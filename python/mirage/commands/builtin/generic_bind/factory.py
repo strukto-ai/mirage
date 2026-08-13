@@ -27,7 +27,8 @@ from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.builtin.generic_bind.provision import default_provision
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
+from mirage.utils.errors import enotdir
 
 
 def _cached_stat(stat: Callable[..., Any], accessor: Accessor, path: PathSpec,
@@ -72,6 +73,38 @@ def with_read_cache(ops: CommandIO) -> CommandIO:
         read_stream=cache_aware_read_stream(ops.read_stream),
         read_bytes=cache_aware_read_bytes(ops.read_bytes),
     )
+
+
+async def _slash_checked_stat(stat: Callable[..., Any], accessor: Accessor,
+                              path: PathSpec, *args, **kwargs):
+    result = await stat(accessor, path, *args, **kwargs)
+    if (path.raw_path.endswith("/")
+            and getattr(result, "type", None) != FileType.DIRECTORY):
+        raise enotdir(path)
+    return result
+
+
+def with_slash_guard(ops: CommandIO) -> CommandIO:
+    """Return ``ops`` whose ``stat`` honors a trailing slash on an operand.
+
+    POSIX resolves ``x/`` as ``x/.``, so the operand has to name a
+    directory: GNU answers ``cat reg/`` with "Not a directory" where
+    plain ``cat reg`` reads the file. Enforcing it on ``stat`` covers
+    every family at once, because the read chokepoint
+    (``dir_aware_stat``) and the metadata commands (ls/du/find/stat)
+    all reach the backend through this slot, and each one already
+    renders whatever strerror it gets in its own GNU voice.
+
+    A missing path is left alone: its own ENOENT is already GNU's answer
+    (``cat dangle/`` is "No such file or directory"). The link half is
+    the router's, not this wrapper's: by the time an operand arrives
+    here a trailing slash has already resolved the final symlink, so
+    ``dlink/`` stats the directory it points at and passes.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+    """
+    return replace(ops, stat=functools.partial(_slash_checked_stat, ops.stat))
 
 
 def with_stat_cache(ops: CommandIO) -> CommandIO:
@@ -165,6 +198,7 @@ def make_generic_commands(
             cmd_ops = with_stat_cache(base_ops)
         else:
             cmd_ops = base_ops
+        cmd_ops = with_slash_guard(cmd_ops)
         bound = functools.partial(_run_with_namespace_globs, cmd_ops, b.fn)
         provision: Callable[..., Any] | None
         if b.name in prov_over:

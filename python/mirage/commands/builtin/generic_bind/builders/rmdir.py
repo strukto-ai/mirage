@@ -34,28 +34,40 @@ async def rmdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
             "Try 'rmdir --help' for more information.", 1)
     rmdir_fn = ops.require(Operation.RMDIR)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
+    links = opts.ns.links if opts.ns is not None else None
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}
     for p in paths:
+        # rmdir(2) never follows, so a link operand never reaches the
+        # directory it points at. GNU words the two spellings apart: a
+        # bare link is the plain ENOTDIR, while one typed with a
+        # trailing slash gets rmdir's own "Symbolic link not followed",
+        # since the slash asked for a directory the call refuses to
+        # resolve. No backend can see a link, so the name plane answers.
+        if links is not None and links.stat_at(p.virtual) is not None:
+            detail = ("Symbolic link not followed"
+                      if p.raw_path.endswith("/") else "Not a directory")
+            errors.append(f"rmdir: failed to remove '{p.raw_path}': {detail}")
+            continue
         try:
             s = await ops.stat(accessor, p)
         except FileNotFoundError:
-            errors.append(f"rmdir: failed to remove '{p.virtual}': "
+            errors.append(f"rmdir: failed to remove '{p.raw_path}': "
                           "No such file or directory")
             continue
         if s.type != FileType.DIRECTORY:
             errors.append(
-                f"rmdir: failed to remove '{p.virtual}': Not a directory")
+                f"rmdir: failed to remove '{p.raw_path}': Not a directory")
             continue
         if await ops.readdir(accessor, p, index=opts.index):
-            errors.append(f"rmdir: failed to remove '{p.virtual}': "
+            errors.append(f"rmdir: failed to remove '{p.raw_path}': "
                           "Directory not empty")
             continue
         await rmdir_fn(accessor, p)
         removed[p.mount_path] = b""
         if v:
-            verbose_parts.append(f"rmdir: removing directory, '{p.virtual}'")
+            verbose_parts.append(f"rmdir: removing directory, '{p.raw_path}'")
     output = format_optional_records(verbose_parts) if v else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output, IOResult(writes=removed,

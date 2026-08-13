@@ -41,14 +41,40 @@ async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
     for p in paths:
+        # A link operand typed with a trailing slash is refused, never
+        # followed: the dispatcher left the link entry in place for
+        # exactly this. GNU splits the wording by what the slash
+        # resolved to and whether -r was given -- a directory without -r
+        # is EISDIR and -f does not suppress it, everything else is
+        # ENOTDIR and -f does.
+        if (links is not None and p.raw_path.endswith("/")
+                and links.stat_at(p.virtual) is not None):
+            target = await links.target_stat(p.virtual)
+            if (target is not None and target.type == FileType.DIRECTORY
+                    and not recursive):
+                errors.append(
+                    f"rm: cannot remove '{p.raw_path}': Is a directory")
+            elif not f:
+                errors.append(
+                    f"rm: cannot remove '{p.raw_path}': Not a directory")
+            continue
         try:
             s = await ops.stat(accessor, p)
+        except NotADirectoryError:
+            # The operand carried a trailing slash and named something
+            # that is not a directory (a plain file, `rm reg/`).
+            if f:
+                continue
+            errors.append(f"rm: cannot remove '{p.raw_path}': "
+                          "Not a directory")
+            continue
         except FileNotFoundError:
             if f:
                 continue
             # GNU rm reports the operand and keeps removing the rest.
-            errors.append(f"rm: cannot remove '{p.virtual}': "
+            errors.append(f"rm: cannot remove '{p.raw_path}': "
                           "No such file or directory")
             continue
         entry_lines: list[str] = []
@@ -69,14 +95,14 @@ async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                     raise NotImplementedError(
                         "rm: directory remove not supported on this backend")
                 if await ops.readdir(accessor, p, index=opts.index):
-                    errors.append(f"rm: cannot remove '{p.virtual}': "
+                    errors.append(f"rm: cannot remove '{p.raw_path}': "
                                   "Directory not empty")
                     continue
                 await ops.rmdir(accessor, p)
                 entry_lines = [f"removed directory '{p.virtual}'"]
             else:
                 errors.append(
-                    f"rm: cannot remove '{p.virtual}': Is a directory")
+                    f"rm: cannot remove '{p.raw_path}': Is a directory")
                 continue
         else:
             await ops.require(Operation.UNLINK)(accessor, p)

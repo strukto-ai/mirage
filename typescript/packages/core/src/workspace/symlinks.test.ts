@@ -689,3 +689,211 @@ describe('symlinks (namespace-backed)', () => {
     await ws.close()
   })
 })
+
+// POSIX pathname resolution: `x/` is `x/.`, so a trailing slash resolves
+// the final symlink even for a command that otherwise lstats its operand,
+// and then requires what it found to be a directory. Every expectation
+// below is GNU coreutils 9.4 / tar 1.35 on debian:stable-slim, probed per
+// case from a fresh tree:
+//
+//   base/dlink  -> base/sub   (emptydir/, f2 = 7 bytes, l2 -> 14-byte target)
+//   base/flink  -> base/reg   (a 6-byte regular file)
+//   base/dangle -> base/nope  (nothing)
+describe('trailing slash (POSIX pathname resolution)', () => {
+  async function slashWorkspace(): Promise<Workspace> {
+    const ws = buildWorkspace()
+    for (const c of [
+      'mkdir -p /data/base/sub/emptydir',
+      "printf 'abcdef\\n' > /data/base/sub/f2",
+      "printf 'hello\\n' > /data/base/reg",
+      'ln -s 12345678901234 /data/base/sub/l2',
+      'ln -s sub /data/base/dlink',
+      'ln -s reg /data/base/flink',
+      'ln -s nope /data/base/dangle',
+    ]) {
+      await ws.execute(c)
+    }
+    return ws
+  }
+
+  it('resolves the link prefix for a no-follow command', async () => {
+    const ws = await slashWorkspace()
+    expect(dec((await ws.execute("stat -c '%F' /data/base/dlink/f2")).stdout)).toBe(
+      'regular file\n',
+    )
+    expect(dec((await ws.execute('du /data/base/dlink/f2')).stdout)).toBe(
+      '7\t/data/base/dlink/f2\n',
+    )
+    expect(dec((await ws.execute('find /data/base/dlink/f2')).stdout)).toBe('/data/base/dlink/f2\n')
+    expect(dec((await ws.execute('readlink /data/base/dlink/l2')).stdout)).toBe('12345678901234\n')
+    const r = await ws.execute('rmdir /data/base/dlink/f2')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe("rmdir: failed to remove '/data/base/dlink/f2': Not a directory\n")
+    await ws.close()
+  })
+
+  it('resolves a directory link', async () => {
+    const ws = await slashWorkspace()
+    expect(dec((await ws.execute("stat -c '%F' /data/base/dlink")).stdout)).toBe('symbolic link\n')
+    expect(dec((await ws.execute("stat -c '%F' /data/base/dlink/")).stdout)).toBe('directory\n')
+    // The link's own target-string length, then the target's contents.
+    expect(dec((await ws.execute('du /data/base/dlink')).stdout)).toBe('3\t/data/base/dlink\n')
+    expect(dec((await ws.execute('du /data/base/dlink/')).stdout)).toBe('21\t/data/base/dlink/\n')
+    expect(dec((await ws.execute('file /data/base/dlink/')).stdout)).toBe(
+      '/data/base/dlink/: directory\n',
+    )
+    expect(
+      dec((await ws.execute('ls /data/base/dlink/')).stdout)
+        .trimEnd()
+        .split('\n'),
+    ).toEqual(['emptydir', 'f2', 'l2'])
+    await ws.close()
+  })
+
+  it('walks the target under find', async () => {
+    const ws = await slashWorkspace()
+    const all = await ws.execute('find /data/base/dlink/')
+    expect(dec(all.stdout).trimEnd().split('\n')).toEqual([
+      '/data/base/dlink/',
+      '/data/base/dlink/emptydir',
+      '/data/base/dlink/f2',
+      '/data/base/dlink/l2',
+    ])
+    expect(dec((await ws.execute('find /data/base/dlink/ -type f')).stdout)).toBe(
+      '/data/base/dlink/f2\n',
+    )
+    await ws.close()
+  })
+
+  it('leaves readlink nothing to read', async () => {
+    const ws = await slashWorkspace()
+    expect(dec((await ws.execute('readlink /data/base/dlink')).stdout)).toBe('sub\n')
+    const r = await ws.execute('readlink /data/base/dlink/')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stdout)).toBe('')
+    await ws.close()
+  })
+
+  it('requires the operand to be a directory', async () => {
+    const ws = await slashWorkspace()
+    const cases: [string, string][] = [
+      ['flink', 'Not a directory'],
+      ['reg', 'Not a directory'],
+      ['dangle', 'No such file or directory'],
+    ]
+    for (const [operand, detail] of cases) {
+      const path = `/data/base/${operand}/`
+      const cat = await ws.execute(`cat ${path}`)
+      expect(cat.exitCode, operand).toBe(1)
+      expect(dec(cat.stderr)).toBe(`cat: ${path}: ${detail}\n`)
+      const wc = await ws.execute(`wc -c ${path}`)
+      expect(wc.exitCode, operand).toBe(1)
+      expect(dec(wc.stderr)).toBe(`wc: ${path}: ${detail}\n`)
+      const ls = await ws.execute(`ls ${path}`)
+      expect(ls.exitCode, operand).toBe(2)
+      expect(dec(ls.stderr)).toBe(`ls: cannot access '${path}': ${detail}\n`)
+      const du = await ws.execute(`du ${path}`)
+      expect(du.exitCode, operand).toBe(1)
+      expect(dec(du.stderr)).toBe(`du: cannot access '${path}': ${detail}\n`)
+      const find = await ws.execute(`find ${path}`)
+      expect(find.exitCode, operand).toBe(1)
+      expect(dec(find.stderr)).toBe(`find: '${path}': ${detail}\n`)
+    }
+    await ws.close()
+  })
+
+  it('words rmdir a link apart from a slashed link', async () => {
+    const ws = await slashWorkspace()
+    const bare = await ws.execute('rmdir /data/base/dlink')
+    expect(bare.exitCode).toBe(1)
+    expect(dec(bare.stderr)).toBe("rmdir: failed to remove '/data/base/dlink': Not a directory\n")
+    const slashed = await ws.execute('rmdir /data/base/dlink/')
+    expect(slashed.exitCode).toBe(1)
+    expect(dec(slashed.stderr)).toBe(
+      "rmdir: failed to remove '/data/base/dlink/': Symbolic link not followed\n",
+    )
+    expect(dec((await ws.execute('readlink /data/base/dlink')).stdout)).toBe('sub\n')
+    await ws.close()
+  })
+
+  it('protects a link from rm and unlink', async () => {
+    const ws = await slashWorkspace()
+    const rm = await ws.execute('rm /data/base/dlink/')
+    expect(rm.exitCode).toBe(1)
+    expect(dec(rm.stderr)).toBe("rm: cannot remove '/data/base/dlink/': Is a directory\n")
+    expect(dec((await ws.execute('readlink /data/base/dlink')).stdout)).toBe('sub\n')
+    const rmr = await ws.execute('rm -r /data/base/dlink/')
+    expect(rmr.exitCode).toBe(1)
+    expect(dec(rmr.stderr)).toBe("rm: cannot remove '/data/base/dlink/': Not a directory\n")
+    const un = await ws.execute('unlink /data/base/dlink/')
+    expect(un.exitCode).toBe(1)
+    expect(dec(un.stderr)).toBe("unlink: cannot unlink '/data/base/dlink/': Not a directory\n")
+    expect(dec((await ws.execute('readlink /data/base/dlink')).stdout)).toBe('sub\n')
+    // Without the slash both remove the link itself, as GNU does.
+    expect((await ws.execute('rm /data/base/dlink')).exitCode).toBe(0)
+    expect((await ws.execute('readlink /data/base/dlink')).exitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('lets -f suppress ENOTDIR but not EISDIR', async () => {
+    const ws = await slashWorkspace()
+    expect((await ws.execute('rm -f /data/base/flink/')).exitCode).toBe(0)
+    expect((await ws.execute('rm -rf /data/base/dlink/')).exitCode).toBe(0)
+    // -rf left the link alone, so the plain form still refuses.
+    const r = await ws.execute('rm -f /data/base/dlink/')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe("rm: cannot remove '/data/base/dlink/': Is a directory\n")
+    await ws.close()
+  })
+
+  it('removes a bare link through unlink', async () => {
+    const ws = await slashWorkspace()
+    expect((await ws.execute('unlink /data/base/dlink')).exitCode).toBe(0)
+    expect((await ws.execute('readlink /data/base/dlink')).exitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('collides mkdir with a link it cannot see', async () => {
+    const ws = await slashWorkspace()
+    for (const line of [
+      'mkdir -p /data/base/dangle',
+      'mkdir /data/base/dangle',
+      'mkdir -p /data/base/dangle/',
+    ]) {
+      const r = await ws.execute(line)
+      expect(r.exitCode, line).toBe(1)
+      expect(dec(r.stderr), line).toContain('File exists')
+      expect((await ws.execute('ls /data/base/nope')).exitCode).not.toBe(0)
+    }
+    // A link that already leads to a directory satisfies -p.
+    expect((await ws.execute('mkdir -p /data/base/dlink')).exitCode).toBe(0)
+    const flink = await ws.execute('mkdir -p /data/base/flink')
+    expect(flink.exitCode).toBe(1)
+    expect(dec(flink.stderr)).toContain('File exists')
+    await ws.close()
+  })
+
+  it('never creates through a trailing slash under touch', async () => {
+    const ws = await slashWorkspace()
+    expect((await ws.execute('touch /data/base/dlink/')).exitCode).toBe(0)
+    const f = await ws.execute('touch /data/base/flink/')
+    expect(f.exitCode).toBe(1)
+    expect(dec(f.stderr)).toBe("touch: setting times of '/data/base/flink/': Not a directory\n")
+    const d = await ws.execute('touch /data/base/dangle/')
+    expect(d.exitCode).toBe(1)
+    expect(dec(d.stderr)).toBe(
+      "touch: setting times of '/data/base/dangle/': No such file or directory\n",
+    )
+    await ws.close()
+  })
+
+  it('ignores a trailing slash in tar', async () => {
+    const ws = await slashWorkspace()
+    expect((await ws.execute('tar -cf /data/a.tar -C /data/base dlink/')).exitCode).toBe(0)
+    expect((await ws.execute('tar -cf /data/b.tar -C /data/base dlink')).exitCode).toBe(0)
+    const slashed = dec((await ws.execute('tar -tf /data/a.tar')).stdout)
+    expect(slashed).toBe(dec((await ws.execute('tar -tf /data/b.tar')).stdout))
+    expect(slashed.trimEnd().split('\n')).toEqual(['dlink'])
+    await ws.close()
+  })
+})

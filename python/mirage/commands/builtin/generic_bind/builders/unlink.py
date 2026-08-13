@@ -33,15 +33,30 @@ async def unlink(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]
+    links = opts.ns.links if opts.ns is not None else None
+    # unlink(2) never follows, so a trailing slash on a link operand is
+    # refused rather than resolved: GNU answers `unlink dlink/` and
+    # `unlink flink/` alike with ENOTDIR, where a real directory under a
+    # slash is EISDIR. A bare link operand never reaches here at all --
+    # the dispatcher removes the link entry, which no backend can see.
+    if (links is not None and p.raw_path.endswith("/")
+            and links.stat_at(p.virtual) is not None):
+        return None, IOResult(exit_code=1,
+                              stderr=(f"unlink: cannot unlink '{p.raw_path}': "
+                                      "Not a directory\n").encode())
     try:
         s = await ops.stat(accessor, p)
+    except NotADirectoryError:
+        return None, IOResult(exit_code=1,
+                              stderr=(f"unlink: cannot unlink '{p.raw_path}': "
+                                      "Not a directory\n").encode())
     except FileNotFoundError:
         return None, IOResult(exit_code=1,
-                              stderr=(f"unlink: cannot unlink '{p.virtual}': "
+                              stderr=(f"unlink: cannot unlink '{p.raw_path}': "
                                       "No such file or directory\n").encode())
     if s.type == FileType.DIRECTORY:
         return None, IOResult(exit_code=1,
-                              stderr=(f"unlink: cannot unlink '{p.virtual}': "
+                              stderr=(f"unlink: cannot unlink '{p.raw_path}': "
                                       "Is a directory\n").encode())
     await ops.require(Operation.UNLINK)(accessor, p)
     return None, IOResult(writes={p.mount_path: b""})

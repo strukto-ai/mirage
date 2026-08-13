@@ -16,7 +16,8 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { type PathSpec } from '../../../types.ts'
+import { FileType, type PathSpec } from '../../../types.ts'
+import { enotdir } from '../../../utils/errors.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { type CommandIO, type StatOp, resolveGlobOf, supports, withHiddenGuard } from './adapter.ts'
@@ -37,6 +38,33 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
 
 function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return { ...ops, stat: cachedStat(ops.stat) }
+}
+
+// Honor a trailing slash on an operand. POSIX resolves `x/` as `x/.`, so
+// the operand has to name a directory: GNU answers `cat reg/` with "Not
+// a directory" where plain `cat reg` reads the file. Enforcing it on
+// `stat` covers every family at once, because the read chokepoint
+// (dirAwareStat) and the metadata commands (ls/du/find/stat) all reach
+// the backend through this slot, and each one already renders whatever
+// strerror it gets in its own GNU voice.
+//
+// A missing path is left alone: its own ENOENT is already GNU's answer
+// (`cat dangle/` is "No such file or directory"). The link half is the
+// router's, not this wrapper's: by the time an operand arrives here a
+// trailing slash has already resolved the final symlink, so `dlink/`
+// stats the directory it points at and passes.
+function slashCheckedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
+  return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
+    const result = await stat(accessor, path, index)
+    if (path.rawPath.endsWith('/') && result.type !== FileType.DIRECTORY) {
+      throw enotdir(path)
+    }
+    return result
+  }
+}
+
+function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  return { ...ops, stat: slashCheckedStat(ops.stat) }
 }
 
 function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
@@ -75,8 +103,13 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // gunzip/...) doesn't get the command registered, rather than getting
     // one that crashes when invoked.
     if (!supports(baseOps, b.requirements ?? [])) continue
-    const cmdOps =
-      b.read === true ? withReadCache(baseOps) : b.write === true ? baseOps : withStatCache(baseOps)
+    const cmdOps = withSlashGuard(
+      b.read === true
+        ? withReadCache(baseOps)
+        : b.write === true
+          ? baseOps
+          : withStatCache(baseOps),
+    )
     // A glob resolved by one backend cannot see a nested mount root or a
     // symlink: the mount keys live in another resource and no resource
     // stores a link. The adapter is built once per backend and the names

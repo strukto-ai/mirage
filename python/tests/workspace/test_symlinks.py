@@ -864,3 +864,232 @@ async def test_find_without_dash_l_reports_every_link_as_l():
     ]
     r = await ws.execute("find /data/d -type f")
     assert r.stdout.decode().splitlines() == ["/data/d/real.txt"]
+
+
+# ── POSIX pathname resolution ────────────────────────────────────────
+# `x/` is `x/.`, so a trailing slash resolves the final symlink even for
+# a command that otherwise lstats its operand, and then requires what it
+# found to be a directory. Every expectation below is GNU coreutils 9.4 /
+# tar 1.35 on debian:stable-slim, probed per case from a fresh tree:
+#
+#   base/dlink  -> base/sub   (emptydir/, f2 = 7 bytes, l2 -> 14-byte target)
+#   base/flink  -> base/reg   (a 6-byte regular file)
+#   base/dangle -> base/nope  (nothing)
+
+
+async def _slash_ws():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/base/sub/emptydir")
+    await ws.execute("printf 'abcdef\\n' > /data/base/sub/f2")
+    await ws.execute("printf 'hello\\n' > /data/base/reg")
+    await ws.execute("ln -s 12345678901234 /data/base/sub/l2")
+    await ws.execute("ln -s sub /data/base/dlink")
+    await ws.execute("ln -s reg /data/base/flink")
+    await ws.execute("ln -s nope /data/base/dangle")
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_link_prefix_resolves_for_no_follow_commands():
+    """Only the LAST component is exempt from resolution, never the prefix.
+
+    GNU: `stat dlink/f2` is a regular file, because dlink was resolved on
+    the way to f2. Every no-follow command sees the same path.
+    """
+    ws = await _slash_ws()
+    r = await ws.execute("stat -c '%F' /data/base/dlink/f2")
+    assert r.stdout.decode() == "regular file\n"
+    r = await ws.execute("du /data/base/dlink/f2")
+    assert r.stdout.decode() == "7\t/data/base/dlink/f2\n"
+    r = await ws.execute("find /data/base/dlink/f2")
+    assert r.stdout.decode() == "/data/base/dlink/f2\n"
+    r = await ws.execute("readlink /data/base/dlink/l2")
+    assert r.stdout.decode() == "12345678901234\n"
+    r = await ws.execute("rmdir /data/base/dlink/f2")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rmdir: failed to remove "
+                                 "'/data/base/dlink/f2': Not a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_resolves_a_directory_link():
+    ws = await _slash_ws()
+    r = await ws.execute("stat -c '%F' /data/base/dlink")
+    assert r.stdout.decode() == "symbolic link\n"
+    r = await ws.execute("stat -c '%F' /data/base/dlink/")
+    assert r.stdout.decode() == "directory\n"
+    # The link's own target-string length, then the target's contents.
+    r = await ws.execute("du /data/base/dlink")
+    assert r.stdout.decode() == "3\t/data/base/dlink\n"
+    r = await ws.execute("du /data/base/dlink/")
+    assert r.stdout.decode() == "21\t/data/base/dlink/\n"
+    r = await ws.execute("file /data/base/dlink/")
+    assert r.stdout.decode() == "/data/base/dlink/: directory\n"
+    r = await ws.execute("ls /data/base/dlink/")
+    assert r.stdout.decode().splitlines() == ["emptydir", "f2", "l2"]
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_walks_the_target_under_find():
+    ws = await _slash_ws()
+    r = await ws.execute("find /data/base/dlink/")
+    assert r.stdout.decode().splitlines() == [
+        "/data/base/dlink/",
+        "/data/base/dlink/emptydir",
+        "/data/base/dlink/f2",
+        "/data/base/dlink/l2",
+    ]
+    r = await ws.execute("find /data/base/dlink/ -type f")
+    assert r.stdout.decode() == "/data/base/dlink/f2\n"
+
+
+@pytest.mark.asyncio
+async def test_readlink_of_a_slashed_link_is_a_silent_failure():
+    """GNU: the slash resolved it, so there is no link left to read."""
+    ws = await _slash_ws()
+    r = await ws.execute("readlink /data/base/dlink")
+    assert r.stdout.decode() == "sub\n"
+    r = await ws.execute("readlink /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stdout is None or r.stdout == b""
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_requires_a_directory():
+    """A link to a file, a dangling link and a plain file all refuse."""
+    ws = await _slash_ws()
+    for operand, detail in (("flink", "Not a directory"), ("reg",
+                                                           "Not a directory"),
+                            ("dangle", "No such file or directory")):
+        path = f"/data/base/{operand}/"
+        r = await ws.execute(f"cat {path}")
+        assert r.exit_code == 1, operand
+        assert r.stderr.decode() == f"cat: {path}: {detail}\n"
+        r = await ws.execute(f"wc -c {path}")
+        assert r.exit_code == 1, operand
+        assert r.stderr.decode() == f"wc: {path}: {detail}\n"
+        r = await ws.execute(f"ls {path}")
+        assert r.exit_code == 2, operand
+        assert r.stderr.decode() == f"ls: cannot access '{path}': {detail}\n"
+        r = await ws.execute(f"du {path}")
+        assert r.exit_code == 1, operand
+        assert r.stderr.decode() == f"du: cannot access '{path}': {detail}\n"
+        r = await ws.execute(f"find {path}")
+        assert r.exit_code == 1, operand
+        assert r.stderr.decode() == f"find: '{path}': {detail}\n"
+
+
+@pytest.mark.asyncio
+async def test_rmdir_words_a_link_apart_from_a_slashed_link():
+    """The two GNU messages rmdir has for a symlink operand."""
+    ws = await _slash_ws()
+    r = await ws.execute("rmdir /data/base/dlink")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rmdir: failed to remove '/data/base/dlink': "
+                                 "Not a directory\n")
+    r = await ws.execute("rmdir /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == (
+        "rmdir: failed to remove '/data/base/dlink/': "
+        "Symbolic link not followed\n")
+    # Neither attempt touched the link.
+    assert (await
+            ws.execute("readlink /data/base/dlink")).stdout.decode() == "sub\n"
+
+
+@pytest.mark.asyncio
+async def test_a_slash_protects_a_link_from_rm_and_unlink():
+    """The data-safety half: `rm dlink/` must not delete the link."""
+    ws = await _slash_ws()
+    r = await ws.execute("rm /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rm: cannot remove '/data/base/dlink/': "
+                                 "Is a directory\n")
+    assert (await
+            ws.execute("readlink /data/base/dlink")).stdout.decode() == "sub\n"
+    r = await ws.execute("rm -r /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rm: cannot remove '/data/base/dlink/': "
+                                 "Not a directory\n")
+    r = await ws.execute("unlink /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("unlink: cannot unlink '/data/base/dlink/': "
+                                 "Not a directory\n")
+    assert (await
+            ws.execute("readlink /data/base/dlink")).stdout.decode() == "sub\n"
+    # Without the slash both remove the link itself, as GNU does.
+    assert (await ws.execute("rm /data/base/dlink")).exit_code == 0
+    assert (await ws.execute("readlink /data/base/dlink")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_rm_f_suppresses_enotdir_but_not_eisdir():
+    ws = await _slash_ws()
+    assert (await ws.execute("rm -f /data/base/flink/")).exit_code == 0
+    assert (await ws.execute("rm -rf /data/base/dlink/")).exit_code == 0
+    r = await ws.execute("rm -f /data/base/dlink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rm: cannot remove '/data/base/dlink/': "
+                                 "Is a directory\n")
+
+
+@pytest.mark.asyncio
+async def test_unlink_removes_a_bare_link():
+    ws = await _slash_ws()
+    assert (await ws.execute("unlink /data/base/dlink")).exit_code == 0
+    assert (await ws.execute("readlink /data/base/dlink")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_mkdir_collides_with_a_link_it_cannot_see():
+    """mkdir lstats the name, so a link occupying it is EEXIST.
+
+    Not a trailing-slash rule: `mkdir -p dangle` collides too, and used
+    to create the link's missing target instead.
+    """
+    ws = await _slash_ws()
+    for line in ("mkdir -p /data/base/dangle", "mkdir /data/base/dangle",
+                 "mkdir -p /data/base/dangle/"):
+        r = await ws.execute(line)
+        assert r.exit_code == 1, line
+        assert "File exists" in r.stderr.decode(), line
+        assert (await ws.execute("ls /data/base/nope")).exit_code != 0
+    # A link that already leads to a directory satisfies -p.
+    assert (await ws.execute("mkdir -p /data/base/dlink")).exit_code == 0
+    r = await ws.execute("mkdir -p /data/base/flink")
+    assert r.exit_code == 1
+    assert "File exists" in r.stderr.decode()
+
+
+@pytest.mark.asyncio
+async def test_touch_never_creates_through_a_trailing_slash():
+    ws = await _slash_ws()
+    assert (await ws.execute("touch /data/base/dlink/")).exit_code == 0
+    r = await ws.execute("touch /data/base/flink/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("touch: setting times of "
+                                 "'/data/base/flink/': Not a directory\n")
+    r = await ws.execute("touch /data/base/dangle/")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("touch: setting times of "
+                                 "'/data/base/dangle/': "
+                                 "No such file or directory\n")
+
+
+@pytest.mark.asyncio
+async def test_tar_ignores_a_trailing_slash():
+    """GNU tar strips it before it stats, so the link is archived.
+
+    The one command a trailing slash does not reach; -h is still how you
+    ask tar to descend.
+    """
+    ws = await _slash_ws()
+    assert (
+        await
+        ws.execute("tar -cf /data/a.tar -C /data/base dlink/")).exit_code == 0
+    assert (
+        await
+        ws.execute("tar -cf /data/b.tar -C /data/base dlink")).exit_code == 0
+    slashed = (await ws.execute("tar -tf /data/a.tar")).stdout.decode()
+    assert slashed == (await ws.execute("tar -tf /data/b.tar")).stdout.decode()
+    assert slashed.splitlines() == ["dlink"]

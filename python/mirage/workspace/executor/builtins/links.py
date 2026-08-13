@@ -286,11 +286,43 @@ async def handle_readlink(
             ExecutionNode(command="readlink", exit_code=exit_code))
 
 
+def follow_parent(namespace: Namespace, virtual: str) -> str:
+    """Resolve every component of a path but the last one.
+
+    POSIX resolves a path one component at a time, and only the last one
+    is exempt for an lstat-style command: ``stat dlink/f2`` reports
+    ``f2`` because ``dlink`` was resolved on the way to it, while
+    ``stat dlink`` reports the link. A no-follow command therefore still
+    needs its operand's directory prefix resolved.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        virtual (str): absolute virtual path.
+
+    Raises:
+        CycleError: when a prefix loops past the hop limit (ELOOP).
+    """
+    parent, _, name = virtual.rstrip("/").rpartition("/")
+    if not name:
+        return virtual
+    resolved = namespace.follow(parent or "/")
+    return resolved.rstrip("/") + "/" + name
+
+
 def follow_paths(
     namespace: Namespace,
     items: list[str | PathSpec],
+    follow_last: bool = True,
+    slash_follows: bool = True,
 ) -> list[str | PathSpec]:
     """Rewrite path operands through the symlink table (open(2) semantics).
+
+    The directory prefix always resolves; ``follow_last`` decides the
+    final component, which is the whole difference between open(2) and
+    lstat(2). A trailing slash overrides it per operand, because POSIX
+    reads ``dlink/`` as ``dlink/.`` and there is no ``.`` to reach
+    without resolving the link first (GNU: ``stat dlink`` is a symbolic
+    link, ``stat dlink/`` is a directory).
 
     Non-path items and paths that resolve to themselves pass through
     untouched. A rewritten spec keeps the user-typed form in ``raw_path``
@@ -300,6 +332,11 @@ def follow_paths(
     Args:
         namespace (Namespace): addressing authority holding the link table.
         items (list[str | PathSpec]): classified command parts.
+        follow_last (bool): whether the command resolves the final
+            component of its own accord (open(2) rather than lstat(2)).
+        slash_follows (bool): whether a trailing slash may override
+            ``follow_last``; False only for ``tar``, which strips the
+            slash before it stats.
 
     Raises:
         CycleError: when a path loops past the hop limit (ELOOP).
@@ -309,8 +346,10 @@ def follow_paths(
         if not isinstance(item, PathSpec):
             out.append(item)
             continue
+        last = follow_last or (slash_follows and item.raw_path.endswith("/"))
         try:
-            virtual = namespace.follow(item.virtual)
+            virtual = (namespace.follow(item.virtual)
+                       if last else follow_parent(namespace, item.virtual))
         except CycleError:
             raise CycleError(item.raw_path) from None
         if virtual == item.virtual:
@@ -329,10 +368,16 @@ async def strip_link_operands(
     namespace: Namespace,
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], int]:
-    """Unlink and drop ``rm`` operands that are symlinks.
+    """Unlink and drop ``rm``/``unlink`` operands that are symlinks.
 
     GNU ``rm`` removes the link itself and never follows it; a dangling
     link removes fine. Remaining operands stay for backend dispatch.
+
+    An operand typed with a trailing slash is deliberately kept: the
+    slash asked for a directory, and GNU refuses rather than removing
+    the link (``rm dlink/`` is "Is a directory", ``unlink dlink/`` is
+    "Not a directory"). Removing it here would delete exactly what the
+    slash was protecting, so the command reports it instead.
 
     Args:
         namespace (Namespace): addressing authority holding the link table.
@@ -345,7 +390,8 @@ async def strip_link_operands(
     removed = 0
     kept: list[str | PathSpec] = []
     for item in items:
-        if isinstance(item, PathSpec) and namespace.is_link(item.virtual):
+        if (isinstance(item, PathSpec) and not item.raw_path.endswith("/")
+                and namespace.is_link(item.virtual)):
             await namespace.unlink(item.virtual)
             removed += 1
             continue

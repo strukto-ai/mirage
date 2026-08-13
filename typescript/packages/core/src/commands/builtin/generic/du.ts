@@ -182,6 +182,8 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
  * materialises a directory entry for its own mount root (redis is one) while
  * the subtree below it is full.
  */
+const ENOENT_TEXT = 'No such file or directory'
+
 async function duOperands(
   paths: PathSpec[],
   cwd: string,
@@ -191,14 +193,16 @@ async function duOperands(
   mountPrefix?: string,
   links: LinkView | null = null,
   statPath: StatPath | null = null,
-): Promise<{ present: PathSpec[]; missing: string[] }> {
+): Promise<{ present: PathSpec[]; missing: [string, string][] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
   const resolved = await resolveGlob(targets)
   const present: PathSpec[] = []
-  const missing: string[] = []
+  const missing: [string, string][] = []
   // An unmatched glob reaches GNU as the literal pattern, which it then
   // reports as unreadable.
-  if (resolved.length === 0) missing.push(...targets.map((p) => p.rawPath))
+  if (resolved.length === 0) {
+    missing.push(...targets.map((p): [string, string] => [p.rawPath, ENOENT_TEXT]))
+  }
   for (const path of resolved) {
     // A link has no backend inode, so it fails stat while still being a
     // perfectly readable operand.
@@ -213,6 +217,13 @@ async function duOperands(
     try {
       await stat(path)
     } catch (err) {
+      // An operand typed with a trailing slash that did not name a
+      // directory. Unreadable like a missing one, but GNU reports the
+      // errno it got, so the two cannot share a wording.
+      if ((err as { code?: string }).code === 'ENOTDIR') {
+        missing.push([path.rawPath, 'Not a directory'])
+        continue
+      }
       if (!isMissingPath(err)) throw err
       stattable = false
     }
@@ -221,7 +232,7 @@ async function duOperands(
       continue
     }
     if (!stattable && !(hasContent !== undefined && (await hasContent(path)))) {
-      missing.push(path.rawPath)
+      missing.push([path.rawPath, ENOENT_TEXT])
       continue
     }
     present.push(path)
@@ -552,7 +563,7 @@ export async function duGeneric(
   flags: DuFlags,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
-  missing: string[] = [],
+  missing: [string, string][] = [],
   truncated?: () => boolean,
   links: LinkView | null = null,
   mounts: MountView | null = null,
@@ -571,7 +582,7 @@ export async function duGeneric(
   if (flags.c) lines.push(`${fmt(grand)}\ttotal`)
 
   const notes = flags.warning === undefined ? [] : [flags.warning]
-  notes.push(...missing.map((raw) => `du: cannot access '${raw}': No such file or directory`))
+  notes.push(...missing.map(([raw, detail]) => `du: cannot access '${raw}': ${detail}`))
   let exitCode = missing.length > 0 ? 1 : 0
   if (truncated?.() === true) {
     notes.push(TRUNCATED_NOTE)

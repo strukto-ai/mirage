@@ -76,7 +76,7 @@ export const JOB_BUILTINS: ReadonlySet<string> = new Set(['wait', 'fg', 'kill', 
 // through a link, so `tar` could not store a symlink member at all and
 // neither archiver could apply its own cross-mount refusal or ELOOP
 // wording. tar's -h and zip's -y are read by the planner instead.
-export const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
+const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
   'rm',
   'mv',
   'ln',
@@ -171,10 +171,66 @@ export function dereferences(name: string, words: readonly (string | PathSpec)[]
 }
 
 // Whether a following command was asked to report links themselves.
-export function reportsLink(name: string, words: readonly (string | PathSpec)[]): boolean {
+function reportsLink(name: string, words: readonly (string | PathSpec)[]): boolean {
   if (dereferences(name, words)) return false
   const spec = NO_FOLLOW_FLAGS[name]
   return spec !== undefined && hasOption(words, spec[0], spec[1])
+}
+
+// Commands the router must not resolve the last component for, even
+// under a trailing slash, because none of them acts on the link's
+// target and each says so in its own words. GNU tar strips the slash
+// and archives the link (`tar -cf a.tar dlink/` == `tar -cf a.tar
+// dlink`; only -h descends). The four destructive ones refuse outright:
+// `rm dlink/` is "Is a directory", `rm -r dlink/` and `mv dlink/ d` and
+// `unlink dlink/` are "Not a directory", and `rmdir dlink/` has a
+// message of its own, "Symbolic link not followed". Probed on GNU
+// coreutils 9.4 / tar 1.35. mkdir is here for the same reason it is in
+// SELF_RESOLVING: it lstats the name it is creating, so `mkdir -p
+// dangle/` collides with the link exactly as `mkdir -p dangle` does.
+// Info-ZIP is the counter-example and is deliberately absent:
+// `zip -y -r a.zip dlink/` descends where `zip -y -r a.zip dlink`
+// stores the link.
+export const SLASH_KEEPS_LAST: ReadonlySet<string> = new Set([
+  'tar',
+  'rm',
+  'rmdir',
+  'mv',
+  'unlink',
+  'mkdir',
+])
+
+// Commands that decide the last component for themselves, so the router
+// resolves only the prefix for them. chmod/chown/chgrp read -h off their
+// own line (GNU `chgrp -h ops link` writes the link, not its target),
+// touch reads -h the same way, ln is creating the name in its second
+// operand, readlink's whole subject is the link it was handed, and
+// mkdir is naming something that must not exist yet -- resolving its
+// last component would make `mkdir -p dangle` create the link's missing
+// target where GNU answers "File exists".
+// A trailing slash still applies to most of them: these are
+// lstat-by-default, not slash-proof (`touch dlink/` succeeds against the
+// target directory, `touch flink/` is "Not a directory"), which is why
+// this is separate from SLASH_KEEPS_LAST.
+const SELF_RESOLVING: ReadonlySet<string> = new Set([
+  'chmod',
+  'chown',
+  'chgrp',
+  'touch',
+  'ln',
+  'readlink',
+  'mkdir',
+])
+
+// Whether a command resolves its operand's final component itself. The
+// directory prefix is resolved for every command, so this is only about
+// the last one: open(2) semantics (true) against lstat(2) (false). A
+// trailing slash overrides a false per operand, which is `followPaths`'
+// job because the slash is a property of the operand rather than of the
+// command.
+export function followsLastComponent(name: string, words: readonly (string | PathSpec)[]): boolean {
+  if (reportsLink(name, words) || SELF_RESOLVING.has(name)) return false
+  return !NO_FOLLOW_COMMANDS.has(name) || dereferences(name, words)
 }
 
 // Options whose argument is a program, so the words after it are that

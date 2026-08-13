@@ -636,6 +636,21 @@ async def handle_touch(
         resolved = _follow_operand(namespace, "touch", "touch", target, errors)
         if resolved is None:
             continue
+        # `x/` is `x/.`, so touch never creates through a trailing slash:
+        # it sets times on a directory that has to be there already, and
+        # GNU words that refusal ("setting times of") differently from
+        # its create-path one ("cannot touch").
+        if target.raw_path.endswith("/"):
+            try:
+                slashed, _ = await dispatch("stat", resolved)
+            except FS_ERRORS as exc:
+                errors.append(f"touch: setting times of "
+                              f"'{target.raw_path}': {fs_strerror(exc)}\n")
+                continue
+            if slashed.type != FileType.DIRECTORY:
+                errors.append(f"touch: setting times of "
+                              f"'{target.raw_path}': Not a directory\n")
+                continue
         try:
             try:
                 await dispatch("stat", resolved)

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import { FileType } from '../../../../types.ts'
 import {
   errorVirtualPath,
   fsStrerror,
@@ -60,7 +61,20 @@ export const MKDIR_BUILDER: Builder = {
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const lines: string[] = []
     const errors: string[] = []
+    const links = opts.ns?.links ?? null
     for (const p of resolved) {
+      // mkdir(2) lstats the name it is about to create, so a symlink
+      // occupying it is EEXIST however it was spelled -- no backend can
+      // see the link, so the name plane has to answer. -p is satisfied
+      // only when the link already leads to a directory; pointing at a
+      // file or at nothing still collides (GNU `mkdir -p dangle` is
+      // "File exists", not a fresh directory at the link's target).
+      if (links !== null && links.statAt(p.virtual) !== null) {
+        const target = await links.targetStat(p.virtual)
+        if (parents && target !== null && target.type === FileType.DIRECTORY) continue
+        errors.push(`mkdir: cannot create directory '${p.rawPath}': File exists`)
+        continue
+      }
       try {
         await mkdir(accessor, p, parents)
       } catch (err) {

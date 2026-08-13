@@ -45,15 +45,36 @@ export const RM_BUILDER: Builder = {
     }
     const lines: string[] = []
     const errors: string[] = []
+    const links = opts.ns?.links ?? null
     for (const p of resolved) {
+      // A link operand typed with a trailing slash is refused, never
+      // followed: the dispatcher left the link entry in place for exactly
+      // this. GNU splits the wording by what the slash resolved to and
+      // whether -r was given -- a directory without -r is EISDIR and -f
+      // does not suppress it, everything else is ENOTDIR and -f does.
+      if (links !== null && p.rawPath.endsWith('/') && links.statAt(p.virtual) !== null) {
+        const target = await links.targetStat(p.virtual)
+        if (target !== null && target.type === FileType.DIRECTORY && !recursive) {
+          errors.push(`rm: cannot remove '${p.rawPath}': Is a directory`)
+        } else if (!force) {
+          errors.push(`rm: cannot remove '${p.rawPath}': Not a directory`)
+        }
+        continue
+      }
       let isDir = false
       try {
         const st = await ops.stat(accessor, p, idx)
         isDir = st.type === FileType.DIRECTORY
-      } catch {
+      } catch (err) {
         if (force) continue
-        // GNU rm reports the operand and keeps removing the rest.
-        errors.push(`rm: cannot remove '${p.virtual}': No such file or directory`)
+        // A trailing slash that named something which is not a directory
+        // (`rm reg/`); otherwise the operand is simply absent. GNU rm
+        // reports it and keeps removing the rest.
+        const detail =
+          (err as { code?: string }).code === 'ENOTDIR'
+            ? 'Not a directory'
+            : 'No such file or directory'
+        errors.push(`rm: cannot remove '${p.rawPath}': ${detail}`)
         continue
       }
       let entryLines: string[] = []
@@ -80,13 +101,13 @@ export const RM_BUILDER: Builder = {
             throw new Error('rm: directory remove not supported on this backend')
           }
           if ((await ops.readdir(accessor, p, idx)).length > 0) {
-            errors.push(`rm: cannot remove '${p.virtual}': Directory not empty`)
+            errors.push(`rm: cannot remove '${p.rawPath}': Directory not empty`)
             continue
           }
           await rmdir(accessor, p)
           entryLines = [`removed directory '${p.virtual}'`]
         } else {
-          errors.push(`rm: cannot remove '${p.virtual}': Is a directory`)
+          errors.push(`rm: cannot remove '${p.rawPath}': Is a directory`)
           continue
         }
       } else {

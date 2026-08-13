@@ -348,7 +348,7 @@ async def test_missing_operand_is_reported_and_exits_one():
                    compute_size=compute_size,
                    compute_entries=compute_entries,
                    flags=DuFlags(),
-                   missing=["nosuch"])
+                   missing=[("nosuch", "No such file or directory")])
     assert out.stdout == b"2\t/dir\n"
     assert out.stderr == (b"du: cannot access 'nosuch': "
                           b"No such file or directory\n")
@@ -363,7 +363,7 @@ async def test_c_still_prints_a_total_when_every_operand_is_missing():
                    compute_size=compute_size,
                    compute_entries=compute_entries,
                    flags=DuFlags(c=True),
-                   missing=["nosuch"])
+                   missing=[("nosuch", "No such file or directory")])
     assert out.stdout == b"0\ttotal\n"
     assert out.exit_code == 1
 

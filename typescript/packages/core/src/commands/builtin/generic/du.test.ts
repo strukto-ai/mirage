@@ -280,7 +280,9 @@ describe('duGeneric', () => {
 
   it('reports a missing operand and exits 1', async () => {
     const [size, entries] = backend({ '/dir/a.txt': 2 })
-    const out = await duGeneric([spec('/dir', 'dir')], flags(), size, entries, ['nosuch'])
+    const out = await duGeneric([spec('/dir', 'dir')], flags(), size, entries, [
+      ['nosuch', 'No such file or directory'],
+    ])
     expect(DEC.decode(out.stdout)).toBe('2\t/dir\n')
     expect(DEC.decode(out.stderr)).toBe("du: cannot access 'nosuch': No such file or directory\n")
     expect(out.exitCode).toBe(1)
@@ -357,7 +359,9 @@ describe('duGeneric', () => {
 
   it('still prints a total under -c when every operand is missing', async () => {
     const [size, entries] = backend({})
-    const out = await duGeneric([], flags({ c: true }), size, entries, ['nosuch'])
+    const out = await duGeneric([], flags({ c: true }), size, entries, [
+      ['nosuch', 'No such file or directory'],
+    ])
     expect(DEC.decode(out.stdout)).toBe('0\ttotal\n')
     expect(out.exitCode).toBe(1)
   })

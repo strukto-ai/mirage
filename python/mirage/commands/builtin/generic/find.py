@@ -117,17 +117,21 @@ def apply_mount_prefix(results: list[str], mount_prefix: str) -> list[str]:
     return out
 
 
-def missing_start_line(search_path: PathSpec) -> str:
-    """GNU's stderr line for a start point that does not exist.
+def missing_start_line(search_path: PathSpec,
+                       detail: str = "No such file or directory") -> str:
+    """GNU's stderr line for a start point find will not walk.
 
     One spelling of the diagnostic, because both find paths emit it: the
-    native-op path and the walk each collect one per operand.
+    native-op path and the walk each collect one per operand. The detail
+    is the strerror: a start point that is not there, or one typed with
+    a trailing slash that did not name a directory.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
+        detail (str): the strerror to report.
     """
     label = search_path.raw_path or search_path.virtual
-    return f"find: '{label}': No such file or directory"
+    return f"find: '{label}': {detail}"
 
 
 def is_link(links: LinkView | None, search: PathSpec) -> bool:
@@ -154,10 +158,19 @@ class StartPoint:
     results: list[str]
     missing: bool = False
     stat: FileStat | None = None
+    # The strerror the diagnostic carries when `missing` is set. A start
+    # point that is simply absent keeps GNU's default wording; one typed
+    # with a trailing slash that resolved to a non-directory reports
+    # ENOTDIR instead (`find flink/` -> "Not a directory").
+    detail: str = "No such file or directory"
 
 
 WALK_START = StartPoint(walk=True, results=[])
 MISSING_START = StartPoint(walk=False, results=[], missing=True)
+NOT_DIR_START = StartPoint(walk=False,
+                           results=[],
+                           missing=True,
+                           detail="Not a directory")
 
 
 async def resolve_start(
@@ -198,6 +211,11 @@ async def resolve_start(
         return MISSING_START
     if start.type == FileType.DIRECTORY:
         return StartPoint(walk=True, results=[], stat=start)
+    # POSIX reads `x/` as `x/.`, so an operand typed with a trailing
+    # slash has to name a directory; GNU refuses the rest with ENOTDIR
+    # rather than reporting the entry itself.
+    if search.raw_path.endswith("/"):
+        return NOT_DIR_START
     prefix = mount_prefix_of(search.virtual, search.resource_path)
     # `-path` matches the display path, so Path nodes carry the mount
     # prefix. Built here rather than read off args.tree: only the
@@ -365,16 +383,16 @@ async def find(
     results: list[str] = []
     missing: list[str] = []
     for search_path in searches:
-        rows = await _find_root(search_path,
-                                args,
-                                find_core=find_core,
-                                stat_path=stat_path,
-                                stat=stat,
-                                dir_empty=dir_empty,
-                                links=links,
-                                follow=follow)
+        rows, detail = await _find_root(search_path,
+                                        args,
+                                        find_core=find_core,
+                                        stat_path=stat_path,
+                                        stat=stat,
+                                        dir_empty=dir_empty,
+                                        links=links,
+                                        follow=follow)
         if rows is None:
-            missing.append(missing_start_line(search_path))
+            missing.append(missing_start_line(search_path, detail))
             continue
         results.extend(rows)
     if missing:
@@ -394,8 +412,12 @@ async def _find_root(
     dir_empty: Callable[[PathSpec], Awaitable[bool]] | None,
     links: LinkView | None,
     follow: bool,
-) -> list[str] | None:
+) -> tuple[list[str] | None, str]:
     """One start point's rows on the native-op path, None when missing.
+
+    The second element is the strerror the caller's diagnostic carries
+    when the rows are None, so the native-op path words a start point it
+    will not walk exactly as the walk path does.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
@@ -420,8 +442,12 @@ async def _find_root(
     if stat_path is None and stat is not None and not root_is_link:
         try:
             await stat(search_path)
+        except NotADirectoryError:
+            # The operand carried a trailing slash and did not name a
+            # directory; the backend stat is the only probe wired here.
+            return None, "Not a directory"
         except (FileNotFoundError, ValueError):
-            return None
+            return None, "No such file or directory"
     root_prefix = mount_prefix_of(search_path.virtual,
                                   search_path.resource_path)
     # `-path` matches the display path as printed; stamp the mount
@@ -445,9 +471,9 @@ async def _find_root(
                                 stat_path,
                                 is_link=root_is_link)
     if start.missing:
-        return None
+        return None, start.detail
     if not start.walk and not root_is_link:
-        return start.results
+        return start.results, start.detail
     results: list[str] = [] if root_is_link else await find_core(
         search_path,
         name=args.name,
@@ -510,7 +536,8 @@ async def _find_root(
     # link merge, so a mount's visibility behavior cannot depend on
     # whether its backend ships a native find op.
     results = [r for r in results if path_allowed(r)]
-    return respell_raw(results, search_path.virtual, search_path.raw_path)
+    return respell_raw(results, search_path.virtual,
+                       search_path.raw_path), start.detail
 
 
 def _modified_ts(modified: str | None) -> float | None:
@@ -900,7 +927,7 @@ async def find_walk_generic(
                                     stat_path,
                                     is_link=is_link(links, search))
         if start.missing:
-            missing.append(missing_start_line(search))
+            missing.append(missing_start_line(search, start.detail))
             continue
         if not start.walk:
             results.extend(start.results)

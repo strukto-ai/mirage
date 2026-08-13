@@ -425,6 +425,13 @@ export async function findGeneric(
         missing.push(`find: '${label}': No such file or directory`)
         continue
       }
+      if (start.type !== FileType.DIRECTORY && root.rawPath.endsWith('/')) {
+        // POSIX reads `x/` as `x/.`, so an operand typed with a trailing
+        // slash has to name a directory; GNU refuses the rest with
+        // ENOTDIR rather than reporting the entry itself.
+        missing.push(`find: '${root.rawPath}': Not a directory`)
+        continue
+      }
       if (start.type !== FileType.DIRECTORY) {
         const rows = startPointResults(
           root,

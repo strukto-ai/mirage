@@ -35,8 +35,8 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.globs import expand_boundary_globs
-from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
-                                    dereferences, reports_link)
+from mirage.workspace.route import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
+                                    follows_last_component)
 from mirage.workspace.session.shell_dirs import home_dir, logical_cwd
 from mirage.workspace.session.state import ensure_var_visible, session_view
 from mirage.workspace.types import ExecutionNode
@@ -566,6 +566,28 @@ async def _run_argv(
     if name == SB.CONTINUE:
         raise ContinueSignal(levels=_loop_levels(args))
 
+    # ── pathname resolution (POSIX): every component of an operand but
+    #    the last resolves for every command, so `stat dlink/f2` reports
+    #    f2 the way GNU does. The last one resolves only for a command
+    #    that follows (open(2) rather than lstat(2)) or an operand typed
+    #    with a trailing slash, which POSIX reads as `dlink/.`. This runs
+    #    ahead of every handler below because the kernel resolves a path
+    #    before the syscall, not inside it.
+    if namespace.nodes and operands:
+        try:
+            operands = follow_paths(namespace,
+                                    operands,
+                                    follows_last_component(name, argv.words),
+                                    slash_follows=name not in SLASH_KEEPS_LAST)
+        except CycleError as exc:
+            err = (f"{name}: {exc}: "
+                   f"Too many levels of symbolic links\n").encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=name,
+                                                             exit_code=1,
+                                                             stderr=err)
+        argv = argv.with_operands(operands)
+
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
     if name == "ln" and "s" in link_flags(operands, "sfnvrT"):
@@ -588,16 +610,6 @@ async def _run_argv(
     # ── capacity (registry-routed: enumerates mounts, reports per-mount
     #    statfs; never fabricates numbers) ──
     if name == "df":
-        if namespace.nodes:
-            try:
-                operands = follow_paths(namespace, operands)
-            except CycleError as exc:
-                err = (f"df: {exc}: "
-                       f"Too many levels of symbolic links\n").encode()
-                return None, IOResult(exit_code=1,
-                                      stderr=err), ExecutionNode(command="df",
-                                                                 exit_code=1,
-                                                                 stderr=err)
         return await handle_df(registry, session, dispatch, operands)
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
@@ -606,7 +618,9 @@ async def _run_argv(
     post_rename: tuple[str, str] | None = None
     if namespace.nodes:
         try:
-            if name == "rm":
+            # Both remove the link entry itself, which no backend can
+            # see; unlink(1) is rm(1) restricted to one non-directory.
+            if name in ("rm", "unlink"):
                 operands, removed = await strip_link_operands(
                     namespace, operands)
                 if removed and not any(
@@ -618,10 +632,6 @@ async def _run_argv(
                     namespace, dispatch, operands)
                 if early is not None:
                     return early
-            elif not reports_link(
-                    name, argv.words) and (name not in NO_FOLLOW_COMMANDS
-                                           or dereferences(name, argv.words)):
-                operands = follow_paths(namespace, operands)
         except CycleError as exc:
             err = (f"{name}: {exc}: "
                    f"Too many levels of symbolic links\n").encode()
@@ -652,6 +662,13 @@ async def _run_argv(
             # the node table matches the pattern itself.
             for item in operands:
                 if not isinstance(item, PathSpec):
+                    continue
+                if item.raw_path.endswith("/"):
+                    # A trailing slash asked for the directory, and rm
+                    # refused (or -f silenced the refusal). Nothing was
+                    # removed, so nothing may be purged: dropping the
+                    # node here deleted the very link the slash
+                    # protects (GNU keeps it through `rm -rf dlink/`).
                     continue
                 if item.pattern:
                     await namespace.unlink_glob(item.virtual)

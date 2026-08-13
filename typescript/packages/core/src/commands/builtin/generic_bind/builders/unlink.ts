@@ -39,16 +39,35 @@ export const UNLINK_BUILDER: Builder = {
       throw new Error('unlink: remove not supported on this backend')
     }
     const enc = new TextEncoder()
-    let isDir = false
-    try {
-      const st = await ops.stat(accessor, p, idx)
-      isDir = st.type === FileType.DIRECTORY
-    } catch {
+    const links = opts.ns?.links ?? null
+    // unlink(2) never follows, so a trailing slash on a link operand is
+    // refused rather than resolved: GNU answers `unlink dlink/` and
+    // `unlink flink/` alike with ENOTDIR, where a real directory under a
+    // slash is EISDIR. A bare link operand never reaches here at all --
+    // the dispatcher removes the link entry, which no backend can see.
+    if (links !== null && p.rawPath.endsWith('/') && links.statAt(p.virtual) !== null) {
       return [
         null,
         new IOResult({
           exitCode: 1,
-          stderr: enc.encode(`unlink: cannot unlink '${p.virtual}': No such file or directory\n`),
+          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Not a directory\n`),
+        }),
+      ]
+    }
+    let isDir = false
+    try {
+      const st = await ops.stat(accessor, p, idx)
+      isDir = st.type === FileType.DIRECTORY
+    } catch (err) {
+      const detail =
+        (err as { code?: string }).code === 'ENOTDIR'
+          ? 'Not a directory'
+          : 'No such file or directory'
+      return [
+        null,
+        new IOResult({
+          exitCode: 1,
+          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${detail}\n`),
         }),
       ]
     }
@@ -57,7 +76,7 @@ export const UNLINK_BUILDER: Builder = {
         null,
         new IOResult({
           exitCode: 1,
-          stderr: enc.encode(`unlink: cannot unlink '${p.virtual}': Is a directory\n`),
+          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': Is a directory\n`),
         }),
       ]
     }

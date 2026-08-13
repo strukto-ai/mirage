@@ -15,11 +15,11 @@
 export {
   JOB_BUILTINS,
   NAMESPACE_COMMANDS,
-  NO_FOLLOW_COMMANDS,
+  SLASH_KEEPS_LAST,
   UNSUPPORTED_BUILTINS,
   dereferences,
   endOptionsAfterProgram,
-  reportsLink,
+  followsLastComponent,
 } from './constants.ts'
 export { route, routeAll } from './route.ts'
 export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

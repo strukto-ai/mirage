@@ -218,7 +218,11 @@ async def plan_create(
     dropped: list[str] = []
     exit_code = 0
     for path in paths:
-        raw = path.raw_path
+        # GNU strips a trailing slash off the operand before naming the
+        # member, and re-adds one only for a member that really is a
+        # directory: `tar -cf a.tar dlink/` stores `dlink`, the symlink,
+        # exactly as `tar -cf a.tar dlink` does.
+        raw = path.raw_path.rstrip("/") or path.raw_path
         base = path.virtual.rstrip("/") or "/"
         scan = await scan_operand(path,
                                   stat=stat,

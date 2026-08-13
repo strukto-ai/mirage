@@ -157,13 +157,37 @@ export async function handleLn(
   return [out, new IOResult(), new ExecutionNode({ command: 'ln', exitCode: 0 })]
 }
 
+// Resolve every component of a path but the last one. POSIX resolves a
+// path one component at a time, and only the last one is exempt for an
+// lstat-style command: `stat dlink/f2` reports f2 because dlink was
+// resolved on the way to it, while `stat dlink` reports the link. A
+// no-follow command therefore still needs its operand's prefix
+// resolved. Throws CycleError on ELOOP.
+function followParent(namespace: Namespace, virtual: string): string {
+  const trimmed = virtual.replace(/\/+$/, '')
+  const cut = trimmed.lastIndexOf('/')
+  const name = trimmed.slice(cut + 1)
+  if (name === '') return virtual
+  const resolved = namespace.follow(trimmed.slice(0, cut) || '/')
+  return `${resolved.replace(/\/+$/, '')}/${name}`
+}
+
 // Rewrite path operands through the symlink table (open(2) semantics).
+// The directory prefix always resolves; `followLast` decides the final
+// component, which is the whole difference between open(2) and lstat(2).
+// A trailing slash overrides it per operand, because POSIX reads
+// `dlink/` as `dlink/.` and there is no `.` to reach without resolving
+// the link first (GNU: `stat dlink` is a symbolic link, `stat dlink/` is
+// a directory). `slashFollows` turns that override off, which only tar
+// wants: it strips the slash before it stats.
 // A rewritten spec keeps the user-typed form in `rawPath` so error messages
 // still name the operand as typed; the mount re-stamps `resourcePath` at
 // dispatch. Throws CycleError (carrying the typed operand) on ELOOP.
 export function followPaths(
   namespace: Namespace,
   items: (string | PathSpec)[],
+  followLast = true,
+  slashFollows = true,
 ): (string | PathSpec)[] {
   const out: (string | PathSpec)[] = []
   for (const item of items) {
@@ -171,9 +195,10 @@ export function followPaths(
       out.push(item)
       continue
     }
+    const last = followLast || (slashFollows && item.rawPath.endsWith('/'))
     let virtual: string
     try {
-      virtual = namespace.follow(item.virtual)
+      virtual = last ? namespace.follow(item.virtual) : followParent(namespace, item.virtual)
     } catch (err) {
       if (err instanceof CycleError) throw new CycleError(item.rawPath)
       throw err
@@ -196,8 +221,13 @@ export function followPaths(
   return out
 }
 
-// Unlink and drop `rm` operands that are symlinks. GNU rm removes the link
-// itself and never follows it; a dangling link removes fine.
+// Unlink and drop `rm`/`unlink` operands that are symlinks. GNU rm removes
+// the link itself and never follows it; a dangling link removes fine.
+// An operand typed with a trailing slash is deliberately kept: the slash
+// asked for a directory, and GNU refuses rather than removing the link
+// (`rm dlink/` is "Is a directory", `unlink dlink/` is "Not a
+// directory"). Removing it here would delete exactly what the slash was
+// protecting, so the command reports it instead.
 export async function stripLinkOperands(
   namespace: Namespace,
   items: (string | PathSpec)[],
@@ -205,7 +235,7 @@ export async function stripLinkOperands(
   let removed = 0
   const kept: (string | PathSpec)[] = []
   for (const item of items) {
-    if (item instanceof PathSpec && namespace.isLink(item.virtual)) {
+    if (item instanceof PathSpec && !item.rawPath.endsWith('/') && namespace.isLink(item.virtual)) {
       await namespace.unlink(item.virtual)
       removed += 1
       continue

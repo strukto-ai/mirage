@@ -181,7 +181,12 @@ export async function planCreate(
   const dropped: string[] = []
   let exitCode = 0
   for (const path of paths) {
-    const raw = path.rawPath
+    // GNU strips a trailing slash off the operand before naming the
+    // member, and re-adds one only for a member that really is a
+    // directory: `tar -cf a.tar dlink/` stores `dlink`, the symlink,
+    // exactly as `tar -cf a.tar dlink` does.
+    const raw =
+      path.rawPath.replace(/\/+$/, '') === '' ? path.rawPath : path.rawPath.replace(/\/+$/, '')
     const base = rstripSlash(path.virtual) || '/'
     const scan = await scanOperand(path, {
       stat: deps.stat,

@@ -87,12 +87,7 @@ import {
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import {
-  NO_FOLLOW_COMMANDS,
-  UNSUPPORTED_BUILTINS,
-  dereferences,
-  reportsLink,
-} from '../route/index.ts'
+import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir, logicalCwd } from '../session/shell_dirs.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
@@ -720,6 +715,37 @@ async function runArgv(
     return handleTimeout(executeFn, args, session)
   }
 
+  // Pathname resolution (POSIX): every component of an operand but the
+  // last resolves for every command, so `stat dlink/f2` reports f2 the
+  // way GNU does. The last one resolves only for a command that follows
+  // (open(2) rather than lstat(2)) or an operand typed with a trailing
+  // slash, which POSIX reads as `dlink/.`. This runs ahead of every
+  // handler below because the kernel resolves a path before the syscall,
+  // not inside it.
+  if (namespace.nodes.size > 0 && operands.length > 0) {
+    try {
+      operands = followPaths(
+        namespace,
+        operands,
+        followsLastComponent(name, argv.words),
+        !SLASH_KEEPS_LAST.has(name),
+      )
+    } catch (err) {
+      if (err instanceof CycleError) {
+        const errBytes = new TextEncoder().encode(
+          `${name}: ${err.path}: Too many levels of symbolic links\n`,
+        )
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: name, exitCode: 1, stderr: errBytes }),
+        ]
+      }
+      throw err
+    }
+    argv = argv.withOperands(operands)
+  }
+
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
@@ -748,23 +774,6 @@ async function runArgv(
   // Capacity (registry-routed: enumerates mounts, reports per-mount statfs;
   // never fabricates numbers).
   if (name === 'df') {
-    if (namespace.nodes.size > 0) {
-      try {
-        operands = followPaths(namespace, operands)
-      } catch (err) {
-        if (err instanceof CycleError) {
-          const errBytes = new TextEncoder().encode(
-            `df: ${err.path}: Too many levels of symbolic links\n`,
-          )
-          return [
-            null,
-            new IOResult({ exitCode: 1, stderr: errBytes }),
-            new ExecutionNode({ command: 'df', exitCode: 1, stderr: errBytes }),
-          ]
-        }
-        throw err
-      }
-    }
     return handleDf(registry, session, dispatch, operands)
   }
 
@@ -775,7 +784,9 @@ async function runArgv(
   let dispatchArgv = argv
   if (namespace.nodes.size > 0) {
     try {
-      if (name === 'rm') {
+      // Both remove the link entry itself, which no backend can see;
+      // unlink(1) is rm(1) restricted to one non-directory.
+      if (name === 'rm' || name === 'unlink') {
         const [rest, removed] = await stripLinkOperands(namespace, operands)
         operands = rest
         if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {
@@ -787,11 +798,6 @@ async function runArgv(
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
-      } else if (
-        !reportsLink(name, argv.words) &&
-        (!NO_FOLLOW_COMMANDS.has(name) || dereferences(name, argv.words))
-      ) {
-        operands = followPaths(namespace, operands)
       }
     } catch (err) {
       if (err instanceof CycleError) {
@@ -833,6 +839,11 @@ async function runArgv(
       // table matches the pattern itself.
       for (const item of operands) {
         if (!(item instanceof PathSpec)) continue
+        // A trailing slash asked for the directory, and rm refused (or -f
+        // silenced the refusal). Nothing was removed, so nothing may be
+        // purged: dropping the node here deleted the very link the slash
+        // protects (GNU keeps it through `rm -rf dlink/`).
+        if (item.rawPath.endsWith('/')) continue
         if (item.pattern !== null) {
           await namespace.unlinkGlob(item.virtual)
         } else {

@@ -162,6 +162,9 @@ def cwd_spec(cwd: PathSpec | str) -> PathSpec:
                     resource_path=cwd.strip("/"))
 
 
+ENOENT_TEXT = "No such file or directory"
+
+
 async def du_operands(
     paths: list[PathSpec],
     cwd: PathSpec | str,
@@ -170,7 +173,7 @@ async def du_operands(
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-) -> tuple[list[PathSpec], list[str]]:
+) -> tuple[list[PathSpec], list[tuple[str, str]]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
     GNU names every operand it fails to stat, keeps going with the rest,
@@ -205,30 +208,37 @@ async def du_operands(
             runs outside a workspace and there is no namespace to ask.
 
     Returns:
-        tuple[list[PathSpec], list[str]]: readable operands, then the
-        as-typed spelling of each unreadable one.
+        tuple[list[PathSpec], list[tuple[str, str]]]: readable operands,
+        then the as-typed spelling of each unreadable one paired with the
+        strerror to report it with.
     """
     targets = paths if paths else [cwd_spec(cwd)]
     resolved = await resolve_glob(targets)
     present: list[PathSpec] = []
-    missing: list[str] = []
+    missing: list[tuple[str, str]] = []
     if not resolved:
         # An unmatched glob reaches GNU as the literal pattern, which it
         # then reports as unreadable.
-        missing = [p.raw_path for p in targets]
+        missing = [(p.raw_path, ENOENT_TEXT) for p in targets]
     for path in resolved:
         if links is not None and links.stat_at(path.virtual) is not None:
             present.append(path)
             continue
         try:
             await stat(path)
+        except NotADirectoryError:
+            # An operand typed with a trailing slash that did not name a
+            # directory. Unreadable like a missing one, but GNU reports
+            # the errno it got, so the two cannot share a wording.
+            missing.append((path.raw_path, "Not a directory"))
+            continue
         except (FileNotFoundError, ValueError):
             probed: FileStat | None = None
             if stat_path is not None:
                 probed = await stat_path(path.virtual)
             if probed is None and (has_content is None
                                    or not await has_content(path)):
-                missing.append(path.raw_path)
+                missing.append((path.raw_path, ENOENT_TEXT))
                 continue
         present.append(path)
     return present, missing
@@ -619,7 +629,7 @@ async def du(
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
     flags: DuFlags,
-    missing: Sequence[str] = (),
+    missing: Sequence[tuple[str, str]] = (),
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
     mounts: MountView | None = None,
@@ -634,7 +644,8 @@ async def du(
             ``None`` on backends that can only produce a size, which makes
             both ``-a`` and the per-directory lines degrade to one total.
         flags (DuFlags): the parsed command line.
-        missing (Sequence[str]): operands that could not be read, as
+        missing (Sequence[tuple[str, str]]): operands that could not be
+            read, as
             typed. GNU reports each and exits 1 but still prints the rest.
         truncated (Callable[[], bool] | None): read after the walks to ask
             whether any of them hit its entry cap.
@@ -657,8 +668,8 @@ async def du(
         lines.append(_line(sum(totals), flags.h, "total"))
 
     notes = [flags.warning] if flags.warning else []
-    notes.extend(f"du: cannot access '{raw}': No such file or directory"
-                 for raw in missing)
+    notes.extend(f"du: cannot access '{raw}': {detail}"
+                 for raw, detail in missing)
     exit_code = 1 if missing else 0
     if truncated is not None and truncated():
         notes.append("du: walk stopped early: the reported sizes are "

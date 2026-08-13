@@ -624,6 +624,26 @@ export async function handleTouch(
       throw err
     }
     const resolved = PathSpec.fromStrPath(virtual)
+    // `x/` is `x/.`, so touch never creates through a trailing slash: it
+    // sets times on a directory that has to be there already, and GNU
+    // words that refusal ("setting times of") differently from its
+    // create-path one ("cannot touch").
+    if (target.rawPath.endsWith('/')) {
+      let slashed: FileStat
+      try {
+        ;[slashed] = (await dispatch('stat', resolved)) as [FileStat, unknown]
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(`touch: setting times of '${target.rawPath}': ${String(fsStrerror(err))}\n`)
+        exitCode = 1
+        continue
+      }
+      if (slashed.type !== FileType.DIRECTORY) {
+        errors.push(`touch: setting times of '${target.rawPath}': Not a directory\n`)
+        exitCode = 1
+        continue
+      }
+    }
     try {
       try {
         await dispatch('stat', resolved)
