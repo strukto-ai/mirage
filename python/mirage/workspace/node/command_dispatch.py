@@ -45,14 +45,14 @@ from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts, get_process_sub_body,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    follow_paths, handle_bash, handle_cd, handle_chgrp, handle_chmod,
-    handle_chown, handle_command_builtin, handle_df, handle_echo, handle_env,
-    handle_eval, handle_exit, handle_export, handle_getopts, handle_history,
-    handle_ln, handle_local, handle_man, handle_printenv, handle_printf,
-    handle_read, handle_readlink, handle_return, handle_set, handle_shift,
-    handle_sleep, handle_source, handle_test, handle_timeout, handle_touch,
-    handle_trap, handle_type, handle_unset, handle_which, handle_whoami,
-    handle_xargs, link_flags, prepare_mv, strip_link_operands)
+    accepts_line, follow_paths, handle_bash, handle_cd, handle_chgrp,
+    handle_chmod, handle_chown, handle_command_builtin, handle_df, handle_echo,
+    handle_env, handle_eval, handle_exit, handle_export, handle_getopts,
+    handle_history, handle_ln, handle_local, handle_man, handle_printenv,
+    handle_printf, handle_read, handle_readlink, handle_return, handle_set,
+    handle_shift, handle_sleep, handle_source, handle_test, handle_timeout,
+    handle_touch, handle_trap, handle_type, handle_unset, handle_which,
+    handle_whoami, handle_xargs, link_flags, prepare_mv, strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -620,7 +620,12 @@ async def _run_argv(
         try:
             # Both remove the link entry itself, which no backend can
             # see; unlink(1) is rm(1) restricted to one non-directory.
-            if name in ("rm", "unlink"):
+            # Gated on the line being one the command layer accepts,
+            # because this removal happens before that layer parses and
+            # it cannot be taken back (GNU refuses `rm --bogus dlink`
+            # and `unlink dlink other` with the link still there).
+            if name in ("rm", "unlink") and accepts_line(
+                    name, argv.args, operands, session.cwd):
                 operands, removed = await strip_link_operands(
                     namespace, operands)
                 if removed and not any(

@@ -896,4 +896,83 @@ describe('trailing slash (POSIX pathname resolution)', () => {
     expect(slashed.trimEnd().split('\n')).toEqual(['dlink'])
     await ws.close()
   })
+
+  // GNU removes nothing from a line it refuses. The link entry lives in
+  // the namespace, so the dispatcher drops it before the command layer
+  // parses; a line that layer would reject has to leave it alone. Pinned
+  // against GNU coreutils 9.7.
+  it('validates a removal line before it drops a link', async () => {
+    const ws = await slashWorkspace()
+    const extra = await ws.execute('unlink /data/base/dlink /data/base/flink')
+    expect(extra.exitCode).toBe(1)
+    expect(dec(extra.stderr)).toBe(
+      "unlink: extra operand '/data/base/flink'\nTry 'unlink --help' for more information.\n",
+    )
+    const badOpt = await ws.execute('unlink --bogus /data/base/dlink')
+    expect(badOpt.exitCode).toBe(1)
+    expect(dec(badOpt.stderr)).toBe(
+      "unlink: unrecognized option '--bogus'\nTry 'unlink --help' for more information.\n",
+    )
+    const badRm = await ws.execute('rm --bogus /data/base/dlink')
+    expect(badRm.exitCode).toBe(1)
+    expect(dec(badRm.stderr)).toBe(
+      "rm: unrecognized option '--bogus'\nTry 'rm --help' for more information.\n",
+    )
+    for (const name of ['dlink', 'flink']) {
+      expect((await ws.execute(`readlink /data/base/${name}`)).exitCode).toBe(0)
+    }
+    expect((await ws.execute('unlink /data/base/flink')).exitCode).toBe(0)
+    expect((await ws.execute('rm /data/base/dlink')).exitCode).toBe(0)
+    expect((await ws.execute('readlink /data/base/dlink')).exitCode).toBe(1)
+    await ws.close()
+  })
+
+  // rename(2) never follows, so `mv dlink/` is refused rather than
+  // resolved, where a bare `mv dlink out` renames the link entry. The
+  // four wordings follow mv's own order and are pinned against GNU 9.7.
+  it('refuses a slashed link source instead of renaming it', async () => {
+    const ws = await slashWorkspace()
+    await ws.execute('mkdir /data/outdir')
+    await ws.execute("printf 'x\\n' > /data/outfile")
+
+    const plain = await ws.execute('mv /data/base/dlink/ /data/out')
+    expect(plain.exitCode).toBe(1)
+    expect(dec(plain.stderr)).toBe(
+      "mv: cannot move '/data/base/dlink/' to '/data/out': Not a directory\n",
+    )
+    const toFile = await ws.execute('mv /data/base/flink/ /data/out')
+    expect(toFile.exitCode).toBe(1)
+    expect(dec(toFile.stderr)).toBe("mv: cannot stat '/data/base/flink/': Not a directory\n")
+    const dangling = await ws.execute('mv /data/base/dangle/ /data/out')
+    expect(dangling.exitCode).toBe(1)
+    expect(dec(dangling.stderr)).toBe(
+      "mv: cannot stat '/data/base/dangle/': No such file or directory\n",
+    )
+    const intoDir = await ws.execute('mv /data/base/dlink/ /data/outdir')
+    expect(intoDir.exitCode).toBe(1)
+    expect(dec(intoDir.stderr)).toBe(
+      "mv: cannot move '/data/base/dlink/' to '/data/outdir/dlink': Not a directory\n",
+    )
+    const ontoFile = await ws.execute('mv /data/base/dlink/ /data/outfile')
+    expect(ontoFile.exitCode).toBe(1)
+    expect(dec(ontoFile.stderr)).toBe(
+      "mv: cannot overwrite non-directory '/data/outfile' with directory '/data/base/dlink/'\n",
+    )
+    expect((await ws.execute('ls /data/out')).exitCode).not.toBe(0)
+    expect((await ws.execute('mv /data/base/dlink /data/out')).exitCode).toBe(0)
+    expect(dec((await ws.execute('readlink /data/out')).stdout)).toBe('sub\n')
+    await ws.close()
+  })
+
+  it('resolves a link prefix before refusing the last component in mv', async () => {
+    const ws = await slashWorkspace()
+    await ws.execute('ln -s /data/base /data/alias')
+    const r = await ws.execute('mv /data/alias/dlink/ /data/out')
+    expect(r.exitCode).toBe(1)
+    expect(dec(r.stderr)).toBe(
+      "mv: cannot move '/data/alias/dlink/' to '/data/out': Not a directory\n",
+    )
+    expect((await ws.execute('readlink /data/base/dlink')).exitCode).toBe(0)
+    await ws.close()
+  })
 })

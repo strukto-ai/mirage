@@ -16,6 +16,7 @@ export type { ExecuteStringFn } from './scope.ts'
 
 export { handleCd } from './dirs.ts'
 export {
+  acceptsLine,
   followPaths,
   handleLn,
   handleReadlink,

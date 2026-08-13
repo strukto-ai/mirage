@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
 from mirage.commands.builtin.generic_bind.adapter import (CommandIO,
@@ -85,8 +86,10 @@ async def _slash_checked_stat(stat: Callable[..., Any], accessor: Accessor,
 
 
 async def _slash_checked_readdir(readdir: Callable[..., Any],
-                                 stat: Callable[..., Any], accessor: Accessor,
-                                 path: PathSpec, *args, **kwargs):
+                                 stat: Callable[..., Any],
+                                 accessor: Accessor,
+                                 path: PathSpec,
+                                 index: IndexCacheStore = NULL_INDEX):
     # A listing never reaches the stat wrapper, and on a keyed store it
     # cannot tell "not a directory" from "no keys under this prefix" on
     # its own: `ls flink/` answered with an empty listing and exit 0
@@ -98,13 +101,19 @@ async def _slash_checked_readdir(readdir: Callable[..., Any],
         # object, so a miss here is not evidence of a non-directory and
         # the listing is the authority (see "absence takes two
         # channels"); slack's per-channel directories stat as nothing.
+        # The index rides along: a synthetic backend resolves a path
+        # through it and cannot stat without one (chroma answers
+        # "missing index"), so dropping it here turns the probe into a
+        # crash. It is a declared parameter rather than a dig through
+        # kwargs because the op contract names it, and callers spell it
+        # both positionally and by keyword.
         try:
-            entry = await stat(accessor, path)
+            entry = await stat(accessor, path, index)
         except MISS_ERRORS:
             entry = None
         if entry is not None and entry.type != FileType.DIRECTORY:
             raise enotdir(path)
-    return await readdir(accessor, path, *args, **kwargs)
+    return await readdir(accessor, path, index)
 
 
 def with_slash_guard(ops: CommandIO) -> CommandIO:

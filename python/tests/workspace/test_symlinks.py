@@ -1093,3 +1093,88 @@ async def test_tar_ignores_a_trailing_slash():
     slashed = (await ws.execute("tar -tf /data/a.tar")).stdout.decode()
     assert slashed == (await ws.execute("tar -tf /data/b.tar")).stdout.decode()
     assert slashed.splitlines() == ["dlink"]
+
+
+@pytest.mark.asyncio
+async def test_removal_validates_the_line_before_it_drops_a_link():
+    """GNU removes nothing from a line it refuses.
+
+    The link entry lives in the namespace, so the dispatcher drops it
+    before the command layer parses; a line that layer would reject has
+    to leave it alone. Pinned against GNU coreutils 9.7: `unlink a b` is
+    "extra operand", an undeclared option is "unrecognized option", and
+    both leave every operand in place.
+    """
+    ws = await _slash_ws()
+    r = await ws.execute("unlink /data/base/dlink /data/base/flink")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("unlink: extra operand '/data/base/flink'\n"
+                                 "Try 'unlink --help' for more information.\n")
+    r = await ws.execute("unlink --bogus /data/base/dlink")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("unlink: unrecognized option '--bogus'\n"
+                                 "Try 'unlink --help' for more information.\n")
+    r = await ws.execute("rm --bogus /data/base/dlink")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("rm: unrecognized option '--bogus'\n"
+                                 "Try 'rm --help' for more information.\n")
+    # Every link the refused lines named is still there.
+    for name in ("dlink", "flink"):
+        assert (await ws.execute(f"readlink /data/base/{name}")).exit_code == 0
+    # The well-formed lines still remove the link entry itself.
+    assert (await ws.execute("unlink /data/base/flink")).exit_code == 0
+    assert (await ws.execute("rm /data/base/dlink")).exit_code == 0
+    assert (await ws.execute("readlink /data/base/dlink")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_mv_refuses_a_slashed_link_instead_of_renaming_it():
+    """rename(2) never follows, so `mv dlink/` is refused, not resolved.
+
+    A bare `mv dlink out` renames the link entry; the slash asks for a
+    directory the call will not resolve, and GNU answers with four
+    wordings in mv's own order (source stat, then destination type, then
+    the rename). All pinned against GNU coreutils 9.7.
+    """
+    ws = await _slash_ws()
+    await ws.execute("mkdir /data/outdir")
+    await ws.execute("printf 'x\\n' > /data/outfile")
+
+    r = await ws.execute("mv /data/base/dlink/ /data/out")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("mv: cannot move '/data/base/dlink/' to "
+                                 "'/data/out': Not a directory\n")
+    r = await ws.execute("mv /data/base/flink/ /data/out")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("mv: cannot stat '/data/base/flink/': "
+                                 "Not a directory\n")
+    r = await ws.execute("mv /data/base/dangle/ /data/out")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("mv: cannot stat '/data/base/dangle/': "
+                                 "No such file or directory\n")
+    # A directory destination names where the move would have landed.
+    r = await ws.execute("mv /data/base/dlink/ /data/outdir")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("mv: cannot move '/data/base/dlink/' to "
+                                 "'/data/outdir/dlink': Not a directory\n")
+    r = await ws.execute("mv /data/base/dlink/ /data/outfile")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == (
+        "mv: cannot overwrite non-directory '/data/outfile' "
+        "with directory '/data/base/dlink/'\n")
+    # Nothing moved, and the bare spelling still renames the link.
+    assert (await ws.execute("ls /data/out")).exit_code != 0
+    assert (await ws.execute("mv /data/base/dlink /data/out")).exit_code == 0
+    assert (await ws.execute("readlink /data/out")).stdout.decode() == "sub\n"
+
+
+@pytest.mark.asyncio
+async def test_mv_resolves_a_link_prefix_before_refusing_the_last():
+    """The prefix resolves for mv too, so an aliased parent behaves alike."""
+    ws = await _slash_ws()
+    await ws.execute("ln -s /data/base /data/alias")
+    r = await ws.execute("mv /data/alias/dlink/ /data/out")
+    assert r.exit_code == 1
+    assert r.stderr.decode() == ("mv: cannot move '/data/alias/dlink/' to "
+                                 "'/data/out': Not a directory\n")
+    assert (await ws.execute("readlink /data/base/dlink")).exit_code == 0

@@ -44,6 +44,7 @@ import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
+  acceptsLine,
   followPaths,
   handleBash,
   handleCd,
@@ -785,8 +786,15 @@ async function runArgv(
   if (namespace.nodes.size > 0) {
     try {
       // Both remove the link entry itself, which no backend can see;
-      // unlink(1) is rm(1) restricted to one non-directory.
-      if (name === 'rm' || name === 'unlink') {
+      // unlink(1) is rm(1) restricted to one non-directory. Gated on the
+      // line being one the command layer accepts, because this removal
+      // happens before that layer parses and it cannot be taken back
+      // (GNU refuses `rm --bogus dlink` and `unlink dlink other` with
+      // the link still there).
+      if (
+        (name === 'rm' || name === 'unlink') &&
+        acceptsLine(name, argv.args, operands, session.cwd)
+      ) {
         const [rest, removed] = await stripLinkOperands(namespace, operands)
         operands = rest
         if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {

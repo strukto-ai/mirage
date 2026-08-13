@@ -78,9 +78,12 @@ function slashCheckedReaddir<A extends Accessor>(
       // object, so a miss here is not evidence of a non-directory and
       // the listing is the authority (see "absence takes two
       // channels"); slack's per-channel directories stat as nothing.
+      // The index rides along: a synthetic backend resolves a path
+      // through it and cannot stat without one (chroma answers "missing
+      // index"), so dropping it here turns the probe into a crash.
       let entry: FileStat | null = null
       try {
-        entry = await stat(accessor, path)
+        entry = await stat(accessor, path, index)
       } catch (err) {
         if (!isMissingPath(err)) throw err
       }

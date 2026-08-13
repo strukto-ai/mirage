@@ -15,6 +15,7 @@
 import dataclasses
 import posixpath
 
+from mirage.commands.spec import SPECS, parse_command
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, word_text
@@ -364,6 +365,39 @@ def follow_paths(
     return out
 
 
+def accepts_line(name: str, args: tuple[str, ...], items: list[str | PathSpec],
+                 cwd: str) -> bool:
+    """Whether the command layer will act on this line as written.
+
+    A link entry lives in the namespace, so ``strip_link_operands``
+    removes it before the command runs, and the command layer can
+    neither see that nor undo it. GNU validates the whole line first and
+    removes nothing when it refuses: ``rm --bogus dlink`` reports the
+    option and ``unlink dlink other`` reports the extra operand, both
+    with every link still in place. So the strip runs only for a line
+    that layer accepts, and a refused one falls through to it unchanged
+    to be reported there. Option errors are the parser's, which reports
+    rather than raises them; unlink's one-operand grammar is its
+    builder's, and reporting it needs the operands to arrive intact.
+
+    Args:
+        name (str): command name.
+        args (tuple[str, ...]): the line's words after the name.
+        items (list[str | PathSpec]): classified command parts.
+        cwd (str): session working directory, which the parser resolves
+            path operands against.
+    """
+    spec = SPECS.get(name)
+    if spec is None:
+        return True
+    parsed = parse_command(spec, list(args), cwd)
+    if parsed.invalid_options or parsed.ambiguous_options:
+        return False
+    if name == "unlink":
+        return sum(1 for i in items if isinstance(i, PathSpec)) <= 1
+    return True
+
+
 async def strip_link_operands(
     namespace: Namespace,
     items: list[str | PathSpec],
@@ -416,6 +450,52 @@ async def _stat_or_none(dispatch: DispatchFn,
     return stat
 
 
+async def _slashed_link_refusal(
+    namespace: Namespace,
+    dispatch: DispatchFn,
+    src: PathSpec,
+    dst: PathSpec,
+    dst_stat: FileStat | None,
+) -> Result:
+    """GNU's refusal for an ``mv`` source that is a link typed with a slash.
+
+    rename(2) never follows, so the slash is not resolved away: POSIX
+    reads ``dlink/`` as ``dlink/.``, which asks for a directory the call
+    will not resolve, and GNU refuses with everything left in place --
+    where a bare ``dlink`` renames the link entry. Which of the four
+    wordings applies follows mv's own order, source stat before
+    destination type before the rename itself, and all four are pinned
+    against GNU coreutils 9.7.
+
+    Args:
+        namespace (Namespace): addressing authority holding the link table.
+        dispatch (DispatchFn): op dispatcher used to stat the target.
+        src (PathSpec): the slashed link source.
+        dst (PathSpec): destination as typed.
+        dst_stat (FileStat | None): the destination's stat, None when it
+            does not exist.
+    """
+    followed = namespace.follow(src.virtual)
+    target = await _stat_or_none(dispatch, PathSpec.from_str_path(followed))
+    if target is None:
+        return fail(
+            "mv", f"mv: cannot stat '{src.raw_path}': "
+            "No such file or directory\n")
+    if target.type != FileType.DIRECTORY:
+        return fail("mv",
+                    f"mv: cannot stat '{src.raw_path}': Not a directory\n")
+    if dst_stat is not None and dst_stat.type != FileType.DIRECTORY:
+        return fail(
+            "mv", f"mv: cannot overwrite non-directory '{dst.raw_path}' "
+            f"with directory '{src.raw_path}'\n")
+    landing = dst.raw_path
+    if dst_stat is not None:
+        landing = landing.rstrip("/") + "/" + posixpath.basename(src.virtual)
+    return fail(
+        "mv", f"mv: cannot move '{src.raw_path}' to '{landing}': "
+        "Not a directory\n")
+
+
 async def prepare_mv(
     namespace: Namespace,
     dispatch: DispatchFn,
@@ -460,6 +540,9 @@ async def prepare_mv(
         target_dst = dst.virtual
 
     if namespace.is_link(src.virtual):
+        if src.raw_path.endswith("/"):
+            return items, None, None, await _slashed_link_refusal(
+                namespace, dispatch, src, dst, stat)
         await namespace.unlink(target_dst)
         await namespace.rename(src.virtual, target_dst)
         return items, None, None, ok("mv")
@@ -475,6 +558,7 @@ async def prepare_mv(
 
 
 __all__ = [
+    "accepts_line",
     "follow_paths",
     "handle_ln",
     "handle_readlink",
