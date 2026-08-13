@@ -742,7 +742,6 @@ export {
   type ExecuteFn,
   lookupVar,
   type TSNodeLike,
-  unescapePath,
 } from './workspace/expand/index.ts'
 export { resolveGlobs, type ResourceWithGlob } from './workspace/expand/globs.ts'
 export {

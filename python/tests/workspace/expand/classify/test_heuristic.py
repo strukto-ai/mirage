@@ -14,29 +14,36 @@
 
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
-from mirage.workspace.expand.classify.heuristic import (_unescape_path,
-                                                        classify_word)
+from mirage.workspace.expand.classify.heuristic import classify_word
 from mirage.workspace.mount import MountRegistry
 
 
-def test_unescape_backslash_apostrophe():
-    assert _unescape_path(r"Zecheng\'s\ Server") == "Zecheng's Server"
-
-
-def test_unescape_no_backslash():
-    assert _unescape_path("normal") == "normal"
-
-
-def test_unescape_only_space():
-    assert _unescape_path(r"hello\ world") == "hello world"
-
-
-def test_classify_backslash_escaped_absolute():
+def _ram_registry() -> MountRegistry:
     registry = MountRegistry()
     resource = RAMResource()
     resource._store.dirs.add("/")
     registry.mount("/ram/", resource, MountMode.WRITE)
-    result = classify_word(r"/ram/Zecheng\'s\ Server/", registry, "/")
+    return registry
+
+
+# Quote removal is the expansion layer's job and it happens once, so a
+# backslash reaching classification is a literal character of the name.
+# GNU keeps it: a file named `a\b` is read by `cat '/data/a\b'`.
+def test_classify_keeps_literal_backslash():
+    result = classify_word(r"/ram/a\b", _ram_registry(), "/")
+    assert isinstance(result, PathSpec)
+    assert result.virtual == r"/ram/a\b"
+    assert result.raw_path == r"/ram/a\b"
+
+
+def test_classify_keeps_control_char():
+    result = classify_word("/ram/x\ty", _ram_registry(), "/")
+    assert isinstance(result, PathSpec)
+    assert result.virtual == "/ram/x\ty"
+
+
+def test_classify_already_unescaped_absolute():
+    result = classify_word("/ram/Zecheng's Server/", _ram_registry(), "/")
     assert isinstance(result, PathSpec)
     assert result.virtual == "/ram/Zecheng's Server"
 

@@ -614,3 +614,36 @@ def test_empty_element_splat_is_still_a_word(line, expected):
     ws = _ws_with_paths()
     io = _exec(ws, line)
     assert _stdout(io) == expected
+
+
+# ── literal backslashes survive classification ─────────────
+# Quote removal happens once, in the expansion layer. A backslash that
+# survives it is a literal character of the name, so classifying a word
+# as a path must not run a second pass over it. Pinned against GNU
+# coreutils 9.7 / bash 5.2 on debian:stable-slim.
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # printf's own format is path-shaped; a second unescape pass ate
+        # the backslash, so the escape never reached printf.
+        (r"""printf '/data/x\ty'""", b"/data/x\ty"),
+        (r"""printf '/data/x\ny'""", b"/data/x\ny"),
+        # A single-quoted backslash is literal to the shell either way.
+        (r"""echo '/data/a\b'""", b"/data/a\\b\n"),
+        (r"""echo "/data/a\\b" """, b"/data/a\\b\n"),
+        # ...while an unquoted escape is removed exactly once.
+        (r"""echo /data/hello\ world""", b"/data/hello world\n"),
+        (r"""echo /data/Zecheng\'s\ Server""", b"/data/Zecheng's Server\n"),
+    ])
+def test_backslash_in_path_shaped_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+def test_control_char_survives_command_substitution():
+    ws = _ws_with_paths()
+    io = _exec(ws, r"""echo "$(printf '/data/x\ty')" """)
+    assert _stdout(io) == b"/data/x\ty\n"

@@ -15,7 +15,6 @@
 import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { posixNormpath } from '../../../utils/path.ts'
-import { shlexSplit } from '../../../utils/shlex.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { hasGlob } from '../../../utils/glob_walk.ts'
 import { relativeSpec } from './relative.ts'
@@ -24,12 +23,11 @@ const FILENAME_CHAR = /[a-zA-Z0-9_./]/
 const NON_PATH_CHAR = /[(){}=;|&<> ]/
 const RELATIVE_PATH = /^(?:\.?[a-zA-Z0-9_-]*\/)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/
 
-export function unescapePath(word: string): string {
-  if (!word.includes('\\')) return word
-  const parts = shlexSplit(word)
-  return parts[0] ?? word
-}
-
+// Every caller hands this an already-expanded word, so quote removal has
+// happened and a surviving backslash is a literal character of the name
+// (GNU reads a file named `a\b` as `cat '/data/a\b'`). Unescaping again
+// here corrupted both that name and any control character an escape had
+// produced.
 export function classifyWord(
   word: string,
   registry: MountRegistry,
@@ -38,12 +36,10 @@ export function classifyWord(
   const wordHasGlob = hasGlob(word)
 
   if (word.startsWith('/')) {
-    let w = word
-    if (w.includes('\\')) w = unescapePath(w)
-    const mount = registry.mountFor(w)
+    const mount = registry.mountFor(word)
     if (mount === null) return word
-    let isDir = w.endsWith('/')
-    const path = posixNormpath(w)
+    let isDir = word.endsWith('/')
+    const path = posixNormpath(word)
     if (!isDir && `${path}/` === mount.prefix) {
       isDir = true
     }
@@ -57,7 +53,7 @@ export function classifyWord(
         virtual: path,
         directory: path.slice(0, lastSlash + 1),
         pattern: path.slice(lastSlash + 1),
-        rawPath: w,
+        rawPath: word,
         resolved: false,
       })
     }
@@ -66,7 +62,7 @@ export function classifyWord(
         resourcePath: stripSlash(path),
         virtual: path,
         directory: `${path}/`,
-        rawPath: w,
+        rawPath: word,
         resolved: false,
       })
     }
@@ -75,7 +71,7 @@ export function classifyWord(
       resourcePath: stripSlash(path),
       virtual: path,
       directory: path.slice(0, lastSlash + 1),
-      rawPath: w,
+      rawPath: word,
       resolved: true,
     })
   }
@@ -88,9 +84,7 @@ export function classifyWord(
   }
 
   if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(word)) {
-    let w = word
-    if (w.includes('\\')) w = unescapePath(w)
-    return relativeSpec(w, registry, cwd)
+    return relativeSpec(word, registry, cwd)
   }
 
   return word

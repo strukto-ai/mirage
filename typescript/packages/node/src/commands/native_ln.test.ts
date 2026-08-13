@@ -55,4 +55,26 @@ describe.each(NATIVE_BACKENDS)('native ln (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  // A symlink target is stored verbatim as typed. GNU: readlink of a link
+  // made from `printf '/data/x\ty'` prints the tab back.
+  it('ln -s keeps a control character in the target', async () => {
+    const env = makeEnv(kind)
+    try {
+      await env.mirage(`ln -s "$(printf '/data/x\\ty')" /data/tabby`)
+      expect(await env.mirage('readlink /data/tabby')).toBe('/data/x\ty\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('ln -s keeps a literal backslash in the target', async () => {
+    const env = makeEnv(kind)
+    try {
+      await env.mirage(`ln -s '/data/a\\b' /data/bs`)
+      expect(await env.mirage('readlink /data/bs')).toBe('/data/a\\b\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

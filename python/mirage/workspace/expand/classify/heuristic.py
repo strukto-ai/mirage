@@ -14,7 +14,6 @@
 
 import posixpath
 import re
-import shlex
 
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import has_glob
@@ -28,28 +27,15 @@ _RELATIVE_PATH = re.compile(
     r"(?:\.?[a-zA-Z0-9_\-]*/)*[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+")
 
 
-def _unescape_path(word: str) -> str:
-    """Strip shell backslash escapes from a path string.
-
-    Uses shlex.split which handles all POSIX shell escaping rules:
-        Zecheng\\'s\\ Server  ->  Zecheng's Server
-        hello\\ world         ->  hello world
-
-    Args:
-        word (str): raw path string possibly containing backslash escapes.
-    """
-    if "\\" not in word:
-        return word
-    try:
-        parts = shlex.split(word)
-        return parts[0] if parts else word
-    except ValueError:
-        return word
-
-
 def classify_word(word: str, registry: MountRegistry,
                   cwd: str) -> str | PathSpec:
     """Classify an expanded word as text or PathSpec.
+
+    Every caller hands this an already-expanded word, so quote removal
+    has happened and a surviving backslash is a literal character of the
+    name (GNU reads a file named ``a\\b`` as ``cat '/data/a\\b'``).
+    Unescaping again here corrupted both that name and any control
+    character an escape had produced.
 
     Rules:
     - Absolute + glob chars -> PathSpec with pattern
@@ -61,11 +47,6 @@ def classify_word(word: str, registry: MountRegistry,
     word_has_glob = has_glob(word)
 
     if word.startswith("/"):
-        # Unescape backslash-escaped paths (e.g. /data/Zecheng\'s\ Server).
-        # Only for absolute paths — non-path text like sed programs
-        # (N;s/\n/ /) also contains \ and / but must not be unescaped.
-        if "\\" in word:
-            word = _unescape_path(word)
         try:
             mount = registry.mount_for(word)
         except ValueError:
@@ -120,8 +101,6 @@ def classify_word(word: str, registry: MountRegistry,
     #   for f in file.txt  (loop value — should stay text)
     # Users must use "./file.txt" or absolute paths for bare filenames.
     if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
-        if "\\" in word:
-            word = _unescape_path(word)
         return relative_spec(word, registry, cwd)
 
     return word

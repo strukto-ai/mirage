@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Resource } from '../../../resource/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { MountRegistry } from '../../mount/registry.ts'
-import { classifyWord, unescapePath } from './heuristic.ts'
+import { classifyWord } from './heuristic.ts'
 
 class StubResource implements Resource {
   readonly kind = 'stub'
@@ -32,13 +32,27 @@ function setup(): MountRegistry {
   return new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
 }
 
-describe('unescapePath', () => {
-  it('strips backslash escapes from paths', () => {
-    expect(unescapePath("Zecheng\\'s\\ Server")).toBe("Zecheng's Server")
+// Quote removal is the expansion layer's job and it happens once, so a
+// backslash reaching classification is a literal character of the name.
+// GNU keeps it: a file named `a\b` is read by `cat '/data/a\b'`.
+describe('classifyWord — backslashes are literal', () => {
+  it('keeps a literal backslash in an absolute path', () => {
+    const r = classifyWord('/ram/a\\b', setup(), '/')
+    if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
+    expect(r.virtual).toBe('/ram/a\\b')
+    expect(r.rawPath).toBe('/ram/a\\b')
   })
 
-  it('leaves unescaped strings untouched', () => {
-    expect(unescapePath('/a/b/c')).toBe('/a/b/c')
+  it('keeps a control character in an absolute path', () => {
+    const r = classifyWord('/ram/x\ty', setup(), '/')
+    if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
+    expect(r.virtual).toBe('/ram/x\ty')
+  })
+
+  it('classifies an already-unescaped name', () => {
+    const r = classifyWord("/ram/Zecheng's Server/", setup(), '/')
+    if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
+    expect(r.virtual).toBe("/ram/Zecheng's Server")
   })
 })
 

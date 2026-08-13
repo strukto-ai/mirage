@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-export { classifyBarePath, classifyParts, classifyWord, unescapePath } from './classify/index.ts'
+export { classifyBarePath, classifyParts, classifyWord } from './classify/index.ts'
 export { type ExecuteFn, expandNode } from './node.ts'
 export { expandAndClassify, expandParts } from './parts.ts'
 export { expandBraces, lookupVar } from './variable.ts'

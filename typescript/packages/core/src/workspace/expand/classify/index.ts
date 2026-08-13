@@ -12,6 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { classifyWord, unescapePath } from './heuristic.ts'
+export { classifyWord } from './heuristic.ts'
 export { classifyParts } from './parts.ts'
 export { classifyBarePath } from './path.ts'
