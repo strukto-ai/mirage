@@ -29,7 +29,7 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { UsageError } from '../../errors.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -42,13 +42,14 @@ function spec(virtual: string, resourcePath: string, rawPath?: string): PathSpec
   })
 }
 
-function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
+function opts(flags: Record<string, string | boolean> = {}, statPath?: StatPath): CommandOpts {
   return {
     stdin: null,
     flags,
     filetypeFns: null,
     cwd: '/',
     resource: {} as never,
+    statPath,
   } as unknown as CommandOpts
 }
 
@@ -318,6 +319,39 @@ describe('duGeneric', () => {
     expect(DEC.decode(out.stderr)).toBe(
       "du: cannot access '/data/nosuch': No such file or directory\n",
     )
+    expect(out.exitCode).toBe(1)
+  })
+
+  it('treats a namespace-only directory as present, not missing', async () => {
+    // The parent backend holds nothing at the operand and cannot: the
+    // content lives in the descendant mount's own resource. Only the
+    // dispatcher-backed probe knows the path is a directory.
+    const [size, entries] = backend({})
+    const out = await runDu(
+      [spec('/empty', 'empty')],
+      opts({}, () => Promise.resolve(new FileStat({ name: 'empty', type: FileType.DIRECTORY }))),
+      (targets) => Promise.resolve(targets),
+      (p) => Promise.reject(enoent(p.virtual)),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('0\t/empty\n')
+    expect(DEC.decode(out.stderr)).toBe('')
+    expect(out.exitCode).toBe(0)
+  })
+
+  it('still reports missing when the probe answers null', async () => {
+    const [size, entries] = backend({})
+    const out = await runDu(
+      [spec('/nope', 'nope')],
+      opts({}, () => Promise.resolve(null)),
+      (targets) => Promise.resolve(targets),
+      (p) => Promise.reject(enoent(p.virtual)),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('')
+    expect(DEC.decode(out.stderr)).toBe("du: cannot access '/nope': No such file or directory\n")
     expect(out.exitCode).toBe(1)
   })
 

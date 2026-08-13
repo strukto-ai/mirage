@@ -23,7 +23,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 export type DuEntries = [entries: [string, number][], total: number]
@@ -168,10 +168,18 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
  * GNU names every operand it fails to stat, keeps going with the rest, and
  * exits 1. With no operand at all it measures the working directory.
  *
- * A failed stat is not proof of absence. Several backends never materialise a
- * directory entry for the mount root (redis is one), so `stat` throws there
- * even though the subtree is full. `hasContent` is the second opinion: only an
- * operand that neither stats nor holds anything is reported missing.
+ * A failed stat is not proof of absence, and du runs bound to one backend, so
+ * its own stat cannot see two things that make a path a real directory: a
+ * mount nested below it and a symlink below it are both namespace state, held
+ * in another resource or in no resource at all. `statPath` is the channel that
+ * knows, because it resolves through the dispatcher rather than one accessor,
+ * and it is the same probe `find` classifies its start point with. Session
+ * filtering rides along with it: a mount the session may not see contributes
+ * no directory here, so absence stays the answer for it.
+ *
+ * `hasContent` is the last resort behind that, for a backend that never
+ * materialises a directory entry for its own mount root (redis is one) while
+ * the subtree below it is full.
  */
 async function duOperands(
   paths: PathSpec[],
@@ -181,6 +189,7 @@ async function duOperands(
   hasContent?: (p: PathSpec) => Promise<boolean>,
   mountPrefix?: string,
   links: LinkView | null = null,
+  statPath: StatPath | null = null,
 ): Promise<{ present: PathSpec[]; missing: string[] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
   const resolved = await resolveGlob(targets)
@@ -205,6 +214,10 @@ async function duOperands(
     } catch (err) {
       if (!isMissingPath(err)) throw err
       stattable = false
+    }
+    if (!stattable && statPath !== null && (await statPath(path.virtual)) !== null) {
+      present.push(path)
+      continue
     }
     if (!stattable && !(hasContent !== undefined && (await hasContent(path)))) {
       missing.push(path.rawPath)
@@ -496,6 +509,7 @@ export async function runDu(
     (p) => duHasContent(computeEntries, p),
     opts.mountPrefix,
     links,
+    opts.statPath ?? null,
   )
   return duGeneric(
     present,

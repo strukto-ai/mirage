@@ -11,7 +11,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -168,6 +168,7 @@ async def du_operands(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
 ) -> tuple[list[PathSpec], list[str]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
@@ -175,11 +176,19 @@ async def du_operands(
     and exits 1. With no operand at all it measures the working
     directory.
 
-    A failed stat is not proof of absence. Several backends never
-    materialise a directory entry for the mount root (redis is one), so
-    ``stat`` raises there even though the subtree is full. ``has_content``
-    is the second opinion: only an operand that neither stats nor holds
-    anything is reported missing.
+    A failed stat is not proof of absence, and du runs bound to one
+    backend, so its own stat cannot see two things that make a path a
+    real directory: a mount nested below it and a symlink below it are
+    both namespace state, held in another resource or in no resource at
+    all. ``stat_path`` is the channel that knows, because it resolves
+    through the dispatcher rather than one accessor, and it is the same
+    probe ``find`` classifies its start point with. Session filtering
+    rides along with it: a mount the session may not see contributes no
+    directory here, so absence stays the answer for it.
+
+    ``has_content`` is the last resort behind that, for a backend that
+    never materialises a directory entry for its own mount root (redis is
+    one) while the subtree below it is full.
 
     Args:
         paths (list[PathSpec]): the operands as parsed, possibly empty.
@@ -191,6 +200,8 @@ async def du_operands(
         links (LinkView | None): the namespace's symlink facts. A link
             has no backend inode, so it fails stat while still being a
             perfectly readable operand.
+        stat_path (StatPath | None): dispatcher-backed stat, None when du
+            runs outside a workspace and there is no namespace to ask.
 
     Returns:
         tuple[list[PathSpec], list[str]]: readable operands, then the
@@ -211,7 +222,11 @@ async def du_operands(
         try:
             await stat(path)
         except (FileNotFoundError, ValueError):
-            if has_content is None or not await has_content(path):
+            probed: FileStat | None = None
+            if stat_path is not None:
+                probed = await stat_path(path.virtual)
+            if probed is None and (has_content is None
+                                   or not await has_content(path)):
                 missing.append(path.raw_path)
                 continue
         present.append(path)
@@ -530,6 +545,7 @@ async def run_du(
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
     mounts: MountView | None = None,
+    stat_path: StatPath | None = None,
 ) -> DuOutput:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -556,6 +572,8 @@ async def run_du(
         mounts (MountView | None): where the mount boundaries are, so
             keys shadowed by a nested mount are excluded from every row
             and total.
+        stat_path (StatPath | None): dispatcher-backed stat, which is what
+            answers for a directory the bound backend cannot see.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
@@ -572,7 +590,8 @@ async def run_du(
                                          stat,
                                          partial(du_has_content,
                                                  compute_entries),
-                                         links=links)
+                                         links=links,
+                                         stat_path=stat_path)
     return await du(present,
                     compute_size=compute_size,
                     compute_entries=compute_entries,
@@ -686,5 +705,6 @@ async def du_generic(
         links=(None if fl.as_bool("L") else
                opts.ns.links if opts.ns is not None else None),
         mounts=opts.ns.mounts if opts.ns is not None else None,
+        stat_path=opts.stat_path,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

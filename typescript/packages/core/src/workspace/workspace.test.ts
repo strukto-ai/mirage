@@ -348,6 +348,56 @@ describe('ls injects child mounts as virtual subdirectories', () => {
     expect(result.stdoutText.split('\n')).not.toContain('data')
     await ws.close()
   })
+
+  // GNU coreutils 9.7 on debian:stable-slim, tmpfs mounted at /empty/hole:
+  // `du --apparent-size -B1 /empty` prints both rows and exits 0. The absence
+  // line is reserved for a path that is really not there. No backend holds an
+  // entry for /empty, so only the dispatcher-backed probe knows it is there.
+  it('du on the implied parent of a nested mount does not report absence', async () => {
+    const ws = await makeWs({ '/': new RAMResource(), '/empty/hole': new RAMResource() })
+    const result = await ws.execute('du /empty')
+    expect(result.stdoutText).toBe('0\t/empty/hole\n0\t/empty\n')
+    expect(result.stderrText).toBe('')
+    expect(result.exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('du -s on the implied parent of a nested mount does not report absence', async () => {
+    const ws = await makeWs({ '/': new RAMResource(), '/empty/hole': new RAMResource() })
+    const result = await ws.execute('du -s /empty')
+    expect(result.stdoutText).toBe('0\t/empty\n')
+    expect(result.stderrText).toBe('')
+    expect(result.exitCode).toBe(0)
+    await ws.close()
+  })
+
+  // The mount table alone is not enough evidence: namespaceNames synthesizes a
+  // directory for a link's ancestors too, and there is no descendant mount
+  // here at all.
+  it('du on a directory implied only by a link below it does not report absence', async () => {
+    const ws = await makeWs({ '/': new RAMResource() })
+    await ws.execute('mkdir -p /real')
+    await ws.execute('echo hi > /real/f.txt')
+    await ws.execute('ln -s /real/f.txt /ghost/deep/lnk')
+    const result = await ws.execute('du /ghost')
+    expect(result.stderrText).toBe('')
+    expect(result.exitCode).toBe(0)
+    expect(result.stdoutText).toContain('/ghost')
+    await ws.close()
+  })
+
+  // registry.descendantMounts is not session-filtered, so proving presence
+  // from the mount table alone would answer `0 /empty` here and confirm a
+  // walled-off mount's parent. The dispatcher-backed probe is filtered.
+  it('du still reports absence when the descendant mount is ungranted', async () => {
+    const ws = await makeWs({ '/': new RAMResource(), '/empty/hole': new RAMResource() })
+    ws.createSession('scoped', { mounts: { '/': 'rw' } })
+    const result = await ws.execute('du /empty', { sessionId: 'scoped' })
+    expect(result.stdoutText).toBe('')
+    expect(result.stderrText).toBe("du: cannot access '/empty': No such file or directory\n")
+    expect(result.exitCode).toBe(1)
+    await ws.close()
+  })
 })
 
 describe('rm/rmdir on a mount prefix is refused (Unix-like)', () => {

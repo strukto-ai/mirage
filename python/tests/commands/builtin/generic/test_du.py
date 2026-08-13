@@ -9,6 +9,7 @@ from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
 from mirage.ops.types import LinkView, MountView
 from mirage.resource.disk import DiskResource
+from mirage.resource.ram import RAMResource
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -415,6 +416,59 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
 
 
 @pytest.mark.asyncio
+async def test_namespace_only_directory_is_present_not_missing():
+    """A directory that exists only above a nested mount is readable.
+
+    The parent backend holds nothing at the operand and cannot: the
+    content lives in the descendant's own resource. Both backend channels
+    therefore come back empty, and only the dispatcher-backed probe knows
+    the path is a directory.
+    """
+    compute_size, compute_entries = _make_backend({})
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(name="empty", type=FileType.DIRECTORY)
+
+    out = await run_du([_spec("/empty", "empty")],
+                       "/",
+                       lambda targets: _ok(list(targets)),
+                       stat,
+                       compute_size,
+                       compute_entries,
+                       stat_path=stat_path)
+    assert out.stdout == b"0\t/empty\n"
+    assert out.stderr == b""
+    assert out.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_stat_path_answering_none_still_reports_missing():
+    """The probe is evidence of presence, never of absence on its own."""
+    compute_size, compute_entries = _make_backend({})
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return None
+
+    out = await run_du([_spec("/nope", "nope")],
+                       "/",
+                       lambda targets: _ok(list(targets)),
+                       stat,
+                       compute_size,
+                       compute_entries,
+                       stat_path=stat_path)
+    assert out.stdout == b""
+    assert out.stderr == (b"du: cannot access '/nope': "
+                          b"No such file or directory\n")
+    assert out.exit_code == 1
+
+
+@pytest.mark.asyncio
 async def test_truncated_walk_reports_partial_output_and_exits_one():
     """GNU du prints what it accounted for, warns, and exits 1."""
     compute_size, compute_entries = _make_backend({"/dir/a.txt": 2})
@@ -723,4 +777,80 @@ async def test_du_partial_operands_keeps_present_output(tmp_path):
     assert result.exit_code == 1
     assert "/d/sub" in await result.stdout_str()
     assert "__nf_missing__" in await result.stderr_str()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_the_implied_parent_of_a_nested_mount():
+    # GNU coreutils 9.7 on debian:stable-slim, tmpfs mounted at /empty/hole:
+    # `du --apparent-size -B1 /empty` prints both rows and exits 0. The
+    # absence line is reserved for a path that is really not there.
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    result = await ws.execute("du /empty", session_id="s")
+    assert await result.stdout_str() == "0\t/empty/hole\n0\t/empty\n"
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_the_implied_parent_of_a_nested_mount_under_s():
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    result = await ws.execute("du -s /empty", session_id="s")
+    assert await result.stdout_str() == "0\t/empty\n"
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_a_directory_implied_only_by_a_link_below_it():
+    """The same false absence, with no descendant mount in sight.
+
+    ``namespace_names`` synthesizes a directory for a link's ancestors
+    too, so the mount table alone is not enough evidence; the probe that
+    answers here is the one that asks the namespace as a whole.
+    """
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    await ws.execute("mkdir -p /real", session_id="s")
+    await ws.execute("echo hi > /real/f.txt", session_id="s")
+    await ws.execute("ln -s /real/f.txt /ghost/deep/lnk", session_id="s")
+    result = await ws.execute("du /ghost", session_id="s")
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    assert "/ghost" in await result.stdout_str()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_still_reports_absence_when_the_descendant_is_ungranted():
+    """A session that may not see the mount must not learn it is there.
+
+    ``registry.descendant_mounts`` is not session-filtered, so proving
+    presence from the mount table alone would answer ``0 /empty`` here and
+    confirm a walled-off mount's parent. The dispatcher-backed probe is
+    filtered, so absence stays the answer.
+    """
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("scoped", {"/": "rw"})
+    result = await ws.execute("du /empty", session_id="scoped")
+    assert await result.stdout_str() == ""
+    assert (await result.stderr_str()) == (
+        "du: cannot access '/empty': No such file or directory\n")
+    assert result.exit_code == 1
     await ws.close()
