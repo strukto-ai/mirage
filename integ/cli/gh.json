@@ -194,6 +194,110 @@
         "stdout": "\u2713 Renamed repository integ-user/renamed\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gh_api_update_then_cat_serves_the_new_bytes",
+      "seq": 569015,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/PROBE.md -X PUT -f message=a -f content=b25lCg== > /dev/null && cat /repo/PROBE.md && gh api repos/integ/repo-cli/contents/PROBE.md -X PUT -f message=b -f content=dHdvCg== -f sha=$(gh api repos/integ/repo-cli/contents/PROBE.md | jq -r .sha) > /dev/null && cat /repo/PROBE.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_leading_slash_is_optional",
+      "seq": 569016,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api /repos/integ/repo-cli | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_typed_fields_reach_a_get_query",
+      "seq": 569017,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X GET repos/integ/repo-cli/contents/README.md -F ref=main | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"type\": \"file\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_without_an_endpoint_is_refused",
+      "seq": 569018,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: an API endpoint is required\n"
+      }
+    },
+    {
+      "id": "gh_is_discoverable_as_a_cli",
+      "seq": 569019,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "type -t gh; which gh",
+      "expect": {
+        "exit": 0,
+        "stdout": "cli\ngh\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "man_gh_renders_the_spec",
+      "seq": 569020,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "man gh | head -8",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh: GitHub CLI\n\nUsage: gh [flags] <command> [<args>]\n\nCommands:\n  api   Make an authenticated GitHub API request\n  repo  Manage repositories\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "man_gh_api_renders_one_leaf",
+      "seq": 569021,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "man gh api | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh api: Make an authenticated GitHub API request\n\nUsage: gh api [flags] <ENDPOINT>\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_rename_answers_help",
+      "seq": 569022,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo rename --help | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh repo rename: Rename a repository\n\nUsage: gh repo rename [flags] <NEW-NAME>\n\n",
+        "stderr": ""
+      }
     }
   ]
 }
