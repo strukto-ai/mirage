@@ -183,7 +183,6 @@ class MirageShellProcess implements ShellProcess {
 export class MirageShellExecutor extends ShellExecutor {
   static readonly inject = ['mirage']
 
-  private readonly workspace: Workspace
   private readonly workdir: string
   private readonly defaultTimeoutMs: number
   private readonly maxTimeoutMs: number
@@ -194,13 +193,29 @@ export class MirageShellExecutor extends ShellExecutor {
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
-    this.workspace = ctx.mirage.workspace
     this.workdir = config.workdir ?? '/'
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
     this.maxTimeoutMs = config.maxTimeoutMs ?? MAX_TIMEOUT_MS
     this.stdoutMaxBytes = config.stdoutMaxBytes ?? DEFAULT_STDOUT_MAX_BYTES
     this.stderrMaxBytes = config.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES
     this.sessionId = config.sessionId
+  }
+
+  // The workspace may still be building (declarative mounts resolve
+  // asynchronously), so every execution awaits the service's `ready`.
+  private workspace(): Promise<Workspace> {
+    return this.ctx.mirage.ready
+  }
+
+  /**
+   * Every command runs inside the mounted workspace and the host is
+   * unreachable by construction, so this executor confines like a
+   * workspace-write sandbox: reads and writes land only where mounts
+   * (and their modes) allow. Declaring it lets confinement-aware
+   * plugins (dsh's permission presets) compose over this executor.
+   */
+  override get sandboxMode(): NonNullable<ShellExecutor['sandboxMode']> {
+    return 'workspace-write'
   }
 
   resolve(request: ShellExecRequest): ShellExecSpec {
@@ -231,9 +246,10 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   private async provisionSession(sessionId: string): Promise<void> {
-    await this.workspace.ensureSessionsLoaded()
-    if (this.workspace.listSessions().some((s) => s.sessionId === sessionId)) return
-    const session = this.workspace.createSession(sessionId)
+    const ws = await this.workspace()
+    await ws.ensureSessionsLoaded()
+    if (ws.listSessions().some((s) => s.sessionId === sessionId)) return
+    const session = ws.createSession(sessionId)
     session.cwd = this.workdir
     session.env.PWD = this.workdir
   }
@@ -268,7 +284,8 @@ export class MirageShellExecutor extends ShellExecutor {
     spec.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       await this.ensureSession()
-      const result = await this.workspace.execute(
+      const ws = await this.workspace()
+      const result = await ws.execute(
         spec.command,
         executeOptions(spec, controller.signal, this.sessionId, this.workdir),
       )
@@ -316,8 +333,9 @@ export class MirageShellExecutor extends ShellExecutor {
     }
     spec.signal?.addEventListener('abort', onAbort, { once: true })
     const run = this.ensureSession()
-      .then(() =>
-        this.workspace.execute(
+      .then(() => this.workspace())
+      .then((ws) =>
+        ws.execute(
           spec.command,
           executeOptions(spec, controller.signal, this.sessionId, this.workdir),
         ),

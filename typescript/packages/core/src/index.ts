@@ -44,6 +44,7 @@ export {
   type NativeMove,
   OnExceed,
   OverflowPolicy,
+  parseMountMode,
   PathSpec,
   type PathSpecInit,
   type PolymorphicReadFn,

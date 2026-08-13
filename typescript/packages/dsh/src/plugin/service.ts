@@ -12,18 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defineConfig } from 'tsup'
-
-export default defineConfig({
-  entry: ['src/index.ts', 'src/plugin/service.ts', 'src/plugin/fs.ts', 'src/plugin/shell.ts'],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
-  external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-fs', '@deepseek-ai/dsh-shell'],
-})
+// The dsh loader entry: a plugin module's default export is what a
+// cordis.patch.yml row's name resolves to.
+export { MirageService as default } from '../service.ts'

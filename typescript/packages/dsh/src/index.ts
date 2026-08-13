@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { MirageService, type MirageConfig } from './service.ts'
+export {
+  MirageService,
+  type MirageConfig,
+  type MirageMount,
+  type MirageMountBlock,
+  type MirageRuntimeBlock,
+} from './service.ts'
 export { MirageFileSystem, type MirageFsConfig } from './fs.ts'
 export { MirageShellExecutor, type MirageShellConfig } from './shell.ts'

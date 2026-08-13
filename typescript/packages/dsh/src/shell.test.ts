@@ -46,6 +46,11 @@ afterEach(async () => {
 })
 
 describe('resolve', () => {
+  it('declares workspace-write confinement', async () => {
+    const { shell } = await makeShell()
+    expect(shell.sandboxMode).toBe('workspace-write')
+  })
+
   it('applies defaults and caps the timeout', async () => {
     const { shell } = await makeShell({}, { defaultTimeoutMs: 5000, maxTimeoutMs: 8000 })
     const defaulted = shell.resolve({ command: 'true' })

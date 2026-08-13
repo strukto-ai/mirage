@@ -89,7 +89,7 @@ async function* singleChunk(text: string): AsyncGenerator<string, void, void> {
 export class MirageFileSystem extends FileSystem {
   static readonly inject = ['mirage']
 
-  private readonly fsOps: Ops
+  private fsOps: Ops | null = null
   private readonly cwd: string
   private readonly diffBasisMaxBytes: number
   // Per-targetKey tail promise: serializes mutating ops so the
@@ -99,12 +99,22 @@ export class MirageFileSystem extends FileSystem {
 
   constructor(ctx: Context, config: MirageFsConfig = {}) {
     super(ctx)
-    this.fsOps = ctx.mirage.workspace.fs
     this.cwd = config.cwd ?? '/'
     this.diffBasisMaxBytes = config.diffBasisMaxBytes ?? DEFAULT_DIFF_BASIS_MAX_BYTES
   }
 
+  // The workspace may still be building (declarative mounts resolve
+  // asynchronously), so every entry point awaits the service's `ready`
+  // once and caches the op door.
+  private async ops(): Promise<Ops> {
+    this.fsOps ??= (await this.ctx.mirage.ready).fs
+    return this.fsOps
+  }
+
   private get links(): LinksSeam | null {
+    if (this.fsOps === null) {
+      throw new Error('mirage: filesystem used before the workspace is ready')
+    }
     return this.fsOps.links
   }
 
@@ -139,10 +149,11 @@ export class MirageFileSystem extends FileSystem {
     return next
   }
 
-  resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
+  async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     assertNotAborted(opts?.signal, 'resolve')
+    await this.ops()
     const followed = this.follow(this.normalize(path, opts?.cwd))
-    return Promise.resolve({ targetKey: FsTargetKey(followed), displayPath: followed })
+    return { targetKey: FsTargetKey(followed), displayPath: followed }
   }
 
   processPath(target: FsTarget): string {
@@ -167,7 +178,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let stat: FileStat
     try {
-      stat = await this.fsOps.stat(key)
+      stat = await (await this.ops()).stat(key)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'stat', target.displayPath)
@@ -185,6 +196,7 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
   ): Promise<FsPathInfo | undefined> {
     assertNotAborted(signal, 'lstat')
+    await this.ops()
     const normalized = this.normalize(path, opts?.cwd)
     // Follow every component except the last: the probe is about the path
     // entry itself, so a link at the leaf must report as one.
@@ -203,7 +215,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let stat: FileStat
     try {
-      stat = await this.fsOps.stat(parentFollowed)
+      stat = await (await this.ops()).stat(parentFollowed)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'lstat', normalized)
@@ -220,7 +232,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let bytes: Uint8Array
     try {
-      bytes = await this.fsOps.readFile(key)
+      bytes = await (await this.ops()).readFile(key)
     } catch (err) {
       throw mapMirageError(err, 'read', target.displayPath)
     }
@@ -249,7 +261,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let children: string[]
     try {
-      children = await this.fsOps.readdir(key)
+      children = await (await this.ops()).readdir(key)
     } catch (err) {
       throw mapMirageError(err, 'list', target.displayPath)
     }
@@ -292,7 +304,7 @@ export class MirageFileSystem extends FileSystem {
     const target: FsTarget = { targetKey: FsTargetKey(followed), displayPath: childPath }
     let stat: FileStat
     try {
-      stat = await this.fsOps.stat(followed)
+      stat = await (await this.ops()).stat(followed)
     } catch {
       // A child the listing named but stat cannot classify (a broken link,
       // a race with a delete) still lists, as an entry of unknown kind.
@@ -340,7 +352,9 @@ export class MirageFileSystem extends FileSystem {
       const before = existing === undefined ? null : await this.diffBasis(target, content)
       const crlf = before !== null && detectsCrlf(before)
       try {
-        await this.fsOps.writeFile(key, restoreLineEndings(normalizeLineEndings(content), crlf))
+        await (
+          await this.ops()
+        ).writeFile(key, restoreLineEndings(normalizeLineEndings(content), crlf))
       } catch (err) {
         throw mapMirageError(err, 'write', target.displayPath)
       }
@@ -360,7 +374,7 @@ export class MirageFileSystem extends FileSystem {
     if (Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes) return null
     let bytes: Uint8Array
     try {
-      bytes = await this.fsOps.readFile(String(target.targetKey))
+      bytes = await (await this.ops()).readFile(String(target.targetKey))
     } catch {
       return null
     }
@@ -409,7 +423,7 @@ export class MirageFileSystem extends FileSystem {
       }
       let bytes: Uint8Array
       try {
-        bytes = await this.fsOps.readFile(key)
+        bytes = await (await this.ops()).readFile(key)
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)
       }
@@ -423,7 +437,7 @@ export class MirageFileSystem extends FileSystem {
         target.displayPath,
       )
       try {
-        await this.fsOps.writeFile(key, restoreLineEndings(edited, detectsCrlf(raw)))
+        await (await this.ops()).writeFile(key, restoreLineEndings(edited, detectsCrlf(raw)))
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)
       }

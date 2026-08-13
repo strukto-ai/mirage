@@ -67,6 +67,32 @@ const script = await shell.run(
 
 [`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
+## Install into a dsh profile
+
+The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem and bash providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
+
+```bash
+dsh plugin --profile web add @struktoai/mirage-dsh
+dsh --profile web
+```
+
+The bundle's default world is one RAM scratch mount at `/tmp`. Mount real resources by overriding the `mirage` row in the profile's own `cordis.patch.yml`, in declarative form (the resource registry name, a mode, and the resource's config; `!!js` expressions resolve at mount time):
+
+```yaml
+- id: mirage
+  config:
+    mounts:
+      /tmp: { resource: ram, mode: exec }
+      /slack:
+        resource: slack
+        mode: read
+        config: { token: !!js process.env.SLACK_BOT_TOKEN }
+    runtimes:
+      - { name: monty, captures: [python, python3] }
+```
+
+The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. The shell executor reports `workspace-write` confinement, since a command cannot reach anything but the mounts, which is what lets dsh's permission presets compose over it.
+
 A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
 
 | Harness | Startup | Est. concurrent sessions (2 vCPU / 8 GB) |

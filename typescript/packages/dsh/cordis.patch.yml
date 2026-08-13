@@ -1,0 +1,54 @@
+# The mirage bundle patch. Applied over dsh-base by `dsh --profile <name>`
+# after `dsh plugin --profile <name> add @struktoai/mirage-dsh`: it swaps
+# the filesystem and shell providers for mirage-backed ones, so dsh's file
+# tools and bash tool operate on a workspace of mounted resources instead
+# of the host disk.
+#
+# Override the `mirage` row's config in the profile's own cordis.patch.yml
+# to mount real resources (the block form is `resource` registry name,
+# `mode`, and the resource's `config`; `!!js` expressions resolve env vars
+# at mount time):
+#
+#   - id: mirage
+#     config:
+#       mounts:
+#         /tmp: { resource: ram, mode: exec }
+#         /slack:
+#           resource: slack
+#           mode: read
+#           config: { token: !!js process.env.SLACK_BOT_TOKEN }
+#       runtimes:
+#         - { name: monty, captures: [python, python3] }
+
+# The host filesystem and bash providers step aside; mirage provides the
+# same ctx.fs and ctx.shell seams over the workspace.
+- id: fs-sandbox
+  disabled: true
+
+- id: bash-sandbox
+  disabled: true
+
+# PowerShell and the ripgrep-based search tool run host subprocesses,
+# which the mirage world does not contain; the bash tool's grep covers
+# search inside the workspace.
+- id: pwsh-sandbox
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- insert:
+    - id: mirage
+      name: '@struktoai/mirage-dsh/service'
+      config:
+        mounts:
+          /tmp: { resource: ram, mode: exec }
+
+    - id: mirage-fs
+      name: '@struktoai/mirage-dsh/fs'
+
+    - id: mirage-shell
+      name: '@struktoai/mirage-dsh/shell'
