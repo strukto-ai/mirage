@@ -88,15 +88,19 @@ export class HttpGitHubTransport implements GitHubTransport {
     params?: Record<string, string>,
   ): Promise<unknown> {
     try {
-      // Octokit routes a parameter by method the way gh does: query string on
-      // GET, JSON body otherwise. A call with neither sends no body at all,
-      // which is what a bare DELETE has to look like on the wire.
+      // Octokit reads loose parameters off the same object that carries
+      // `url`, `method` and `headers`, so a field the agent typed would
+      // steer the request rather than ride in it: `gh api X -f url=...`
+      // retargeted the call. The query is spelled into the url and the body
+      // travels as `data`, which octokit sends verbatim, so neither can
+      // collide with a transport option. A call with neither sends no body
+      // at all, which is what a bare DELETE has to look like on the wire.
+      const query = new URLSearchParams(params ?? {}).toString()
       const r = await this.kit.request({
         method: method.toUpperCase(),
-        url: escapeBraces(path),
+        url: escapeBraces(path) + (query === '' ? '' : `?${query}`),
         headers: { 'X-GitHub-Api-Version': GITHUB_API_VERSION },
-        ...(params ?? {}),
-        ...((body as Record<string, unknown> | undefined) ?? {}),
+        ...(body === undefined ? {} : { data: body }),
       })
       // 204 and an empty 202 decode to '' rather than a body; the caller gets
       // null on a call that worked.

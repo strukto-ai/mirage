@@ -111,6 +111,32 @@ describe('HttpGitHubTransport', () => {
     expect(SEEN).toHaveLength(3)
   })
 
+  // Octokit merges loose parameters into the same object that carries
+  // `url`, `method` and `headers`, so a field the agent typed could steer
+  // the request instead of riding in it: `gh api X -f url=...` retargeted
+  // the call. Body and query travel in their own containers.
+  it('does not let a field named url steer the request', async () => {
+    await transport().request('POST', '/repos/o/r/issues', {
+      url: 'https://elsewhere.test/x',
+      method: 'DELETE',
+      title: 'hi',
+    })
+    expect(SEEN[0]?.url).toBe('https://api.example.test/repos/o/r/issues')
+    expect(SEEN[0]?.method).toBe('POST')
+    expect(JSON.parse(SEEN[0]?.body ?? '{}')).toEqual({
+      url: 'https://elsewhere.test/x',
+      method: 'DELETE',
+      title: 'hi',
+    })
+  })
+
+  it('does not let a query field named url steer the request', async () => {
+    await transport().get('/search/code', { url: 'https://elsewhere.test/x', q: 'a' })
+    expect(SEEN[0]?.url).toBe(
+      'https://api.example.test/search/code?url=https%3A%2F%2Felsewhere.test%2Fx&q=a',
+    )
+  })
+
   it('reports a failure as a GitHubApiError carrying the status', async () => {
     REPLY = { status: 404, body: '{"message":"Not Found"}' }
     await expect(transport().get('/repos/o/r')).rejects.toMatchObject({
