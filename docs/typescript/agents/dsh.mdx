@@ -61,25 +61,6 @@ const ran = await shell.run(
 )
 ```
 
-The TypeScript monty binding answers `os.getenv`/`os.environ` but not builtin `open()` or `os.listdir` yet; a script that must read mounted files itself should run under `pyodide` (WASM CPython, the default when no `runtimes` list is given), where `open()` and `os.listdir` work against the mounts. Either way the script executes inside the workspace, never on the host.
-
 ## One execution world
 
 dsh's architecture expects the filesystem and shell providers to share one execution world, so that a path from one seam is valid in the other. Both providers here read the same `ctx.mirage` workspace: `ctx.fs.processPath(target)` returns a virtual path that `ctx.shell` commands resolve to the same file, and a file written by the shell stats and edits through `ctx.fs`.
-
-## Semantics
-
-- **Targets are canonical virtual paths.** `resolve()` collapses aliases and follows Mirage namespace symlinks once, yielding the stable `FsTarget` every other operation takes; `lstat()` probes the path entry itself and reports `symlink` for a link.
-- **Versions are metadata tokens.** `FsVersion` derives from the backend's fingerprint, revision, or `modified` + `size`, so dsh's stale-write guards (`createIfAbsent`, `replaceIfVersion`) work without content hashing. A backend that reports none of those degrades to always-fresh.
-- **Errors carry dsh codes.** Mirage's POSIX-stamped errors map onto the seam taxonomy: a missing path is `FS_NOT_FOUND`, a directory in a file slot is `FS_NOT_REGULAR_FILE`, a policy denial or read-only mount is `FS_PERMISSION_DENIED`.
-- **Every op walks the workspace door.** Session grants, admission policies, cache read-through, and post-write invalidation fire exactly as they do for a Mirage shell command.
-
-## Sandboxing and policy
-
-Both providers report `sandboxMode` as `undefined` and ignore per-call `sandboxPolicy`: dsh's sandbox seam confines host OS processes, and there is no OS process here to confine. Confinement comes from Mirage instead — mount modes, session grants, and the policy layer bound what any command, file op, or guest script can touch, uniformly across both seams.
-
-## Limitations
-
-- `ctx.shell.start()` delivers output once the command completes; Mirage buffers a command's output rather than streaming it, and `kill()` aborts cooperatively at executor boundaries.
-- dsh's `ctx.subprocess`, terminal, and LSP seams are not provided: Mirage's shell is an interpreter, not an OS. Compose profiles without those capabilities, or point them at a Mirage FUSE mount when real processes must see mounted data.
-- Built against the published `@deepseek-ai/dsh-fs` and `@deepseek-ai/dsh-shell` release candidates; dsh is in developer preview and its seams may change.
