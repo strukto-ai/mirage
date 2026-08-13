@@ -14,17 +14,18 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 
 ## Compose
 
-Three Cordis plugins. `MirageService` owns the workspace; the two providers inject it. Mix any resources, such as Redis beside a scratch RAM mount:
+Three Cordis plugins. `MirageService` owns the workspace; the two providers inject it. Mix any resources, such as Slack and Redis beside a scratch RAM mount:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import { MountMode, RAMResource, RedisResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 const ws = new Workspace(
   {
     '/notes': [new RAMResource(), MountMode.EXEC],
     '/redis': new RedisResource({ url: redisUrl }),
+    '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
   { runtimes: ['monty', 'vfs'] },
 )
