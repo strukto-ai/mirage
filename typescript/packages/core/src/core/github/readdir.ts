@@ -18,6 +18,7 @@ import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchDirTree } from './_client.ts'
+import { refillIndex } from './tree.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -49,7 +50,14 @@ export async function readdir(
   const stripped = stripPrefix(path)
   const key = normalizeKey(stripped)
 
-  const listing = await index.listDir(key)
+  let listing = await index.listDir(key)
+  // The index is the whole listing here, not a cache in front of one, so a
+  // miss may mean the index was invalidated or its TTL lapsed rather than
+  // that the path is absent. Refetch once and ask again; only then is a
+  // miss an answer.
+  if ((listing.entries === undefined || listing.entries === null) && !accessor.truncated) {
+    if (await refillIndex(accessor, index)) listing = await index.listDir(key)
+  }
   if (listing.entries !== undefined && listing.entries !== null) {
     return prefix !== '' && listing.entries.length > 0 && !listing.entries[0]?.startsWith(prefix)
       ? listing.entries.map((e) => prefix + e)

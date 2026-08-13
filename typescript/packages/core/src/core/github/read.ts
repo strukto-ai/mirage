@@ -16,6 +16,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
+import { refillIndex } from './tree.ts'
 import { fetchBlob } from './_client.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -47,7 +48,12 @@ export async function read(
 ): Promise<Uint8Array> {
   const p = stripPrefix(path)
   if (index === undefined) throw enoent(path)
-  const result = await index.get(indexKey(p))
+  let result = await index.get(indexKey(p))
+  // A miss may mean the index was invalidated or expired rather than that
+  // the blob is absent; refetch once before calling it absent.
+  if ((result.entry === undefined || result.entry === null) && !accessor.truncated) {
+    if (await refillIndex(accessor, index)) result = await index.get(indexKey(p))
+  }
   if (result.entry === undefined || result.entry === null) throw enoent(path)
   if (result.entry.resourceType === 'folder') throw eisdir(p)
   return fetchBlob(accessor.transport, accessor.owner, accessor.repo, result.entry.id)

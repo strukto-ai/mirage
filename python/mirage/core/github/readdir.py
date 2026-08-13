@@ -16,7 +16,7 @@ import logging
 
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
-from mirage.core.github.tree import fetch_dir_tree
+from mirage.core.github.tree import fetch_dir_tree, refill_index
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -36,6 +36,13 @@ async def readdir(accessor,
             path = rest or "/"
     path = path.rstrip("/") or "/"
     listing = await index.list_dir(path)
+    # The index is the whole listing here, not a cache in front of one, so
+    # an *expired* answer means the tree aged out, not that the path is
+    # gone. Refetch once and ask again. A NOT_FOUND against a live index
+    # is a real absence and must not cost a tree fetch.
+    if listing.status == LookupStatus.EXPIRED and not accessor.truncated:
+        if await refill_index(accessor, index):
+            listing = await index.list_dir(path)
     if listing.entries is not None:
         if prefix and listing.entries and not listing.entries[0].startswith(
                 prefix):

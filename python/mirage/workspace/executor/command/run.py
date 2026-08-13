@@ -241,7 +241,12 @@ async def drop_service_caches(registry: MountRegistry,
     for mount in registry.mounts():
         if mount.resource.name not in wanted:
             continue
-        await mount.resource.index.clear()
+        # Invalidate rather than clear: a cleared index reads exactly like
+        # one that was never filled, so a backend whose index *is* its
+        # listing (github seeds the whole tree once) cannot tell the drop
+        # from an empty repository and reports the mount as gone. Expiring
+        # keeps that distinction and the next read refetches.
+        await mount.resource.index.invalidate()
         if mount.cache_manager is not None:
             await mount.cache_manager.drop_prefix()
 

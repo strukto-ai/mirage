@@ -201,6 +201,24 @@ class RedisIndexCacheStore(IndexCacheStore):
         pipe.delete(children_key)
         await pipe.execute()
 
+    async def invalidate(self) -> None:
+        """Clear rather than expire, because redis cannot say "stale" here.
+
+        The RAM store marks entries expired in place, so a later lookup
+        answers EXPIRED and a backend whose index *is* its listing knows to
+        refetch. A redis key carries a real TTL and an expired one is
+        simply gone, so absent and stale read the same and this can only
+        clear. The consequence, deliberately chosen: a github mount on a
+        redis index answers ENOENT after a CLI write instead of refetching
+        (``ls`` reports the mount root missing). That is a loud failure,
+        not a wrong answer -- a no-op here would instead serve the
+        pre-write tree as if it were current, and quietly wrong is the
+        worse of the two. Closing this properly means an ``invalidated_at``
+        marker key compared against each entry's ``index_time``, which
+        needs no schema change and can ride the same round trip.
+        """
+        await self.clear()
+
     async def clear(self) -> None:
         self._pending_seed = None
         cursor = 0

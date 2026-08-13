@@ -18,6 +18,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, LookupStatus
 from mirage.core.github._client import github_get
 from mirage.core.github.config import GitHubConfig
+from mirage.core.github.tree import refill_index
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -45,6 +46,9 @@ async def read(
 
     key = "/" + path.strip("/")
     result = await index.get(key)
+    if (result.status == LookupStatus.EXPIRED and not accessor.truncated
+            and await refill_index(accessor, index)):
+        result = await index.get(key)
     if result.status == LookupStatus.NOT_FOUND or result.entry is None:
         raise enoent(virtual)
     if result.entry.resource_type == "folder":

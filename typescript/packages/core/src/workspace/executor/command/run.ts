@@ -174,7 +174,11 @@ export async function dropServiceCaches(
   const wanted = new Set<string>(serves)
   for (const mount of registry.allMounts()) {
     if (!wanted.has(mount.resource.kind)) continue
-    await mount.resource.index?.clear()
+    // Invalidate rather than clear: a cleared index reads exactly like one
+    // that was never filled, so a backend whose index *is* its listing
+    // (github seeds the whole tree once) cannot tell the drop from an empty
+    // repository. Expiring keeps that distinction and the next read refetches.
+    await mount.resource.index?.invalidate()
     await mount.cacheManager?.dropPrefix()
   }
 }
