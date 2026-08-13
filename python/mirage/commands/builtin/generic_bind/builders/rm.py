@@ -19,6 +19,8 @@ from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.slash_links import (is_slashed_link,
+                                                       rm_link_refusal)
 from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -43,22 +45,13 @@ async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     removed: dict[str, ByteSource] = {}
     links = opts.ns.links if opts.ns is not None else None
     for p in paths:
-        # A link operand typed with a trailing slash is refused, never
-        # followed: the dispatcher left the link entry in place for
-        # exactly this. GNU splits the wording by what the slash
-        # resolved to and whether -r was given -- a directory without -r
-        # is EISDIR and -f does not suppress it, everything else is
-        # ENOTDIR and -f does.
-        if (links is not None and p.raw_path.endswith("/")
-                and links.stat_at(p.virtual) is not None):
-            target = await links.target_stat(p.virtual)
-            if (target is not None and target.type == FileType.DIRECTORY
-                    and not recursive):
-                errors.append(
-                    f"rm: cannot remove '{p.raw_path}': Is a directory")
-            elif not f:
-                errors.append(
-                    f"rm: cannot remove '{p.raw_path}': Not a directory")
+        if is_slashed_link(p, links):
+            refusal = await rm_link_refusal(p,
+                                            links,
+                                            recursive=recursive,
+                                            force=f)
+            if refusal is not None:
+                errors.append(refusal)
             continue
         try:
             s = await ops.stat(accessor, p)

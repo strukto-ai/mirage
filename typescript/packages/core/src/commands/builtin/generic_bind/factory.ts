@@ -16,8 +16,8 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { FileType, type PathSpec } from '../../../types.ts'
-import { enotdir } from '../../../utils/errors.ts'
+import { type FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { enotdir, isMissingPath } from '../../../utils/errors.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { type CommandIO, type StatOp, resolveGlobOf, supports, withHiddenGuard } from './adapter.ts'
@@ -63,8 +63,39 @@ function slashCheckedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   }
 }
 
+// A listing never reaches the stat wrapper, and on a keyed store it cannot tell
+// "not a directory" from "no keys under this prefix" on its own: `ls flink/`
+// answered with an empty listing and exit 0 where GNU says "Not a directory".
+// One stat decides it, and only for an operand actually typed with a slash.
+function slashCheckedReaddir<A extends Accessor>(
+  readdir: CommandIO<A>['readdir'],
+  stat: StatOp<A>,
+): CommandIO<A>['readdir'] {
+  return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
+    if (path.rawPath.endsWith('/')) {
+      // Only a stat that ANSWERS can refuse. On a prefix or synthetic
+      // store a directory is the set of keys under it rather than an
+      // object, so a miss here is not evidence of a non-directory and
+      // the listing is the authority (see "absence takes two
+      // channels"); slack's per-channel directories stat as nothing.
+      let entry: FileStat | null = null
+      try {
+        entry = await stat(accessor, path)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+      }
+      if (entry !== null && entry.type !== FileType.DIRECTORY) throw enotdir(path)
+    }
+    return readdir(accessor, path, index)
+  }
+}
+
 function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  return { ...ops, stat: slashCheckedStat(ops.stat) }
+  return {
+    ...ops,
+    stat: slashCheckedStat(ops.stat),
+    readdir: slashCheckedReaddir(ops.readdir, ops.stat),
+  }
 }
 
 function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {

@@ -28,7 +28,7 @@ from mirage.commands.builtin.generic_bind.provision import default_provision
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import enotdir
+from mirage.utils.errors import MISS_ERRORS, enotdir
 
 
 def _cached_stat(stat: Callable[..., Any], accessor: Accessor, path: PathSpec,
@@ -84,6 +84,29 @@ async def _slash_checked_stat(stat: Callable[..., Any], accessor: Accessor,
     return result
 
 
+async def _slash_checked_readdir(readdir: Callable[..., Any],
+                                 stat: Callable[..., Any], accessor: Accessor,
+                                 path: PathSpec, *args, **kwargs):
+    # A listing never reaches the stat wrapper, and on a keyed store it
+    # cannot tell "not a directory" from "no keys under this prefix" on
+    # its own: `ls flink/` answered with an empty listing and exit 0
+    # where GNU says "Not a directory". One stat decides it, and only
+    # for an operand actually typed with a slash.
+    if path.raw_path.endswith("/"):
+        # Only a stat that ANSWERS can refuse. On a prefix or synthetic
+        # store a directory is the set of keys under it rather than an
+        # object, so a miss here is not evidence of a non-directory and
+        # the listing is the authority (see "absence takes two
+        # channels"); slack's per-channel directories stat as nothing.
+        try:
+            entry = await stat(accessor, path)
+        except MISS_ERRORS:
+            entry = None
+        if entry is not None and entry.type != FileType.DIRECTORY:
+            raise enotdir(path)
+    return await readdir(accessor, path, *args, **kwargs)
+
+
 def with_slash_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose ``stat`` honors a trailing slash on an operand.
 
@@ -93,7 +116,10 @@ def with_slash_guard(ops: CommandIO) -> CommandIO:
     every family at once, because the read chokepoint
     (``dir_aware_stat``) and the metadata commands (ls/du/find/stat)
     all reach the backend through this slot, and each one already
-    renders whatever strerror it gets in its own GNU voice.
+    renders whatever strerror it gets in its own GNU voice. ``readdir``
+    is wrapped too, because a listing never stats on its own and a keyed
+    store answers a non-directory prefix with an empty list rather than
+    an error.
 
     A missing path is left alone: its own ENOENT is already GNU's answer
     (``cat dangle/`` is "No such file or directory"). The link half is
@@ -104,7 +130,10 @@ def with_slash_guard(ops: CommandIO) -> CommandIO:
     Args:
         ops (CommandIO): the backend's IO adapter.
     """
-    return replace(ops, stat=functools.partial(_slash_checked_stat, ops.stat))
+    return replace(ops,
+                   stat=functools.partial(_slash_checked_stat, ops.stat),
+                   readdir=functools.partial(_slash_checked_readdir,
+                                             ops.readdir, ops.stat))
 
 
 def with_stat_cache(ops: CommandIO) -> CommandIO:

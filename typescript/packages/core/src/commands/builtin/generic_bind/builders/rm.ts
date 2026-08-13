@@ -19,6 +19,7 @@ import { formatRecords } from '../../utils/output.ts'
 import { removalLines } from '../../utils/verbose.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/types.ts'
+import { isSlashedLink, rmLinkRefusal } from '../../utils/slash_links.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const RM_BUILDER: Builder = {
@@ -47,18 +48,9 @@ export const RM_BUILDER: Builder = {
     const errors: string[] = []
     const links = opts.ns?.links ?? null
     for (const p of resolved) {
-      // A link operand typed with a trailing slash is refused, never
-      // followed: the dispatcher left the link entry in place for exactly
-      // this. GNU splits the wording by what the slash resolved to and
-      // whether -r was given -- a directory without -r is EISDIR and -f
-      // does not suppress it, everything else is ENOTDIR and -f does.
-      if (links !== null && p.rawPath.endsWith('/') && links.statAt(p.virtual) !== null) {
-        const target = await links.targetStat(p.virtual)
-        if (target !== null && target.type === FileType.DIRECTORY && !recursive) {
-          errors.push(`rm: cannot remove '${p.rawPath}': Is a directory`)
-        } else if (!force) {
-          errors.push(`rm: cannot remove '${p.rawPath}': Not a directory`)
-        }
+      if (isSlashedLink(p, links)) {
+        const refusal = await rmLinkRefusal(p, links, { recursive, force })
+        if (refusal !== null) errors.push(refusal)
         continue
       }
       let isDir = false

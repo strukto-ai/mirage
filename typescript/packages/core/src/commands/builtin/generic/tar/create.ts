@@ -185,8 +185,8 @@ export async function planCreate(
     // member, and re-adds one only for a member that really is a
     // directory: `tar -cf a.tar dlink/` stores `dlink`, the symlink,
     // exactly as `tar -cf a.tar dlink` does.
-    const raw =
-      path.rawPath.replace(/\/+$/, '') === '' ? path.rawPath : path.rawPath.replace(/\/+$/, '')
+    const trimmedRaw = rstripSlash(path.rawPath)
+    const raw = trimmedRaw === '' ? path.rawPath : trimmedRaw
     const base = rstripSlash(path.virtual) || '/'
     const scan = await scanOperand(path, {
       stat: deps.stat,

@@ -14,6 +14,7 @@
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.s3.io import resolve_glob
+from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -33,11 +34,23 @@ async def mkdir(accessor: S3Accessor, paths: list[PathSpec], texts: list[str],
         raise ValueError("mkdir: missing operand")
     paths = await resolve_glob(accessor, paths, opts.index)
     lines: list[str] = []
+    errors: list[str] = []
     writes: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
     for path in paths:
+        # A symlink occupying the name is EEXIST; the shared helper keeps
+        # this identical to the generic builder's answer.
+        taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
+        if taken:
+            if refusal is not None:
+                errors.append(refusal)
+            continue
         await mkdir_impl(accessor, path, parents=parents)
         writes[path.mount_path] = b""
         if verbose:
             lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
-    return output, IOResult(writes=writes)
+    stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    return output, IOResult(writes=writes,
+                            stderr=stderr,
+                            exit_code=1 if errors else 0)

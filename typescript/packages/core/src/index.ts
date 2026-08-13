@@ -412,6 +412,11 @@ export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
 export {
+  isSlashedLink,
+  mkdirLinkRefusal,
+  rmLinkRefusal,
+} from './commands/builtin/utils/slash_links.ts'
+export {
   formatOptionalRecords,
   formatRecordText,
   formatRecords,

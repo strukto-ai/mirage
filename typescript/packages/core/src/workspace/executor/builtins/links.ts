@@ -164,12 +164,12 @@ export async function handleLn(
 // no-follow command therefore still needs its operand's prefix
 // resolved. Throws CycleError on ELOOP.
 function followParent(namespace: Namespace, virtual: string): string {
-  const trimmed = virtual.replace(/\/+$/, '')
+  const trimmed = rstripSlash(virtual)
   const cut = trimmed.lastIndexOf('/')
   const name = trimmed.slice(cut + 1)
   if (name === '') return virtual
   const resolved = namespace.follow(trimmed.slice(0, cut) || '/')
-  return `${resolved.replace(/\/+$/, '')}/${name}`
+  return `${rstripSlash(resolved)}/${name}`
 }
 
 // Rewrite path operands through the symlink table (open(2) semantics).

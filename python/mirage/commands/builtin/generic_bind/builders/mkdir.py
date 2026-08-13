@@ -15,11 +15,12 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
+from mirage.commands.builtin.utils.slash_links import mkdir_link_refusal
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
                                  operand_spelling)
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
@@ -50,19 +51,10 @@ async def mkdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     errors: list[str] = []
     links = opts.ns.links if opts.ns is not None else None
     for path in paths:
-        # mkdir(2) lstats the name it is about to create, so a symlink
-        # occupying it is EEXIST however it was spelled -- no backend can
-        # see the link, so the name plane has to answer. -p is satisfied
-        # only when the link already leads to a directory; pointing at a
-        # file or at nothing still collides (GNU `mkdir -p dangle` is
-        # "File exists", not a fresh directory at the link's target).
-        if links is not None and links.stat_at(path.virtual) is not None:
-            target = await links.target_stat(path.virtual)
-            if parents and target is not None and target.type == (
-                    FileType.DIRECTORY):
-                continue
-            errors.append(f"mkdir: cannot create directory "
-                          f"'{path.raw_path}': File exists")
+        taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
+        if taken:
+            if refusal is not None:
+                errors.append(refusal)
             continue
         try:
             await mkdir_fn(accessor, path, parents=parents)

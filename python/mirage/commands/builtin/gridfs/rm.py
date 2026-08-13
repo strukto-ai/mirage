@@ -19,6 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.slash_links import (is_slashed_link,
+                                                       rm_link_refusal)
 from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
@@ -103,7 +105,15 @@ async def rm(
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
     for p in paths:
+        # A link typed with a trailing slash is refused, never followed:
+        # the shared helper keeps this identical to the generic builder.
+        if is_slashed_link(p, links):
+            refusal = await rm_link_refusal(p, links, recursive=r, force=f)
+            if refusal is not None:
+                errors.append(refusal)
+            continue
         # GNU rm reports the operand and keeps removing the rest.
         error, entry_lines = await _rm(accessor,
                                        p,

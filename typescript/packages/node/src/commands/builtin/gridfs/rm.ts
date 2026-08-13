@@ -35,6 +35,7 @@ import { rmdir as gridfsRmdir } from '../../../core/gridfs/rmdir.ts'
 import { stat as gridfsStat } from '../../../core/gridfs/stat.ts'
 import { unlink as gridfsUnlink } from '../../../core/gridfs/unlink.ts'
 import { GRIDFS_IO } from './io.ts'
+import { isSlashedLink, rmLinkRefusal } from '@struktoai/mirage-core'
 
 const resolveGlob = resolveGlobOf(GRIDFS_IO)
 
@@ -111,7 +112,15 @@ async function rmCommand(
   const verboseParts: string[] = []
   const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}
+  const links = opts.ns?.links ?? null
   for (const p of resolved) {
+    // A link typed with a trailing slash is refused, never followed: the
+    // shared helper keeps this identical to the generic builder.
+    if (isSlashedLink(p, links)) {
+      const refusal = await rmLinkRefusal(p, links, { recursive, force })
+      if (refusal !== null) errors.push(refusal)
+      continue
+    }
     // GNU rm reports the operand and keeps removing the rest.
     const [error, entryLines] = await rmOne(
       accessor,

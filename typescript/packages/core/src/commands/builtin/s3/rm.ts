@@ -28,6 +28,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 import { removalLines } from '../utils/verbose.ts'
 import { FlagView } from '../../spec/types.ts'
+import { isSlashedLink, rmLinkRefusal } from '../utils/slash_links.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
 
@@ -104,7 +105,15 @@ async function rmCommand(
   const verboseParts: string[] = []
   const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}
+  const links = opts.ns?.links ?? null
   for (const p of resolved) {
+    // A link typed with a trailing slash is refused, never followed: the
+    // shared helper keeps this identical to the generic builder.
+    if (isSlashedLink(p, links)) {
+      const refusal = await rmLinkRefusal(p, links, { recursive, force })
+      if (refusal !== null) errors.push(refusal)
+      continue
+    }
     // GNU rm reports the operand and keeps removing the rest.
     const [error, entryLines] = await rmOne(
       accessor,

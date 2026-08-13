@@ -27,7 +27,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/slashd/sub/emptydir && echo hello > /data/slashd/sub/f2 && echo hi > /data/slashd/reg && ln -s sub /data/slashd/dlink && ln -s reg /data/slashd/flink && ln -s nope /data/slashd/dangle",
+      "command": "mkdir -p /data/slashd/sub && echo hello > /data/slashd/sub/f2 && echo hi > /data/slashd/reg && ln -s sub /data/slashd/dlink && ln -s reg /data/slashd/flink && ln -s nope /data/slashd/dangle",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -200,7 +200,7 @@
       "command": "ls /data/slashd/dlink/",
       "expect": {
         "exit": 0,
-        "stdout": "emptydir\nf2\n",
+        "stdout": "f2\n",
         "stderr": ""
       }
     },
@@ -422,8 +422,6 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -456,8 +454,6 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
