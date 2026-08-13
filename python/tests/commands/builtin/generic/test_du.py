@@ -3,11 +3,13 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.builtin.generic.du import (DuFlags, _depth, du,
                                                 parse_depth, parse_flags,
-                                                rollup, run_du, to_virtual)
+                                                rollup, run_du, separate_total,
+                                                to_virtual)
 from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.commands.errors import UsageError
 from mirage.ops.types import LinkView, MountView
 from mirage.resource.disk import DiskResource
+from mirage.resource.ram import RAMResource
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -90,6 +92,87 @@ async def test_subdirectories_get_their_own_line():
                    compute_entries=compute_entries,
                    flags=DuFlags())
     assert out.stdout == b"1\t/dir/sub/deep\n3\t/dir/sub\n6\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_excludes_subdirectory_sizes():
+    """GNU -S: parent totals omit children that are directories."""
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(S=True))
+    assert out.stdout == b"1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_summarize_uses_direct_files_only():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True, S=True))
+    assert out.stdout == b"3\t/dir\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_with_all_lists_files():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(a=True, S=True))
+    assert out.stdout == (b"3\t/dir/a.txt\n"
+                          b"2\t/dir/sub/b.txt\n"
+                          b"1\t/dir/sub/deep/c.txt\n"
+                          b"1\t/dir/sub/deep\n"
+                          b"2\t/dir/sub\n"
+                          b"3\t/dir\n")
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_keeps_the_grand_total_recursive():
+    """GNU -Sc: rows are separate, the total is not (coreutils 9.7)."""
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(c=True, S=True))
+    assert out.stdout == (b"1\t/dir/sub/deep\n"
+                          b"2\t/dir/sub\n"
+                          b"3\t/dir\n"
+                          b"6\ttotal\n")
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_summarize_still_totals_recursively():
+    tree = {"/dir/a.txt": 3, "/dir/sub/b.txt": 2, "/dir/sub/deep/c.txt": 1}
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du([_spec("/dir", "dir")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(s=True, c=True, S=True))
+    assert out.stdout == b"3\t/dir\n6\ttotal\n"
+
+
+@pytest.mark.asyncio
+async def test_separate_dirs_keeps_a_file_operand_in_the_total():
+    """GNU scopes -S to directories: a file operand counts itself."""
+    compute_size, compute_entries = _make_backend({"/f.txt": 7})
+    out = await du([_spec("/f.txt", "f.txt")],
+                   compute_size=compute_size,
+                   compute_entries=compute_entries,
+                   flags=DuFlags(c=True, S=True))
+    assert out.stdout == b"7\t/f.txt\n7\ttotal\n"
+
+
+def test_separate_total_sums_direct_children_only():
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    assert separate_total(entries, "/d") == 3
 
 
 @pytest.mark.asyncio
@@ -333,6 +416,59 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
 
 
 @pytest.mark.asyncio
+async def test_namespace_only_directory_is_present_not_missing():
+    """A directory that exists only above a nested mount is readable.
+
+    The parent backend holds nothing at the operand and cannot: the
+    content lives in the descendant's own resource. Both backend channels
+    therefore come back empty, and only the dispatcher-backed probe knows
+    the path is a directory.
+    """
+    compute_size, compute_entries = _make_backend({})
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return FileStat(name="empty", type=FileType.DIRECTORY)
+
+    out = await run_du([_spec("/empty", "empty")],
+                       "/",
+                       lambda targets: _ok(list(targets)),
+                       stat,
+                       compute_size,
+                       compute_entries,
+                       stat_path=stat_path)
+    assert out.stdout == b"0\t/empty\n"
+    assert out.stderr == b""
+    assert out.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_stat_path_answering_none_still_reports_missing():
+    """The probe is evidence of presence, never of absence on its own."""
+    compute_size, compute_entries = _make_backend({})
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def stat_path(virtual: str) -> FileStat | None:
+        return None
+
+    out = await run_du([_spec("/nope", "nope")],
+                       "/",
+                       lambda targets: _ok(list(targets)),
+                       stat,
+                       compute_size,
+                       compute_entries,
+                       stat_path=stat_path)
+    assert out.stdout == b""
+    assert out.stderr == (b"du: cannot access '/nope': "
+                          b"No such file or directory\n")
+    assert out.exit_code == 1
+
+
+@pytest.mark.asyncio
 async def test_truncated_walk_reports_partial_output_and_exits_one():
     """GNU du prints what it accounted for, warns, and exits 1."""
     compute_size, compute_entries = _make_backend({"/dir/a.txt": 2})
@@ -434,6 +570,25 @@ def test_rollup_totals_are_recursive():
     rows = dict(rollup(entries, "/d", a=False, max_depth=None))
     assert rows["/d/sub"] == 3
     assert rows["/d/sub/deep"] == 1
+
+
+def test_rollup_separate_dirs_counts_only_direct_files():
+    """GNU -S: a directory omits subdirectory sizes (pinned coreutils 9.7)."""
+    entries = [("/d/a.txt", 3), ("/d/sub/b.txt", 2), ("/d/sub/deep/c.txt", 1)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 1
+    assert rows["/d/sub"] == 2
+    assert "/d/a.txt" not in rows
+
+
+def test_rollup_separate_dirs_keeps_empty_ancestor_dirs():
+    """A directory with only subdirs still prints, at size 0."""
+    entries = [("/d/sub/deep/c.txt", 4)]
+    rows = dict(
+        rollup(entries, "/d", a=False, max_depth=None, separate_dirs=True))
+    assert rows["/d/sub/deep"] == 4
+    assert rows["/d/sub"] == 0
 
 
 def test_rollup_a_keeps_the_sum_over_a_directory_marker():
@@ -582,6 +737,24 @@ async def test_fully_shadowed_operand_reports_zero():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("flag", ["-S", "--separate-dirs"])
+async def test_du_separate_dirs_off_the_command_line(tmp_path, flag):
+    res = DiskResource(root=str(tmp_path))
+    ws = Workspace({"/d": res}, mode=MountMode.WRITE)
+    await ws.execute("mkdir -p /d/sub/deep")
+    await ws.execute("printf abc > /d/a.txt")
+    await ws.execute("printf de > /d/sub/b.txt")
+    await ws.execute("printf f > /d/sub/deep/c.txt")
+    result = await ws.execute(f"du {flag} -c /d")
+    assert result.exit_code == 0
+    assert await result.stdout_str() == ("1\t/d/sub/deep\n"
+                                         "2\t/d/sub\n"
+                                         "3\t/d\n"
+                                         "6\ttotal\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_du_missing_operand_reports_and_exits_1(tmp_path):
     # GNU: "du: cannot access 'X': No such file or directory", exit 1. Walking
     # a missing operand used to report it as size 0 with exit 0.
@@ -604,4 +777,80 @@ async def test_du_partial_operands_keeps_present_output(tmp_path):
     assert result.exit_code == 1
     assert "/d/sub" in await result.stdout_str()
     assert "__nf_missing__" in await result.stderr_str()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_the_implied_parent_of_a_nested_mount():
+    # GNU coreutils 9.7 on debian:stable-slim, tmpfs mounted at /empty/hole:
+    # `du --apparent-size -B1 /empty` prints both rows and exits 0. The
+    # absence line is reserved for a path that is really not there.
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    result = await ws.execute("du /empty", session_id="s")
+    assert await result.stdout_str() == "0\t/empty/hole\n0\t/empty\n"
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_the_implied_parent_of_a_nested_mount_under_s():
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    result = await ws.execute("du -s /empty", session_id="s")
+    assert await result.stdout_str() == "0\t/empty\n"
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_on_a_directory_implied_only_by_a_link_below_it():
+    """The same false absence, with no descendant mount in sight.
+
+    ``namespace_names`` synthesizes a directory for a link's ancestors
+    too, so the mount table alone is not enough evidence; the probe that
+    answers here is the one that asks the namespace as a whole.
+    """
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    await ws.execute("mkdir -p /real", session_id="s")
+    await ws.execute("echo hi > /real/f.txt", session_id="s")
+    await ws.execute("ln -s /real/f.txt /ghost/deep/lnk", session_id="s")
+    result = await ws.execute("du /ghost", session_id="s")
+    assert await result.stderr_str() == ""
+    assert result.exit_code == 0
+    assert "/ghost" in await result.stdout_str()
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_still_reports_absence_when_the_descendant_is_ungranted():
+    """A session that may not see the mount must not learn it is there.
+
+    ``registry.descendant_mounts`` is not session-filtered, so proving
+    presence from the mount table alone would answer ``0 /empty`` here and
+    confirm a walled-off mount's parent. The dispatcher-backed probe is
+    filtered, so absence stays the answer.
+    """
+    ws = Workspace({
+        "/": RAMResource(),
+        "/empty/hole": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("scoped", {"/": "rw"})
+    result = await ws.execute("du /empty", session_id="scoped")
+    assert await result.stdout_str() == ""
+    assert (await result.stderr_str()) == (
+        "du: cannot access '/empty': No such file or directory\n")
+    assert result.exit_code == 1
     await ws.close()

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import spec_flag_names
 from mirage.io import IOResult
 from mirage.ops.types import NamespaceView
 from mirage.resource.ram import RAMResource
@@ -285,6 +287,37 @@ def test_du_c_fanout_prints_one_total_across_the_mounts():
     assert _stdout(io) == "7\t/base/inner\n17\t/base\n17\ttotal\n"
 
 
+def test_du_separate_dirs_fanout_scopes_only_the_rows():
+    """``-S`` reaches the merge, and the ``-c`` total stays recursive.
+
+    Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
+    ``du -bS base`` prints ``7 base/inner`` then ``10 base`` (the parent
+    counts only the file sitting in it), and ``du -bSc base`` still ends
+    ``17 total``.
+    """
+    ws = _shadowed_workspace()
+    assert _stdout(asyncio.run(
+        ws.execute("du -S /base"))) == "7\t/base/inner\n10\t/base\n"
+    assert _stdout(asyncio.run(ws.execute(
+        "du -Sc /base"))) == "7\t/base/inner\n10\t/base\n17\ttotal\n"
+
+
+def test_du_separate_dirs_summarize_fanout():
+    ws = _shadowed_workspace()
+    assert _stdout(asyncio.run(ws.execute("du -Ss /base"))) == "10\t/base\n"
+    assert _stdout(asyncio.run(
+        ws.execute("du -Ssc /base"))) == "10\t/base\n17\ttotal\n"
+
+
+def test_du_separate_dirs_all_fanout():
+    ws = _shadowed_workspace()
+    assert _stdout(asyncio.run(
+        ws.execute("du -Sa /base"))) == ("7\t/base/inner/real.txt\n"
+                                         "7\t/base/inner\n"
+                                         "10\t/base/top.txt\n"
+                                         "10\t/base\n")
+
+
 def test_du_sc_fanout_prints_one_total():
     ws = _shadowed_workspace()
     io = asyncio.run(ws.execute("du -sc /base"))
@@ -391,6 +424,36 @@ def test_operands_spanning_mounts_still_fan_out_inside_each_operand():
     io = asyncio.run(ws.execute("du -c /base /other"))
     assert _stdout(io) == ("9\t/base/inner\n"
                            "19\t/base\n"
+                           "10\t/other\n"
+                           "29\ttotal\n")
+
+
+def test_du_fan_out_accounts_for_every_du_flag():
+    """The du merge re-derives the whole tree centrally, so the sub-runs
+    are asked with the presentation flags stripped and each one is then
+    applied once, here. A flag nobody classified is neither stripped nor
+    re-applied, so it silently does nothing across a nested mount, which
+    is exactly how -S first shipped. Adding an option to du's spec fails
+    this until it is sorted into one of the two lists."""
+    # Applied centrally by _DuFanFlags, and neutralized in the sub-runs.
+    central = {"a", "s", "c", "h", "max_depth", "separate_dirs"}
+    # Chooses whether a run counts the symlinks on its own mount, which
+    # is a per-run question; the merge only ever sees the rows.
+    per_run = {"L", "P"}
+    assert spec_flag_names(SPECS["du"]) == central | per_run
+
+
+def test_operands_spanning_mounts_separate_dirs():
+    """-S has to survive both fan-outs at once: the per-operand one that
+    splits the operands across mounts, and the traversal one that folds
+    `/base/inner` into `/base`. GNU (coreutils 9.7, tmpfs at the nested
+    spot) scopes -S to each printed row and keeps the grand total
+    recursive, so `/base` reports only `top.txt` while the total still
+    covers every byte."""
+    ws = _spanning_workspace()
+    io = asyncio.run(ws.execute("du -Sc /base /other"))
+    assert _stdout(io) == ("9\t/base/inner\n"
+                           "10\t/base\n"
                            "10\t/other\n"
                            "29\ttotal\n")
 

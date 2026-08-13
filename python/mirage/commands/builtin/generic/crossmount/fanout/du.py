@@ -15,7 +15,7 @@
 from collections.abc import Sequence
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
-from mirage.commands.builtin.generic.du import rollup
+from mirage.commands.builtin.generic.du import rollup, separate_total
 from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.utils.path import respell_raw
 
@@ -75,6 +75,7 @@ def merge_du_blocks(
         c: bool,
         human: bool,
         max_depth: int | None,
+        separate_dirs: bool = False,
         mount_roots: Sequence[str] = (),
 ) -> bytes:
     """Fold per-mount du blocks into one tree, GNU's way.
@@ -101,6 +102,9 @@ def merge_du_blocks(
         c (bool): -c, append the grand total row.
         human (bool): format the sizes like ``du -h`` does.
         max_depth (int | None): --max-depth, prune what is printed.
+        separate_dirs (bool): -S, a directory counts only the files that
+            sit directly in it. The per-mount runs are asked without it,
+            because the merge needs their leaves and applies it here.
         mount_roots (Sequence[str]): the descendant mount roots, which
             are directories whether or not they hold anything. An empty
             mount contributes only its own row, which the leaf inference
@@ -108,15 +112,24 @@ def merge_du_blocks(
     """
     leaves = _leaves(_parse_rows(blocks), mount_roots)
     total = sum(size for _, size in leaves)
+    # -S scopes to the operand's own row; GNU keeps the -c grand total
+    # recursive (coreutils 9.7 over a real mount: `du -bSc base` prints
+    # `3 base` then `10 total`).
+    own = separate_total(leaves, root) if separate_dirs else total
     lines: list[str] = []
     if not s:
-        rows = rollup(leaves, root, a=a, max_depth=max_depth, dirs=mount_roots)
+        rows = rollup(leaves,
+                      root,
+                      a=a,
+                      max_depth=max_depth,
+                      dirs=mount_roots,
+                      separate_dirs=separate_dirs)
         shown = respell_raw([node for node, _ in rows], root, label)
         lines = [
             _format_size(size, human) + "\t" + name
             for name, (_, size) in zip(shown, rows)
         ]
-    lines.append(_format_size(total, human) + "\t" + label)
+    lines.append(_format_size(own, human) + "\t" + label)
     if c:
         lines.append(_format_size(total, human) + "\ttotal")
     return ("\n".join(lines) + "\n").encode()

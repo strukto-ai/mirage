@@ -1,0 +1,70 @@
+---
+title: DeepSeek Harness
+description: Register Mirage as the filesystem and shell of DeepSeek Harness (dsh), so its file tools and bash tool run on mounted data.
+icon: /images/deepseek-logo.svg
+---
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis where the filesystem and the shell are swappable capability seams. `@struktoai/mirage-dsh` provides both seams over one Mirage workspace: `ctx.fs` for dsh's read/write/edit tools and `ctx.shell` for its bash tool. Anything Mirage mounts (S3, Gmail, Slack, Notion, Postgres) becomes the world those tools operate in.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell
+```
+
+## Compose
+
+Three Cordis plugins. `MirageService` owns the workspace; the two providers inject it. Mix any resources, such as Slack and Redis beside a scratch RAM mount:
+
+```ts
+import { Context } from '@deepseek-ai/cordis'
+import { buildRuntime, MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
+import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
+
+const ws = new Workspace(
+  {
+    '/tmp': [new RAMResource(), MountMode.EXEC],
+    '/redis': [new RedisResource({ url: redisUrl }), MountMode.WRITE],
+    '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
+  },
+  { mode: MountMode.EXEC, runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
+)
+
+const ctx = new Context()
+await ctx.plugin(MirageService, { workspace: ws }).await()
+await ctx.plugin(MirageFileSystem, {}).await()
+await ctx.plugin(MirageShellExecutor, {}).await()
+```
+
+Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults and `run` executes it, the same two calls dsh's own tools make):
+
+```ts
+const shell = ctx.shell
+const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis /tmp' }))
+```
+
+`MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads.
+
+## Run Python with monty
+
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
+
+```ts
+const script = await shell.run(
+  shell.resolve({
+    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /redis/report.txt',
+  }),
+)
+```
+
+[`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+
+A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
+
+| Harness | Startup | Est. concurrent sessions (2 vCPU / 8 GB) |
+| --- | --- | --- |
+| dsh | ~0.5 ms | ~200 |
+| [Codex](/typescript/agents/codex) | ~20 ms (+ ~150 ms sandbox startup) | ~30 |
+| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | ~40 ms (+ ~150 ms sandbox startup) | ~15 |
+
+Concurrency is estimated as about 6 GB of free memory divided by a session's measured resident footprint (a dsh session with a live Python engine is about 27 MB, idle workspaces 240 KB, a Codex session about 200 MB, a Claude Code CLI session about 430 MB); startup is the measured time to bring one session up, process boot for the CLIs and workspace construction for dsh. The dsh numbers already include isolation, since monty is the sandbox and each engine runs on its own crash-isolated worker process; the CLI sessions run on the host, so isolating them means provisioning a container or remote sandbox per session, measured at about 150 ms even for a warm local container and more for a cold or remote one.

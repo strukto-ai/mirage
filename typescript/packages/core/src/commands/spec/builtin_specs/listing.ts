@@ -37,6 +37,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-c' }),
       new Option({ short: '-L' }),
       new Option({ short: '-P' }),
+      new Option({ short: '-S', long: '--separate-dirs' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

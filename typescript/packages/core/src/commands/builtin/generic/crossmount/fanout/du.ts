@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanSize } from '../../../utils/formatting.ts'
-import { rollup } from '../../du.ts'
+import { rollup, separateTotal } from '../../du.ts'
 import { respellRaw } from '../../../../../utils/path.ts'
 import type { OperandRun } from '../types.ts'
 
@@ -121,18 +121,27 @@ export function mergeDuBlocks(
     total: boolean
     human: boolean
     maxDepth: number | null
+    // -S, a directory counts only the files that sit directly in it. The
+    // per-mount runs are asked without it, because the merge needs their
+    // leaves and applies it here.
+    separateDirs?: boolean
     mountRoots?: readonly string[]
   },
 ): Uint8Array {
   const mountRoots = opts.mountRoots ?? []
   const leaves = leavesOf(parseRows(blocks), mountRoots)
   const sum = leaves.reduce((acc, [, size]) => acc + size, 0)
+  // -S scopes to the operand's own row; GNU keeps the -c grand total
+  // recursive (coreutils 9.7 over a real mount: `du -bSc base` prints
+  // `3 base` then `10 total`).
+  const own = opts.separateDirs === true ? separateTotal(leaves, root) : sum
   const lines: string[] = []
   if (!opts.summarize) {
     const rows = rollup(leaves, root, {
       all: opts.all,
       maxDepth: opts.maxDepth,
       dirs: mountRoots,
+      separateDirs: opts.separateDirs === true,
     })
     const shown = respellRaw(
       rows.map(([node]) => node),
@@ -143,7 +152,7 @@ export function mergeDuBlocks(
       lines.push(`${formatSize(size, opts.human)}\t${shown[i] ?? ''}`)
     })
   }
-  lines.push(`${formatSize(sum, opts.human)}\t${label}`)
+  lines.push(`${formatSize(own, opts.human)}\t${label}`)
   if (opts.total) lines.push(`${formatSize(sum, opts.human)}\ttotal`)
   return ENC.encode(lines.join('\n') + '\n')
 }

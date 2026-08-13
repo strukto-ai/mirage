@@ -12,7 +12,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.context import hidden_paths_active, path_allowed
 from mirage.io.types import IOResult
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import LinkView, MountView, StatPath
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -39,6 +39,7 @@ class DuFlags:
         a (bool): -a, list files as well as directories.
         h (bool): -h, human-readable sizes.
         c (bool): -c, append a grand total.
+        S (bool): -S/--separate-dirs, directories exclude subdirectory sizes.
         max_depth (int | None): --max-depth/-d, deepest level to print.
         warning (str | None): a non-fatal diagnostic GNU prints before the
             output, without failing the command.
@@ -48,6 +49,7 @@ class DuFlags:
     a: bool = False
     h: bool = False
     c: bool = False
+    S: bool = False
     max_depth: int | None = None
     warning: str | None = None
 
@@ -94,8 +96,13 @@ def parse_depth(text: str) -> int | None:
     return None
 
 
-def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
-                max_depth: str | None) -> DuFlags:
+def parse_flags(*,
+                s: bool,
+                a: bool,
+                h: bool,
+                c: bool,
+                max_depth: str | None,
+                separate_dirs: bool = False) -> DuFlags:
     """Validate a ``du`` command line the way GNU does, before any I/O.
 
     GNU parses ``--max-depth`` as each option is read, so a bad depth is
@@ -108,6 +115,7 @@ def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
         h (bool): -h.
         c (bool): -c.
         max_depth (str | None): raw --max-depth/-d text, unparsed.
+        separate_dirs (bool): -S/--separate-dirs.
 
     Raises:
         UsageError: on a bad depth or a conflicting combination.
@@ -131,7 +139,13 @@ def parse_flags(*, s: bool, a: bool, h: bool, c: bool,
                 f"--max-depth={depth}\n{USAGE_HINT}", 1)
         warning = ("du: warning: summarizing is the same as using "
                    "--max-depth=0")
-    return DuFlags(s=s, a=a, h=h, c=c, max_depth=depth, warning=warning)
+    return DuFlags(s=s,
+                   a=a,
+                   h=h,
+                   c=c,
+                   S=separate_dirs,
+                   max_depth=depth,
+                   warning=warning)
 
 
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
@@ -155,6 +169,7 @@ async def du_operands(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
     links: LinkView | None = None,
+    stat_path: StatPath | None = None,
 ) -> tuple[list[PathSpec], list[str]]:
     """Split the operands into the ones du can read and the ones it cannot.
 
@@ -162,11 +177,19 @@ async def du_operands(
     and exits 1. With no operand at all it measures the working
     directory.
 
-    A failed stat is not proof of absence. Several backends never
-    materialise a directory entry for the mount root (redis is one), so
-    ``stat`` raises there even though the subtree is full. ``has_content``
-    is the second opinion: only an operand that neither stats nor holds
-    anything is reported missing.
+    A failed stat is not proof of absence, and du runs bound to one
+    backend, so its own stat cannot see two things that make a path a
+    real directory: a mount nested below it and a symlink below it are
+    both namespace state, held in another resource or in no resource at
+    all. ``stat_path`` is the channel that knows, because it resolves
+    through the dispatcher rather than one accessor, and it is the same
+    probe ``find`` classifies its start point with. Session filtering
+    rides along with it: a mount the session may not see contributes no
+    directory here, so absence stays the answer for it.
+
+    ``has_content`` is the last resort behind that, for a backend that
+    never materialises a directory entry for its own mount root (redis is
+    one) while the subtree below it is full.
 
     Args:
         paths (list[PathSpec]): the operands as parsed, possibly empty.
@@ -178,6 +201,8 @@ async def du_operands(
         links (LinkView | None): the namespace's symlink facts. A link
             has no backend inode, so it fails stat while still being a
             perfectly readable operand.
+        stat_path (StatPath | None): dispatcher-backed stat, None when du
+            runs outside a workspace and there is no namespace to ask.
 
     Returns:
         tuple[list[PathSpec], list[str]]: readable operands, then the
@@ -198,7 +223,11 @@ async def du_operands(
         try:
             await stat(path)
         except (FileNotFoundError, ValueError):
-            if has_content is None or not await has_content(path):
+            probed: FileStat | None = None
+            if stat_path is not None:
+                probed = await stat_path(path.virtual)
+            if probed is None and (has_content is None
+                                   or not await has_content(path)):
                 missing.append(path.raw_path)
                 continue
         present.append(path)
@@ -274,13 +303,30 @@ def to_virtual(entries: Sequence[tuple[str, int]],
             for entry, size in entries]
 
 
+def separate_total(entries: Sequence[tuple[str, int]], root: str) -> int:
+    """Bytes of the leaves sitting directly in the operand (GNU ``-S``).
+
+    This is the operand's own row under ``-S``, not what it contributes
+    to the ``-c`` grand total: GNU keeps that recursive (coreutils 9.7,
+    ``du -bSc dir`` prints ``3 dir`` then ``6 total``).
+
+    Args:
+        entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
+        root (str): the operand's absolute virtual path.
+    """
+    root_key = _norm(root)
+    return sum(size for leaf, size in entries
+               if _parent(_norm(leaf)) == root_key)
+
+
 def rollup(
-        entries: Sequence[tuple[str, int]],
-        root: str,
-        *,
-        a: bool,
-        max_depth: int | None,
-        dirs: Sequence[str] = (),
+    entries: Sequence[tuple[str, int]],
+    root: str,
+    *,
+    a: bool,
+    max_depth: int | None,
+    dirs: Sequence[str] = (),
+    separate_dirs: bool = False,
 ) -> list[tuple[str, int]]:
     """Derive GNU's per-directory lines from a flat list of leaf files.
 
@@ -292,8 +338,11 @@ def rollup(
     readdir order, which is unspecified, so sorting is a deterministic
     choice within the same shape.
 
-    The operand's own line is not included; the caller renders it with
-    the operand as typed.
+    With ``-S``/``--separate-dirs`` a directory only counts files that
+    sit directly in it: a leaf still forces every ancestor directory to
+    appear (possibly at size 0), but only the immediate parent gets its
+    bytes. The operand's own line is not included; the caller renders it
+    with the operand as typed.
 
     Args:
         entries (Sequence[tuple[str, int]]): leaf (virtual path, size).
@@ -304,6 +353,7 @@ def rollup(
             leaf points at them. mirage cannot otherwise see an empty
             directory, so this is the one case it can: an empty mount
             still gets GNU's ``0`` row.
+        separate_dirs (bool): -S, exclude subdirectory sizes.
 
     Returns:
         list[tuple[str, int]]: (virtual path, size) in GNU's print order.
@@ -318,8 +368,16 @@ def rollup(
             continue
         files[node] = size
         parent = _parent(node)
+        immediate = True
         while parent != root_key and parent.startswith(prefix):
-            sizes[parent] = sizes.get(parent, 0) + size
+            if separate_dirs and not immediate:
+                # -S: only the directory a file sits in counts its
+                # bytes. The ancestors still print, at 0 when they hold
+                # nothing but directories.
+                sizes.setdefault(parent, 0)
+            else:
+                sizes[parent] = sizes.get(parent, 0) + size
+            immediate = False
             parent = _parent(parent)
 
     # setdefault, never assignment: a hinted directory that does hold
@@ -426,7 +484,7 @@ async def _du_one(
         leaves = drop_shadowed(leaves, roots)
     link_total = sum(size for _, size in leaves)
 
-    if flags.s and not roots and not hidden_paths_active():
+    if flags.s and not flags.S and not roots and not hidden_paths_active():
         # The one-total fast path trusts the backend's own sum, which a
         # session hiding paths cannot: hidden leaves would be counted
         # into a total their names never justify, so that session takes
@@ -454,20 +512,30 @@ async def _du_one(
         # honest number is the sum of what survived.
         virtual = drop_shadowed(virtual, roots)
         total = sum(size for _, size in virtual)
-    if flags.s:
-        return [_line(total, flags.h, label)], total
     root_key = _norm(path.virtual)
     # A file operand walks to itself. GNU prints it once, with or
-    # without -a, never as a leaf line plus a roll-up line.
+    # without -a, never as a leaf line plus a roll-up line. GNU scopes
+    # -S to directories, so a file operand keeps its own size in both
+    # its row and the grand total.
     if len(virtual) == 1 and _norm(virtual[0][0]) == root_key:
         return [_line(virtual[0][1], flags.h, label)], total
+    # -S changes what the operand's own row counts, not what the operand
+    # contributes to -c: GNU's grand total stays recursive (coreutils
+    # 9.7, `du -bSc dir` prints `3 dir` then `6 total`).
+    own = separate_total(virtual, path.virtual) if flags.S else total
+    if flags.s:
+        return [_line(own, flags.h, label)], total
 
-    rows = rollup(virtual, path.virtual, a=flags.a, max_depth=flags.max_depth)
+    rows = rollup(virtual,
+                  path.virtual,
+                  a=flags.a,
+                  max_depth=flags.max_depth,
+                  separate_dirs=flags.S)
     shown = respell_raw([node for node, _ in rows], path.virtual, label)
     lines = [
         _line(size, flags.h, name) for name, (_, size) in zip(shown, rows)
     ]
-    lines.append(_line(total, flags.h, label))
+    lines.append(_line(own, flags.h, label))
     return lines, total
 
 
@@ -484,9 +552,11 @@ async def run_du(
     h: bool = False,
     c: bool = False,
     max_depth: str | None = None,
+    separate_dirs: bool = False,
     truncated: Callable[[], bool] | None = None,
     links: LinkView | None = None,
     mounts: MountView | None = None,
+    stat_path: StatPath | None = None,
 ) -> DuOutput:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -507,23 +577,32 @@ async def run_du(
         h (bool): -h.
         c (bool): -c.
         max_depth (str | None): raw --max-depth text.
+        separate_dirs (bool): -S/--separate-dirs.
         truncated (Callable[[], bool] | None): whether a walk was cut off.
         links (LinkView | None): the namespace's symlink facts.
         mounts (MountView | None): where the mount boundaries are, so
             keys shadowed by a nested mount are excluded from every row
             and total.
+        stat_path (StatPath | None): dispatcher-backed stat, which is what
+            answers for a directory the bound backend cannot see.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
     """
-    flags = parse_flags(s=s, a=a, h=h, c=c, max_depth=max_depth)
+    flags = parse_flags(s=s,
+                        a=a,
+                        h=h,
+                        c=c,
+                        max_depth=max_depth,
+                        separate_dirs=separate_dirs)
     present, missing = await du_operands(paths,
                                          cwd,
                                          resolve_glob,
                                          stat,
                                          partial(du_has_content,
                                                  compute_entries),
-                                         links=links)
+                                         links=links,
+                                         stat_path=stat_path)
     return await du(present,
                     compute_size=compute_size,
                     compute_entries=compute_entries,
@@ -632,9 +711,11 @@ async def du_generic(
         h=fl.as_bool("h"),
         c=fl.as_bool("c"),
         max_depth=fl.as_str("max_depth"),
+        separate_dirs=fl.as_bool("separate_dirs"),
         truncated=truncated,
         links=(None if fl.as_bool("L") else
                opts.ns.links if opts.ns is not None else None),
         mounts=opts.ns.mounts if opts.ns is not None else None,
+        stat_path=opts.stat_path,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

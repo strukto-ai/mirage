@@ -22,13 +22,14 @@ import {
   parseDuFlags,
   rollup,
   runDu,
+  separateTotal,
   toVirtual,
 } from './du.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { UsageError } from '../../errors.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -41,18 +42,19 @@ function spec(virtual: string, resourcePath: string, rawPath?: string): PathSpec
   })
 }
 
-function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
+function opts(flags: Record<string, string | boolean> = {}, statPath?: StatPath): CommandOpts {
   return {
     stdin: null,
     flags,
     filetypeFns: null,
     cwd: '/',
     resource: {} as never,
+    statPath,
   } as unknown as CommandOpts
 }
 
 function flags(over: Partial<DuFlags> = {}): DuFlags {
-  return { s: false, a: false, h: false, c: false, maxDepth: null, ...over }
+  return { s: false, a: false, h: false, c: false, S: false, maxDepth: null, ...over }
 }
 
 /** Build (computeSize, computeEntries) over a mount-relative in-memory tree. */
@@ -100,6 +102,74 @@ describe('duGeneric', () => {
     })
     const out = await duGeneric([spec('/dir', 'dir')], flags(), size, entries)
     expect(DEC.decode(out.stdout)).toBe('1\t/dir/sub/deep\n3\t/dir/sub\n6\t/dir\n')
+  })
+
+  it('excludes subdirectory sizes under -S', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n')
+  })
+
+  it('summarises only direct files under -Ss', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ s: true, S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('3\t/dir\n')
+  })
+
+  it('lists files under -Sa with separate directory totals', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ a: true, S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe(
+      '3\t/dir/a.txt\n2\t/dir/sub/b.txt\n1\t/dir/sub/deep/c.txt\n1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n',
+    )
+  })
+
+  it('keeps the -c grand total recursive under -S', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric([spec('/dir', 'dir')], flags({ c: true, S: true }), size, entries)
+    expect(DEC.decode(out.stdout)).toBe('1\t/dir/sub/deep\n2\t/dir/sub\n3\t/dir\n6\ttotal\n')
+  })
+
+  it('keeps the -c grand total recursive under -Ss', async () => {
+    const [size, entries] = backend({
+      '/dir/a.txt': 3,
+      '/dir/sub/b.txt': 2,
+      '/dir/sub/deep/c.txt': 1,
+    })
+    const out = await duGeneric(
+      [spec('/dir', 'dir')],
+      flags({ s: true, c: true, S: true }),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('3\t/dir\n6\ttotal\n')
+  })
+
+  it('keeps a file operand in the total under -S', async () => {
+    const [size, entries] = backend({ '/f.txt': 7 })
+    const out = await duGeneric(
+      [spec('/f.txt', 'f.txt')],
+      flags({ c: true, S: true }),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('7\t/f.txt\n7\ttotal\n')
   })
 
   it('lists files then directories post-order under -a', async () => {
@@ -249,6 +319,39 @@ describe('duGeneric', () => {
     expect(DEC.decode(out.stderr)).toBe(
       "du: cannot access '/data/nosuch': No such file or directory\n",
     )
+    expect(out.exitCode).toBe(1)
+  })
+
+  it('treats a namespace-only directory as present, not missing', async () => {
+    // The parent backend holds nothing at the operand and cannot: the
+    // content lives in the descendant mount's own resource. Only the
+    // dispatcher-backed probe knows the path is a directory.
+    const [size, entries] = backend({})
+    const out = await runDu(
+      [spec('/empty', 'empty')],
+      opts({}, () => Promise.resolve(new FileStat({ name: 'empty', type: FileType.DIRECTORY }))),
+      (targets) => Promise.resolve(targets),
+      (p) => Promise.reject(enoent(p.virtual)),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('0\t/empty\n')
+    expect(DEC.decode(out.stderr)).toBe('')
+    expect(out.exitCode).toBe(0)
+  })
+
+  it('still reports missing when the probe answers null', async () => {
+    const [size, entries] = backend({})
+    const out = await runDu(
+      [spec('/nope', 'nope')],
+      opts({}, () => Promise.resolve(null)),
+      (targets) => Promise.resolve(targets),
+      (p) => Promise.reject(enoent(p.virtual)),
+      size,
+      entries,
+    )
+    expect(DEC.decode(out.stdout)).toBe('')
+    expect(DEC.decode(out.stderr)).toBe("du: cannot access '/nope': No such file or directory\n")
     expect(out.exitCode).toBe(1)
   })
 
@@ -500,6 +603,34 @@ describe('rollup', () => {
     const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null }))
     expect(rows.get('/d/sub')).toBe(3)
     expect(rows.get('/d/sub/deep')).toBe(1)
+  })
+
+  it('separateDirs counts only direct files', () => {
+    const entries: [string, number][] = [
+      ['/d/a.txt', 3],
+      ['/d/sub/b.txt', 2],
+      ['/d/sub/deep/c.txt', 1],
+    ]
+    const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null, separateDirs: true }))
+    expect(rows.get('/d/sub/deep')).toBe(1)
+    expect(rows.get('/d/sub')).toBe(2)
+    expect(rows.has('/d/a.txt')).toBe(false)
+  })
+
+  it('separateDirs keeps empty ancestor directories at size 0', () => {
+    const entries: [string, number][] = [['/d/sub/deep/c.txt', 4]]
+    const rows = new Map(rollup(entries, '/d', { all: false, maxDepth: null, separateDirs: true }))
+    expect(rows.get('/d/sub/deep')).toBe(4)
+    expect(rows.get('/d/sub')).toBe(0)
+  })
+
+  it('separateTotal sums only direct children', () => {
+    const entries: [string, number][] = [
+      ['/d/a.txt', 3],
+      ['/d/sub/b.txt', 2],
+      ['/d/sub/deep/c.txt', 1],
+    ]
+    expect(separateTotal(entries, '/d')).toBe(3)
   })
 
   it('keeps the sum over a directory marker under -a', () => {

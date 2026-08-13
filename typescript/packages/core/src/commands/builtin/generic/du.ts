@@ -24,7 +24,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
-import type { LinkView, MountView } from '../../../ops/types.ts'
+import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 export type DuEntries = [entries: [string, number][], total: number]
@@ -65,6 +65,8 @@ export interface DuFlags {
   h: boolean
   /** -c, append a grand total. */
   c: boolean
+  /** -S/--separate-dirs, directories exclude subdirectory sizes. */
+  S: boolean
   /** --max-depth/-d, deepest level to print. */
   maxDepth: number | null
   /** A non-fatal diagnostic GNU prints before the output. */
@@ -124,6 +126,7 @@ export function parseDuFlags(opts: CommandOpts): DuFlags {
     a,
     h: fl.asBool('h'),
     c: fl.asBool('c'),
+    S: fl.asBool('separate_dirs'),
     maxDepth,
     ...(warning === undefined ? {} : { warning }),
   }
@@ -166,10 +169,18 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
  * GNU names every operand it fails to stat, keeps going with the rest, and
  * exits 1. With no operand at all it measures the working directory.
  *
- * A failed stat is not proof of absence. Several backends never materialise a
- * directory entry for the mount root (redis is one), so `stat` throws there
- * even though the subtree is full. `hasContent` is the second opinion: only an
- * operand that neither stats nor holds anything is reported missing.
+ * A failed stat is not proof of absence, and du runs bound to one backend, so
+ * its own stat cannot see two things that make a path a real directory: a
+ * mount nested below it and a symlink below it are both namespace state, held
+ * in another resource or in no resource at all. `statPath` is the channel that
+ * knows, because it resolves through the dispatcher rather than one accessor,
+ * and it is the same probe `find` classifies its start point with. Session
+ * filtering rides along with it: a mount the session may not see contributes
+ * no directory here, so absence stays the answer for it.
+ *
+ * `hasContent` is the last resort behind that, for a backend that never
+ * materialises a directory entry for its own mount root (redis is one) while
+ * the subtree below it is full.
  */
 async function duOperands(
   paths: PathSpec[],
@@ -179,6 +190,7 @@ async function duOperands(
   hasContent?: (p: PathSpec) => Promise<boolean>,
   mountPrefix?: string,
   links: LinkView | null = null,
+  statPath: StatPath | null = null,
 ): Promise<{ present: PathSpec[]; missing: string[] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
   const resolved = await resolveGlob(targets)
@@ -203,6 +215,10 @@ async function duOperands(
     } catch (err) {
       if (!isMissingPath(err)) throw err
       stattable = false
+    }
+    if (!stattable && statPath !== null && (await statPath(path.virtual)) !== null) {
+      present.push(path)
+      continue
     }
     if (!stattable && !(hasContent !== undefined && (await hasContent(path)))) {
       missing.push(path.rawPath)
@@ -244,6 +260,18 @@ export function toVirtual(entries: [string, number][], path: PathSpec): [string,
 }
 
 /**
+ * Sum of leaves whose parent is the operand (GNU `-S` total).
+ */
+export function separateTotal(entries: [string, number][], root: string): number {
+  const rootKey = norm(root)
+  let total = 0
+  for (const [leaf, size] of entries) {
+    if (parentOf(norm(leaf)) === rootKey) total += size
+  }
+  return total
+}
+
+/**
  * Derive GNU's per-directory lines from a flat list of leaf files.
  *
  * Backends report only files, but GNU `du` prints a line per directory
@@ -253,6 +281,9 @@ export function toVirtual(entries: [string, number][], path: PathSpec): [string,
  * siblings sorted by name. GNU walks in readdir order, which is unspecified,
  * so sorting is a deterministic choice within the same shape.
  *
+ * With `-S`/`--separate-dirs` a directory only counts files that sit
+ * directly in it: a leaf still forces every ancestor directory to appear
+ * (possibly at size 0), but only the immediate parent gets its bytes.
  * The operand's own line is not included; the caller renders it with the
  * operand as typed.
  */
@@ -262,10 +293,16 @@ export function rollup(
   // `dirs`: paths that are directories even though no leaf points at
   // them. mirage cannot otherwise see an empty directory, so this is the
   // one case it can: an empty mount still gets GNU's `0` row.
-  opts: { all: boolean; maxDepth: number | null; dirs?: readonly string[] },
+  opts: {
+    all: boolean
+    maxDepth: number | null
+    dirs?: readonly string[]
+    separateDirs?: boolean
+  },
 ): [string, number][] {
   const rootKey = norm(root)
   const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
+  const separateDirs = opts.separateDirs === true
   const sizes = new Map<string, number>()
   const files = new Map<string, number>()
   for (const [leaf, size] of entries) {
@@ -273,8 +310,17 @@ export function rollup(
     if (node === rootKey || !node.startsWith(prefix)) continue
     files.set(node, size)
     let parent = parentOf(node)
+    let immediate = true
     while (parent !== rootKey && parent.startsWith(prefix)) {
-      sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+      if (separateDirs && !immediate) {
+        // -S: only the directory a file sits in counts its bytes. The
+        // ancestors still print, at 0 when they hold nothing but
+        // directories.
+        if (!sizes.has(parent)) sizes.set(parent, 0)
+      } else {
+        sizes.set(parent, (sizes.get(parent) ?? 0) + size)
+      }
+      immediate = false
       parent = parentOf(parent)
     }
   }
@@ -379,7 +425,7 @@ async function duOne(
   if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (flags.s && roots.length === 0 && !hiddenPathsActive()) {
+  if (flags.s && !flags.S && roots.length === 0 && !hiddenPathsActive()) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
@@ -411,25 +457,34 @@ async function duOne(
     entries = dropShadowed(entries, roots)
     total = entries.reduce((acc, [, size]) => acc + size, 0)
   }
-  if (flags.s) {
-    return [[`${fmt(total)}\t${label}`], total]
-  }
   const rootKey = norm(path.virtual)
   // A file operand walks to itself. GNU prints it once, with or without -a,
-  // never as a leaf line plus a roll-up line.
+  // never as a leaf line plus a roll-up line. GNU scopes -S to directories, so
+  // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
     return [[`${fmt(first[1])}\t${label}`], total]
   }
+  // -S changes what the operand's own row counts, not what the operand
+  // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
+  // `du -bSc dir` prints `3 dir` then `6 total`).
+  const own = flags.S ? separateTotal(entries, path.virtual) : total
+  if (flags.s) {
+    return [[`${fmt(own)}\t${label}`], total]
+  }
 
-  const rows = rollup(entries, path.virtual, { all: flags.a, maxDepth: flags.maxDepth })
+  const rows = rollup(entries, path.virtual, {
+    all: flags.a,
+    maxDepth: flags.maxDepth,
+    separateDirs: flags.S,
+  })
   const shown = respellRaw(
     rows.map(([p]) => p),
     path.virtual,
     label,
   )
   const lines = rows.map(([, size], i) => `${fmt(size)}\t${shown[i] ?? ''}`)
-  lines.push(`${fmt(total)}\t${label}`)
+  lines.push(`${fmt(own)}\t${label}`)
   return [lines, total]
 }
 
@@ -466,6 +521,7 @@ export async function runDu(
     (p) => duHasContent(computeEntries, p),
     opts.mountPrefix,
     links,
+    opts.statPath ?? null,
   )
   return duGeneric(
     present,

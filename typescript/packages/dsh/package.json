@@ -1,0 +1,53 @@
+{
+  "name": "@struktoai/mirage-dsh",
+  "version": "0.0.1",
+  "description": "DeepSeek Harness (dsh) providers backed by a mirage workspace: ctx.fs and ctx.shell over mounted resources",
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/dsh"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-core": "workspace:*",
+    "@struktoai/mirage-node": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-fs": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-shell": "0.0.1-rc.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-fs": "0.0.1-rc.1",
+    "@deepseek-ai/dsh-shell": "0.0.1-rc.5",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^3.2.6"
+  }
+}
