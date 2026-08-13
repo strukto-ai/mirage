@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface CephConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  endpoint?: string
-  region?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface CephConfigRedacted extends Omit<CephConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const CephConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const CephConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type CephConfig = ConfigOf<typeof CephConfigSchema>
+
+export type CephConfigRedacted = RedactedConfig<CephConfig, 'presignedUrlProvider'>
 
 export function cephToS3Config(config: CephConfig): S3Config {
   return {

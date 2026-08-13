@@ -12,19 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import (find_generic,
                                                   find_walk_generic)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView, StatPath
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
@@ -45,52 +44,39 @@ async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
     return not await ops.readdir(accessor, search, index=index)
 
 
-async def find(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    ns: NamespaceView | None = None,
-    stat_path: StatPath | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    stat_overlay = ns.stat_overlay if ns is not None else None
-    links = ns.links if ns is not None else None
+async def find(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("find: no resource")
-    resolved = await ops.resolve_glob(accessor, paths, index)
-    opts = CommandOpts(stdin=stdin, flags=flags)
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
     if ops.find is None:
         # -mtime must see namespace times (touch results, observed
         # writes on mtime-less backends), same as ls.
-        walk_stat = partial(ops.stat, accessor)
-        if stat_overlay is not None:
-            walk_stat = partial(overlaid_stat, walk_stat, stat_overlay)
+        walk_stat: Callable[...,
+                            Awaitable[FileStat]] = partial(ops.stat, accessor)
+        if overlay is not None:
+            walk_stat = partial(overlaid_stat, walk_stat, overlay)
         return await find_walk_generic(resolved,
                                        list(texts),
                                        opts,
                                        readdir=partial(ops.readdir, accessor),
-                                       stat=walk_stat,
-                                       index=index,
-                                       stat_path=stat_path,
-                                       links=links)
-    stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
-    if stat is not None and stat_overlay is not None:
+                                       stat=walk_stat)
+    stat: Callable[..., Awaitable[FileStat]] | None = (partial(
+        ops.stat, accessor, index=opts.index) if ops.local else None)
+    if stat is not None and overlay is not None:
         stat = partial(overlaid_stat,
                        partial(ops.stat, accessor),
-                       stat_overlay,
-                       index=index)
+                       overlay,
+                       index=opts.index)
     return await find_generic(resolved,
                               list(texts),
                               opts,
                               find_core=partial(ops.find, accessor),
                               stat=stat,
-                              stat_path=stat_path,
                               dir_empty=partial(_dir_is_empty, ops, accessor,
-                                                index),
-                              links=links)
+                                                opts.index))
 
 
 BUILDER = Builder('find', find, None, False, None)

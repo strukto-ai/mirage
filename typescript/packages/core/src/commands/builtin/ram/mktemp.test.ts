@@ -32,7 +32,6 @@ async function runMktemp(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: '', resource }
   const [out] = result

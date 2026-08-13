@@ -16,11 +16,11 @@ import asyncio
 
 import pytest
 
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import CommandSpec
 from mirage.fuse.core import MountCore
 from mirage.io.types import IOResult
-from mirage.ops.types import SessionView
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.policy.types import SessionContext
 from mirage.resource.ram import RAMResource
@@ -271,15 +271,10 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
     # parent's environment, so a mutation must not land in the session.
 
     @command("envpoke", resource="ram", spec=CommandSpec())
-    async def envpoke(store,
-                      paths: list[PathSpec],
-                      *texts: str,
-                      cwd: str = "/",
-                      stdin=None,
-                      env: dict[str, str] | None = None,
-                      **flags: object):
-        assert env is not None
-        env["INJECTED"] = "1"
+    async def envpoke(store, paths: list[PathSpec], texts: list[str],
+                      opts: CommandOpts):
+        assert opts.env is not None
+        opts.env["INJECTED"] = "1"
         return b"", IOResult()
 
     ws = _two_mounts()
@@ -296,19 +291,14 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
 
 
 def test_a_command_can_opt_into_the_session_view():
-    # The LinkView pattern for the session plane: naming the parameter
-    # is the whole opt-in, and reads answer through the view.
+    # The LinkView pattern for the session plane: the live handle rides
+    # CommandOpts, and reads answer through the view.
 
     @command("envread", resource="ram", spec=CommandSpec())
-    async def envread(store,
-                      paths: list[PathSpec],
-                      *texts: str,
-                      cwd: str = "/",
-                      stdin=None,
-                      session_view: SessionView | None = None,
-                      **flags: object):
-        assert session_view is not None
-        value = session_view.get("MARKER") or "none"
+    async def envread(store, paths: list[PathSpec], texts: list[str],
+                      opts: CommandOpts):
+        assert opts.session_view is not None
+        value = opts.session_view.get("MARKER") or "none"
         return value.encode(), IOResult()
 
     ws = _two_mounts()

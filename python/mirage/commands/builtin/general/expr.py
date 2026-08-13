@@ -14,16 +14,16 @@
 
 import re
 
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def _expr_eval(args: tuple[str, ...]) -> tuple[str, int]:
+def _expr_eval(args: list[str]) -> tuple[str, int]:
     if len(args) == 3 and args[1] == ":":
         pattern = args[2]
         m = re.match(pattern, args[0])
@@ -86,13 +86,9 @@ def _expr_eval(args: tuple[str, ...]) -> tuple[str, int]:
 
 
 @command("expr", resource=None, spec=SPECS["expr"], provision=pure_provision)
-async def expr(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    **_extra: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def expr(accessor: Accessor, paths: list[PathSpec] | None,
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         return b"\n", IOResult(exit_code=2)
     result, exit_code = _expr_eval(texts)

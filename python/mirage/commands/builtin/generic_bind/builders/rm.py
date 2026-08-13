@@ -15,34 +15,28 @@
 import functools
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.verbose import removal_lines
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-async def rm(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rm"])
+async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rm"])
     f = fl.as_bool("f")
     v = fl.as_bool("v")
     d = fl.as_bool("d")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("rm: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
@@ -66,7 +60,7 @@ async def rm(
                 if v:
                     readdir = functools.partial(ops.readdir,
                                                 accessor,
-                                                index=index)
+                                                index=opts.index)
                     entry_lines = removal_lines(await walk(
                         readdir, functools.partial(ops.stat, accessor), p))
                 await ops.rm_r(accessor, p)
@@ -74,7 +68,7 @@ async def rm(
                 if ops.rmdir is None:
                     raise NotImplementedError(
                         "rm: directory remove not supported on this backend")
-                if await ops.readdir(accessor, p, index=index):
+                if await ops.readdir(accessor, p, index=opts.index):
                     errors.append(f"rm: cannot remove '{p.virtual}': "
                                   "Directory not empty")
                     continue

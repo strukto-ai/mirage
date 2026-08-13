@@ -38,7 +38,6 @@ async function runStat(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
     ...(options.index !== undefined ? { index: options.index } : {}),
   })
   if (result === null) return { stdout: '', exitCode: 0 }

@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.commands.builtin.github.grep import grep
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -41,7 +42,8 @@ def _scope(path: str, resolved: bool = True) -> PathSpec:
 
 async def _run(accessor, index, paths, pattern, **kwargs):
     scopes = [_scope(p, resolved=("." in p.split("/")[-1])) for p in paths]
-    stdout, io = await grep(accessor, scopes, pattern, index=index, **kwargs)
+    stdout, io = await grep(accessor, scopes, [pattern],
+                            CommandOpts(index=index, flags={**kwargs}))
     data = await materialize(stdout)
     return data.decode(errors="replace"), io
 
@@ -132,10 +134,8 @@ async def test_grep_files_only(mock_github_api, github_env):
 async def test_grep_stdin(github_env):
     accessor, index = github_env
     stdin_data = b"hello world\nfoo bar\nhello again\n"
-    stdout, io = await grep(accessor, [],
-                            "hello",
-                            stdin=stdin_data,
-                            index=index)
+    stdout, io = await grep(accessor, [], ['hello'],
+                            CommandOpts(stdin=stdin_data, index=index))
     data = await materialize(stdout)
     text = data.decode(errors="replace")
     lines = text.strip().splitlines()
@@ -153,12 +153,12 @@ async def test_grep_files_only_with_prefix(mock_github_api, github_env):
                  directory="/gh/src/",
                  resolved=False)
     ]
-    stdout, io = await grep(accessor,
-                            scopes,
-                            "dataclass",
-                            r=True,
-                            args_l=True,
-                            index=index)
+    stdout, io = await grep(
+        accessor, scopes, ['dataclass'],
+        CommandOpts(index=index, flags={
+            'r': True,
+            'args_l': True
+        }))
     data = await materialize(stdout)
     text = data.decode()
     assert io.exit_code == 0

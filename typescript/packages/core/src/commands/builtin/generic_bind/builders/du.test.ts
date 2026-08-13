@@ -67,7 +67,6 @@ async function runDu(
     flags,
     filetypeFns: null,
     cwd,
-    resource: {} as never,
   })
   if (result === null) return []
   const [out] = result
@@ -106,7 +105,6 @@ describe('du walk fallback (no native du op)', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: {} as never,
     })
     expect(result).not.toBeNull()
     const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
@@ -128,7 +126,7 @@ describe('du walk fallback (no native du op)', () => {
       ACCESSOR,
       [PathSpec.fromStrPath('/nope'), PathSpec.fromStrPath('/db')],
       [],
-      { stdin: null, flags: {}, filetypeFns: null, cwd: '/', resource: {} as never },
+      { stdin: null, flags: {}, filetypeFns: null, cwd: '/' },
     )
     expect(result).not.toBeNull()
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
@@ -165,7 +163,6 @@ describe('du walk fallback (no native du op)', () => {
         flags: {},
         filetypeFns: null,
         cwd: '/',
-        resource: {} as never,
       }),
     ).rejects.toThrow('403 Forbidden')
   })

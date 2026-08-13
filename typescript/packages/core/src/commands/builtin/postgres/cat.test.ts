@@ -80,7 +80,6 @@ describe('postgres cat size-guard surfacing', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'postgres' } as never,
     })
     expect(result).not.toBeNull()
     if (result === null) return

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import Union
 
+from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 
@@ -75,7 +75,7 @@ class CondError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class CondContext:
-    dispatch: Callable[..., Any]
+    dispatch: DispatchFn
     namespace: Namespace
     session: Session
     name: str

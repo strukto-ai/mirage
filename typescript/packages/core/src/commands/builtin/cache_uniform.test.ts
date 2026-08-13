@@ -26,7 +26,6 @@ import { CacheManager } from '../../cache/manager.ts'
 import { materialize } from '../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../config.ts'
-import type { Resource } from '../../resource/base.ts'
 import { grepGeneric } from './generic/grep.ts'
 import { headGeneric } from './generic/head.ts'
 import { rgGeneric } from './generic/rg.ts'
@@ -75,7 +74,6 @@ function opts(flags: Record<string, string | boolean | number | string[]> = {}):
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
   }
 }
 

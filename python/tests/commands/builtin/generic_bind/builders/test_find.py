@@ -16,6 +16,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.find import find
+from mirage.commands.config import CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 
 TREE = {
@@ -67,7 +68,7 @@ def _root() -> PathSpec:
 
 
 async def _lines(ops: CommandIO) -> list[str]:
-    stdout, _io = await find(ops, None, [_root()])
+    stdout, _io = await find(ops, None, [_root()], [], CommandOpts())
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 
@@ -98,7 +99,7 @@ async def test_walk_honors_multiple_start_points():
                  resolved=False,
                  resource_path="notes.txt"),
     ]
-    stdout, _io = await find(ops, None, roots)
+    stdout, _io = await find(ops, None, roots, [], CommandOpts())
     data = stdout if isinstance(stdout, bytes) else b""
     lines = data.decode().splitlines()
     # GNU find walks every start point in operand order
@@ -132,7 +133,7 @@ async def test_native_find_honors_multiple_start_points():
                  resolved=False,
                  resource_path="notes.txt"),
     ]
-    stdout, _io = await find(ops, None, roots)
+    stdout, _io = await find(ops, None, roots, [], CommandOpts())
     data = stdout if isinstance(stdout, bytes) else b""
     lines = data.decode().splitlines()
     # The native-op path walks every start point too, in operand order;

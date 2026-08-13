@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import parse_flags
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_generic
@@ -25,7 +24,6 @@ from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream
 from mirage.core.mongodb.types import ScopeLevel
@@ -34,23 +32,18 @@ from mirage.types import PathSpec
 
 
 @command("tail", resource="mongodb", spec=SPECS["tail"])
-async def tail(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def tail(accessor: MongoDBAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
     counts = parsed.counts
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
     if (parsed.follow and len(resolved) == 1
             and detect_scope(resolved[0]).level == ScopeLevel.DOCUMENTS):
-        return watch_stream(accessor, resolved[0], index), IOResult()
+        return watch_stream(accessor, resolved[0], opts.index), IOResult()
     # Collections fetch only the last N documents server-side (sort by
     # primary key descending + limit) instead of reading everything.
     n_eff = counts.lines if counts.lines is not None else 10
@@ -58,9 +51,8 @@ async def tail(
             and counts.from_byte is None and counts.from_line is None
             and n_eff > 0
             and detect_scope(resolved[0]).level == ScopeLevel.DOCUMENTS):
-        data = await read_tail(accessor, resolved[0], n_eff, index)
+        data = await read_tail(accessor, resolved[0], n_eff, opts.index)
         return generic_tail(data, n=n_eff, c=None, from_line=None), IOResult()
-    return await tail_generic(resolved, list(texts),
-                              CommandOpts(stdin=stdin, flags=flags),
-                              bound_op(IO.stat, accessor, index),
-                              bound_op(stream_any, accessor, index))
+    return await tail_generic(resolved, list(texts), opts,
+                              bound_op(IO.stat, accessor, opts.index),
+                              bound_op(stream_any, accessor, opts.index))

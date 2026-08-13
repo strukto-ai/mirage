@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github_ci.grep import grep
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import FileStat, FileType, PathSpec
@@ -51,12 +52,8 @@ async def test_grep_single_file_match(accessor, index):
             patch("mirage.commands.builtin.github_ci.grep.ci_read",
                   new=AsyncMock(return_value=b"hello world\nbye world\n")),
     ):
-        out, io = await grep(
-            accessor,
-            [_scope("/runs/wf_1/run.json")],
-            "hello",
-            index=index,
-        )
+        out, io = await grep(accessor, [_scope('/runs/wf_1/run.json')],
+                             ['hello'], CommandOpts(index=index))
         data = await materialize(out)
         assert b"hello world" in data
         assert io.exit_code == 0
@@ -71,12 +68,8 @@ async def test_grep_no_match_exit_one(accessor, index):
             patch("mirage.commands.builtin.github_ci.grep.ci_read",
                   new=AsyncMock(return_value=b"abc\ndef\n")),
     ):
-        out, io = await grep(
-            accessor,
-            [_scope("/runs/wf_1/run.json")],
-            "missing",
-            index=index,
-        )
+        out, io = await grep(accessor, [_scope('/runs/wf_1/run.json')],
+                             ['missing'], CommandOpts(index=index))
         await materialize(out)
         assert io.exit_code == 1
 
@@ -109,13 +102,8 @@ async def test_grep_recursive_directory(accessor, index):
             patch("mirage.commands.builtin.github_ci.grep.ci_read",
                   new=AsyncMock(side_effect=fake_read)),
     ):
-        out, io = await grep(
-            accessor,
-            [_scope("/workflows")],
-            "Test",
-            r=True,
-            index=index,
-        )
+        out, io = await grep(accessor, [_scope('/workflows')], ['Test'],
+                             CommandOpts(index=index, flags={'r': True}))
         data = await materialize(out)
         assert b"name: Test" in data
         assert io.exit_code == 0
@@ -124,18 +112,15 @@ async def test_grep_recursive_directory(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_recursive_runs_rejected(accessor, index):
     with pytest.raises(ValueError, match="across runs is disabled"):
-        await grep(accessor, [_scope("/runs")], "x", r=True, index=index)
+        await grep(accessor, [_scope('/runs')], ['x'],
+                   CommandOpts(index=index, flags={'r': True}))
 
 
 @pytest.mark.asyncio
 async def test_grep_stdin(accessor, index):
     out, io = await grep(
-        accessor,
-        [],
-        "two",
-        stdin=b"line one\nline two\nline three\n",
-        index=index,
-    )
+        accessor, [], ['two'],
+        CommandOpts(stdin=b'line one\nline two\nline three\n', index=index))
     data = await materialize(out)
     assert b"line two" in data
     assert io.exit_code == 0

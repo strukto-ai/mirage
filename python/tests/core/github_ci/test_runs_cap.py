@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github_ci import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.github_ci import _client as ci_client
 from mirage.core.github_ci.runs import list_runs
 from mirage.io.stream import materialize
@@ -166,11 +167,8 @@ async def test_ls_runs_listing_capped(monkeypatch):
     ls_cmd = next(c for c in COMMANDS
                   if any(rc.name == "ls" for rc in c._registered_commands))
     out, _ = await ls_cmd.__wrapped__(
-        accessor,
-        [runs_path],
-        args_1=True,
-        index=index,
-    )
+        accessor, [runs_path], [],
+        CommandOpts(index=index, flags={"args_1": True}))
     data = await materialize(out)
     names = [line for line in data.decode().splitlines() if line.strip()]
     assert len(names) == 5

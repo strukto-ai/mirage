@@ -12,43 +12,35 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
-
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (resolve_source,
                                                          run_code)
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, CommandOutput
-from mirage.runtime.base import Runtime
+from mirage.commands.spec.types import FlagView
+from mirage.io.types import CommandOutput
 from mirage.types import PathSpec
 
 
 async def _js(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    e: str | None = None,
-    module: bool = False,
-    stdin: ByteSource | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    cwd: PathSpec | None = None,
-    env: dict[str, str] | None = None,
-    exec_allowed: bool = True,
-    runtime: Runtime | None = None,
-    runtime_unavailable: str | None = None,
-    **_extra: FlagValue,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> CommandOutput:
-    error, prepared = await resolve_source("js", paths, texts, e, stdin,
-                                           dispatch, cwd, exec_allowed)
+    fl = FlagView(opts.flags, spec=SPECS["js"])
+    error, prepared = await resolve_source("js", paths, texts, fl.as_str("e"),
+                                           opts.stdin, opts.dispatch, opts.cwd,
+                                           opts.exec_allowed)
     if error is not None or prepared is None:
         assert error is not None
         return error
-    as_module = module or (prepared.script_path is not None
-                           and prepared.script_path.virtual.endswith(".mjs"))
-    return await run_code("js", prepared, env, {"module": as_module}, runtime,
-                          runtime_unavailable)
+    as_module = fl.as_bool("module") or (
+        prepared.script_path is not None
+        and prepared.script_path.virtual.endswith(".mjs"))
+    return await run_code("js", prepared, opts.env, {"module": as_module},
+                          opts.runtime, opts.runtime_unavailable)
 
 
 js = command("js", resource=None, spec=SPECS["js"])(_js)

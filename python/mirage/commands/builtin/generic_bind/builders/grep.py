@@ -13,36 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def grep(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **flags,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = (await ops.resolve_glob(accessor, paths, index)
+async def grep(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = (await ops.resolve_glob(accessor, paths, opts.index)
                 if paths and ops.is_mounted(accessor) else [])
     return await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(ops.readdir, accessor, index),
-        stat=bound_op(ops.stat, accessor, index),
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        read_stream=bound_op(ops.read_stream, accessor, index),
-        stdin=stdin,
+        opts.flags,
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        read_stream=bound_op(ops.read_stream, accessor, opts.index),
+        stdin=opts.stdin,
     )
 
 

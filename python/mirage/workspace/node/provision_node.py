@@ -17,6 +17,7 @@ from functools import partial
 from typing import Any, Callable
 
 from mirage.provision import Precision, ProvisionResult
+from mirage.runtime.types import DispatchFn
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
@@ -170,7 +171,7 @@ async def _provision_reassociated(
 
 async def provision_node(
     registry: MountRegistry,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     namespace: Namespace | None,
     node: Any,
@@ -186,7 +187,7 @@ async def provision_node(
 
     Args:
         registry (MountRegistry): mount registry for path resolution.
-        dispatch (Callable): VFS op dispatcher (op, path, **kw).
+        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
         execute_fn (Callable): recursive execute (for expansions).
         node (Any): tree-sitter node to plan.
         session (Session): shell session state.

@@ -15,16 +15,16 @@
 import logging
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord.io import resolve_glob
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
@@ -41,16 +41,10 @@ logger = logging.getLogger(__name__)
 
 
 @command("rg", resource="discord", spec=SPECS["rg"])
-async def rg(
-    accessor: DiscordAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rg"])
+async def rg(accessor: DiscordAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
@@ -58,9 +52,9 @@ async def rg(
 
     pushdown_warnings: list[str] = []
     if paths and "\n" not in pattern_str:
-        scope = await detect_scope(paths[0], index)
+        scope = await detect_scope(paths[0], opts.index)
         if scope.level in ("messages", "file_blob", "date"):
-            coalesced = await coalesce_scopes(paths, index)
+            coalesced = await coalesce_scopes(paths, opts.index)
             if coalesced is not None:
                 scope = coalesced
 
@@ -110,16 +104,16 @@ async def rg(
                     "falling back to per-file scan", exc)
 
     resolved = await resolve_glob(accessor, paths,
-                                  index=index) if paths else []
+                                  index=opts.index) if paths else []
     stdout, io = await generic_rg(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(discord_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(discord_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )
     if pushdown_warnings:
         io.stderr = ("\n".join(pushdown_warnings) + "\n").encode()

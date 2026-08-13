@@ -49,7 +49,6 @@ async function runWget(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: '', err: '', exitCode: -1, writes: {} }
   const [out, ioResult] = result

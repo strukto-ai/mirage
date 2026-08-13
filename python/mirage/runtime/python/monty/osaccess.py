@@ -15,7 +15,7 @@
 import asyncio
 import errno
 from pathlib import PurePosixPath
-from typing import Any, Callable
+from typing import Any
 
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import parse_mode
@@ -25,6 +25,7 @@ from mirage.runtime.python.monty.constants import (EXDEV_MESSAGE,
                                                    FILE_EXISTS_MESSAGE)
 from mirage.runtime.python.monty.vfs import MontyVFS
 from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import DispatchFn
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -57,7 +58,7 @@ class MirageOSAccess(OSAccess):
 
     def __init__(self,
                  loop: asyncio.AbstractEventLoop,
-                 dispatch: Callable[..., Any] | None,
+                 dispatch: DispatchFn | None,
                  environ: dict[str, str],
                  resolver: MountResolver | None = None) -> None:
         super().__init__([], environ=dict(environ))

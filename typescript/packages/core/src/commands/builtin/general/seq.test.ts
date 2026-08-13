@@ -31,7 +31,6 @@ async function runSeq(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result

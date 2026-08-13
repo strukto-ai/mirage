@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface SupabaseConfig {
@@ -22,20 +29,6 @@ export interface SupabaseConfig {
   secretAccessKey?: string
   projectRef?: string
   endpoint?: string
-  sessionToken?: string
-  profile?: string
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
-
-export interface SupabaseConfigRedacted {
-  bucket: string
-  region: string
-  projectRef?: string
-  endpoint: string
-  accessKeyId?: string
-  secretAccessKey?: string
   sessionToken?: string
   profile?: string
   keyPrefix?: string
@@ -56,6 +49,13 @@ const SupabaseConfigSchema = z.object({
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint the redactor fills in.
+export type SupabaseConfigRedacted = RedactedConfig<
+  ConfigOf<typeof SupabaseConfigSchema>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 export function resolvedSupabaseEndpoint(config: SupabaseConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

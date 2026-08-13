@@ -22,6 +22,7 @@ from typing import Any
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.runtime.types import DispatchFn
 from mirage.shell.options import parse_option_word
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_strerror
@@ -63,8 +64,7 @@ def script_error(
                                                      stderr=err)
 
 
-async def read_script_text(dispatch: Callable[..., Any], path: str,
-                           cwd: str) -> str:
+async def read_script_text(dispatch: DispatchFn, path: str, cwd: str) -> str:
     """Read a script file through the op dispatcher.
 
     Every way of running a script off a mount comes through here, so a
@@ -80,7 +80,7 @@ async def read_script_text(dispatch: Callable[..., Any], path: str,
     the same failure differently and exit differently on it.
 
     Args:
-        dispatch (Callable): op dispatcher, used to read the file.
+        dispatch (DispatchFn): op dispatcher, used to read the file.
         path (str): the script operand, as typed.
         cwd (str): working directory a relative operand resolves against.
     """
@@ -100,7 +100,7 @@ async def read_script_text(dispatch: Callable[..., Any], path: str,
 
 
 async def handle_source(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     path: str | PathSpec,
     session: Session,
@@ -114,7 +114,7 @@ async def handle_source(
     bash restores those and nothing else.
 
     Args:
-        dispatch (Callable): op dispatcher, used to read the file.
+        dispatch (DispatchFn): op dispatcher, used to read the file.
         execute_fn (Callable): runs the script text in this session.
         path (str | PathSpec): the script to source.
         session (Session): shell session state.
@@ -264,7 +264,7 @@ def parse_bash_args(args: list[str]) -> BashArgs:
 
 
 async def read_script_file(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     name: str,
     path: str,
     session: Session,
@@ -283,7 +283,7 @@ async def read_script_file(
     message into a search box will find.
 
     Args:
-        dispatch (Callable): op dispatcher, used to read the file.
+        dispatch (DispatchFn): op dispatcher, used to read the file.
         name (str): the head word, used as the diagnostic prefix.
         path (str): the script operand, as typed.
         session (Session): shell session state, for the working directory.
@@ -302,7 +302,7 @@ async def read_script_file(
 
 
 async def handle_bash(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     args: list[str],
     session: Session,
@@ -319,7 +319,7 @@ async def handle_bash(
     file is the caller.
 
     Args:
-        dispatch (Callable): op dispatcher, used to read a script file.
+        dispatch (DispatchFn): op dispatcher, used to read a script file.
         execute_fn (Callable): runs the program text in this session.
         args (list[str]): words after the head word.
         session (Session): shell session state.

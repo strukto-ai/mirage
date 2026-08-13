@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  type ConfigOf,
   normalizeFields,
   redactConfigWithSchema,
   S3ConfigSchema as S3CoreConfigSchema,
   type S3Config as S3CoreConfig,
-  type S3ConfigRedacted as S3CoreConfigRedacted,
+  type RedactedConfig,
   secretStr,
   z,
 } from '@struktoai/mirage-core'
@@ -27,15 +28,20 @@ export interface S3Config extends S3CoreConfig {
   proxy?: string
 }
 
-export interface S3ConfigRedacted extends S3CoreConfigRedacted {
-  profile?: string
-  proxy?: string
-}
-
 const S3ConfigSchema = S3CoreConfigSchema.extend({
   profile: z.string().optional(),
   proxy: secretStr().optional(),
 })
+
+export type S3ConfigRedacted = RedactedConfig<
+  ConfigOf<typeof S3ConfigSchema>,
+  | 'accessKeyId'
+  | 'secretAccessKey'
+  | 'sessionToken'
+  | 'presignedUrlProvider'
+  | 'httpAgentProvider'
+  | 'proxy'
+>
 
 export function redactConfig(config: S3Config): S3ConfigRedacted {
   return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted

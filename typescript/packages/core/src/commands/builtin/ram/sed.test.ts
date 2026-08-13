@@ -35,7 +35,7 @@ async function runSed(
     (resource as { accessor?: unknown }).accessor as never,
     paths,
     texts,
-    { stdin, flags, filetypeFns: null, cwd: '/', resource },
+    { stdin, flags, filetypeFns: null, cwd: '/' },
   )
   if (result === null) return ''
   const [out] = result

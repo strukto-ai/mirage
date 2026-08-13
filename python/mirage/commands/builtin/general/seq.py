@@ -12,17 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandName, FlagValue
+from mirage.commands.spec.types import CommandName, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def _seq_generate(texts: tuple[str, ...], separator: str, width: bool,
+def _seq_generate(texts: list[str], separator: str, width: bool,
                   fmt: str | None) -> str:
     nums = [float(t) for t in texts]
     if len(nums) == 1:
@@ -53,17 +54,15 @@ def _seq_generate(texts: tuple[str, ...], separator: str, width: bool,
 
 @command("seq", resource=None, spec=SPECS["seq"], provision=pure_provision)
 async def seq(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    s: str | None = None,
-    w: bool = False,
-    f: str | None = None,
-    **_extra: FlagValue,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["seq"])
     if len(texts) > 3:
         raise extra_operand_error(CommandName.SEQ, texts[3])
-    separator = s if s is not None else "\n"
-    result = _seq_generate(texts, separator, w, f)
+    sep = fl.as_str("s")
+    separator = sep if sep is not None else "\n"
+    result = _seq_generate(texts, separator, fl.as_bool("w"), fl.as_str("f"))
     return result.encode(), IOResult()

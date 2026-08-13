@@ -42,7 +42,7 @@ import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
-import type { DispatchFn } from '../executor/cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import {
   followPaths,
   handleBash,

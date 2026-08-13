@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-from typing import Any, Callable
 
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.runtime.types import DispatchFn
 from mirage.types import CapacityResult, CapacityState, PathSpec
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, fail, ok,
@@ -179,14 +179,14 @@ def _pct_cell(cap: CapacityResult, inodes: bool) -> str:
     return _use_pct(cap.used or 0, cap.available or 0)
 
 
-async def _path_exists(dispatch: Callable[..., Any], spec: PathSpec) -> bool:
+async def _path_exists(dispatch: DispatchFn, spec: PathSpec) -> bool:
     """Whether a path resolves to an existing entry.
 
     GNU df errors on a missing FILE operand, so a deeper path is statted
     before its mount is accepted; a missing entry maps to False.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         spec (PathSpec): the operand to stat.
     """
     try:
@@ -196,7 +196,7 @@ async def _path_exists(dispatch: Callable[..., Any], spec: PathSpec) -> bool:
     return True
 
 
-async def _target_mounts(registry: MountRegistry, dispatch: Callable[..., Any],
+async def _target_mounts(registry: MountRegistry, dispatch: DispatchFn,
                          session: Session,
                          operands: list[str | PathSpec]) -> list[MountEntry]:
     """Resolve df operands to the mounts to report, deduped and ordered.
@@ -208,7 +208,7 @@ async def _target_mounts(registry: MountRegistry, dispatch: Callable[..., Any],
 
     Args:
         registry (MountRegistry): mount registry.
-        dispatch (Callable): op dispatcher (FILE existence check).
+        dispatch (DispatchFn): op dispatcher (FILE existence check).
         session (Session): session providing cwd for relative operands.
         operands (list[str | PathSpec]): path operands.
     """
@@ -283,7 +283,7 @@ def _render_table(header: list[str], rows: list[list[str]],
 async def handle_df(
     registry: MountRegistry,
     session: Session,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     args: list[str | PathSpec],
 ) -> Result:
     """df [OPTION]... [FILE]...: report per-mount capacity.
@@ -297,7 +297,7 @@ async def handle_df(
     Args:
         registry (MountRegistry): mount registry (mount enumeration).
         session (Session): session providing cwd for relative operands.
-        dispatch (Callable): op dispatcher (FILE existence check).
+        dispatch (DispatchFn): op dispatcher (FILE existence check).
         args (list[str | PathSpec]): args after the command name.
     """
     flags, values, operands, bad = split_value_flags(args, "hHkiaTP", "B")

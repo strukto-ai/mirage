@@ -21,7 +21,7 @@ import { posixNormpath } from '../../../utils/path.ts'
 import type { Session } from '../../session/session.ts'
 import { changeDir, logicalCwd } from '../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../types.ts'
-import type { DispatchFn } from '../cross_mount.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { toScope, scopePath } from './scope.ts'
 import type { Result } from './scope.ts'
 

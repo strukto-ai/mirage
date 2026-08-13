@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -55,19 +56,14 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
     monkeypatch.setattr(search, "search_segments", search_segments)
 
-    stdout, io = await command_search(
-        accessor(),
-        [
-            PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
-                                             "/knowledge"),
-                     virtual="/knowledge/guides/*.md",
-                     directory="/knowledge/guides",
-                     pattern="*.md",
-                     resolved=False)
-        ],
-        "login",
-        index=RAMIndexCacheStore(),
-    )
+    stdout, io = await command_search(accessor(), [
+        PathSpec(resource_path=mount_key('/knowledge/guides/*.md',
+                                         '/knowledge'),
+                 virtual='/knowledge/guides/*.md',
+                 directory='/knowledge/guides',
+                 pattern='*.md',
+                 resolved=False)
+    ], ['login'], CommandOpts(index=RAMIndexCacheStore()))
 
     assert await materialize(stdout) == b"api\nauth"
     assert io.reads == {}
@@ -95,9 +91,8 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
                     virtual="/knowledge",
                     directory="/knowledge")
 
-    stdout, _ = await command_search(accessor(), [root],
-                                     "anything",
-                                     index=RAMIndexCacheStore())
+    stdout, _ = await command_search(accessor(), [root], ['anything'],
+                                     CommandOpts(index=RAMIndexCacheStore()))
 
     assert await materialize(stdout) == b"dataset"
     assert calls == [([], {

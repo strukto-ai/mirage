@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type CommandOpts, PathSpec, Precision, type Resource } from '@struktoai/mirage-core'
+import { type CommandOpts, PathSpec, Precision } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '../../../accessor/redis.ts'
 import { writeBytes } from '../../../core/redis/write.ts'
-import { RedisResource } from '../../../resource/redis/redis.ts'
 import { RedisStore } from '../../../resource/redis/store.ts'
 import { fileReadProvision, headTailProvision, metadataProvision } from './provision.ts'
 
@@ -31,7 +30,6 @@ function spec(p: string): PathSpec {
 describe.skipIf(skip)('redis provision helpers', () => {
   let store: RedisStore
   let acc: RedisAccessor
-  let resource: RedisResource
   const prefix = `mirage:fs:provision-test:${String(Date.now())}:${Math.random().toString(36).slice(2)}:`
 
   function makeOpts(flags: Record<string, string | boolean> = {}): CommandOpts {
@@ -40,7 +38,6 @@ describe.skipIf(skip)('redis provision helpers', () => {
       flags,
       filetypeFns: null,
       cwd: '/',
-      resource: resource as Resource,
     }
   }
 
@@ -49,10 +46,6 @@ describe.skipIf(skip)('redis provision helpers', () => {
       REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: prefix } : { keyPrefix: prefix },
     )
     acc = new RedisAccessor(store)
-    resource = Object.assign(
-      Object.create(RedisResource.prototype) as RedisResource,
-      { accessor: acc } as Partial<RedisResource>,
-    )
     await store.clear()
     await store.addDir('/')
   })

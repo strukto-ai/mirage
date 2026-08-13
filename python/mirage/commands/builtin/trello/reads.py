@@ -18,9 +18,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
-from mirage.commands.spec.types import (CommandSpec, FlagValue, FlagView,
-                                        Operand)
+from mirage.commands.spec.types import CommandSpec, FlagView, Operand
 from mirage.core.trello._client import (get_board, get_card, list_board_labels,
                                         list_board_lists, list_board_members,
                                         list_card_comments, list_list_cards,
@@ -124,14 +124,10 @@ TRELLO_READS: tuple[TrelloRead, ...] = (
 )
 
 
-async def _dispatch(
-    entry: TrelloRead,
-    accessor: TrelloAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=entry.spec)
+async def _dispatch(entry: TrelloRead, accessor: TrelloAccessor,
+                    paths: list[PathSpec], texts: list[str],
+                    opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=entry.spec)
     data = await entry.runner(accessor, list(texts), fl)
     return yield_bytes(data), IOResult()
 

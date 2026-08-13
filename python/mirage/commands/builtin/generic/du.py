@@ -587,8 +587,6 @@ async def du_generic(
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
     truncated: Callable[[], bool] | None = None,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run du over the given operands; mirrors duGeneric.
 
@@ -609,8 +607,6 @@ async def du_generic(
         compute_size (ComputeSize): Recursive byte size of one operand.
         compute_entries (ComputeEntries): Per-file breakdown.
         truncated (Callable[[], bool] | None): Whether the walk was cut.
-        links (LinkView | None): The namespace's symlink facts.
-        mounts (MountView | None): Mounts nested under this one.
     """
     fl = FlagView(opts.flags, spec=SPECS["du"])
     out = await run_du(
@@ -626,7 +622,8 @@ async def du_generic(
         c=fl.as_bool("c"),
         max_depth=fl.as_str("max_depth"),
         truncated=truncated,
-        links=None if fl.as_bool("L") else links,
-        mounts=mounts,
+        links=(None if fl.as_bool("L") else
+               opts.ns.links if opts.ns is not None else None),
+        mounts=opts.ns.mounts if opts.ns is not None else None,
     )
     return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

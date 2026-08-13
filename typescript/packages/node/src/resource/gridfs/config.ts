@@ -16,17 +16,11 @@ import {
   normalizeFields,
   normalizeKeyPrefix,
   redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
   secretStr,
   z,
 } from '@struktoai/mirage-core'
-
-export interface GridFSConfig {
-  uri: string
-  database: string
-  bucket?: string
-  keyPrefix?: string
-  chunkSizeBytes?: number
-}
 
 const GridFSConfigSchema = z.object({
   uri: secretStr(),
@@ -36,9 +30,9 @@ const GridFSConfigSchema = z.object({
   chunkSizeBytes: z.number().optional(),
 })
 
-export interface GridFSConfigRedacted extends Omit<GridFSConfig, 'uri'> {
-  uri?: string
-}
+export type GridFSConfig = ConfigOf<typeof GridFSConfigSchema>
+
+export type GridFSConfigRedacted = RedactedConfig<GridFSConfig, 'uri'>
 
 export function redactConfig(config: GridFSConfig): GridFSConfigRedacted {
   return redactConfigWithSchema(GridFSConfigSchema, config) as unknown as GridFSConfigRedacted

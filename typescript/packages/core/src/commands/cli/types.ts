@@ -16,7 +16,8 @@ import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec, ResourceName } from '../../types.ts'
 import type { MountRoot, StatPath } from '../../ops/types.ts'
 import type { ScriptSource } from '../../runtime/policy/types.ts'
-import type { CommandDispatch, CommandFnResult } from '../config.ts'
+import type { CommandFnResult } from '../config.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 
@@ -38,7 +39,7 @@ export interface CLIVerbOpts {
    * so nothing hands it an accessor; a verb that works over a mount (git over a
    * checkout) reaches one through this instead.
    */
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   /**
    * Dispatcher-backed stat of one path, asking both channels a backend can
    * answer on. On a prefix store a directory is the set of keys under it rather

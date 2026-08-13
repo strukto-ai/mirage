@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../../../types.ts'
-import type { CommandDispatch } from '../../../config.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
 
 /**
  * The workspace op dispatcher, as every module here consumes it.
@@ -22,7 +22,7 @@ import type { CommandDispatch } from '../../../config.ts'
  * rather than the Workspace facade's: a CLI leaf is handed the same callable a
  * mount command receives.
  */
-export type Dispatch = CommandDispatch
+export type Dispatch = DispatchFn
 
 /**
  * A resolved repository: where the objects live, and over what.

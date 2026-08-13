@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -67,9 +68,10 @@ async def test_rg_multi_pattern_skips_imap_search():
             "mirage.commands.builtin.email.rg.generic_rg",
             new=fake_generic,
     ):
-        _, io = await rg(accessor, [_path()],
-                         index=RAMIndexCacheStore(),
-                         e=["ada", "ben"])
+        _, io = await rg(
+            accessor, [_path()], [],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={'e': ['ada', 'ben']}))
 
     assert io.exit_code == 0
     assert seen["resolved"] == ["/email/INBOX"]
@@ -87,9 +89,8 @@ async def test_rg_single_pattern_uses_imap_search():
             "mirage.commands.builtin.email.rg.resolve_glob",
             new=AsyncMock(side_effect=AssertionError("glob ran")),
     ):
-        _, io = await rg(accessor, [_path()],
-                         "ada",
-                         index=RAMIndexCacheStore())
+        _, io = await rg(accessor, [_path()], ['ada'],
+                         CommandOpts(index=RAMIndexCacheStore()))
 
     assert io.exit_code == 1
     search.assert_awaited_once()

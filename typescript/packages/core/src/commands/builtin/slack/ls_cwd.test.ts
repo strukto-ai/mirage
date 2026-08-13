@@ -70,7 +70,6 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
         filetypeFns: null,
         cwd: '/slack/channels',
         mountPrefix: '/slack',
-        resource,
         index: idx,
       },
     )
@@ -82,7 +81,6 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       filetypeFns: null,
       cwd: '/slack/channels/general__C1',
       mountPrefix: '/slack',
-      resource,
       index: idx,
     })
     expect(out).not.toBeNull()

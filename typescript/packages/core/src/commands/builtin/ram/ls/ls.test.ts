@@ -34,7 +34,6 @@ async function runLs(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result

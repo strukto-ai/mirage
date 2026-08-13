@@ -43,7 +43,6 @@ async function runLs(
     flags,
     filetypeFns: null,
     cwd: options.cwd ?? '/',
-    resource,
     ...(options.mountPrefix !== undefined ? { mountPrefix: options.mountPrefix } : {}),
     ...(options.index !== undefined ? { index: options.index } : {}),
   })

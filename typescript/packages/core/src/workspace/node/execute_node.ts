@@ -68,7 +68,7 @@ import {
   handleUntil,
   handleWhile,
 } from '../executor/control.ts'
-import type { DispatchFn } from '../executor/cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import {
   handleExport,
   handleLocal,

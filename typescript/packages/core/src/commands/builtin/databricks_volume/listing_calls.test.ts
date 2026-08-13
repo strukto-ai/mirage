@@ -25,7 +25,6 @@ import {
 } from '../../../core/databricks_volume/_test_util.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { materialize } from '../../../io/types.ts'
-import type { Resource } from '../../../resource/base.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { PathSpec } from '../../../types.ts'
 import { DATABRICKS_VOLUME_COMMANDS } from './index.ts'
@@ -115,7 +114,6 @@ async function findText(
     flags: {},
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
     index,
   })
   if (result === null) return ''
@@ -138,7 +136,6 @@ async function runCmd(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
     index,
   })
 }

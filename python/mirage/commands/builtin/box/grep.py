@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.box.narrow import narrow_scope
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.box.read import read as _read
 from mirage.core.box.read import stream as _stream
 from mirage.core.box.readdir import readdir as _readdir
@@ -30,16 +30,9 @@ from mirage.types import PathSpec
 
 
 @command("grep", resource="box", spec=SPECS["grep"])
-async def grep(
-    accessor: BoxAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["grep"])
+async def grep(accessor: BoxAccessor, paths: list[PathSpec], texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
 
     resolved: list[PathSpec] = []
@@ -49,7 +42,7 @@ async def grep(
         # zero counts (-c) from files a narrowed superset would never visit.
         resolved, used_search = await narrow_scope(
             accessor,
-            index,
+            opts.index,
             paths,
             pattern,
             fixed_string=fl.as_bool("F"),
@@ -63,10 +56,10 @@ async def grep(
     return await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(_read, accessor, index),
-        read_stream=bound_op(_stream, accessor, index),
-        stdin=stdin,
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(_read, accessor, opts.index),
+        read_stream=bound_op(_stream, accessor, opts.index),
+        stdin=opts.stdin,
     )

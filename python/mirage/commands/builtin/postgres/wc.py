@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 parse_flags, wc_generic)
 from mirage.commands.builtin.generic_bind.adapter import bound_op
@@ -23,7 +22,6 @@ from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres import _client
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
@@ -32,19 +30,14 @@ from mirage.types import PathSpec
 
 
 @command("wc", resource="postgres", spec=SPECS["wc"])
-async def wc(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def wc(accessor: PostgresAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(opts.flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
     # Line counts on tables/views come from a server-side COUNT(*) instead
     # of reading every row. -l only (default prints words and bytes too,
     # which needs the content).
@@ -66,6 +59,5 @@ async def wc(
                 total += count
         return format_count_rows(rows, WCCounts(lines=total), len(resolved),
                                  parsed), IOResult()
-    return await wc_generic(resolved, list(texts),
-                            CommandOpts(stdin=stdin, flags=flags),
-                            bound_op(postgres_read, accessor, index))
+    return await wc_generic(resolved, list(texts), opts,
+                            bound_op(postgres_read, accessor, opts.index))

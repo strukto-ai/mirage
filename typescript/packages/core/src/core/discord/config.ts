@@ -13,23 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+} from '../../resource/secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
-
-export interface DiscordConfig {
-  token: string
-  baseUrl?: string
-}
-
-export interface DiscordConfigRedacted {
-  token: '<REDACTED>'
-  baseUrl?: string
-}
 
 export const DiscordConfigSchema = z.object({
   token: secretStr(),
   baseUrl: z.string().optional(),
 })
+
+export type DiscordConfig = ConfigOf<typeof DiscordConfigSchema>
+
+export type DiscordConfigRedacted = RedactedConfig<DiscordConfig, 'token'>
 
 export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacted {
   return redactConfigWithSchema(DiscordConfigSchema, config) as unknown as DiscordConfigRedacted

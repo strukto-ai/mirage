@@ -21,7 +21,7 @@ import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../utils/
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import type { DispatchFn } from '../cross_mount.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'

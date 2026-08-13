@@ -33,7 +33,6 @@ async function runCut(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result
@@ -126,7 +125,6 @@ describe('cut', () => {
       flags: { fields: '1' },
       filetypeFns: null,
       cwd: '/',
-      resource,
     })
     if (result === null) throw new Error('result null')
     const [, ioResult] = result
@@ -150,7 +148,6 @@ describe('cut', () => {
       flags: { fields: '1', delimiter: ',,' },
       filetypeFns: null,
       cwd: '/',
-      resource,
     })
     if (result === null) throw new Error('result null')
     const [out, ioResult] = result

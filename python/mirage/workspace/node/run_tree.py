@@ -20,6 +20,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import ExecuteResultContext, post_execute_gate
 from mirage.runtime.policy import PolicyDecision
+from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.types import Producer
@@ -31,7 +32,7 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def run_command_tree(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     registry: MountRegistry,
     namespace: Namespace,
     job_table: JobTable,
@@ -55,7 +56,7 @@ async def run_command_tree(
     inside the barrier here.
 
     Args:
-        dispatch (Callable): VFS op dispatcher (op, path, **kw).
+        dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
         registry (MountRegistry): mount registry for path resolution.
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.

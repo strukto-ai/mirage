@@ -24,7 +24,7 @@ import { PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import type { DispatchFn } from './cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]

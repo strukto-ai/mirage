@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
@@ -21,10 +20,11 @@ from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.readdir import readdir as _readdir
@@ -42,16 +42,10 @@ SEARCHABLE_SCOPE_TYPES = (MongoDBEntityScope, MongoDBDatabaseScope,
 
 
 @command("rg", resource="mongodb", spec=SPECS["rg"])
-async def rg(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rg"])
+async def rg(accessor: MongoDBAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
@@ -62,7 +56,7 @@ async def rg(
     # The $regex push-down prints each matching document as a whole line, so
     # output/match-shaping flags must defer to the generic scan below.
     if (paths and not has_unresolved_glob(paths) and "\n" not in pattern_str
-            and not has_search_shaping_flags(flags)):
+            and not has_search_shaping_flags(opts.flags)):
         scope = detect_scope(paths[0])
 
         if isinstance(scope, SEARCHABLE_SCOPE_TYPES):
@@ -99,14 +93,14 @@ async def rg(
             return format_records(all_lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths,
-                                  index=index) if paths else []
+                                  index=opts.index) if paths else []
     return await generic_rg(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(mongodb_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(mongodb_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )

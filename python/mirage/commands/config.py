@@ -13,15 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, cast
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import FlagValue, Option
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
+from mirage.runtime.base import Runtime
+from mirage.runtime.types import DispatchFn
 from mirage.types import Limit, PathSpec
 from mirage.version import __version__
 
@@ -44,31 +49,108 @@ def cwd_str(cwd: PathSpec | str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class CommandOpts:
-    """Options bag the wiring hands a generic command.
+    """The dispatcher context of one command invocation, as one value.
 
     Mirrors the TypeScript ``CommandOpts`` (commands/config.ts): the
-    dispatcher context a generic interprets itself, as one typed value.
-    Builders and bespoke backend wrappers construct it from their own
-    keyword arguments and pass it alongside the bound backend ops; the
-    generic owns everything inside it (flag parsing via a spec-bound
-    FlagView, the stdin fallback), the wiring owns everything outside it
-    (glob resolution, op binding, push-downs).
+    dispatcher (``Mount.execute_cmd``) constructs it once and hands it
+    to every handler as the fourth argument, so builders and bespoke
+    backend wrappers are wiring that passes it through. The generic owns
+    everything inside it (flag parsing via a spec-bound FlagView, the
+    stdin fallback); the wiring owns everything outside it (glob
+    resolution, op binding, push-downs). A handler reads the fields it
+    wants and ignores the rest, so there is no opt-in registry anywhere.
 
     Args:
         stdin (ByteSource | None): Piped standard input, if any.
         flags (Mapping[str, FlagValue]): The parsed command-line flag
-            bag, forwarded wholesale.
+            bag — only real flags, no injected context.
         cwd (PathSpec | str): The session's working directory, as the
             dispatcher injected it — a PathSpec keeps the mount-relative
             key for operand defaulting, a plain string is root-mounted.
         mount_prefix (str): The owning mount's prefix, for commands that
             render mount-relative names.
+        filetype_fns (Mapping[str, CommandFn] | None): Extension-specific
+            handlers of the same command, for a generic that delegates
+            per operand; None when the handler itself is one of them.
+        command (str | None): The full command string, set on the
+            provision path only.
+        spec (CommandSpec | None): The invoked command's spec, set on the
+            provision path: a provision function is shared across
+            commands, so it needs the spec to resolve a flag spelling.
+        index (IndexCacheStore): The mount's index cache store.
+        dispatch (DispatchFn | None): The workspace op dispatch, for
+            interpreter commands whose sandboxed I/O rides it.
+        session_id (str | None): The calling session, for commands that
+            record per-session state.
+        env (dict[str, str] | None): The session environment.
+        exec_allowed (bool): Whether the policy layer permits spawning
+            an interpreter.
+        runtime (Runtime | None): The resolved runtime for interpreter
+            commands.
+        runtime_unavailable (str | None): The hint naming why the
+            requested runtime is unavailable. Python-only: the TS
+            runtime table refuses at resolution time instead.
+        ns (NamespaceView | None): The name plane's facts (symlinks,
+            mount boundaries, attr overlay, child names the namespace
+            owes a directory), which no backend can see.
+        stat_path (StatPath | None): Dispatcher-backed stat of one path,
+            for a traversal command's start point.
+        readdir_path (ReaddirPath | None): Dispatcher-backed readdir of
+            one path, for a walker that reads past a mount boundary.
+        session_view (SessionView | None): The session plane's live,
+            gated handle (reads and gate-cleared writes); ``env`` above
+            stays the frozen process-view snapshot.
     """
 
     stdin: ByteSource | None = None
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     cwd: PathSpec | str = "/"
     mount_prefix: str = ""
+    filetype_fns: Mapping[str, "CommandFn"] | None = None
+    command: str | None = None
+    spec: CommandSpec | None = None
+    index: IndexCacheStore = NULL_INDEX
+    dispatch: DispatchFn | None = None
+    session_id: str | None = None
+    env: dict[str, str] | None = None
+    exec_allowed: bool = True
+    runtime: Runtime | None = None
+    runtime_unavailable: str | None = None
+    ns: NamespaceView | None = None
+    stat_path: StatPath | None = None
+    readdir_path: ReaddirPath | None = None
+    session_view: SessionView | None = None
+
+
+CommandFnResult = tuple[ByteSource | None, IOResult] | None
+
+
+class CommandFn(Protocol):
+    """Command handler signature, mirroring the TS ``CommandFn``.
+
+    Four positional parameters — accessor, paths, texts, opts — on both
+    sides. Handlers that narrow the accessor to their backend's type are
+    cast at registration (``command``), exactly like the TS
+    ``options.fn as CommandFn``, so the dispatcher call site stays
+    typed.
+    """
+
+    def __call__(self, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> Awaitable[CommandFnResult]:
+        ...
+
+
+class ProvisionFn(Protocol):
+    """Provision estimator signature, mirroring the TS ``ProvisionFn``.
+
+    Same four positional parameters as ``CommandFn``; the provision-only
+    context (``command``, ``spec``) rides in ``opts``.
+    """
+
+    def __call__(self, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str], opts: CommandOpts) -> Awaitable[Any]:
+        ...
 
 
 HELP_OPTION = Option(
@@ -117,7 +199,7 @@ def version_request(name: str, spec: CommandSpec | None,
 
 def _with_help_support(
         name: str, spec: CommandSpec,
-        fn: Callable[..., Any]) -> tuple[CommandSpec, Callable[..., Any]]:
+        fn: Callable[..., Any]) -> tuple[CommandSpec, CommandFn]:
     """Inject --help / --version and short-circuit them before the handler.
 
     Mirrors GNU coreutils: every registered command accepts both flags,
@@ -134,12 +216,13 @@ def _with_help_support(
     version_text = _version_line(name)
 
     @functools.wraps(fn)
-    async def wrapper(accessor, paths, *texts, **kwargs):
-        if kwargs.get("help") is True:
+    async def wrapper(accessor: Accessor, paths: list[PathSpec],
+                      texts: list[str], opts: CommandOpts) -> CommandFnResult:
+        if opts.flags.get("help") is True:
             return yield_bytes(help_text), IOResult()
-        if kwargs.get("version") is True:
+        if opts.flags.get("version") is True:
             return yield_bytes(version_text), IOResult()
-        return await fn(accessor, paths, *texts, **kwargs)
+        return await fn(accessor, paths, texts, opts)
 
     return new_spec, wrapper
 
@@ -150,8 +233,8 @@ class RegisteredCommand:
     spec: CommandSpec
     resource: str | None
     filetype: str | None
-    fn: Callable[..., Any]
-    provision_fn: Callable[..., Any] | None = None
+    fn: CommandFn
+    provision_fn: ProvisionFn | None = None
     aggregate: Callable[..., Any] | None = None
     src: str | None = None
     dst: str | None = None
@@ -175,6 +258,7 @@ def command(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         resources = (resource if isinstance(resource, list) else [resource])
         new_spec, wrapped_fn = _with_help_support(name, spec, fn)
+        provision_fn = cast(ProvisionFn | None, provision or dry_run)
         cmds = getattr(wrapped_fn, "_registered_commands", [])
         for p in resources:
             rc = RegisteredCommand(
@@ -183,7 +267,7 @@ def command(
                 resource=p,
                 filetype=filetype,
                 fn=wrapped_fn,
-                provision_fn=provision or dry_run,
+                provision_fn=provision_fn,
                 aggregate=aggregate,
                 write=write,
                 limit=limit,
@@ -209,7 +293,7 @@ def cross_command(
             spec=spec,
             resource=f"{src}->{dst}",
             filetype=None,
-            fn=fn,
+            fn=cast(CommandFn, fn),
             src=src,
             dst=dst,
         )

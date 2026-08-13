@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface AliyunConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  region?: string
-  endpoint?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface AliyunConfigRedacted extends Omit<AliyunConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const AliyunConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const AliyunConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type AliyunConfig = ConfigOf<typeof AliyunConfigSchema>
+
+export type AliyunConfigRedacted = RedactedConfig<AliyunConfig, 'presignedUrlProvider'>
 
 export function resolvedAliyunEndpoint(config: AliyunConfig): string | undefined {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

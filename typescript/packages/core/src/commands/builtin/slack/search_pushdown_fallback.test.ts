@@ -37,7 +37,6 @@ async function runGrep(
     flags: { args_l: true, w: true },
     filetypeFns: null,
     cwd: '/',
-    resource,
     index: options.index,
   })
   if (result === null) return { stdout: '', stderr: '', exitCode: 0 }
@@ -69,7 +68,6 @@ async function runRg(
     flags: { args_l: true, w: true },
     filetypeFns: null,
     cwd: '/',
-    resource,
     index: options.index,
   })
   if (result === null) return { stdout: '', stderr: '', exitCode: 0 }

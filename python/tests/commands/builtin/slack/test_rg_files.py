@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.slack.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
@@ -45,20 +46,12 @@ async def test_rg_messages_only_when_chat_jsonl(accessor, index):
             patch("mirage.commands.builtin.slack.rg.search_files",
                   new_callable=AsyncMock) as mock_files,
     ):
-        await rg(
-            accessor,
-            [
-                PathSpec(
-                    resource_path=mount_key(
-                        "/channels/general__C001/2026-04-10/chat.jsonl", ""),
-                    virtual="/channels/general__C001/2026-04-10/chat.jsonl",
-                    directory="/channels/general__C001/2026-04-10/chat.jsonl",
-                )
-            ],
-            "foo",
-            w=True,
-            index=index,
-        )
+        await rg(accessor, [
+            PathSpec(resource_path=mount_key(
+                '/channels/general__C001/2026-04-10/chat.jsonl', ''),
+                     virtual='/channels/general__C001/2026-04-10/chat.jsonl',
+                     directory='/channels/general__C001/2026-04-10/chat.jsonl')
+        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
     assert mock_msgs.await_count == 1
     assert mock_files.await_count == 0
 
@@ -74,20 +67,12 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
                   new_callable=AsyncMock,
                   return_value=(b"", None)) as mock_generic,
     ):
-        await rg(
-            accessor,
-            [
-                PathSpec(
-                    resource_path=mount_key(
-                        "/channels/general__C001/2026-04-10/files", ""),
-                    virtual="/channels/general__C001/2026-04-10/files",
-                    directory="/channels/general__C001/2026-04-10/files",
-                )
-            ],
-            "foo",
-            w=True,
-            index=index,
-        )
+        await rg(accessor, [
+            PathSpec(resource_path=mount_key(
+                '/channels/general__C001/2026-04-10/files', ''),
+                     virtual='/channels/general__C001/2026-04-10/files',
+                     directory='/channels/general__C001/2026-04-10/files')
+        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
     assert mock_generic.await_count == 1
@@ -105,20 +90,12 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
                   new_callable=AsyncMock,
                   return_value=files_payload) as mock_files,
     ):
-        await rg(
-            accessor,
-            [
-                PathSpec(
-                    resource_path=mount_key(
-                        "/channels/general__C001/2026-04-10", ""),
-                    virtual="/channels/general__C001/2026-04-10",
-                    directory="/channels/general__C001/2026-04-10",
-                )
-            ],
-            "foo",
-            w=True,
-            index=index,
-        )
+        await rg(accessor, [
+            PathSpec(resource_path=mount_key(
+                '/channels/general__C001/2026-04-10', ''),
+                     virtual='/channels/general__C001/2026-04-10',
+                     directory='/channels/general__C001/2026-04-10')
+        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
     assert mock_msgs.await_count == 1
     assert mock_files.await_count == 1
 
@@ -134,20 +111,12 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
                   new_callable=AsyncMock) as mock_files,
     ):
         from mirage.commands.builtin.slack.grep import grep
-        await grep(
-            accessor,
-            [
-                PathSpec(
-                    resource_path=mount_key(
-                        "/channels/general__C001/2026-04-10/chat.jsonl", ""),
-                    virtual="/channels/general__C001/2026-04-10/chat.jsonl",
-                    directory="/channels/general__C001/2026-04-10/chat.jsonl",
-                )
-            ],
-            "foo",
-            w=True,
-            index=index,
-        )
+        await grep(accessor, [
+            PathSpec(resource_path=mount_key(
+                '/channels/general__C001/2026-04-10/chat.jsonl', ''),
+                     virtual='/channels/general__C001/2026-04-10/chat.jsonl',
+                     directory='/channels/general__C001/2026-04-10/chat.jsonl')
+        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
     assert mock_msgs.await_count == 1
     assert mock_files.await_count == 0
 
@@ -177,20 +146,12 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
                                         type=FileType.TEXT)),
     ):
         from mirage.commands.builtin.slack.grep import grep
-        out, io = await grep(
-            accessor,
-            [
-                PathSpec(
-                    resource_path=mount_key(
-                        "/channels/general__C001/2026-04-10/files", ""),
-                    virtual="/channels/general__C001/2026-04-10/files",
-                    directory="/channels/general__C001/2026-04-10/files",
-                )
-            ],
-            "foo",
-            w=True,
-            index=index,
-        )
+        out, io = await grep(accessor, [
+            PathSpec(resource_path=mount_key(
+                '/channels/general__C001/2026-04-10/files', ''),
+                     virtual='/channels/general__C001/2026-04-10/files',
+                     directory='/channels/general__C001/2026-04-10/files')
+        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
     assert mock_read.await_count >= 1

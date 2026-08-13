@@ -1,3 +1,5 @@
+import type { RedactedConfig } from '@struktoai/mirage-core'
+
 export interface NextcloudConfig {
   url: string
   username?: string
@@ -6,9 +8,7 @@ export interface NextcloudConfig {
   timeout?: number
 }
 
-export interface NextcloudConfigRedacted extends Omit<NextcloudConfig, 'password'> {
-  password?: '<REDACTED>'
-}
+export type NextcloudConfigRedacted = RedactedConfig<NextcloudConfig, 'password'>
 
 export function normalizeNextcloudConfig(config: Record<string, unknown>): NextcloudConfig {
   const url = config.url

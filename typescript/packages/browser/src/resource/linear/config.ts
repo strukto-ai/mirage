@@ -12,28 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface LinearConfig {
-  apiKey: string
-  workspace?: string
-  teamIds?: readonly string[]
-  baseUrl?: string
-}
-
-export interface LinearConfigRedacted {
-  apiKey: '<REDACTED>'
-  workspace?: string
-  teamIds?: readonly string[]
-  baseUrl?: string
-}
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 const LinearConfigSchema = z.object({
   apiKey: secretStr(),
   workspace: z.string().optional(),
-  teamIds: z.array(z.string()).optional(),
+  teamIds: z.array(z.string()).readonly().optional(),
   baseUrl: z.string().optional(),
 })
+
+export type LinearConfig = ConfigOf<typeof LinearConfigSchema>
+
+export type LinearConfigRedacted = RedactedConfig<LinearConfig, 'apiKey'>
 
 export function redactLinearConfig(config: LinearConfig): LinearConfigRedacted {
   return redactConfigWithSchema(LinearConfigSchema, config) as unknown as LinearConfigRedacted

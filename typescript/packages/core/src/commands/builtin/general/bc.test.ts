@@ -32,7 +32,6 @@ async function runBc(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result

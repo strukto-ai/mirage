@@ -12,17 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
-
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.objects import load_object_store
 from mirage.commands.cli.builtin.git.refs import load_refs
 from mirage.commands.cli.builtin.git.types import RepoLocation
+from mirage.runtime.types import DispatchFn
 
 
-async def open_repo(dispatch: Callable[..., Any],
-                    location: RepoLocation) -> BaseRepo:
+async def open_repo(dispatch: DispatchFn, location: RepoLocation) -> BaseRepo:
     """Open a repository living in a mount as a dulwich repository.
 
     This is the async-to-sync boundary the whole design turns on. Every
@@ -41,7 +39,7 @@ async def open_repo(dispatch: Callable[..., Any],
     are per-checkout.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         location (RepoLocation): the discovered repository.
     """
     store = await load_object_store(dispatch, location.commondir)

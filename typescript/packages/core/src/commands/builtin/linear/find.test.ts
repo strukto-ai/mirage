@@ -19,7 +19,6 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { LinearTransport } from '../../../core/linear/_client.ts'
-import type { Resource } from '../../../resource/base.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { LINEAR_COMMANDS } from './index.ts'
 
@@ -67,7 +66,6 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
     index: new RAMIndexCacheStore(),
   })
   if (result === null) return []

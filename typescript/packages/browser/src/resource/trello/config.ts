@@ -12,31 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface TrelloConfig {
-  apiKey: string
-  apiToken: string
-  workspaceId?: string
-  boardIds?: readonly string[]
-  baseUrl?: string
-}
-
-export interface TrelloConfigRedacted {
-  apiKey: '<REDACTED>'
-  apiToken: '<REDACTED>'
-  workspaceId?: string
-  boardIds?: readonly string[]
-  baseUrl?: string
-}
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 const TrelloConfigSchema = z.object({
   apiKey: secretStr(),
   apiToken: secretStr(),
   workspaceId: z.string().optional(),
-  boardIds: z.array(z.string()).optional(),
+  boardIds: z.array(z.string()).readonly().optional(),
   baseUrl: z.string().optional(),
 })
+
+export type TrelloConfig = ConfigOf<typeof TrelloConfigSchema>
+
+export type TrelloConfigRedacted = RedactedConfig<TrelloConfig, 'apiKey' | 'apiToken'>
 
 export function redactTrelloConfig(config: TrelloConfig): TrelloConfigRedacted {
   return redactConfigWithSchema(TrelloConfigSchema, config) as unknown as TrelloConfigRedacted

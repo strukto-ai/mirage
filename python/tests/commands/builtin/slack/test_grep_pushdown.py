@@ -19,6 +19,7 @@ import pytest
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -47,12 +48,13 @@ async def test_grep_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(return_value=fake_payload),
     ) as fake_search:
-        out, io = await grep(accessor,
-                             _concrete_paths(7),
-                             "hello",
-                             w=True,
-                             index=RAMIndexCacheStore(),
-                             i=True)
+        out, io = await grep(
+            accessor, _concrete_paths(7), ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={
+                            'w': True,
+                            'i': True
+                        }))
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello there" in out
@@ -68,12 +70,13 @@ async def test_rg_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.slack.rg.search_messages",
             new=AsyncMock(return_value=fake_payload),
     ) as fake_search:
-        out, io = await rg(accessor,
-                           _concrete_paths(7),
-                           "hello",
-                           w=True,
-                           index=RAMIndexCacheStore(),
-                           i=True)
+        out, io = await rg(
+            accessor, _concrete_paths(7), ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={
+                            'w': True,
+                            'i': True
+                        }))
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello rg" in out
@@ -111,12 +114,13 @@ async def test_grep_falls_back_when_native_search_raises():
             new=AsyncMock(return_value=FileStat(
                 name="chat.jsonl", type=FileType.TEXT, size=0)),
     ):
-        out, io = await grep(accessor,
-                             paths,
-                             "hello",
-                             w=True,
-                             index=RAMIndexCacheStore(),
-                             i=True)
+        out, io = await grep(
+            accessor, paths, ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={
+                            'w': True,
+                            'i': True
+                        }))
     assert io.exit_code in (0, 1)
 
 
@@ -132,11 +136,9 @@ async def test_grep_native_empty_does_not_trigger_fallback():
             "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),
     ) as fake_read:
-        out, io = await grep(accessor,
-                             _concrete_paths(7),
-                             "missing",
-                             w=True,
-                             index=RAMIndexCacheStore())
+        out, io = await grep(
+            accessor, _concrete_paths(7), ['missing'],
+            CommandOpts(index=RAMIndexCacheStore(), flags={'w': True}))
     assert fake_search.await_count == 1
     assert fake_read.await_count == 0
     assert io.exit_code == 1
@@ -166,11 +168,9 @@ async def test_grep_without_word_flag_skips_native_search():
         # accessor cannot serve any file, so every operand erroring proves
         # the native path was skipped rather than silently returning
         # search results.
-        out, io = await grep(accessor,
-                             _concrete_paths(7),
-                             "hello",
-                             index=RAMIndexCacheStore(),
-                             i=True)
+        out, io = await grep(
+            accessor, _concrete_paths(7), ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(), flags={'i': True}))
     fake_search.assert_not_awaited()
     assert out == b""
     assert io.exit_code == 2

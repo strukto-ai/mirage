@@ -15,42 +15,34 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.builtin.generic.mv import parse_mv_flags
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.cp import overlayable_stat
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import NamespaceView
 from mirage.types import NativeMove, PathSpec
 
 
-async def mv(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    ns: NamespaceView | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    stat_overlay = ns.stat_overlay if ns is not None else None
+async def mv(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("mv: no resource")
-    fl = FlagView(flags, spec=SPECS["mv"])
+    fl = FlagView(opts.flags, spec=SPECS["mv"])
     parsed = parse_mv_flags(fl)
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
     return await generic_mv(
         paths,
         strategy=NativeMove(
             rename=partial(ops.require(Operation.RENAME), accessor)),
-        stat=overlayable_stat(ops, accessor, index, stat_overlay),
+        stat=overlayable_stat(ops, accessor, opts.index, overlay),
         flags=parsed,
-        readdir=bound_op(ops.readdir, accessor, index))
+        readdir=bound_op(ops.readdir, accessor, opts.index))
 
 
 BUILDER = Builder('mv',

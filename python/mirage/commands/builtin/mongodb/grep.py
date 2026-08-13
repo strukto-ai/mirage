@@ -15,7 +15,6 @@
 import asyncio
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
@@ -23,9 +22,10 @@ from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.readdir import readdir as _readdir
@@ -44,16 +44,10 @@ SEARCHABLE_SCOPE_TYPES = (MongoDBEntityScope, MongoDBDatabaseScope,
 
 
 @command("grep", resource="mongodb", spec=SPECS["grep"])
-async def grep(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["grep"])
+async def grep(accessor: MongoDBAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
 
     config = accessor.config
@@ -62,12 +56,13 @@ async def grep(
     # The $regex push-down prints each matching document as a whole line, so
     # output/match-shaping flags must defer to the generic scan below.
     if (paths and not has_unresolved_glob(paths) and pattern is not None
-            and "\n" not in pattern and not has_search_shaping_flags(flags)):
+            and "\n" not in pattern
+            and not has_search_shaping_flags(opts.flags)):
         scope = detect_scope(paths[0])
 
         if isinstance(scope, SEARCHABLE_SCOPE_TYPES):
             if not isinstance(scope, MongoDBRootScope):
-                await _stat(accessor, paths[0], index=index)
+                await _stat(accessor, paths[0], index=opts.index)
             if isinstance(scope, MongoDBEntityScope):
                 docs = await search_collection(
                     accessor.client,
@@ -108,14 +103,14 @@ async def grep(
             return format_records(all_lines), IOResult()
 
     resolved = await resolve_glob(accessor, paths,
-                                  index=index) if paths else []
+                                  index=opts.index) if paths else []
     return await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(mongodb_read, accessor, index),
-        read_stream=bound_op(read_stream, accessor, index),
-        stdin=stdin,
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(mongodb_read, accessor, opts.index),
+        read_stream=bound_op(read_stream, accessor, opts.index),
+        stdin=opts.stdin,
     )

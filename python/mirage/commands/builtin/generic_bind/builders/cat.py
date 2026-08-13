@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
@@ -22,26 +21,19 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def cat(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, index)
+async def cat(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await cat_generic(resolved,
                              list(texts),
-                             CommandOpts(stdin=stdin, flags=flags),
-                             dir_aware_stat(ops, accessor, index),
-                             bound_op(ops.read_stream, accessor, index),
+                             opts,
+                             dir_aware_stat(ops, accessor, opts.index),
+                             bound_op(ops.read_stream, accessor, opts.index),
                              local=ops.local)
 
 

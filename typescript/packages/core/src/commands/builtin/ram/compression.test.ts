@@ -39,7 +39,6 @@ async function runCmd(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: new Uint8Array(), writes: {}, exitCode: 0 }
   const [output, io] = result as [unknown, { writes: Record<string, Uint8Array>; exitCode: number }]

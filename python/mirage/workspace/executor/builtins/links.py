@@ -14,10 +14,9 @@
 
 import dataclasses
 import posixpath
-from collections.abc import Callable
-from typing import Any
 
 from mirage.io import IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import MISS_ERRORS
 from mirage.utils.path import CycleError
@@ -35,7 +34,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
 
 async def handle_ln(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -53,7 +52,7 @@ async def handle_ln(
 
     Args:
         namespace (Namespace): addressing authority holding the link table.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         session (Session): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
     """
@@ -102,7 +101,7 @@ async def handle_ln(
     return ok("ln", out)
 
 
-async def resolve_path_stat(dispatch: Callable[..., Any],
+async def resolve_path_stat(dispatch: DispatchFn,
                             path: PathSpec) -> FileStat | None:
     """What a path is, asked on both channels a backend can answer on.
 
@@ -118,7 +117,7 @@ async def resolve_path_stat(dispatch: Callable[..., Any],
     here, a missing path does not.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         path (PathSpec): path to resolve.
     """
     try:
@@ -137,8 +136,7 @@ async def resolve_path_stat(dispatch: Callable[..., Any],
                     type=FileType.DIRECTORY)
 
 
-async def path_stat(dispatch: Callable[..., Any],
-                    virtual: str) -> FileStat | None:
+async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
     """Stat one virtual path through the workspace, None when absent.
 
     Resolves through the op dispatcher rather than one backend, so a path
@@ -147,7 +145,7 @@ async def path_stat(dispatch: Callable[..., Any],
     file is reported as itself, and None is GNU's missing-operand error.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path.
     """
     spec = PathSpec(virtual=virtual,
@@ -156,8 +154,7 @@ async def path_stat(dispatch: Callable[..., Any],
     return await resolve_path_stat(dispatch, spec)
 
 
-async def path_readdir(dispatch: Callable[..., Any],
-                       virtual: str) -> list[str]:
+async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
     """List one virtual path through the workspace, as virtual paths.
 
     Resolves through the op dispatcher rather than one backend, so a
@@ -166,7 +163,7 @@ async def path_readdir(dispatch: Callable[..., Any],
     mount lives in a resource the walker's own accessor cannot open.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path of the directory.
     """
     spec = PathSpec(virtual=virtual,
@@ -176,11 +173,11 @@ async def path_readdir(dispatch: Callable[..., Any],
     return list(entries)
 
 
-async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+async def path_exists(dispatch: DispatchFn, virtual: str) -> bool:
     """Whether a resolved virtual path names something that exists.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path.
     """
     try:
@@ -189,7 +186,7 @@ async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
         return False
 
 
-async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
+async def link_target_stat(namespace: Namespace, dispatch: DispatchFn,
                            virtual: str) -> FileStat | None:
     """The stat of what a link points at, or None when it dangles.
 
@@ -206,7 +203,7 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
 
     Args:
         namespace (Namespace): addressing authority holding the links.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path of the link.
     """
     try:
@@ -221,7 +218,7 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
 
 async def handle_readlink(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -234,7 +231,7 @@ async def handle_readlink(
 
     Args:
         namespace (Namespace): addressing authority holding the links.
-        dispatch (Callable): op dispatcher, used for the existence check.
+        dispatch (DispatchFn): op dispatcher, used for the existence check.
         session (Session): current session, for the working directory.
         args (list[str | PathSpec]): the command's words after the name.
     """
@@ -356,12 +353,12 @@ async def strip_link_operands(
     return kept, removed
 
 
-async def _stat_or_none(dispatch: Callable[..., Any],
+async def _stat_or_none(dispatch: DispatchFn,
                         path: PathSpec) -> FileStat | None:
     """Stat a path via dispatch, mapping a missing file to ``None``.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         path (PathSpec): path to stat.
     """
     # A missing destination is an expected mv case (plain rename), not an
@@ -375,7 +372,7 @@ async def _stat_or_none(dispatch: Callable[..., Any],
 
 async def prepare_mv(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None, Result
            | None]:
@@ -390,7 +387,7 @@ async def prepare_mv(
 
     Args:
         namespace (Namespace): addressing authority holding the node table.
-        dispatch (Callable): op dispatcher used to stat the destination.
+        dispatch (DispatchFn): op dispatcher used to stat the destination.
         items (list[str | PathSpec]): classified command parts.
 
     Returns:

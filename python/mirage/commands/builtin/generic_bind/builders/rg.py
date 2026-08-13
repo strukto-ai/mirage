@@ -13,35 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def rg(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore = NULL_INDEX,
-    **flags,
-) -> tuple[ByteSource | None, IOResult]:
+async def rg(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, index)
+        paths = await ops.resolve_glob(accessor, paths, opts.index)
     return await generic_rg(
         paths,
         texts,
-        flags,
-        readdir=bound_op(ops.readdir, accessor, index),
-        stat=bound_op(ops.stat, accessor, index),
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        read_stream=bound_op(ops.read_stream, accessor, index),
-        stdin=stdin,
+        opts.flags,
+        readdir=bound_op(ops.readdir, accessor, opts.index),
+        stat=bound_op(ops.stat, accessor, opts.index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+        read_stream=bound_op(ops.read_stream, accessor, opts.index),
+        stdin=opts.stdin,
     )
 
 

@@ -35,7 +35,6 @@ async function runSort(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { lines: [], exitCode: -1 }
   const [out, ioResult] = result

@@ -12,33 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
-
-export interface SSHConfig {
-  host: string
-  hostname?: string
-  port?: number
-  username?: string
-  password?: string
-  identityFile?: string
-  passphrase?: string
-  root?: string
-  timeout?: number
-  knownHosts?: string
-}
-
-export interface SSHConfigRedacted {
-  host: string
-  hostname?: string
-  port?: number
-  username?: string
-  password?: '<REDACTED>'
-  identityFile?: string
-  passphrase?: '<REDACTED>'
-  root?: string
-  timeout?: number
-  knownHosts?: string
-}
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 const SSHConfigSchema = z.object({
   host: z.string(),
@@ -52,6 +33,10 @@ const SSHConfigSchema = z.object({
   timeout: z.number().optional(),
   knownHosts: z.string().optional(),
 })
+
+export type SSHConfig = ConfigOf<typeof SSHConfigSchema>
+
+export type SSHConfigRedacted = RedactedConfig<SSHConfig, 'password' | 'passphrase'>
 
 export function redactSshConfig(config: SSHConfig): SSHConfigRedacted {
   return redactConfigWithSchema(SSHConfigSchema, config) as unknown as SSHConfigRedacted

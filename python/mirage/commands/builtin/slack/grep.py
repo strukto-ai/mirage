@@ -13,18 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from dataclasses import replace
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.slack._provision import file_read_provision
 from mirage.commands.builtin.slack.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.slack.formatters import (build_query,
                                           format_file_grep_results,
                                           format_grep_results)
@@ -42,31 +43,22 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def grep_provision(
-    accessor: SlackAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: FlagValue,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)))
+async def grep_provision(accessor: SlackAccessor, paths: list[PathSpec],
+                         texts: list[str],
+                         opts: CommandOpts) -> ProvisionResult:
+    line = "grep " + " ".join(list(texts) + [str(p) for p in paths])
+    return await file_read_provision(accessor, paths, texts,
+                                     replace(opts, command=line))
 
 
 @command("grep",
          resource="slack",
          spec=SPECS["grep"],
          provision=grep_provision)
-async def grep(
-    accessor: SlackAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["grep"])
+async def grep(accessor: SlackAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
     max_count = fl.as_int("m")
 
@@ -113,14 +105,14 @@ async def grep(
                 "slack search push-down failed (%s); "
                 "falling back to per-file scan", err)
 
-    resolved = await resolve_glob(accessor, paths, index) if paths else []
+    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(slack_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(slack_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )

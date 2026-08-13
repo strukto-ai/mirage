@@ -100,9 +100,11 @@ export {
   throwUnsupported,
 } from './resource/base.ts'
 export {
+  type ConfigOf,
   hasRedactedSecret,
   REDACTED_SECRET,
   redactConfigWithSchema,
+  type RedactedConfig,
   resourceStateRequiresOverride,
   secretSchema,
   secretStr,
@@ -689,7 +691,6 @@ export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {
   command,
-  type CommandDispatch,
   type CommandFn,
   type CommandFnResult,
   type CommandOptions,

@@ -12,52 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
+from typing import Any
 
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (CPYTHON_ARGV0,
                                                          resolve_source,
                                                          run_code)
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, CommandOutput
-from mirage.runtime.base import Runtime
+from mirage.commands.spec.types import FlagView
+from mirage.io.types import CommandOutput
 from mirage.types import PathSpec
 
 
 async def _python3(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    c: str | None = None,
-    m: str | None = None,
-    u: bool = False,
-    q: bool = False,
-    b: int = 0,
-    B: bool = False,
-    E: bool = False,
-    P: bool = False,
-    s: bool = False,
-    S: bool = False,
-    x: bool = False,
-    args_I: bool = False,
-    args_O: int = 0,
-    W: list[str] | None = None,
-    X: list[str] | None = None,
-    check_hash_based_pycs: str | None = None,
-    stdin: ByteSource | None = None,
-    dispatch: Callable[..., Any] | None = None,
-    cwd: PathSpec | None = None,
-    env: dict[str, str] | None = None,
-    exec_allowed: bool = True,
-    runtime: Runtime | None = None,
-    runtime_unavailable: str | None = None,
-    **_extra: FlagValue,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> CommandOutput:
-    error, prepared = await resolve_source("python3", paths, texts, c, stdin,
-                                           dispatch, cwd, exec_allowed, m,
-                                           CPYTHON_ARGV0, x)
+    fl = FlagView(opts.flags, spec=SPECS["python3"])
+    error, prepared = await resolve_source("python3", paths, texts,
+                                           fl.as_str("c"), opts.stdin,
+                                           opts.dispatch,
+                                           opts.cwd, opts.exec_allowed,
+                                           fl.as_str("m"), CPYTHON_ARGV0,
+                                           fl.as_bool("x"))
     if error is not None or prepared is None:
         assert error is not None
         return error
@@ -69,20 +50,20 @@ async def _python3(
     # than configuring an interpreter, so resolve_source answered it
     # above.
     init_flags: dict[str, Any] = {
-        "b": b,
-        "B": B,
-        "E": E,
-        "I": args_I,
-        "O": args_O,
-        "P": P,
-        "s": s,
-        "S": S,
-        "W": W or [],
-        "X": X or [],
-        "check_hash_based_pycs": check_hash_based_pycs,
+        "b": fl.as_int("b") or 0,
+        "B": fl.as_bool("B"),
+        "E": fl.as_bool("E"),
+        "I": fl.as_bool("args_I"),
+        "O": fl.as_int("args_O") or 0,
+        "P": fl.as_bool("P"),
+        "s": fl.as_bool("s"),
+        "S": fl.as_bool("S"),
+        "W": fl.as_list("W"),
+        "X": fl.as_list("X"),
+        "check_hash_based_pycs": fl.as_str("check_hash_based_pycs"),
     }
-    return await run_code("python3", prepared, env, init_flags, runtime,
-                          runtime_unavailable)
+    return await run_code("python3", prepared, opts.env, init_flags,
+                          opts.runtime, opts.runtime_unavailable)
 
 
 python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)

@@ -22,7 +22,6 @@ from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
@@ -50,18 +49,13 @@ async def stream_any(accessor: MongoDBAccessor, path: PathSpec, *,
 
 
 @command("cat", resource="mongodb", spec=SPECS["cat"])
-async def cat(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(IO, accessor, paths, index)
+async def cat(accessor: MongoDBAccessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
     return await cat_generic(resolved,
                              list(texts),
-                             CommandOpts(stdin=stdin, flags=flags),
-                             bound_op(IO.stat, accessor, index),
-                             bound_op(stream_any, accessor, index),
+                             opts,
+                             bound_op(IO.stat, accessor, opts.index),
+                             bound_op(stream_any, accessor, opts.index),
                              local=IO.local)

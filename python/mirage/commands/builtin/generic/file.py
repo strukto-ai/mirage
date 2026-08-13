@@ -107,16 +107,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FileFlags:
     return FileFlags(brief=fl.as_bool("b"), mime=fl.as_bool("i"))
 
 
-async def file_generic(paths,
-                       texts,
-                       opts: CommandOpts,
-                       read_bytes,
-                       stat_fn,
-                       links=None):
+async def file_generic(paths, texts, opts: CommandOpts, read_bytes, stat_fn):
     parsed = parse_flags(opts.flags)
     return await file_cmd(paths,
                           read_bytes=read_bytes,
                           stat_fn=stat_fn,
                           b=parsed.brief,
                           i=parsed.mime,
-                          links=links)
+                          links=opts.ns.links if opts.ns is not None else None)

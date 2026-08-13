@@ -22,7 +22,7 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
-import { redactConfigWithSchema } from '../resource/secrets.ts'
+import { type ConfigOf, redactConfigWithSchema, type RedactedConfig } from '../resource/secrets.ts'
 import { normalizeFields } from '../utils/normalize.ts'
 import { stripSlash } from '../utils/slash.ts'
 
@@ -32,19 +32,6 @@ export interface OneDriveConfig extends MsGraphConfig {
   // A Teams/Microsoft 365 group's document library, and another user's
   // drive under app-only auth. Both are reachable without first resolving
   // a drive id out of band.
-  groupId?: string
-  userId?: string
-  keyPrefix?: string
-}
-
-export interface OneDriveConfigRedacted {
-  accessToken: '<REDACTED>'
-  tenantHost?: string
-  graphBaseUrl?: string
-  timeout?: number
-  maxRetries?: number
-  driveId?: string
-  siteId?: string
   groupId?: string
   userId?: string
   keyPrefix?: string
@@ -74,6 +61,11 @@ export const OneDriveConfigSchema = z
   .refine((c) => DRIVE_TARGETS.filter((f) => c[f] !== undefined).length <= 1, {
     message: driveTargetError(DRIVE_TARGETS),
   })
+
+export type OneDriveConfigRedacted = RedactedConfig<
+  ConfigOf<typeof OneDriveConfigSchema>,
+  'accessToken'
+>
 
 export function redactOneDriveConfig(config: OneDriveConfig): OneDriveConfigRedacted {
   return redactConfigWithSchema(OneDriveConfigSchema, config) as unknown as OneDriveConfigRedacted

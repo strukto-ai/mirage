@@ -14,19 +14,19 @@
 
 import asyncio
 
-from mirage.commands.config import (RegisteredCommand, command, cross_command,
-                                    version_request)
+from mirage.commands.config import (CommandOpts, RegisteredCommand, command,
+                                    cross_command, version_request)
 from mirage.commands.spec import CommandSpec, Operand, Option
 from mirage.version import __version__
 
 _HANDLER_CALLS: list[str] = []
 
 
-async def _noop_handler(backend, paths, *texts, **kw):
+async def _noop_handler(backend, paths, texts, opts):
     return None, None
 
 
-async def _recording_handler(backend, paths, *texts, **kw):
+async def _recording_handler(backend, paths, texts, opts):
     _HANDLER_CALLS.append("called")
     return None, None
 
@@ -171,7 +171,7 @@ class TestVersionSupport:
         registered = command("tsort", resource="disk",
                              spec=CommandSpec())(_recording_handler)
         stdout, result = asyncio.run(registered._registered_commands[0].fn(
-            None, [], version=True))
+            None, [], [], CommandOpts(flags={"version": True})))
         assert _HANDLER_CALLS == []
         assert asyncio.run(
             _collect(stdout)) == f"tsort (Mirage) {__version__}\n".encode()
@@ -184,7 +184,8 @@ class TestVersionSupport:
             spec=CommandSpec(epilog="Services:\n  drive"))(_noop_handler)
         rc = registered._registered_commands[0]
         assert rc.spec.epilog == "Services:\n  drive"
-        stdout, result = asyncio.run(rc.fn(None, [], help=True))
+        stdout, result = asyncio.run(
+            rc.fn(None, [], [], CommandOpts(flags={"help": True})))
         assert b"Services:\n  drive\n" in asyncio.run(_collect(stdout))
         assert result.exit_code == 0
 

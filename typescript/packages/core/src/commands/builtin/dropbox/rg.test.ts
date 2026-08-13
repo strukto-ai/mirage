@@ -22,7 +22,6 @@ vi.mock('../generic/rg.ts', () => ({ rgGeneric: vi.fn() }))
 import { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import type { DropboxTokenManager } from '../../../core/dropbox/_client.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { Resource } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rgGeneric } from '../generic/rg.ts'
@@ -60,7 +59,6 @@ async function runRg(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
   }
   return cmd.fn(makeAccessor(), [scope()], ['needle'], opts)
 }

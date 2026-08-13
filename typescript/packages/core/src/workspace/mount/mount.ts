@@ -15,7 +15,6 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
-  CommandDispatch,
   CommandFn,
   CommandFnResult,
   CommandOpts,
@@ -40,6 +39,7 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { eaccesReadOnly, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
@@ -385,7 +385,7 @@ export class MountEntry {
     opts: {
       stdin?: ByteSource | null
       cwd?: string
-      dispatch?: CommandDispatch
+      dispatch?: DispatchFn
       sessionId?: string
       env?: Record<string, string>
       sessionView?: SessionView
@@ -439,7 +439,6 @@ export class MountEntry {
       filetypeFns: isFiletypeCmd ? null : filetypeFns,
       mountPrefix,
       cwd: opts.cwd ?? '/',
-      resource: this.resource,
       ...(this.resource.index !== undefined ? { index: this.resource.index } : {}),
       ...(opts.dispatch !== undefined ? { dispatch: opts.dispatch } : {}),
       ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),

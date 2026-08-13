@@ -14,18 +14,19 @@
 
 import dataclasses
 import functools
-from typing import Any, Callable
+from typing import Any
 
 from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
                                                               RunSingle)
 from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
-async def relay(dispatch: Callable[..., Any], name: str, path: PathSpec,
+async def relay(dispatch: DispatchFn, name: str, path: PathSpec,
                 **kwargs: Any) -> Any:
     # Relay one op for one path to the mount that owns it. The generics call
     # ops as (path); dispatch keys off the path.
@@ -98,11 +99,11 @@ def flat_scopes(scopes: list[PathSpec]) -> list[PathSpec]:
     ]
 
 
-def transfer_primitives(dispatch: Callable[..., Any]) -> dict[str, Any]:
+def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     """Dispatch-relayed primitives shared by the transfer generics (cp/mv).
 
     Args:
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (DispatchFn): Workspace operation dispatcher.
     """
     p = functools.partial
     return dict(

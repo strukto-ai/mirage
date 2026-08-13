@@ -21,7 +21,7 @@ def _sample(items: list[str], count: int | None,
 
 async def shuf(
     paths: list[PathSpec],
-    texts: tuple[str, ...],
+    texts: list[str],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     stdin: ByteSource | None = None,

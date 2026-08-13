@@ -13,18 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes, relay
 from mirage.commands.builtin.generic.paste import paste as generic_paste
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
 
 async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
-                    dispatch: Callable[..., Any]) -> CrossResult:
+                    dispatch: DispatchFn) -> CrossResult:
     """Paste files on different mounts via the shared generic paste.
 
     Pure wiring: every operand is read through dispatch-relayed
@@ -33,7 +33,7 @@ async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
     Args:
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared paste spec.
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (DispatchFn): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["paste"])
     d = fl.as_str("delimiters")

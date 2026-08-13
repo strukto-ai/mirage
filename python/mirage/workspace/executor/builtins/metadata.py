@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_chmod
@@ -160,7 +160,7 @@ def _permission_error(cmd: str, namespace: Namespace, path: PathSpec,
 
 
 async def _setattr_via(
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     path: PathSpec,
     *,
     mode: int | None = None,
@@ -178,7 +178,7 @@ async def _setattr_via(
     seam so every metadata builtin shares one call shape.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         path (PathSpec): target path (already link-resolved).
         mode (int | None): permission bits (e.g. 0o644).
         uid (int | str | None): owner id or name.
@@ -197,7 +197,7 @@ async def _setattr_via(
 
 async def _apply_link_attrs(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     cmd: str,
     path: PathSpec,
     errors: list[str],
@@ -214,7 +214,7 @@ async def _apply_link_attrs(
 
     Args:
         namespace (Namespace): addressing authority (error rendering).
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error message.
         path (PathSpec): the link's own path.
         errors (list[str]): per-operand error accumulator.
@@ -260,7 +260,7 @@ def _follow_operand(
 
 async def _resolve_operand(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     cmd: str,
     target: PathSpec,
     errors: list[str],
@@ -269,7 +269,7 @@ async def _resolve_operand(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error messages.
         target (PathSpec): the operand as typed.
         errors (list[str]): per-operand error accumulator.
@@ -288,7 +288,7 @@ async def _resolve_operand(
 
 async def _apply_attrs(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     cmd: str,
     resolved: PathSpec,
     errors: list[str],
@@ -301,7 +301,7 @@ async def _apply_attrs(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error message.
         resolved (PathSpec): link-resolved target path.
         errors (list[str]): per-operand error accumulator.
@@ -317,7 +317,7 @@ async def _apply_attrs(
 
 async def _walk_stats(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
 ) -> list[tuple[PathSpec, FileStat]]:
@@ -333,7 +333,7 @@ async def _walk_stats(
 
     Args:
         namespace (Namespace): addressing authority (link table).
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
     """
@@ -355,7 +355,7 @@ async def _walk_stats(
 
 async def _walk_owned(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
 ) -> tuple[list[PathSpec], list[str]]:
@@ -368,7 +368,7 @@ async def _walk_owned(
 
     Args:
         namespace (Namespace): addressing authority (link table).
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root.
         root_stat (FileStat): the root's stat, already read.
     """
@@ -379,7 +379,7 @@ async def _walk_owned(
 
 async def handle_chmod(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     args: list[str | PathSpec],
 ) -> Result:
     """chmod MODE FILE...: set permission bits via setattr.
@@ -393,7 +393,7 @@ async def handle_chmod(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         args (list[str | PathSpec]): args after the command name.
     """
     flags, _values, operands, bad = split_value_flags(args, "Rvf", "")
@@ -440,7 +440,7 @@ async def handle_chmod(
 
 async def handle_chown(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     args: list[str | PathSpec],
 ) -> Result:
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
@@ -453,7 +453,7 @@ async def handle_chown(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         args (list[str | PathSpec]): args after the command name.
     """
     flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
@@ -510,7 +510,7 @@ async def handle_chown(
 
 async def handle_chgrp(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     args: list[str | PathSpec],
 ) -> Result:
     """chgrp GROUP FILE...: set group ownership via setattr.
@@ -523,7 +523,7 @@ async def handle_chgrp(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         args (list[str | PathSpec]): args after the command name.
     """
     flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
@@ -577,7 +577,7 @@ async def handle_chgrp(
 
 async def handle_touch(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -589,7 +589,7 @@ async def handle_touch(
 
     Args:
         namespace (Namespace): addressing authority.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         session (Session): session whose cwd resolves relative -r paths.
         args (list[str | PathSpec]): args after the command name.
     """

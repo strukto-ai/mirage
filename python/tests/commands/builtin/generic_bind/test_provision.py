@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic_bind.provision import (
     make_search_provision, make_transform_provision, metadata_provision,
     pure_provision, with_default_provisions, write_metadata_provision)
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.provision import Precision
@@ -113,9 +114,8 @@ def test_factory_registers_default_provisions():
 async def test_file_read_known_sizes_exact():
     provision = make_file_read_provision(_stat)
     result = await provision(
-        None, [_spec("/data/known.txt"),
-               _spec("/data/big.txt")],
-        command="cat")
+        None, [_spec('/data/known.txt'),
+               _spec('/data/big.txt')], [], CommandOpts(command='cat'))
     assert result.precision == Precision.EXACT
     assert result.network_read_low == 105
     assert result.network_read_high == 105
@@ -126,9 +126,8 @@ async def test_file_read_known_sizes_exact():
 async def test_file_read_missing_size_keeps_floor():
     provision = make_file_read_provision(_stat)
     result = await provision(
-        None, [_spec("/data/known.txt"),
-               _spec("/data/chat.jsonl")],
-        command="cat")
+        None, [_spec('/data/known.txt'),
+               _spec('/data/chat.jsonl')], [], CommandOpts(command='cat'))
     assert result.precision == Precision.UNKNOWN
     assert result.network_read_low == 5
     assert result.network_read_high == 5
@@ -139,9 +138,8 @@ async def test_file_read_missing_size_keeps_floor():
 async def test_head_tail_missing_size_keeps_known_ceiling():
     provision = make_head_tail_provision(_stat)
     result = await provision(
-        None, [_spec("/data/known.txt"),
-               _spec("/data/chat.jsonl")],
-        command="head")
+        None, [_spec('/data/known.txt'),
+               _spec('/data/chat.jsonl')], [], CommandOpts(command='head'))
     assert result.precision == Precision.UNKNOWN
     assert result.network_read_low == 0
     assert result.network_read_high == 5
@@ -151,7 +149,8 @@ async def test_head_tail_missing_size_keeps_known_ceiling():
 @pytest.mark.asyncio
 async def test_transform_keeps_read_floor_unknown_output():
     provision = make_transform_provision(_stat)
-    result = await provision(None, [_spec("/data/known.txt")], command="gzip")
+    result = await provision(None, [_spec('/data/known.txt')], [],
+                             CommandOpts(command='gzip'))
     assert result.precision == Precision.UNKNOWN
     assert result.network_read_low == 5
     assert result.network_read_high == 5
@@ -162,9 +161,8 @@ async def test_transform_keeps_read_floor_unknown_output():
 async def test_copy_brackets_read_and_write():
     provision = make_copy_provision(_stat)
     result = await provision(
-        None, [_spec("/data/known.txt"),
-               _spec("/data/dest.txt")],
-        command="cp")
+        None, [_spec('/data/known.txt'),
+               _spec('/data/dest.txt')], [], CommandOpts(command='cp'))
     assert result.precision == Precision.RANGE
     assert result.network_read_low == 0
     assert result.network_read_high == 5
@@ -175,16 +173,14 @@ async def test_copy_brackets_read_and_write():
 
 @pytest.mark.asyncio
 async def test_write_metadata_zero_bytes_recursive_floors():
-    result = await write_metadata_provision(None, [_spec("/data/known.txt")],
-                                            command="rm")
+    result = await write_metadata_provision(None, [_spec('/data/known.txt')],
+                                            [], CommandOpts(command='rm'))
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 0
     assert result.read_ops == 1
-    recursive = await write_metadata_provision(None,
-                                               [_spec("/data/known.txt")],
-                                               command="rm",
-                                               spec=SPECS["rm"],
-                                               r=True)
+    recursive = await write_metadata_provision(
+        None, [_spec('/data/known.txt')], [],
+        CommandOpts(command='rm', spec=SPECS['rm'], flags={'r': True}))
     assert recursive.precision == Precision.UNKNOWN
 
 
@@ -196,16 +192,17 @@ async def test_write_metadata_reference_flag_is_not_recursion():
     so a value-typed option under the same letter never degrades the
     estimate to a floor.
     """
-    result = await write_metadata_provision(None, [_spec("/data/known.txt")],
-                                            command="touch -r /data/ref",
-                                            spec=SPECS["touch"],
-                                            r=_spec("/data/ref"))
+    result = await write_metadata_provision(
+        None, [_spec('/data/known.txt')], [],
+        CommandOpts(command='touch -r /data/ref',
+                    spec=SPECS['touch'],
+                    flags={'r': _spec('/data/ref')}))
     assert result.precision == Precision.EXACT
 
 
 @pytest.mark.asyncio
 async def test_pure_provision_zero_exact():
-    result = await pure_provision(None, [], command="seq 3")
+    result = await pure_provision(None, [], [], CommandOpts(command='seq 3'))
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 0
     assert result.read_ops == 0
@@ -218,7 +215,7 @@ async def test_file_read_expands_globs():
                        directory="/data/tree/",
                        pattern="*.txt",
                        resource_path="tree/*.txt")
-    result = await provision(None, [pattern], command="cat")
+    result = await provision(None, [pattern], [], CommandOpts(command='cat'))
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 7
     assert result.read_ops == 1
@@ -231,7 +228,7 @@ async def test_file_read_unmatched_glob_unknown():
                        directory="/data/tree/",
                        pattern="*.nope",
                        resource_path="tree/*.nope")
-    result = await provision(None, [pattern], command="cat")
+    result = await provision(None, [pattern], [], CommandOpts(command='cat'))
     assert result.precision == Precision.UNKNOWN
     assert result.network_read_high == 0
 
@@ -239,11 +236,9 @@ async def test_file_read_unmatched_glob_unknown():
 @pytest.mark.asyncio
 async def test_search_recursive_walks_tree_exact():
     provision = make_search_provision(_stat, _resolve_glob, _readdir)
-    result = await provision(None, [_spec("/data/tree")],
-                             "x",
-                             command="grep",
-                             spec=SPECS["grep"],
-                             r=True)
+    result = await provision(
+        None, [_spec('/data/tree')], ['x'],
+        CommandOpts(command='grep', spec=SPECS['grep'], flags={'r': True}))
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 18
     assert result.read_ops == 2
@@ -252,20 +247,16 @@ async def test_search_recursive_walks_tree_exact():
 @pytest.mark.asyncio
 async def test_search_recursive_skips_columnar():
     provision = make_search_provision(_stat, _resolve_glob, _readdir)
-    result = await provision(None, [_spec("/data/tree")],
-                             "x",
-                             command="grep",
-                             r=True)
+    result = await provision(None, [_spec('/data/tree')], ['x'],
+                             CommandOpts(command='grep', flags={'r': True}))
     assert result.network_read_high != 918
 
 
 @pytest.mark.asyncio
 async def test_search_without_readdir_keeps_floor():
     provision = make_search_provision(_stat, _resolve_glob)
-    result = await provision(None, [_spec("/data/tree")],
-                             "x",
-                             command="grep",
-                             r=True)
+    result = await provision(None, [_spec('/data/tree')], ['x'],
+                             CommandOpts(command='grep', flags={'r': True}))
     assert result.precision == Precision.UNKNOWN
 
 
@@ -274,16 +265,15 @@ async def test_search_recursive_cap_degrades(monkeypatch):
     monkeypatch.setattr(
         "mirage.commands.builtin.generic_bind.provision.MAX_PLAN_WALK", 2)
     provision = make_search_provision(_stat, _resolve_glob, _readdir)
-    result = await provision(None, [_spec("/data/tree")],
-                             "x",
-                             command="grep",
-                             r=True)
+    result = await provision(None, [_spec('/data/tree')], ['x'],
+                             CommandOpts(command='grep', flags={'r': True}))
     assert result.precision == Precision.UNKNOWN
 
 
 @pytest.mark.asyncio
 async def test_exact_zero_provision_charges_nothing():
-    result = await exact_zero_provision("find /chat")
+    result = await exact_zero_provision(None, [], [],
+                                        CommandOpts(command="find /chat"))
     assert result.command == "find /chat"
     assert result.network_read_low == 0
     assert result.network_read_high == 0
@@ -304,7 +294,8 @@ async def test_index_hit_read_provision_counts_cached_operands():
                  directory="/chat",
                  resource_path="missing.jsonl"),
     ]
-    result = await index_hit_read_provision(None, paths, "cat", index)
+    result = await index_hit_read_provision(
+        None, paths, [], CommandOpts(command="cat", index=index))
     assert result.read_ops == 1
     assert result.network_read_low == 0
     assert result.precision == Precision.EXACT
@@ -312,7 +303,8 @@ async def test_index_hit_read_provision_counts_cached_operands():
 
 @pytest.mark.asyncio
 async def test_index_hit_read_provision_without_paths_is_unknown():
-    result = await index_hit_read_provision(None, [], "grep x", None)
+    result = await index_hit_read_provision(None, [], [],
+                                            CommandOpts(command="grep x"))
     assert result.precision == Precision.UNKNOWN
 
 

@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Coroutine
-from typing import Any, Callable
+from collections.abc import Awaitable
+from typing import Any
 
 from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
@@ -23,7 +23,7 @@ from mirage.observe.context import (active_recorder, reset_active_recorder,
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import plan_flush
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import VFSEntry
+from mirage.runtime.types import DispatchFn, VFSEntry
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
@@ -56,14 +56,14 @@ class RuntimeVFS:
     shell command's does.
 
     Args:
-        dispatch (Callable): the workspace dispatch coroutine function.
+        dispatch (DispatchFn): the workspace dispatch coroutine function.
         loop (asyncio.AbstractEventLoop): the loop dispatch belongs to.
         resolver (MountResolver | None): the workspace mount routing
             table; None means routing questions answer None.
     """
 
     def __init__(self,
-                 dispatch: Callable[..., Any],
+                 dispatch: DispatchFn,
                  loop: asyncio.AbstractEventLoop,
                  resolver: MountResolver | None = None) -> None:
         self._dispatch = dispatch
@@ -79,7 +79,7 @@ class RuntimeVFS:
                                                      self._loop).result()
         return result
 
-    async def _bind_session(self, coro: Coroutine[Any, Any, Any]) -> Any:
+    async def _bind_session(self, coro: Awaitable[Any]) -> Any:
         """Run one dispatched op under the captured launch context.
 
         Set inside the coroutine so the tokens land on the event-loop

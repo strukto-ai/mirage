@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Any, Callable
 
 from dulwich.repo import BaseRepo
 
@@ -35,6 +34,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatPath
+from mirage.runtime.types import DispatchFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +73,7 @@ def parse_flags(fl: FlagView) -> StatusFlags:
                        untracked=mode)
 
 
-async def render_report(dispatch: Callable[..., Any], stat_path: StatPath,
+async def render_report(dispatch: DispatchFn, stat_path: StatPath,
                         repo: BaseRepo, location: RepoLocation,
                         head: HeadRef) -> str:
     """The default status report, as a string.
@@ -83,7 +83,7 @@ async def render_report(dispatch: Callable[..., Any], stat_path: StatPath,
     two renderings of the same thing would drift.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.

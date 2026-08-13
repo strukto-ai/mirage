@@ -19,7 +19,7 @@ import type { OpKwargs } from './registry.ts'
 import type { FileStat } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { exdev, isMissingPath } from '../utils/errors.ts'
-import type { DispatchFn } from '../workspace/executor/cross_mount.ts'
+import type { DispatchFn } from '../runtime/types.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
 

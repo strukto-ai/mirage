@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.email.io import resolve_glob
@@ -23,9 +24,10 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_count_has_matches,
                                                  grep_lines, pattern_arg)
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import EmailScope, detect_scope
@@ -37,18 +39,12 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def grep_provision(
-    accessor: EmailAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    index: IndexCacheStore,
-    **_extra: FlagValue,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor,
-        paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)),
-        index=index)
+async def grep_provision(accessor: EmailAccessor, paths: list[PathSpec],
+                         texts: list[str],
+                         opts: CommandOpts) -> ProvisionResult:
+    line = "grep " + " ".join(list(texts) + [str(p) for p in paths])
+    return await file_read_provision(accessor, paths, texts,
+                                     replace(opts, command=line))
 
 
 @command("grep",
@@ -56,16 +52,10 @@ async def grep_provision(
          spec=SPECS["grep"],
          provision=grep_provision,
          aggregate=prefix_aggregate)
-async def grep(
-    accessor: EmailAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["grep"])
+async def grep(accessor: EmailAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
 
     if paths and pattern is not None and "\n" not in pattern and (
@@ -86,16 +76,16 @@ async def grep(
                                            o=fl.as_bool("o"),
                                            max_count=fl.as_int("m"))
 
-    resolved = await resolve_glob(accessor, paths, index) if paths else []
+    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_grep(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(email_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(email_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )
 
 

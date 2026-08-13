@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { IOResult, OpReport } from '../io/types.ts'
+import type { PathSpec } from '../types.ts'
 import type { RuntimeConfig } from './config.ts'
 import type { PolicyScript } from './policy/types.ts'
 
@@ -23,10 +25,26 @@ import type { PolicyScript } from './policy/types.ts'
 export type RuntimeLanguage = 'python' | 'js'
 
 /**
- * The workspace op dispatch a sandboxed runtime's file I/O rides.
- * Defined here, on the consumer side, because runtimes receive it
- * (attach) while the workspace provides it, and the runtime package
- * imports no workspace module (Python's DispatchFn in runtime/types).
+ * The workspace op dispatch: run `op` against the mount owning `path`
+ * and return its result with the accounting IOResult. Defined here, on
+ * the consumer side, because runtimes receive it (attach) while the
+ * workspace provides it, and the runtime package imports no workspace
+ * module — the home of Python's DispatchFn protocol (runtime/types).
+ * `report`, when a caller passes one, is stamped by the door the moment
+ * the op completes, so an observer reads what ran even when a later
+ * step throws the result away; runtimes and combiners never pass it.
+ */
+export type DispatchFn = (
+  op: string,
+  path: PathSpec,
+  args?: readonly unknown[],
+  kwargs?: Record<string, unknown>,
+  report?: OpReport,
+) => Promise<[unknown, IOResult]>
+
+/**
+ * The narrow bridge a sandboxed guest's file I/O rides: fixed op names,
+ * string paths, positional payloads (the guest cannot build PathSpecs).
  */
 export type BridgeDispatchFn = (
   op:

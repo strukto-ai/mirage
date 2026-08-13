@@ -35,7 +35,7 @@ def _split_by_patterns(
 
 async def csplit(
     paths: list[PathSpec],
-    patterns: tuple[str, ...],
+    patterns: list[str],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],

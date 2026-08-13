@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.sha1sum import sha1sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           dir_aware_stat,
@@ -21,26 +20,17 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.config import CommandOpts
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def sha1sum(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    cwd: PathSpec | str = "/",
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_or_empty(ops, accessor, paths, index)
-    return await sha1sum_generic(
-        resolved, list(texts), CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
-        dir_aware_stat(ops, accessor, index),
-        dir_aware_stream(ops, accessor, index))
+async def sha1sum(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                  texts: list[str],
+                  opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await sha1sum_generic(resolved, list(texts), opts,
+                                 dir_aware_stat(ops, accessor, opts.index),
+                                 dir_aware_stream(ops, accessor, opts.index))
 
 
 BUILDER = Builder('sha1sum', sha1sum, None, False, None, read=True)

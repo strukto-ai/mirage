@@ -16,6 +16,7 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic.rm_command import make_rm
+from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 
 
@@ -43,7 +44,7 @@ async def test_rm_threads_accessor_and_index_into_unlink():
     accessor = FakeAccessor()
     rm = _make_rm({"/owned/a.gdoc.json"}, calls)
     path = PathSpec.from_str_path("/owned/a.gdoc.json")
-    _, result = await rm(accessor, [path], index=NULL_INDEX)
+    _, result = await rm(accessor, [path], [], CommandOpts(index=NULL_INDEX))
     assert result.exit_code == 0
     assert calls == [(accessor, path, NULL_INDEX)]
 
@@ -52,7 +53,7 @@ async def test_rm_threads_accessor_and_index_into_unlink():
 async def test_rm_missing_operand():
     rm = _make_rm(set(), [])
     with pytest.raises(ValueError, match="missing operand"):
-        await rm(FakeAccessor(), [])
+        await rm(FakeAccessor(), [], [], CommandOpts())
 
 
 @pytest.mark.asyncio
@@ -64,7 +65,7 @@ async def test_rm_enoent_reports_and_continues_without_force():
         PathSpec.from_str_path("/owned/x.json"),
         PathSpec.from_str_path("/owned/b.json"),
     ]
-    _, result = await rm(FakeAccessor(), paths)
+    _, result = await rm(FakeAccessor(), paths, [], CommandOpts())
     assert result.exit_code == 1
     assert result.stderr == (b"rm: cannot remove '/owned/x.json': "
                              b"No such file or directory\n")
@@ -76,8 +77,8 @@ async def test_rm_force_swallows_enoent():
     calls: list[tuple] = []
     rm = _make_rm(set(), calls)
     _, result = await rm(FakeAccessor(),
-                         [PathSpec.from_str_path("/owned/x.json")],
-                         f=True)
+                         [PathSpec.from_str_path("/owned/x.json")], [],
+                         CommandOpts(flags={"f": True}))
     assert result.exit_code == 0
     assert len(calls) == 1
 
@@ -90,7 +91,8 @@ async def test_rm_verbose_reports_each_removal():
         PathSpec.from_str_path("/owned/a.gdoc.json"),
         PathSpec.from_str_path("/owned/b.gdoc.json"),
     ]
-    output, result = await rm(FakeAccessor(), paths, v=True)
+    output, result = await rm(FakeAccessor(), paths, [],
+                              CommandOpts(flags={"v": True}))
     assert isinstance(output, bytes)
     text = output.decode()
     assert "removed '/owned/a.gdoc.json'" in text

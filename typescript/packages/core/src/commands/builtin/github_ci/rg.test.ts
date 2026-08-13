@@ -68,7 +68,6 @@ async function runRg(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'github_ci' } as never,
   })
   if (result === null) return { stdout: '', exitCode: 0 }
   const [out, io] = result

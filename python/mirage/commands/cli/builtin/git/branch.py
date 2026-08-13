@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from typing import Any, Callable
 
 from dulwich.objects import ObjectID
 from dulwich.refs import Ref
@@ -36,6 +35,7 @@ from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 
 HEADS_PREFIX = b"refs/heads/"
 REMOTES_PREFIX = b"refs/remotes/"
@@ -65,13 +65,12 @@ def _symref_suffix(repo: BaseRepo, ref: bytes) -> str:
     return f" -> {target.decode()}"
 
 
-async def _create(dispatch: Callable[..., Any], repo: BaseRepo,
-                  location: RepoLocation, name: str,
-                  start: str | None) -> None:
+async def _create(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
+                  name: str, start: str | None) -> None:
     """Point a new branch at a commit, refusing to move an existing one.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         name (str): the branch name.
@@ -136,13 +135,12 @@ def _merged(repo: BaseRepo, sha: bytes, head: bytes | None) -> bool:
                for entry in Walker(repo.object_store, [ObjectID(head)]))
 
 
-async def _delete(dispatch: Callable[..., Any], repo: BaseRepo,
-                  location: RepoLocation, head: HeadRef, name: str,
-                  force: bool) -> bytes:
+async def _delete(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
+                  head: HeadRef, name: str, force: bool) -> bytes:
     """Remove a branch, refusing when the removal would lose commits.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
