@@ -23,11 +23,27 @@ import { Context } from '@deepseek-ai/cordis'
 import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
+const REPORT_SCRIPT = [
+  'import os',
+  'who = os.getenv("REPORT_OWNER", "nobody")',
+  'fib = [1, 1]',
+  'while len(fib) < 10:',
+  '    fib.append(fib[-1] + fib[-2])',
+  'print("owner:", who)',
+  'print("fib10:", fib[-1])',
+].join('\n')
+
 async function main(): Promise<void> {
-  const ws = new Workspace({
-    '/notes': [new RAMResource(), MountMode.WRITE],
-    '/docs': [new RAMResource(), MountMode.WRITE],
-  })
+  // EXEC mode admits code execution (the mode ladder is READ < WRITE <
+  // EXEC); registering monty routes python3 lines into the sandboxed
+  // interpreter instead of the default pyodide.
+  const ws = new Workspace(
+    {
+      '/notes': [new RAMResource(), MountMode.EXEC],
+      '/docs': [new RAMResource(), MountMode.WRITE],
+    },
+    { mode: MountMode.EXEC, runtimes: ['monty', 'vfs'] },
+  )
   await ws.fs.writeFile('/docs/readme.md', '# demo\nmirage inside dsh\n')
 
   const ctx = new Context()
@@ -63,6 +79,19 @@ async function main(): Promise<void> {
     shell.resolve({ command: `wc -c ${ctx.fs.processPath(target)}` }),
   )
   console.log('wc:', viaShell.stdout.text.trim())
+
+  // python3 under monty: the fs seam writes the script, monty computes
+  // (sandboxed, no host access), and the shell's redirection files the
+  // report back into the mount for any tool to read.
+  await ctx.fs.writeText(await ctx.fs.resolve('/notes/report.py'), REPORT_SCRIPT)
+  const ran = await shell.run(
+    shell.resolve({
+      command: 'REPORT_OWNER=zecheng python3 /notes/report.py > /notes/report.txt',
+    }),
+  )
+  console.log('python exit:', ran.exitCode)
+  const report = await shell.run(shell.resolve({ command: 'cat /notes/report.txt' }))
+  console.log(report.stdout.text.trim())
 
   await ws.close()
 }
