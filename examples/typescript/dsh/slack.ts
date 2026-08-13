@@ -30,7 +30,13 @@ const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
 
 const SCRIPT_NAME = 'example.py'
+const SCRIPT_STEM = SCRIPT_NAME.slice(0, SCRIPT_NAME.lastIndexOf('.'))
+const SCRIPT_EXT = SCRIPT_NAME.slice(SCRIPT_NAME.lastIndexOf('.'))
 const RECENT_DAYS = 5
+
+function newestFirst(a: string, b: string): number {
+  return a < b ? 1 : a > b ? -1 : 0
+}
 
 async function composeWorld(ws: Workspace): Promise<Context> {
   const ctx = new Context()
@@ -40,17 +46,23 @@ async function composeWorld(ws: Workspace): Promise<Context> {
   return ctx
 }
 
-// The channel directory embeds the Slack ID (general__C...), so match on
-// the human name prefix; uploads land under <channel>/<date>/files/.
+// The channel directory embeds the Slack ID (general__C...) and an upload
+// gets its file ID suffixed the same way (example__F0....py), so match both
+// on the human-name prefix; uploads land under <channel>/<date>/files/.
 async function findScript(ctx: Context, channel: string): Promise<string | null> {
   const channels = await ctx.fs.listDir(await ctx.fs.resolve('/slack/channels'))
   const dir = channels.find((entry) => entry.name.startsWith(`${channel}__`))
   if (dir === undefined) return null
-  const days = await ctx.fs.listDir(dir.target)
-  for (const day of days.slice(-RECENT_DAYS).reverse()) {
-    const candidate = `${ctx.fs.processPath(day.target)}/files/${SCRIPT_NAME}`
-    const info = await ctx.fs.stat(await ctx.fs.resolve(candidate))
-    if (info?.type === 'file') return candidate
+  const days = (await ctx.fs.listDir(dir.target)).sort((a, b) => newestFirst(a.name, b.name))
+  for (const day of days.slice(0, RECENT_DAYS)) {
+    const filesDir = await ctx.fs.resolve(`${ctx.fs.processPath(day.target)}/files`)
+    const uploads = await ctx.fs.listDir(filesDir)
+    const hit = uploads.find(
+      (entry) =>
+        entry.name === SCRIPT_NAME ||
+        (entry.name.startsWith(`${SCRIPT_STEM}__`) && entry.name.endsWith(SCRIPT_EXT)),
+    )
+    if (hit !== undefined) return ctx.fs.processPath(hit.target)
   }
   return null
 }
@@ -80,7 +92,9 @@ async function main(): Promise<void> {
     console.log('running:', script)
     const shell = ctx.shell
     const ran = await shell.run(
-      shell.resolve({ command: `MIRAGE_RUNNER=dsh-monty python3 ${script} > /notes/report.txt` }),
+      shell.resolve({
+        command: `MIRAGE_RUNNER=dsh-monty python3 ${script} > /notes/report.txt`,
+      }),
     )
     console.log('exit:', ran.exitCode, ran.stderr.text.trim())
     const report = await shell.run(shell.resolve({ command: 'cat /notes/report.txt' }))

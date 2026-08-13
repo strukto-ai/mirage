@@ -49,12 +49,12 @@ const sweep = await shell.run(
 
 ## Run Python with monty
 
-Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`):
+Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`, with the Slack file ID suffixed into the name):
 
 ```ts
 const ran = await shell.run(
   shell.resolve({
-    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example.py > /notes/report.txt',
+    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /notes/report.txt',
   }),
 )
 ```
