@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GitHubTransport } from './_client.ts'
+import { GitHubApiError, type GitHubTransport } from './_client.ts'
+import { decodeBase64 } from '../../utils/base64.ts'
 
 export interface RepoRef {
   owner: string
@@ -52,6 +53,22 @@ export async function login(transport: GitHubTransport): Promise<string> {
 
 export function viewRepo(transport: GitHubTransport, ref: RepoRef): Promise<unknown> {
   return transport.get(`/repos/${ref.owner}/${ref.repo}`)
+}
+
+/**
+ * The repository's README as text, or null when it has none.
+ */
+export async function readReadme(transport: GitHubTransport, ref: RepoRef): Promise<string | null> {
+  let data: unknown
+  try {
+    data = await transport.get(`/repos/${ref.owner}/${ref.repo}/readme`)
+  } catch (err) {
+    if (err instanceof GitHubApiError && err.status === 404) return null
+    throw err
+  }
+  const content = (data as { content?: unknown } | null)?.content
+  if (typeof content !== 'string') return null
+  return new TextDecoder().decode(decodeBase64(content))
 }
 
 export function forkRepo(

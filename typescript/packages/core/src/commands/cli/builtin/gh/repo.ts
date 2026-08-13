@@ -13,14 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FlagView } from '../../../spec/types.ts'
-import { forkRepo, login, renameRepo, viewRepo } from '../../../../core/github/repo.ts'
+import { forkRepo, login, readReadme, renameRepo, viewRepo } from '../../../../core/github/repo.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { ghRepo, ghTransport, jsonOut, textOut } from './accessor.ts'
+import { ghRepo, ghTransport, textOut } from './accessor.ts'
+
+/**
+ * gh's own text view of a repository: two tab-separated header lines and
+ * then the README verbatim, with the `--` separator omitted entirely when
+ * there is no README. Probed against gh 2.85, whose description line is
+ * present and empty for a repository that has none.
+ */
+export function summary(repo: unknown, readme: string | null): string {
+  const fields = (repo ?? {}) as { full_name?: unknown; description?: unknown }
+  const name = typeof fields.full_name === 'string' ? fields.full_name : ''
+  const description = typeof fields.description === 'string' ? fields.description : ''
+  const head = `name:\t${name}\ndescription:\t${description}\n`
+  return readme === null ? head : `${head}--\n${readme}`
+}
 
 export async function view(inv: CLIInvocation): Promise<CommandFnResult> {
   const transport = ghTransport(inv.config)
-  return jsonOut(await viewRepo(transport, ghRepo(inv.config, inv.texts[0])))
+  const ref = ghRepo(inv.config, inv.texts[0])
+  const repo = await viewRepo(transport, ref)
+  return textOut(summary(repo, await readReadme(transport, ref)))
 }
 
 export async function fork(inv: CLIInvocation): Promise<CommandFnResult> {

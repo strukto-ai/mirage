@@ -21,7 +21,7 @@ import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GH } from './index.ts'
 import { api } from './api.ts'
-import { fork, rename, view } from './repo.ts'
+import { fork, rename, summary, view } from './repo.ts'
 
 const DEC = new TextDecoder()
 
@@ -98,7 +98,10 @@ describe('gh repo', () => {
   it('views the repository the operand names', async () => {
     reset({ full_name: 'o/r' })
     await view(inv(['o/r']))
-    expect(CALLS).toEqual([{ method: 'GET', path: '/repos/o/r' }])
+    expect(CALLS).toEqual([
+      { method: 'GET', path: '/repos/o/r' },
+      { method: 'GET', path: '/repos/o/r/readme' },
+    ])
   })
 
   it('falls back to the install repo when no operand is given', async () => {
@@ -215,5 +218,21 @@ describe('gh api', () => {
     await api(inv(['search/code'], { method: 'GET', field: ['per_page=5', 'draft=true'] }))
     expect(CALLS[0]?.params).toEqual({ per_page: '5', draft: 'true' })
     expect(CALLS[0]?.body).toBeUndefined()
+  })
+})
+
+// gh prints two tab-separated header lines and then the README verbatim;
+// with no README there is no `--` separator at all. Probed against 2.85.
+describe('gh repo view rendering', () => {
+  it('is two headers then the readme', () => {
+    expect(summary({ full_name: 'o/r', description: 'd' }, '# Title\n')).toBe(
+      'name:\to/r\ndescription:\td\n--\n# Title\n',
+    )
+  })
+
+  it('omits the separator without a readme', () => {
+    expect(summary({ full_name: 'o/r', description: null }, null)).toBe(
+      'name:\to/r\ndescription:\t\n',
+    )
   })
 })

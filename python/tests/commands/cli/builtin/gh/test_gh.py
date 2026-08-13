@@ -16,7 +16,7 @@ import pytest
 
 from mirage.commands.cli.builtin.gh import GH
 from mirage.commands.cli.builtin.gh.api import api
-from mirage.commands.cli.builtin.gh.repo import fork, rename, view
+from mirage.commands.cli.builtin.gh.repo import fork, rename, summary, view
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLIInvocation
 from mirage.core.github.config import GhConfig
@@ -26,6 +26,7 @@ from mirage.types import ResourceName
 CONFIG = GhConfig(token="t")
 CALLS: list[dict] = []
 REPLY: dict = {}
+README: list[str | None] = [None]
 
 
 def _record(**call) -> dict:
@@ -35,6 +36,7 @@ def _record(**call) -> dict:
 
 def _reset(reply=None) -> None:
     CALLS.clear()
+    README[0] = None
     globals()["REPLY"] = {} if reply is None else reply
 
 
@@ -44,6 +46,9 @@ def _patch(monkeypatch):
 
     async def fake_view(config, ref):
         return _record(method="GET", path=f"/repos/{ref.owner}/{ref.repo}")
+
+    async def fake_readme(config, ref):
+        return README[0]
 
     async def fake_fork(config, ref, name=None):
         return _record(method="POST",
@@ -70,6 +75,7 @@ def _patch(monkeypatch):
         return _record(**call)
 
     monkeypatch.setitem(view.__globals__, "view_repo", fake_view)
+    monkeypatch.setitem(view.__globals__, "read_readme", fake_readme)
     monkeypatch.setitem(fork.__globals__, "fork_repo", fake_fork)
     monkeypatch.setitem(rename.__globals__, "rename_repo", fake_rename)
     monkeypatch.setitem(api.__globals__, "github_request", fake_request)
@@ -246,3 +252,24 @@ async def test_api_stringifies_a_typed_field_bound_for_the_query():
         }))
     assert CALLS[0]["params"] == {"per_page": "5", "draft": "true"}
     assert "body" not in CALLS[0]
+
+
+# gh prints two tab-separated header lines and then the README verbatim;
+# with no README there is no `--` separator at all. Probed against 2.85.
+def test_summary_is_gh_s_two_headers_then_the_readme():
+    out = summary({"full_name": "o/r", "description": "d"}, "# Title\n")
+    assert out == "name:\to/r\ndescription:\td\n--\n# Title\n"
+
+
+def test_summary_omits_the_separator_without_a_readme():
+    out = summary({"full_name": "o/r", "description": None}, None)
+    assert out == "name:\to/r\ndescription:\t\n"
+
+
+@pytest.mark.asyncio
+async def test_view_renders_text_not_the_rest_object():
+    _reset({"full_name": "integ/x", "description": "hi"})
+    README[0] = "body\n"
+    out, _io = await view(_inv(["integ/x"]))
+    assert await materialize(
+        out) == b"name:\tinteg/x\ndescription:\thi\n--\nbody\n"

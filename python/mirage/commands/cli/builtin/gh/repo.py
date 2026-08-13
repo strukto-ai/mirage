@@ -12,18 +12,48 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.gh.accessor import gh_repo, json_out, text_out
+from mirage.commands.cli.builtin.gh.accessor import gh_repo, text_out
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.github.config import GhConfig
-from mirage.core.github.repo import fork_repo, login, rename_repo, view_repo
+from mirage.core.github.repo import (fork_repo, login, read_readme,
+                                     rename_repo, view_repo)
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import JsonValue
+
+
+def summary(repo: JsonValue, readme: str | None) -> str:
+    """gh's own text view of a repository.
+
+    Two tab-separated header lines and then the README verbatim, with the
+    `--` separator omitted entirely when there is no README. Probed
+    against gh 2.85, whose description line is present and empty for a
+    repository that has none.
+
+    Args:
+        repo (JsonValue): the REST repository object.
+        readme (str | None): the decoded README, None when absent.
+
+    Returns:
+        str: what gh prints.
+    """
+    fields = repo if isinstance(repo, dict) else {}
+    name = fields.get("full_name")
+    description = fields.get("description")
+    head = (f"name:\t{name if isinstance(name, str) else ''}\n"
+            f"description:\t"
+            f"{description if isinstance(description, str) else ''}\n")
+    if readme is None:
+        return head
+    return f"{head}--\n{readme}"
 
 
 async def view(
         inv: CLIInvocation[GhConfig]) -> tuple[ByteSource | None, IOResult]:
     operand = inv.texts[0] if inv.texts else None
-    return json_out(await view_repo(inv.config, gh_repo(inv.config, operand)))
+    ref = gh_repo(inv.config, operand)
+    repo = await view_repo(inv.config, ref)
+    return text_out(summary(repo, await read_readme(inv.config, ref)))
 
 
 async def fork(

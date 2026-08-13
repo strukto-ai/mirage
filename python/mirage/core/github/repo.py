@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import base64
 from dataclasses import dataclass
 
-from mirage.core.github._client import github_get, github_request
+from mirage.core.github._client import (GitHubApiError, github_get,
+                                        github_request)
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.types import JsonValue
 
@@ -83,6 +85,33 @@ async def view_repo(config: GhConfig, ref: RepoRef) -> JsonValue:
                                 "GET",
                                 f"/repos/{ref.owner}/{ref.repo}",
                                 base_url=config.base_url)
+
+
+async def read_readme(config: GhConfig, ref: RepoRef) -> str | None:
+    """The repository's README as text, or None when it has none.
+
+    Args:
+        config (GhConfig): the install's configuration.
+        ref (RepoRef): the repository.
+
+    Returns:
+        str | None: the decoded README, None when the repo has none.
+    """
+    try:
+        data = await github_request(config.token,
+                                    "GET",
+                                    f"/repos/{ref.owner}/{ref.repo}/readme",
+                                    base_url=config.base_url)
+    except GitHubApiError as exc:
+        if exc.status == 404:
+            return None
+        raise
+    if not isinstance(data, dict):
+        return None
+    content = data.get("content")
+    if not isinstance(content, str):
+        return None
+    return base64.b64decode(content).decode("utf-8", "replace")
 
 
 async def fork_repo(config: GhConfig,
