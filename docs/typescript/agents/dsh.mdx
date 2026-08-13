@@ -47,7 +47,7 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-Registering `runtimes` on the workspace specifies who captures what: `monty` takes every `python3` line — a script file, inline `-c` code, or code piped on stdin — and `vfs` keeps the shell commands. [monty](https://github.com/pydantic/monty) is a sandboxed Python interpreter with no host access, so the code runs inside the workspace, never on the machine:
+Registering `runtimes` on the workspace specifies who captures what: `monty` is set up as the workspace's Python and captures every `python` and `python3` invocation — a script file, inline `-c` code, or code piped on stdin — while `vfs` keeps the shell commands. [monty](https://github.com/pydantic/monty) is a sandboxed Python interpreter with no host access, so the captured code runs inside the workspace, never on the machine:
 
 ```ts
 const ws = new Workspace(mounts, { runtimes: ['monty', 'vfs'] })
