@@ -238,7 +238,7 @@ export async function handleCommand(
       // expands the operand's glob. RELAY bypasses the mount command
       // wrappers entirely, so its glob operands must expand here; an
       // unmatched glob stays the literal word, like bash.
-      const expanded = await resolveGlobs(pathScopes, registry)
+      const expanded = await resolveGlobs(pathScopes, registry, false, namespace ?? null)
       csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
     }
     const runCtx: RunOnMountCtx = {

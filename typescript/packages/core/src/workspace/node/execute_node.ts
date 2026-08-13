@@ -169,6 +169,7 @@ async function expandArrayItems(
   session: Session,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   callStack: CallStack | null,
 ): Promise<string[]> {
   const classified = await expandAndClassify(
@@ -179,7 +180,12 @@ async function expandArrayItems(
     session.cwd,
     callStack,
   )
-  const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
+  const resolved = await resolveGlobs(
+    classified,
+    registry,
+    session.shellOptions.noglob === true,
+    namespace,
+  )
   return resolved.map((w) => wordText(w))
 }
 
@@ -544,7 +550,12 @@ export async function executeNode(
     )
     // The loop word list is consumed by the shell (WordPolicy.SHELL):
     // globs resolve to matches before iteration starts.
-    const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
+    const resolved = await resolveGlobs(
+      classified,
+      registry,
+      session.shellOptions.noglob === true,
+      deps.namespace,
+    )
     if (kind === NodeKind.SELECT) {
       return handleSelect(
         recurse,
@@ -622,7 +633,14 @@ export async function executeNode(
           staged.push({
             name: append ? key.slice(0, -1) : key,
             append,
-            items: await expandArrayItems(firstVal, session, executeFn, registry, callStack),
+            items: await expandArrayItems(
+              firstVal,
+              session,
+              executeFn,
+              registry,
+              deps.namespace,
+              callStack,
+            ),
           })
           continue
         }
@@ -763,7 +781,14 @@ export async function executeNode(
     const view = sessionView(session, registry.policies)
     const firstVal = valNodes[0]
     if (firstVal?.type === NT.ARRAY) {
-      const items = await expandArrayItems(firstVal, session, executeFn, registry, callStack)
+      const items = await expandArrayItems(
+        firstVal,
+        session,
+        executeFn,
+        registry,
+        deps.namespace,
+        callStack,
+      )
       let base: ShellArray
       if (append) {
         const existing = session.arrays[key]

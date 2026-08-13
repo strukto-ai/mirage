@@ -145,6 +145,20 @@
       "flags": [
         "r"
       ]
+    },
+    {
+      "id": "ln_glob_descends_symlinked_dir",
+      "seq": 611026,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo /data/lns/alias/* && echo /data/lns/a*/a/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/lns/alias/a\n/data/lns/alias/a/f.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

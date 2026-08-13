@@ -18,6 +18,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import { WordPolicy, endOptionsAfterProgram, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
+import type { NamespaceLinks } from '../../ops/config.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
@@ -78,6 +79,7 @@ export async function expandArgv(
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   registry: MountRegistry,
+  namespace: NamespaceLinks | null = null,
 ): Promise<Argv> {
   const expanded = await expandParts(parts, session, executeFn, callStack)
   if (expanded.length === 0) return new Argv('', [], [])
@@ -136,7 +138,10 @@ export async function expandArgv(
   // WordPolicy.SHELL words get matches here; mount commands keep
   // patterns for backend pushdown; unknown names fail without
   // touching backends.
-  const words = policy === WordPolicy.SHELL ? await resolveGlobs(classified, registry) : classified
+  const words =
+    policy === WordPolicy.SHELL
+      ? await resolveGlobs(classified, registry, false, namespace)
+      : classified
   // The text view renders words as typed (rawPath): bash hands
   // programs their words unchanged, so `echo sub/file.txt` prints the
   // relative form, not the resolved absolute path.

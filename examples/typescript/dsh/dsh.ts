@@ -137,8 +137,8 @@ async function main(): Promise<void> {
   const channel = process.env.SLACK_CHANNEL ?? 'general'
   const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379/1'
 
-  // EXEC admits code execution (the mode ladder is READ < WRITE < EXEC),
-  // and monty is set up to capture python and python3; the catch-all vfs
+  // EXEC admits code execution (the mode ladder is READ < WRITE < EXEC);
+  // monty is set up to capture python and python3, and the catch-all vfs
   // runtime serving the shell commands is always present.
   const ws = new Workspace(
     {
@@ -146,10 +146,7 @@ async function main(): Promise<void> {
       '/redis': [new RedisResource({ url: redisUrl, keyPrefix: 'dsh:' }), MountMode.WRITE],
       '/slack': [new SlackResource({ token }), MountMode.EXEC],
     },
-    {
-      mode: MountMode.EXEC,
-      runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })],
-    },
+    { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
   )
   const ctx = await composeWorld(ws)
   try {

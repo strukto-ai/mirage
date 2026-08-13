@@ -579,6 +579,73 @@ describe('symlinks (namespace-backed)', () => {
     expect(dec((await ws.execute('stat -L /data/link.txt')).stdout)).toContain('type=text')
     await ws.close()
   })
+
+  // GNU renders %N as `'name' -> 'target'` for a link, and as the bare
+  // quoted name otherwise.
+  it('stat %N renders the link arrow', async () => {
+    const ws = await seeded()
+    expect(dec((await ws.execute("stat -c '%N' /data/link.txt")).stdout)).toBe(
+      "'/data/link.txt' -> '/data/dir/real.txt'\n",
+    )
+    expect(dec((await ws.execute("stat -c '%N' /data/dir/real.txt")).stdout)).toBe(
+      "'/data/dir/real.txt'\n",
+    )
+    // %n is the bare name even for a link.
+    expect(dec((await ws.execute("stat -c '%n' /data/link.txt")).stdout)).toBe('/data/link.txt\n')
+    // -L reports the target, which is not a link, so no arrow.
+    expect(dec((await ws.execute("stat -L -c '%N' /data/link.txt")).stdout)).toBe(
+      "'/data/link.txt'\n",
+    )
+    await ws.close()
+  })
+
+  it('stat %N renders the arrow for a dangling link', async () => {
+    const ws = await dangling()
+    expect(dec((await ws.execute("stat -c '%N' /data/dangle")).stdout)).toBe(
+      "'/data/dangle' -> '/data/nope'\n",
+    )
+    await ws.close()
+  })
+
+  it('stat %N quotes each side on its own', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('echo hi > "/data/it\'s"')
+    await ws.execute('ln -s "/data/it\'s" /data/plain')
+    expect(dec((await ws.execute("stat -c '%N' /data/plain")).stdout)).toBe(
+      "'/data/plain' -> \"/data/it's\"\n",
+    )
+    await ws.close()
+  })
+
+  // A target with an apostrophe next to a live character goes back to single
+  // quotes, so replaying the line cannot expand $c.
+  it('stat %N single-quotes a target holding shell metacharacters', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('ln -s "/data/a\'b\\$c" /data/meta')
+    expect(dec((await ws.execute("stat -c '%N' /data/meta")).stdout)).toBe(
+      "'/data/meta' -> '/data/a'\\''b$c'\n",
+    )
+    await ws.close()
+  })
+
+  // GNU quotes %N only when the directive carries no modifier, and a width
+  // or precision applies to the name and the target separately.
+  it('stat %N modifiers drop the quotes and pad each side', async () => {
+    const ws = await seeded()
+    expect(dec((await ws.execute("stat -c '[%20N]' /data/link.txt")).stdout)).toBe(
+      '[      /data/link.txt ->   /data/dir/real.txt]\n',
+    )
+    expect(dec((await ws.execute("stat -c '[%-20N]' /data/link.txt")).stdout)).toBe(
+      '[/data/link.txt       -> /data/dir/real.txt  ]\n',
+    )
+    expect(dec((await ws.execute("stat -c '[%.6N]' /data/link.txt")).stdout)).toBe(
+      '[/data/ -> /data/]\n',
+    )
+    expect(dec((await ws.execute("stat -c '[%20N]' /data/dir/real.txt")).stdout)).toBe(
+      '[  /data/dir/real.txt]\n',
+    )
+    await ws.close()
+  })
   it('find -L classifies a link by its target', async () => {
     const ws = buildWorkspace()
     for (const c of [

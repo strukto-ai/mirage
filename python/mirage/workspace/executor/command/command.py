@@ -213,7 +213,9 @@ async def handle_command(
             # expands the operand's glob. RELAY bypasses the mount command
             # wrappers entirely, so its glob operands must expand here; an
             # unmatched glob stays the literal word, like bash.
-            expanded = await resolve_globs(list(path_scopes), registry)
+            expanded = await resolve_globs(list(path_scopes),
+                                           registry,
+                                           links=namespace)
             cross_scopes = [p for p in expanded if isinstance(p, PathSpec)]
         run_single = functools.partial(run_on_mount,
                                        registry,

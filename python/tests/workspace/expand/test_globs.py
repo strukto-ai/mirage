@@ -18,9 +18,10 @@ from unittest.mock import MagicMock
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.resource.ram import RAMResource
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
 
@@ -40,6 +41,7 @@ def _mock_registry(resolve_result=None):
     reg = MagicMock()
     reg.clis = CLIRegistry()
     reg.mount_for = MagicMock(return_value=mount)
+    reg.mounts = MagicMock(return_value=[mount])
     return reg
 
 
@@ -295,3 +297,172 @@ def test_bare_relative_glob_raw_has_no_dir_prefix():
     result = _run(resolve_globs(["ls", glob_ps], reg))
     assert isinstance(result[1], PathSpec)
     assert result[1].raw_path == "a.txt"
+
+
+def _ws():
+    """Workspace with a nested mount and a symlink under /base."""
+    ws = Workspace({
+        "/": RAMResource(),
+        "/base/inner": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    return ws
+
+
+async def _seed(ws):
+    await ws.execute("mkdir -p /base/sub", session_id="s")
+    await ws.execute("printf 111 > /base/f1", session_id="s")
+    await ws.execute("printf 2222222 > /base/sub/f2", session_id="s")
+    await ws.execute("printf 3333333 > /base/inner/g1", session_id="s")
+    await ws.execute("ln -s /base/sub/f2 /base/link", session_id="s")
+
+
+def _out(ws, line):
+    r = _run(ws.execute(line, session_id="s"))
+    return r.stdout.decode()
+
+
+def test_glob_enumerates_nested_mount_root_and_symlink():
+    """A glob lists what its directory holds, mounts and links included.
+
+    GNU coreutils 9.7 (debian:stable-slim, tmpfs at base/inner):
+    ``echo base/*`` -> ``base/f1 base/inner base/link base/sub``.
+    """
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "echo /base/*").split() == [
+        "/base/f1", "/base/inner", "/base/link", "/base/sub"
+    ]
+
+
+def test_du_glob_rows_match_gnu():
+    """Pinned against ``du -b base/*`` on GNU coreutils 9.7."""
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "du /base/*").splitlines() == [
+        "3\t/base/f1",
+        "7\t/base/inner",
+        "12\t/base/link",
+        "7\t/base/sub",
+    ]
+
+
+def test_glob_operand_commands_see_mount_and_link():
+    """The omission was the expander's, so every glob consumer had it."""
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "ls -d /base/*").split() == [
+        "/base/f1", "/base/inner", "/base/link", "/base/sub"
+    ]
+    assert _out(ws, "find /base/* -maxdepth 0").split() == [
+        "/base/f1", "/base/inner", "/base/link", "/base/sub"
+    ]
+    # stat renders a mount root's name as "/" (a separate, pre-existing
+    # divergence reproducible with the operand typed by hand), so this
+    # pins the row count rather than the naming.
+    assert len(_out(ws, "stat /base/*").splitlines()) == 4
+    # wc follows the link and reports the target's bytes under the link's
+    # name, and names each directory operand on stderr, like GNU.
+    assert _out(ws, "wc -c /base/*").split() == [
+        "3", "/base/f1", "7", "/base/link", "10", "total"
+    ]
+
+
+def test_glob_matches_only_the_pattern():
+    """Merged namespace names are filtered by the pattern like any entry."""
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "echo /base/i*").split() == ["/base/inner"]
+    assert _out(ws, "echo /base/l*").split() == ["/base/link"]
+    assert _out(ws, "echo /base/f*").split() == ["/base/f1"]
+
+
+def test_unmatched_glob_still_stays_literal():
+    """bash with nullglob off: a zero-match word keeps its spelling."""
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "echo /base/zzz*").split() == ["/base/zzz*"]
+
+
+def test_midpath_glob_descends_into_nested_mount():
+    """A mount root is a directory a mid-path segment can match."""
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "echo /base/*/g1").split() == ["/base/inner/g1"]
+
+
+def test_single_match_boundary_glob_is_installed():
+    """One match is still an expansion.
+
+    Comparing operand counts read it as unchanged, so the pattern stayed
+    routed to the parent mount, which cannot serve the child mount's
+    keys.
+    """
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "du /base/i*").splitlines() == ["7\t/base/inner"]
+    assert _out(ws, "ls -d /base/i*").split() == ["/base/inner"]
+
+
+def test_glob_produced_mount_root_is_refused():
+    """The mount-root refusal reads operands, so it must see expanded ones.
+
+    Expanding after the admission policies handed ``tar`` a mount root
+    nobody had checked, letting a glob archive a whole backend the same
+    operand typed by hand is refused for.
+    """
+    ws = _ws()
+    _run(_seed(ws))
+    typed = _run(ws.execute("tar -cf /out.tar /base/inner", session_id="s"))
+    globbed = _run(ws.execute("tar -cf /out2.tar /base/i*", session_id="s"))
+    assert globbed.stderr == typed.stderr
+    assert globbed.exit_code == typed.exit_code
+    assert b"Device or resource busy" in globbed.stderr
+
+
+def _seed_links(ws):
+    _run(_seed(ws))
+    _run(ws.execute("ln -s /base/sub /base/dlink", session_id="s"))
+    _run(ws.execute("ln -s /base/inner /base/mlink", session_id="s"))
+
+
+def test_glob_descends_a_symlinked_directory():
+    """bash follows a link while expanding and keeps the typed spelling.
+
+    GNU bash 5.2 (debian:stable-slim, ``base/dlink -> base/sub``):
+    ``echo base/d*/f2`` -> ``base/dlink/f2``.
+    """
+    ws = _ws()
+    _seed_links(ws)
+    assert _out(ws, "echo /base/d*/f2").split() == ["/base/dlink/f2"]
+    assert _out(ws, "echo /base/dlink/*").split() == ["/base/dlink/f2"]
+
+
+def test_glob_reports_a_link_and_its_target():
+    """``echo base/*/f2`` -> ``base/dlink/f2 base/sub/f2`` on GNU bash."""
+    ws = _ws()
+    _seed_links(ws)
+    assert _out(
+        ws, "echo /base/*/f2").split() == ["/base/dlink/f2", "/base/sub/f2"]
+
+
+def test_glob_follows_a_link_into_a_nested_mount():
+    """The followed directory is re-owned, so it can be another mount."""
+    ws = _ws()
+    _seed_links(ws)
+    assert _out(ws, "echo /base/mlink/*").split() == ["/base/mlink/g1"]
+    assert _out(ws, "echo /base/m*/g1").split() == ["/base/mlink/g1"]
+
+
+def test_midpath_glob_does_not_descend_into_a_file():
+    """A descent step yields children, so a file parent matches nothing.
+
+    A backend asked to list a path that is really a file answers with
+    that file, which walked back out as a doubled segment
+    (``/base/f*/f1`` -> ``/base/base/f1``). GNU bash keeps the literal.
+    """
+    ws = _ws()
+    _run(_seed(ws))
+    assert _out(ws, "echo /base/f*/f1").split() == ["/base/f*/f1"]
+    assert _out(ws, "echo /base/f1/*").split() == ["/base/f1/*"]

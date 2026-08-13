@@ -32,8 +32,8 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { classifyBarePath } from '../expand/classify/index.ts'
-import type { Argv } from '../expand/argv.ts'
-import { expandArgv } from '../expand/argv.ts'
+import { Argv, expandArgv } from '../expand/argv.ts'
+import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
@@ -330,7 +330,7 @@ async function runCommandBody(
     stdin = merged
   }
 
-  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
+  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry, namespace)
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
@@ -411,6 +411,31 @@ async function runArgv(
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
+
+  // A glob whose directory holds a child mount cannot be pushed down to
+  // one backend: the mount root is a child of that directory but its keys
+  // live in another resource, so the backend reports "no such file" for a
+  // name its own listing shows. Expanding such a word here lets the
+  // matches route per mount. It has to happen before the admission
+  // policies below, not just before the follow policy: a word left
+  // unexpanded reaches preCommand as the literal pattern, and
+  // MountRootPolicy cannot recognize a mount root inside one, so
+  // `tar -cf out.tar /base/*` would archive a whole backend the same
+  // operand typed by hand is refused for.
+  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const expandedWords = boundary.map(wordText)
+  // Compared as words, not as a count: a glob that matches exactly one
+  // name (`du /base/i*` where only the mount root matches) is still an
+  // expansion, and dropping it routes the pattern to a backend that
+  // cannot serve the child mount's keys.
+  const typedWords = argv.operands.map(wordText)
+  if (
+    expandedWords.length !== typedWords.length ||
+    expandedWords.some((w, i) => w !== typedWords[i])
+  ) {
+    argv = new Argv(argv.name, expandedWords, boundary)
+  }
+
   const args = [...argv.args]
   let operands = [...argv.operands]
 

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
@@ -33,6 +34,7 @@ from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
+from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
                                     dereferences, reports_link)
 from mirage.workspace.session.shell_dirs import home_dir, logical_cwd
@@ -233,7 +235,8 @@ async def _dispatch_command_body(
         stdin = b"".join(proc_sub_parts)
     parts = clean_parts
 
-    argv = await expand_argv(parts, session, execute_fn, call_stack, registry)
+    argv = await expand_argv(parts, session, execute_fn, call_stack, registry,
+                             namespace)
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
@@ -277,6 +280,30 @@ async def _run_argv(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name
+
+    # ── boundary globs ──────────────────────────
+    # A glob whose directory holds a child mount cannot be pushed down
+    # to one backend: the mount root is a child of that directory but
+    # its keys live in another resource, so the backend reports "no such
+    # file" for a name its own listing shows. Expanding such a word here
+    # lets the matches route per mount. It has to happen before the
+    # admission policies below, not just before the follow policy: a
+    # word left unexpanded reaches `pre_command` as the literal pattern,
+    # and `MountRootPolicy` cannot recognize a mount root inside one, so
+    # `tar -cf out.tar /base/*` would archive a whole backend the same
+    # operand typed by hand is refused for.
+    boundary = await expand_boundary_globs(list(argv.operands), registry,
+                                           namespace)
+    expanded = [word_text(w) for w in boundary]
+    # Compared as words, not as a count: a glob that matches exactly one
+    # name (`du /base/i*` where only the mount root matches) is still an
+    # expansion, and dropping it routes the pattern to a backend that
+    # cannot serve the child mount's keys.
+    if expanded != [word_text(w) for w in argv.operands]:
+        argv = dataclasses.replace(argv,
+                                   operands=tuple(boundary),
+                                   args=tuple(expanded))
+
     args = list(argv.args)
     operands = list(argv.operands)
 

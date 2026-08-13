@@ -25,7 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (CommandIO,
                                                           with_hidden_guard)
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.builtin.generic_bind.provision import default_provision
-from mirage.commands.config import command
+from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.types import PathSpec
 
@@ -90,6 +90,37 @@ def with_stat_cache(ops: CommandIO) -> CommandIO:
     return replace(ops, stat=functools.partial(_cached_stat, ops.stat))
 
 
+async def _run_with_namespace_globs(ops: CommandIO, fn: Callable[..., Any],
+                                    accessor: Accessor, paths: list[PathSpec],
+                                    texts: list[str],
+                                    opts: CommandOpts) -> Any:
+    """Run a builder with an adapter whose globs see the namespace.
+
+    A nested mount's keys live in another resource and no resource stores
+    a symlink, so a glob resolved by one backend's readdir misses both,
+    while the same names are already merged into a listing. The adapter
+    is built once per backend and the names are session-scoped, so the
+    fact is stamped on here, per invocation, from ``opts.ns``:
+    every builder then keeps calling ``ops.resolve_glob`` unchanged.
+
+    ``ops`` stays the first bound argument, because that partial slot is
+    how the adapter is reached for a registered command.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+        fn (Callable): the builder's command function.
+        accessor (Accessor): backend handle.
+        paths (list[PathSpec]): the command's path operands.
+        texts (list[str]): the command's text arguments.
+        opts (CommandOpts): the per-invocation option bag.
+    """
+    children = opts.ns.child_mounts if opts.ns is not None else None
+    if children is None:
+        return await fn(ops, accessor, paths, texts, opts)
+    return await fn(replace(ops, glob_children=children), accessor, paths,
+                    texts, opts)
+
+
 def make_generic_commands(
     resource: str,
     ops: CommandIO,
@@ -134,7 +165,7 @@ def make_generic_commands(
             cmd_ops = with_stat_cache(base_ops)
         else:
             cmd_ops = base_ops
-        bound = functools.partial(b.fn, cmd_ops)
+        bound = functools.partial(_run_with_namespace_globs, cmd_ops, b.fn)
         provision: Callable[..., Any] | None
         if b.name in prov_over:
             provision = prov_over[b.name]

@@ -581,6 +581,65 @@ async def test_stat_format_directives_on_a_link():
     assert r.stdout.decode().strip() == "symbolic link lrwxrwxrwx"
 
 
+@pytest.mark.asyncio
+async def test_stat_percent_n_renders_the_link_arrow():
+    """GNU: ``'name' -> 'target'`` for a link, bare quoted name otherwise."""
+    ws = await _seeded()
+    r = await ws.execute("stat -c '%N' /data/link.txt")
+    assert r.stdout.decode() == "'/data/link.txt' -> '/data/dir/real.txt'\n"
+    r = await ws.execute("stat -c '%N' /data/dir/real.txt")
+    assert r.stdout.decode() == "'/data/dir/real.txt'\n"
+    # %n is the bare name even for a link.
+    r = await ws.execute("stat -c '%n' /data/link.txt")
+    assert r.stdout.decode() == "/data/link.txt\n"
+    # -L reports the target, which is not a link, so no arrow.
+    r = await ws.execute("stat -L -c '%N' /data/link.txt")
+    assert r.stdout.decode() == "'/data/link.txt'\n"
+
+
+@pytest.mark.asyncio
+async def test_stat_percent_n_arrow_on_a_dangling_link():
+    ws = await _dangling()
+    r = await ws.execute("stat -c '%N' /data/dangle")
+    assert r.stdout.decode() == "'/data/dangle' -> '/data/nope'\n"
+
+
+@pytest.mark.asyncio
+async def test_stat_percent_n_quotes_each_side_on_its_own():
+    ws = _ws()
+    await ws.execute("echo hi > \"/data/it's\"")
+    await ws.execute("ln -s \"/data/it's\" /data/plain")
+    r = await ws.execute("stat -c '%N' /data/plain")
+    assert r.stdout.decode() == "'/data/plain' -> \"/data/it's\"\n"
+
+
+@pytest.mark.asyncio
+async def test_stat_percent_n_target_holding_shell_metacharacters():
+    """A target with an apostrophe next to a live character goes back to
+    single quotes, so replaying the line cannot expand ``$c``."""
+    ws = _ws()
+    await ws.execute("""ln -s "/data/a'b\\$c" /data/meta""")
+    r = await ws.execute("stat -c '%N' /data/meta")
+    assert r.stdout.decode() == "'/data/meta' -> '/data/a'\\''b$c'\n"
+
+
+@pytest.mark.asyncio
+async def test_stat_percent_n_modifiers_drop_quotes_and_pad_each_side():
+    """GNU quotes %N only when the directive carries no modifier, and a
+    width or precision applies to the name and the target separately."""
+    ws = await _seeded()
+    r = await ws.execute("stat -c '[%20N]' /data/link.txt")
+    assert r.stdout.decode() == (
+        "[      /data/link.txt ->   /data/dir/real.txt]\n")
+    r = await ws.execute("stat -c '[%-20N]' /data/link.txt")
+    assert r.stdout.decode() == (
+        "[/data/link.txt       -> /data/dir/real.txt  ]\n")
+    r = await ws.execute("stat -c '[%.6N]' /data/link.txt")
+    assert r.stdout.decode() == "[/data/ -> /data/]\n"
+    r = await ws.execute("stat -c '[%20N]' /data/dir/real.txt")
+    assert r.stdout.decode() == "[  /data/dir/real.txt]\n"
+
+
 async def _dangling():
     """The seeded tree plus a link whose target does not exist."""
     ws = await _seeded()

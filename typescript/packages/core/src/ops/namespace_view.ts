@@ -27,7 +27,7 @@ import { compareCodePoints } from '../utils/sort.ts'
  * names (leading dot) are included; presentation filtering is the
  * consumer's job, exactly as for backend entries.
  */
-function childMountNames(prefixes: readonly string[], parent: string): string[] {
+export function childMountNames(prefixes: readonly string[], parent: string): string[] {
   const norm = normDir(parent)
   const out = new Set<string>()
   for (const prefix of prefixes) {

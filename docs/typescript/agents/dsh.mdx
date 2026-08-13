@@ -27,7 +27,7 @@ const ws = new Workspace(
     '/redis': [new RedisResource({ url: redisUrl }), MountMode.WRITE],
     '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
-  { mode: MountMode.EXEC, runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
+  { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
 )
 
 const ctx = new Context()
