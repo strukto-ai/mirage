@@ -411,6 +411,31 @@ async function runArgv(
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
+
+  // A glob whose directory holds a child mount cannot be pushed down to
+  // one backend: the mount root is a child of that directory but its keys
+  // live in another resource, so the backend reports "no such file" for a
+  // name its own listing shows. Expanding such a word here lets the
+  // matches route per mount. It has to happen before the admission
+  // policies below, not just before the follow policy: a word left
+  // unexpanded reaches preCommand as the literal pattern, and
+  // MountRootPolicy cannot recognize a mount root inside one, so
+  // `tar -cf out.tar /base/*` would archive a whole backend the same
+  // operand typed by hand is refused for.
+  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const expandedWords = boundary.map(wordText)
+  // Compared as words, not as a count: a glob that matches exactly one
+  // name (`du /base/i*` where only the mount root matches) is still an
+  // expansion, and dropping it routes the pattern to a backend that
+  // cannot serve the child mount's keys.
+  const typedWords = argv.operands.map(wordText)
+  if (
+    expandedWords.length !== typedWords.length ||
+    expandedWords.some((w, i) => w !== typedWords[i])
+  ) {
+    argv = new Argv(argv.name, expandedWords, boundary)
+  }
+
   const args = [...argv.args]
   let operands = [...argv.operands]
 
@@ -725,18 +750,6 @@ async function runArgv(
       }
     }
     return handleDf(registry, session, dispatch, operands)
-  }
-
-  // A glob whose directory holds a child mount cannot be pushed down to
-  // one backend: the mount root is a child of that directory but its keys
-  // live in another resource, so the backend reports "no such file" for a
-  // name its own listing shows. Expanding such a word here (before the
-  // follow policy below, so a matched link is followed exactly as a typed
-  // one is) lets the matches route per mount.
-  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
-  if (boundary.length !== argv.operands.length) {
-    argv = new Argv(argv.name, boundary.map(wordText), boundary)
-    operands = [...argv.operands]
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on

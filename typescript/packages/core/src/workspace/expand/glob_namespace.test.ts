@@ -102,4 +102,63 @@ describe('glob expansion sees namespace state', () => {
     const ws = await makeWs()
     expect((await out(ws, 'echo /base/*/g1')).trim()).toBe('/base/inner/g1')
   })
+
+  // A glob matching exactly one name is still an expansion. Comparing
+  // counts read it as unchanged, so the pattern stayed routed to the
+  // parent mount, which cannot serve the child mount's keys.
+  it('installs a boundary glob that matches one name', async () => {
+    const ws = await makeWs()
+    expect((await out(ws, 'du /base/i*')).trimEnd()).toBe('7\t/base/inner')
+    expect((await out(ws, 'ls -d /base/i*')).trim()).toBe('/base/inner')
+  })
+
+  // The mount-root refusal reads the operands, so an expansion that
+  // happens after the admission policies hands tar a mount root nobody
+  // checked. Both spellings must answer identically.
+  it('refuses a mount root a glob produced', async () => {
+    const ws = await makeWs()
+    const typed = await ws.execute('tar -cf /out.tar /base/inner', { sessionId: 's' })
+    const globbed = await ws.execute('tar -cf /out2.tar /base/i*', { sessionId: 's' })
+    expect(new TextDecoder().decode(globbed.stderr)).toBe(new TextDecoder().decode(typed.stderr))
+    expect(globbed.exitCode).toBe(typed.exitCode)
+    expect(new TextDecoder().decode(globbed.stderr)).toContain('Device or resource busy')
+  })
+})
+
+// bash descends through a symlinked directory during pathname expansion
+// and reports the match under the typed name. Pinned against GNU bash
+// 5.2 on debian:stable-slim with base/dlink -> base/sub:
+//   echo base/d*/f2 -> base/dlink/f2
+//   echo base/*/f2  -> base/dlink/f2 base/sub/f2
+describe('glob expansion follows a symlinked directory', () => {
+  async function makeLinked(): Promise<Workspace> {
+    const ws = await makeWs()
+    await ws.execute('ln -s /base/sub /base/dlink', { sessionId: 's' })
+    await ws.execute('ln -s /base/inner /base/mlink', { sessionId: 's' })
+    return ws
+  }
+
+  it('descends a link in a mid-path segment', async () => {
+    const ws = await makeLinked()
+    expect((await out(ws, 'echo /base/d*/f2')).trim()).toBe('/base/dlink/f2')
+  })
+
+  it('lists a link named as the final parent', async () => {
+    const ws = await makeLinked()
+    expect((await out(ws, 'echo /base/dlink/*')).trim()).toBe('/base/dlink/f2')
+  })
+
+  it('reports both the link and its target', async () => {
+    const ws = await makeLinked()
+    expect((await out(ws, 'echo /base/*/f2')).split(/\s+/).filter(Boolean)).toEqual([
+      '/base/dlink/f2',
+      '/base/sub/f2',
+    ])
+  })
+
+  it('follows a link that points into a nested mount', async () => {
+    const ws = await makeLinked()
+    expect((await out(ws, 'echo /base/mlink/*')).trim()).toBe('/base/mlink/g1')
+    expect((await out(ws, 'echo /base/m*/g1')).trim()).toBe('/base/mlink/g1')
+  })
 })

@@ -20,6 +20,7 @@ from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import has_glob, spell_match
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import CycleError
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -114,6 +115,43 @@ def _mount_of(registry: MountRegistry, virtual: str,
         return fallback
 
 
+def _listing_dir(links: NamespaceLinks | None, directory: str) -> str:
+    """The directory a backend must list to answer a glob's parent.
+
+    bash descends through a symlinked directory during pathname
+    expansion (``base/dlink/*`` and ``base/*/f2`` both reach the target's
+    entries), but a link is namespace state no backend can see, so the
+    parent has to be resolved here or the listing comes back empty and
+    the word stays literal. The match keeps the typed spelling, exactly
+    as bash reports ``base/dlink/f2`` rather than the target's path.
+
+    Args:
+        links (NamespaceLinks | None): the namespace symlink table.
+        directory (str): the directory being globbed, slash-terminated.
+    """
+    if links is None:
+        return directory
+    base = directory.rstrip("/") or "/"
+    try:
+        real = links.follow(base)
+    except CycleError:
+        # A loop resolves to nothing, which is bash's own answer: the
+        # word matches no file and stays literal.
+        return directory
+    return directory if real == base else real.rstrip("/") + "/"
+
+
+def _respell(virtuals: list[str], directory: str) -> list[str]:
+    """Move matches found under a resolved directory back to the typed one.
+
+    Args:
+        virtuals (list[str]): matches as the target directory names them.
+        directory (str): the directory as typed, slash-terminated.
+    """
+    base = directory.rstrip("/")
+    return [f"{base}/{v.rsplit('/', 1)[-1]}" for v in virtuals]
+
+
 async def _level_matches(registry: MountRegistry, mount: MountEntry,
                          links: NamespaceLinks | None, dir_virtual: str,
                          seg: str) -> list[str]:
@@ -121,7 +159,10 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
 
     The walk can cross into a nested mount, because a mid-path segment
     may match a mount root, so the backend asked is the one owning that
-    parent rather than the one owning the typed word.
+    parent rather than the one owning the typed word. It can equally
+    descend through a symlinked directory, so the parent is resolved
+    through the namespace first and the matches are spelled back under
+    the name that was typed.
 
     Args:
         registry (MountRegistry): registry holding the mount table.
@@ -130,11 +171,12 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
         dir_virtual (str): the parent directory, slash-terminated.
         seg (str): the glob segment being matched.
     """
-    owner = _mount_of(registry, dir_virtual, mount)
+    real = _listing_dir(links, dir_virtual)
+    owner = _mount_of(registry, real, mount)
     prefix = owner.prefix.rstrip("/")
-    spec = PathSpec(virtual=dir_virtual,
-                    directory=dir_virtual,
-                    resource_path=mount_key(dir_virtual, prefix),
+    spec = PathSpec(virtual=real,
+                    directory=real,
+                    resource_path=mount_key(real, prefix),
                     pattern=seg,
                     resolved=False)
     try:
@@ -143,12 +185,19 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
         # This parent is not a listable directory; bash skips it during
         # descent. A nested mount root or a link under it is still real.
         matches = []
+    base = real.rstrip("/")
+    # A descent step yields children, so a match that is the parent
+    # itself is not one. A backend asked to list a path that is really a
+    # file answers with that file, which walked back out as a doubled
+    # segment (`/base/f*/f1` -> `/base/base/f1`); bash keeps the literal
+    # because a file is not a directory to descend into.
     out = [
-        m.virtual if isinstance(m, PathSpec) else
-        (m if m.startswith(prefix) else prefix + m) for m in matches
+        v for v in (m.virtual if isinstance(m, PathSpec) else (
+            m if m.startswith(prefix) else prefix + m)
+                    for m in matches) if v.startswith(f"{base}/")
     ]
-    out.extend(_namespace_children(registry, links, dir_virtual, seg))
-    return out
+    out.extend(_namespace_children(registry, links, real, seg))
+    return out if real == dir_virtual else _respell(out, dir_virtual)
 
 
 async def _walk_segments(item: PathSpec, mount: MountEntry, prefix: str,
@@ -185,13 +234,27 @@ async def _walk_segments(item: PathSpec, mount: MountEntry, prefix: str,
         level = sorted(set(gathered))
         if not level:
             return []
-    item_raw = item.raw_path
+    return _to_specs(level, item, registry, mount, walked)
+
+
+def _to_specs(virtuals: list[str], item: PathSpec, registry: MountRegistry,
+              mount: MountEntry, walked: int) -> list[PathSpec]:
+    """Key matched virtual paths to their mounts and spell them as typed.
+
+    Args:
+        virtuals (list[str]): the matched absolute virtual paths.
+        item (PathSpec): the glob word they answer.
+        registry (MountRegistry): registry holding the mount table.
+        mount (MountEntry): the mount owning the word.
+        walked (int): segment count from the word's first glob segment.
+    """
+    raw = item.raw_path
     return [
         dataclasses.replace(PathSpec.from_str_path(
             v, mount_key(v,
                          _mount_of(registry, v, mount).prefix.rstrip("/"))),
-                            raw_path=spell_match(item_raw, v, walked))
-        for v in level
+                            raw_path=spell_match(raw, v, walked))
+        for v in virtuals
     ]
 
 
@@ -259,6 +322,16 @@ async def resolve_globs(
                 if has_glob(item.directory):
                     resolved = await _walk_segments(item, mount, prefix,
                                                     registry, links)
+                elif _listing_dir(links, item.directory) != item.directory:
+                    # The parent is a symlink, so the backend holding the
+                    # typed path has nothing to list; _level_matches
+                    # follows it and spells the matches back.
+                    resolved = _to_specs(
+                        sorted(
+                            set(await
+                                _level_matches(registry, mount, links,
+                                               item.directory, pattern))),
+                        item, registry, mount, 1)
                 else:
                     resolved = _merge_namespace(
                         item,

@@ -21,6 +21,7 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { hasGlob as hasGlobChars, spellMatch } from '../../utils/glob_walk.ts'
+import { CycleError } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -57,6 +58,54 @@ function mountOf(registry: MountRegistry, virtual: string, fallback: MountEntry)
   return registry.mountFor(virtual) ?? fallback
 }
 
+// The directory a backend must list to answer a glob's parent. bash
+// descends through a symlinked directory during pathname expansion
+// (`base/dlink/*` and `base/*/f2` both reach the target's entries), but a
+// link is namespace state no backend can see, so the parent has to be
+// resolved here or the listing comes back empty and the word stays
+// literal. The match keeps the typed spelling, exactly as bash reports
+// `base/dlink/f2` rather than the target's path.
+function listingDir(links: NamespaceLinks | null, directory: string): string {
+  if (links === null) return directory
+  const base = rstripSlash(directory) || '/'
+  let real: string
+  try {
+    real = links.follow(base)
+  } catch (err) {
+    // A loop resolves to nothing, which is bash's own answer: the word
+    // matches no file and stays literal.
+    if (err instanceof CycleError) return directory
+    throw err
+  }
+  return real === base ? directory : `${rstripSlash(real)}/`
+}
+
+// Move matches found under a resolved directory back to the typed one.
+function respell(virtuals: readonly string[], directory: string): string[] {
+  const base = rstripSlash(directory)
+  return virtuals.map((v) => `${base}/${v.slice(v.lastIndexOf('/') + 1)}`)
+}
+
+// Key matched virtual paths to their mounts and spell them as typed.
+function toSpecs(
+  virtuals: readonly string[],
+  item: PathSpec,
+  registry: MountRegistry,
+  mount: MountEntry,
+  walked: number,
+): PathSpec[] {
+  return virtuals.map((v) => {
+    const prefix = rstripSlash(mountOf(registry, v, mount).prefix)
+    const base = PathSpec.fromStrPath(v, mountKey(v, prefix))
+    return new PathSpec({
+      virtual: base.virtual,
+      directory: base.directory,
+      resourcePath: base.resourcePath,
+      rawPath: spellMatch(item.rawPath, v, walked),
+    })
+  })
+}
+
 // Union a backend's matches with the namespace-owed ones. Sorted, because
 // bash sorts a pathname expansion and the two sources are enumerated
 // separately. A backend that matched nothing answers with the literal word
@@ -86,7 +135,10 @@ function mergeNamespace(
 // One descent step: the owning backend's matches plus the namespace's.
 // The walk can cross into a nested mount, because a mid-path segment may
 // match a mount root, so the backend asked is the one owning that parent
-// rather than the one owning the typed word.
+// rather than the one owning the typed word. It can equally descend
+// through a symlinked directory, so the parent is resolved through the
+// namespace first and the matches are spelled back under the name that
+// was typed.
 async function levelMatches(
   registry: MountRegistry,
   mount: MountEntry,
@@ -94,20 +146,29 @@ async function levelMatches(
   dirVirtual: string,
   seg: string,
 ): Promise<string[]> {
-  const owner = mountOf(registry, dirVirtual, mount)
+  const real = listingDir(links, dirVirtual)
+  const owner = mountOf(registry, real, mount)
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
   if (hasGlob(owner.resource)) {
     const spec = new PathSpec({
-      virtual: dirVirtual,
-      directory: dirVirtual,
-      resourcePath: mountKey(dirVirtual, prefix),
+      virtual: real,
+      directory: real,
+      resourcePath: mountKey(real, prefix),
       pattern: seg,
       resolved: false,
     })
     try {
       const matches = await owner.resource.glob([spec], prefix)
-      for (const m of matches) out.push(m.virtual)
+      // A descent step yields children, so a match that is the parent
+      // itself is not one. A backend asked to list a path that is really
+      // a file answers with that file, which walked back out as a
+      // doubled segment (`/base/f*/f1` -> `/base/base/f1`); bash keeps
+      // the literal because a file is not a directory to descend into.
+      const base = `${rstripSlash(real)}/`
+      for (const m of matches) {
+        if (m.virtual.startsWith(base)) out.push(m.virtual)
+      }
     } catch (err) {
       // fs-coded failures mean this parent is not a listable directory
       // (bash skips it); anything else is a real bug and propagates. A
@@ -115,8 +176,8 @@ async function levelMatches(
       if ((err as { code?: string }).code === undefined) throw err
     }
   }
-  out.push(...namespaceChildren(registry, links, dirVirtual, seg))
-  return out
+  out.push(...namespaceChildren(registry, links, real, seg))
+  return real === dirVirtual ? out : respell(out, dirVirtual)
 }
 
 // Expand a mid-path pattern level by level via the resource's glob. A glob
@@ -146,16 +207,7 @@ async function walkSegments(
     level = [...new Set(gathered)].sort(compareCodePoints)
     if (level.length === 0) return []
   }
-  return level.map((v) => {
-    const prefix = rstripSlash(mountOf(registry, v, mount).prefix)
-    const base = PathSpec.fromStrPath(v, mountKey(v, prefix))
-    return new PathSpec({
-      virtual: base.virtual,
-      directory: base.directory,
-      resourcePath: base.resourcePath,
-      rawPath: spellMatch(item.rawPath, v, walked),
-    })
-  })
+  return toSpecs(level, item, registry, mount, walked)
 }
 
 // Stamp a glob match with the spelling the user's word implies.
@@ -202,8 +254,12 @@ export async function resolveGlobs(
       // root or a link under the globbed directory; with nothing for the
       // namespace to add it keeps the untouched pass-through it had.
       const midPath = hasGlobChars(item.directory)
-      const extra = midPath ? [] : namespaceChildren(registry, links, item.directory, item.pattern)
-      if (!hasGlob(mount.resource) && extra.length === 0) {
+      // The parent is a symlink, so the backend holding the typed path
+      // has nothing to list and levelMatches has to follow it first.
+      const linked = !midPath && listingDir(links, item.directory) !== item.directory
+      const extra =
+        midPath || linked ? [] : namespaceChildren(registry, links, item.directory, item.pattern)
+      if (!linked && !hasGlob(mount.resource) && extra.length === 0) {
         result.push(item)
         continue
       }
@@ -216,10 +272,23 @@ export async function resolveGlobs(
         rawPath: item.rawPath,
       })
       try {
-        const own = hasGlob(mount.resource) ? await mount.resource.glob([withPrefix], prefix) : []
-        const resolved = midPath
-          ? await walkSegments(withPrefix, mount, registry, links)
-          : mergeNamespace(withPrefix, own, extra, registry, mount)
+        const own =
+          !linked && hasGlob(mount.resource) ? await mount.resource.glob([withPrefix], prefix) : []
+        let resolved: PathSpec[]
+        if (midPath) {
+          resolved = await walkSegments(withPrefix, mount, registry, links)
+        } else if (linked) {
+          const found = await levelMatches(registry, mount, links, item.directory, item.pattern)
+          resolved = toSpecs(
+            [...new Set(found)].sort(compareCodePoints),
+            withPrefix,
+            registry,
+            mount,
+            1,
+          )
+        } else {
+          resolved = mergeNamespace(withPrefix, own, extra, registry, mount)
+        }
         // bash with nullglob off: a zero-match glob stays the literal
         // word instead of vanishing.
         if (resolved.length === 0) {

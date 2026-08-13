@@ -280,6 +280,30 @@ async def _run_argv(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name
+
+    # ── boundary globs ──────────────────────────
+    # A glob whose directory holds a child mount cannot be pushed down
+    # to one backend: the mount root is a child of that directory but
+    # its keys live in another resource, so the backend reports "no such
+    # file" for a name its own listing shows. Expanding such a word here
+    # lets the matches route per mount. It has to happen before the
+    # admission policies below, not just before the follow policy: a
+    # word left unexpanded reaches `pre_command` as the literal pattern,
+    # and `MountRootPolicy` cannot recognize a mount root inside one, so
+    # `tar -cf out.tar /base/*` would archive a whole backend the same
+    # operand typed by hand is refused for.
+    boundary = await expand_boundary_globs(list(argv.operands), registry,
+                                           namespace)
+    expanded = [word_text(w) for w in boundary]
+    # Compared as words, not as a count: a glob that matches exactly one
+    # name (`du /base/i*` where only the mount root matches) is still an
+    # expansion, and dropping it routes the pattern to a backend that
+    # cannot serve the child mount's keys.
+    if expanded != [word_text(w) for w in argv.operands]:
+        argv = dataclasses.replace(argv,
+                                   operands=tuple(boundary),
+                                   args=tuple(expanded))
+
     args = list(argv.args)
     operands = list(argv.operands)
 
@@ -562,20 +586,6 @@ async def _run_argv(
                                                                  exit_code=1,
                                                                  stderr=err)
         return await handle_df(registry, session, dispatch, operands)
-
-    # A glob whose directory holds a child mount cannot be pushed down to
-    # one backend: the mount root is a child of that directory but its
-    # keys live in another resource, so the backend reports "no such
-    # file" for a name its own listing shows. Expanding such a word here
-    # (before the follow policy below, so a matched link is followed
-    # exactly as a typed one is) lets the matches route per mount.
-    boundary = await expand_boundary_globs(list(argv.operands), registry,
-                                           namespace)
-    if len(boundary) != len(argv.operands):
-        argv = dataclasses.replace(argv,
-                                   operands=tuple(boundary),
-                                   args=tuple(word_text(w) for w in boundary))
-        operands = list(argv.operands)
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
