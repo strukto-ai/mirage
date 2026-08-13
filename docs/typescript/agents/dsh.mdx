@@ -49,17 +49,17 @@ const sweep = await shell.run(
 
 ## Run Python with monty
 
-Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. A script can live on any mount — upload `test.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`):
+Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`):
 
 ```ts
 const ran = await shell.run(
   shell.resolve({
-    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/test.py > /notes/report.txt',
+    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example.py > /notes/report.txt',
   }),
 )
 ```
 
-The pattern that fits monty is: **the fs seam and the shell do the file I/O, monty does the compute** — the shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`test.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/test.py).
+The pattern that fits monty is: **the fs seam and the shell do the file I/O, monty does the compute** — the shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
 ## One execution world
 

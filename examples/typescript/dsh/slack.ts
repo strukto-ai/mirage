@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Run a Python script that lives in Slack. Upload test.py (next to this
-// file) to a channel, and the dsh shell provider executes it with monty
+// Run a Python script that lives in Slack. Upload example.py (next to
+// this file) to a channel, and the dsh shell provider executes it with monty
 // straight off the mount: the Slack backend serves the source, monty
 // computes in its sandbox, and the shell files the output into RAM.
 //
@@ -29,7 +29,7 @@ import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
 
-const SCRIPT_NAME = 'test.py'
+const SCRIPT_NAME = 'example.py'
 const RECENT_DAYS = 5
 
 async function composeWorld(ws: Workspace): Promise<Context> {
