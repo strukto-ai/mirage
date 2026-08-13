@@ -91,7 +91,7 @@ async function pythonUnderMonty(ctx: Context): Promise<void> {
   const shell = ctx.shell
   const ran = await bash(
     shell,
-    'REPORT_OWNER=zecheng python3 /notes/report.py > /notes/report.txt',
+    'REPORT_OWNER=mirage python3 /notes/report.py > /notes/report.txt',
   )
   console.log('exit:', ran.exitCode)
   const report = await bash(shell, 'cat /notes/report.txt')

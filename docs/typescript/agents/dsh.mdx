@@ -57,7 +57,7 @@ await ctx.fs.writeText(
   'import os\nwho = os.getenv("REPORT_OWNER", "nobody")\nprint("owner:", who)\nprint("total:", sum(range(100)))\n',
 )
 const ran = await shell.run(
-  shell.resolve({ command: 'REPORT_OWNER=zecheng python3 /notes/report.py > /data/report.txt' }),
+  shell.resolve({ command: 'REPORT_OWNER=mirage python3 /notes/report.py > /data/report.txt' }),
 )
 ```
 
