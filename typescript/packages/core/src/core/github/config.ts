@@ -20,12 +20,14 @@ export interface GhConfig {
   token: string
   baseUrl?: string
   repo?: string
+  branch?: string
 }
 
 export interface GhConfigRedacted {
   token: '<REDACTED>'
   baseUrl?: string
   repo?: string
+  branch?: string
 }
 
 export const GhConfigSchema = z.object({

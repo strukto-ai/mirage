@@ -21,9 +21,9 @@ import { readdir } from './readdir.ts'
 import type { GitHubTransport } from './_client.ts'
 
 const TREE = [
-  { path: 'README.md', mode: '100644', type: 'blob', sha: 'eee', size: 50 },
-  { path: 'src', mode: '040000', type: 'tree', sha: 'aaa' },
-  { path: 'src/main.py', mode: '100644', type: 'blob', sha: 'bbb', size: 120 },
+  { path: 'README.md', type: 'blob' as const, sha: 'eee', size: 50 },
+  { path: 'src', type: 'tree' as const, sha: 'aaa' },
+  { path: 'src/main.py', type: 'blob' as const, sha: 'bbb', size: 120 },
 ]
 
 function accessorFor(probe: { trees: number }): GitHubAccessor {

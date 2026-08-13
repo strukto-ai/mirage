@@ -38,8 +38,8 @@ function accessorFor(sha: string, probe: Probe): GitHubAccessor {
         probe.trees += 1
         return Promise.resolve({
           tree: [
-            { path: 'src', mode: '040000', type: 'tree', sha: 'aaa' },
-            { path: 'src/main.py', mode: '100644', type: 'blob', sha, size: 4 },
+            { path: 'src', type: 'tree' as const, sha: 'aaa' },
+            { path: 'src/main.py', type: 'blob' as const, sha, size: 4 },
           ],
           truncated: false,
         })
@@ -64,8 +64,8 @@ function accessorFor(sha: string, probe: Probe): GitHubAccessor {
 async function seeded(sha: string): Promise<RAMIndexCacheStore> {
   const index = new RAMIndexCacheStore()
   await populateIndex(index, [
-    { path: 'src', mode: '040000', type: 'tree', sha: 'aaa' },
-    { path: 'src/main.py', mode: '100644', type: 'blob', sha, size: 4 },
+    { path: 'src', type: 'tree' as const, sha: 'aaa' },
+    { path: 'src/main.py', type: 'blob' as const, sha, size: 4 },
   ])
   return index
 }
