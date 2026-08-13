@@ -18,7 +18,7 @@ import type { FileCache } from '../../cache/file/mixin.ts'
 import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { getExtension } from '../../commands/resolve.ts'
 import { IOResult, type OpReport } from '../../io/types.ts'
-import { eaccesReadOnly, einval } from '../../utils/errors.ts'
+import { eacces, eaccesReadOnly, einval, enoent } from '../../utils/errors.ts'
 import { Policies, postOpsGate, preOpsGate } from '../../policy/index.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { ownerPrefix, rstripSlash } from '../../utils/slash.ts'
@@ -40,6 +40,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import {
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
+  HIDDEN_CREATE_OPS,
   NAMESPACE_TABLE_OPS,
   POLICY_WRITE_OPS,
   SETATTR_KEYS,
@@ -48,9 +49,31 @@ import {
   assertMountAllowed,
   effectiveMountMode,
   MountNotAllowedError,
+  pathAllowed,
 } from '../../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
+
+/** The error a hidden path answers: ENOENT, or EACCES for a create. */
+function hiddenRefusal(opName: string, virtual: string): Error {
+  return HIDDEN_CREATE_OPS.has(opName) ? eacces(virtual) : enoent(virtual)
+}
+
+/**
+ * Drop listing entries the current session's spec hides.
+ *
+ * Entry shapes vary by backend (bare names, trailing-slash names, full
+ * paths), so each is keyed by its final segment against the listed
+ * directory, the same normalization `mergeReaddir` dedups by.
+ */
+function visibleEntries(entries: string[], parent: string): string[] {
+  const base = parent.replace(/\/+$/, '')
+  return entries.filter((e) => {
+    const trimmed = e.replace(/\/+$/, '')
+    const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
+    return pathAllowed(`${base}/${name}`)
+  })
+}
 
 /** The byte window a read asked for, whole file when it asked none. */
 function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
@@ -136,6 +159,17 @@ export class Dispatcher {
         return stat
       })
     }
+    // Hidden paths answer before anything else can: the typed path is
+    // checked so a link inside hidden space cannot be followed out of
+    // it, the followed path is re-checked so a visible link cannot
+    // lead in, and a rename destination is a create.
+    if (!pathAllowed(path.virtual)) {
+      throw hiddenRefusal(opName, path.virtual)
+    }
+    const dstArg = args?.[0]
+    if (opName === 'rename' && dstArg instanceof PathSpec && !pathAllowed(dstArg.virtual)) {
+      throw eacces(dstArg.virtual)
+    }
     if (NAMESPACE_TABLE_OPS.has(opName)) {
       return [await this.namespaceTableOp(opName, path, kwargs ?? {}, report), new IOResult()]
     }
@@ -151,7 +185,10 @@ export class Dispatcher {
     let p = path
     if (!NO_FOLLOW_OPS.has(opName) && !nofollow) {
       const followed = this.namespace.follow(path.virtual)
-      if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
+      if (followed !== path.virtual) {
+        p = PathSpec.fromStrPath(followed)
+        if (!pathAllowed(p.virtual)) throw hiddenRefusal(opName, p.virtual)
+      }
     }
     let resolved: [Resource, PathSpec, MountMode]
     try {
@@ -179,8 +216,11 @@ export class Dispatcher {
         return [stored, new IOResult()]
       }
       const eligible = isMissingPath(err) || err instanceof MountNotAllowedError
-      const fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
+      let fallback = eligible ? this.namespaceResult(opName, p.virtual) : null
       if (fallback === null) throw err
+      if (opName === 'readdir' && Array.isArray(fallback)) {
+        fallback = visibleEntries(fallback, p.virtual)
+      }
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
       await preOpsGate(this.policies, opName, p, fallbackWrite, '')
       // A synthetic namespace answer (a directory that exists only
@@ -316,7 +356,10 @@ export class Dispatcher {
       report?.served(null, result instanceof Uint8Array ? result.byteLength : null)
     }
     if (opName === 'readdir' && Array.isArray(result)) {
-      result = mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual)
+      result = visibleEntries(
+        mergeReaddir(result, this.namespace.mountPrefixes(), this.namespace, p.virtual),
+        p.virtual,
+      )
     }
     if (DISPATCH_WRITE_OPS.has(opName)) {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null

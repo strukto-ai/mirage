@@ -19,7 +19,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { type CommandIO, type StatOp, resolveGlobOf, supports } from './adapter.ts'
+import { type CommandIO, type StatOp, resolveGlobOf, supports, withHiddenGuard } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { defaultProvision } from './provision.ts'
 
@@ -67,7 +67,10 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   const commands: RegisteredCommand[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
-    const baseOps = (opsOver[b.name] ?? ops) as CommandIO
+    // Hidden-path enforcement wraps here, once for every generic
+    // command; the raw adapter stays untouched for the ops tables,
+    // whose door does its own enforcement.
+    const baseOps = withHiddenGuard((opsOver[b.name] ?? ops) as CommandIO)
     // A backend missing an op a command cannot run without (cp/mv/tee/
     // gunzip/...) doesn't get the command registered, rather than getting
     // one that crashes when invoked.

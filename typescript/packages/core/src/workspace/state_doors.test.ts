@@ -469,3 +469,185 @@ describe('the remaining session writers clear the same gate', () => {
     expect(stdoutStr(allowed).match(/ok/g)?.length).toBe(2)
   })
 })
+
+async function makeHiddenVarsWs(): Promise<Workspace> {
+  const ws = await makeWs()
+  const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
+  sess.env.SLACK_TOKEN = 'xoxb-real'
+  sess.env.PUBLIC = 'ok'
+  sess.hiddenVars = { names: ['SLACK_TOKEN'] }
+  return ws
+}
+
+describe('hidden vars across the shell tier', () => {
+  it('assign-default writes the raw env under hidden vars', async () => {
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('echo "${NEWVAR:=seeded}" && echo "$NEWVAR"', {
+      sessionId: 'agent',
+    })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('seeded\nseeded\n')
+    expect(ws.getSession('agent').env.NEWVAR).toBe('seeded')
+  })
+
+  it('expansion reads a hidden var as unset', async () => {
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('echo "[$SLACK_TOKEN][$PUBLIC]"', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('[][ok]\n')
+  })
+
+  it('env and set listings omit hidden vars', async () => {
+    const ws = await makeHiddenVarsWs()
+    for (const line of ['env', 'set', 'export -p']) {
+      const io = await ws.execute(line, { sessionId: 'agent' })
+      expect(stdoutStr(io)).not.toContain('SLACK_TOKEN')
+    }
+  })
+
+  it('exporting a hidden var is refused and preserves it', async () => {
+    // A landed write would clobber the real value the host's wiring
+    // still reads; a swallowed one would gaslight the agent.
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('export SLACK_TOKEN=fake', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+
+  it('unset of a hidden var is quiet and preserves it', async () => {
+    const ws = await makeHiddenVarsWs()
+    const io = await ws.execute('unset SLACK_TOKEN', { sessionId: 'agent' })
+    expect(io.exitCode).toBe(0)
+    expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
+  })
+})
+
+async function makeHiddenPathsWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const a = new RAMResource()
+  a.store.files.set('/x.txt', ENC.encode('public\n'))
+  a.store.files.set('/secrets/token.txt', ENC.encode('s3cr3t\n'))
+  a.store.files.set('/note.key', ENC.encode('kkk\n'))
+  a.store.dirs.add('/secrets')
+  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
+  open.push(ws)
+  const sess = ws.createSession('agent')
+  sess.hiddenPaths = { paths: ['/a/secrets'], patterns: ['*.key'] }
+  return ws
+}
+
+describe('hidden paths across the tiers', () => {
+  it('the shell reads a hidden path as missing', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('cat /a/secrets/token.txt', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('s3cr3t')
+    expect(stderrStr(io)).toContain('No such file')
+  })
+
+  it('a pattern-hidden file reads as missing', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('cat /a/note.key', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('kkk')
+  })
+
+  it('ls drops hidden names', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('ls /a', { sessionId: 'agent' })
+    const out = stdoutStr(io)
+    expect(out).toContain('x.txt')
+    expect(out).not.toContain('secrets')
+    expect(out).not.toContain('note.key')
+  })
+
+  it('ls of a hidden dir is no such file', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('ls /a/secrets', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('token')
+  })
+
+  it('find never reports hidden rows', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('find /a', { sessionId: 'agent' })
+    const out = stdoutStr(io)
+    expect(out).toContain('/a/x.txt')
+    expect(out).not.toContain('secrets')
+    expect(out).not.toContain('.key')
+  })
+
+  it('du never counts hidden leaves', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('du -a /a', { sessionId: 'agent' })
+    const out = stdoutStr(io)
+    expect(out).toContain('x.txt')
+    expect(out).not.toContain('secrets')
+    expect(out).not.toContain('.key')
+  })
+
+  it('a glob never matches a hidden name', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('cat /a/*.key', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    expect(stdoutStr(io)).not.toContain('kkk')
+  })
+
+  it('a redirect into hidden space fails and writes nothing', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('echo hi > /a/secrets/new.txt', { sessionId: 'agent' })
+    expect(io.exitCode).not.toBe(0)
+    const a = ws.namespace.mountFor('/a/x.txt')
+    expect(a).not.toBeNull()
+    const resource = a?.resource as RAMResource
+    expect(resource.store.files.has('/secrets/new.txt')).toBe(false)
+  })
+
+  it('the unscoped session sees everything', async () => {
+    const ws = await makeHiddenPathsWs()
+    const io = await ws.execute('ls /a')
+    const out = stdoutStr(io)
+    expect(out).toContain('secrets')
+    expect(out).toContain('note.key')
+  })
+
+  it('the fs facade agrees with the shell', async () => {
+    const ws = await makeHiddenPathsWs()
+    const sess = ws.getSession('agent')
+    await runWithSession(sess, async () => {
+      await expect(ws.fs.readFile('/a/secrets/token.txt')).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      const names = await ws.fs.readdir('/a')
+      expect(names.some((n) => n.includes('secrets'))).toBe(false)
+    })
+  })
+})
+
+describe('session profiles', () => {
+  it('a profile applies every narrowing field end to end', async () => {
+    const parser = await getTestParser()
+    const a = new RAMResource()
+    a.store.files.set('/x.txt', ENC.encode('public\n'))
+    a.store.files.set('/secrets/token.txt', ENC.encode('s3cr3t\n'))
+    a.store.dirs.add('/secrets')
+    const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, shellParser: parser })
+    open.push(ws)
+    const analyst = {
+      mounts: { '/a': 'write' },
+      hiddenPaths: { paths: ['/a/secrets'] },
+      hiddenVars: { names: ['SLACK_TOKEN'] },
+      env: { ROLE: 'analyst' },
+    }
+    const s1 = ws.createSession('agent1', { profile: analyst })
+    const s2 = ws.createSession('agent2', { profile: analyst })
+    expect(s1.mountModes?.get('/a')).toBe(MountMode.WRITE)
+    expect(s1.hiddenPaths).toBe(analyst.hiddenPaths)
+    expect(s2.hiddenPaths).toBe(analyst.hiddenPaths)
+    expect(s1.env.ROLE).toBe('analyst')
+    const listing = await ws.execute('ls /a', { sessionId: 'agent1' })
+    expect(stdoutStr(listing)).not.toContain('secrets')
+    const role = await ws.execute('echo "$ROLE"', { sessionId: 'agent1' })
+    expect(stdoutStr(role)).toBe('analyst\n')
+  })
+})

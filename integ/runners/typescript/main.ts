@@ -86,9 +86,39 @@ async function runTarget(
     }
     // Sessions a case can name via its `session` field. Mount grants take
     // either the mapping form ({ '/data': 'read' }) or the list form
-    // (['/data'], which inherits the mount's own mode).
-    for (const [sessionId, mounts] of Object.entries(target.sessions ?? {})) {
-      ws.createSession(sessionId, { mounts })
+    // (['/data'], which inherits the mount's own mode). A profile form
+    // ({ mounts, hidden_paths, hidden_vars, env }) narrows visibility
+    // too; it is told apart by its keys, which never start with '/'.
+    for (const [sessionId, spec] of Object.entries(target.sessions ?? {})) {
+      const profileShaped =
+        spec !== null &&
+        typeof spec === 'object' &&
+        !Array.isArray(spec) &&
+        ['mounts', 'hidden_paths', 'hidden_vars', 'env'].some((k) => k in spec)
+      if (profileShaped) {
+        const p = spec as {
+          mounts?: Record<string, string> | string[]
+          hidden_paths?: { paths?: string[]; patterns?: string[] }
+          hidden_vars?: { names?: string[]; patterns?: string[] }
+          env?: Record<string, string>
+        }
+        ws.createSession(sessionId, {
+          profile: {
+            mounts: p.mounts ?? null,
+            hiddenPaths:
+              p.hidden_paths !== undefined
+                ? { paths: p.hidden_paths.paths ?? [], patterns: p.hidden_paths.patterns ?? [] }
+                : null,
+            hiddenVars:
+              p.hidden_vars !== undefined
+                ? { names: p.hidden_vars.names ?? [], patterns: p.hidden_vars.patterns ?? [] }
+                : null,
+            env: p.env ?? null,
+          },
+        })
+      } else {
+        ws.createSession(sessionId, { mounts: spec as Record<string, string> | string[] })
+      }
     }
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue

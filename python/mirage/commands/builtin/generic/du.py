@@ -10,6 +10,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
+from mirage.context import hidden_paths_active, path_allowed
 from mirage.io.types import IOResult
 from mirage.ops.types import LinkView, MountView
 from mirage.types import FileStat, PathSpec
@@ -425,7 +426,11 @@ async def _du_one(
         leaves = drop_shadowed(leaves, roots)
     link_total = sum(size for _, size in leaves)
 
-    if flags.s and not roots:
+    if flags.s and not roots and not hidden_paths_active():
+        # The one-total fast path trusts the backend's own sum, which a
+        # session hiding paths cannot: hidden leaves would be counted
+        # into a total their names never justify, so that session takes
+        # the entries walk below instead.
         total = await compute_size(path) + link_total
         return [_line(total, flags.h, label)], total
 
@@ -438,6 +443,12 @@ async def _du_one(
         return [_line(total, flags.h, label)], total
 
     virtual = to_virtual(entries, path) + leaves
+    visible = [(leaf, size) for leaf, size in virtual if path_allowed(leaf)]
+    if len(visible) != len(virtual):
+        # Same honesty rule as shadowed leaves: the total is the sum of
+        # what the session may see, never the backend's own number.
+        virtual = visible
+        total = sum(size for _, size in virtual)
     if roots:
         # The backend's own total counted the shadowed leaves, so the
         # honest number is the sum of what survived.

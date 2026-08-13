@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SessionView } from '../../ops/types.ts'
-import { preSessionGate, type Policies } from '../../policy/index.ts'
+import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import { arrayValues, type ShellArray } from '../../shell/array.ts'
+import { varHidden } from '../../utils/hidden.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { ownRecord, sessionEntry } from './session.ts'
 import type { Session } from './session.ts'
@@ -24,23 +25,51 @@ import type { Session } from './session.ts'
  *
  * Every tier that hands the env onward as a process view (command
  * opts, `inv.env`, guest `RunArgs.env`, the `env` builtin) copies
- * through here, so a filter added later lands on all of them by
+ * through here, so the hidden-vars filter lands on all of them by
  * construction rather than on however many hand-rolled copies someone
  * remembers. The copy keeps the null prototype session records carry.
  */
 export function envSnapshot(session: Session): Record<string, string> {
-  return ownRecord(session.env)
+  if (session.hiddenVars == null) return ownRecord(session.env)
+  const out = ownRecord<string>()
+  for (const [name, value] of Object.entries(session.env)) {
+    if (!varHidden(session.hiddenVars, name)) out[name] = value
+  }
+  return out
 }
 
-/** The variable's value, null when unset. Sync on purpose: `$X`
- * expansion is the hot path, so a read stays a record lookup. */
+/** The variable's value, null when unset or hidden. Sync on purpose:
+ * `$X` expansion is the hot path, so a read stays a record lookup plus
+ * the hidden check. */
 function envGet(session: Session, name: string): string | null {
+  if (varHidden(session.hiddenVars, name)) return null
   return sessionEntry(session.env, name) ?? null
 }
 
-/** Whether `readonly` has marked the name. */
+/**
+ * Whether `readonly` has marked the name.
+ *
+ * A hidden name answers false: isReadonly speaks about the session's
+ * visible world, and calling a name that reads as unset "readonly"
+ * would leak it.
+ */
 function envIsReadonly(session: Session, name: string): boolean {
+  if (varHidden(session.hiddenVars, name)) return false
   return session.readonlyVars.has(name)
+}
+
+/**
+ * The env mapping a reader tier should resolve names against.
+ *
+ * The raw record when nothing is hidden (the common case pays
+ * nothing), a filtered copy otherwise. TS diverges from python's lazy
+ * mapping view deliberately: expansion sites read records with plain
+ * property access, so a filtered copy is the shape they already
+ * consume, and env sizes make the copy cost noise.
+ */
+export function visibleEnv(session: Session): Record<string, string> {
+  if (session.hiddenVars == null) return session.env
+  return envSnapshot(session)
 }
 
 /**
@@ -48,15 +77,19 @@ function envIsReadonly(session: Session, name: string): boolean {
  *
  * General over variable shapes: a string stores a scalar, a ShellArray
  * stores a whole array, and the two storages stay exclusive. Semantics
- * live here once — readonly refusal, the `preSession` policy gate
- * (whose context value renders an array as its present elements joined
- * by spaces), then the store — so every writer states them the same
- * way whichever tier or spelling asked. Writers with richer mechanics
- * (subscripts, appends, holes) compute the resulting value on a copy
- * and hand it here, so a denial never leaves a half-applied write.
- * Null policies gate nothing (a writer outside a workspace). Throws
- * ReadonlyVariableError when the name is readonly, PolicyDenied when a
- * preSession policy refuses the write.
+ * live here once — the hidden refusal, readonly refusal, the
+ * `preSession` policy gate (whose context value renders an array as
+ * its present elements joined by spaces), then the store — so every
+ * writer states them the same way whichever tier or spelling asked.
+ * Writers with richer mechanics (subscripts, appends, holes) compute
+ * the resulting value on a copy and hand it here, so a denial never
+ * leaves a half-applied write. Null policies gate nothing (a writer
+ * outside a workspace). Throws PolicyDenied when the name is hidden
+ * for this session (a landed write would clobber the real value the
+ * host's wiring still reads; a swallowed one would gaslight the
+ * writer — the vars twin of EACCES on a create into hidden path
+ * space), ReadonlyVariableError when the name is readonly, and
+ * PolicyDenied when a preSession policy refuses the write.
  */
 async function setVar(
   session: Session,
@@ -64,6 +97,9 @@ async function setVar(
   name: string,
   value: string | ShellArray,
 ): Promise<void> {
+  if (varHidden(session.hiddenVars, name)) {
+    throw new PolicyDenied(`${name}: permission denied`, name)
+  }
   if (session.readonlyVars.has(name)) {
     throw new ReadonlyVariableError(name)
   }
@@ -88,10 +124,14 @@ async function setVar(
 
 /**
  * Drop one variable through the session plane's gate; a missing name
- * is quiet. Throws ReadonlyVariableError when the name is readonly,
+ * is quiet. A hidden name is a quiet no-op that writes nothing:
+ * hidden reads as unset, bash's unset of a missing name is quiet, and
+ * popping the real value would let a session mutate state it cannot
+ * see. Throws ReadonlyVariableError when the name is readonly,
  * PolicyDenied when a preSession policy refuses the write.
  */
 async function unsetVar(session: Session, policies: Policies | null, name: string): Promise<void> {
+  if (varHidden(session.hiddenVars, name)) return
   if (session.readonlyVars.has(name)) {
     throw new ReadonlyVariableError(name)
   }

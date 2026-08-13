@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import functools
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Protocol, overload
 
@@ -23,6 +25,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import (DEFAULT_MAX_DU_ENTRIES,
                                                 DuEntries)
 from mirage.commands.config import CommandFnResult, CommandOpts, ProvisionFn
+from mirage.context import path_allowed
 from mirage.ops.types import StatOverlay
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS, eisdir
@@ -213,7 +216,8 @@ async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
 
     Bound via ``partial(overlaid_stat, stat_fn, overlay)`` so stat-
     rendering commands (ls) show chmod/chown/touch state the backend
-    itself cannot hold.
+    itself cannot hold. Guarded itself because the overlay branch binds
+    the raw backend stat rather than a CommandIO slot.
 
     Args:
         stat (OperationFn): backend stat ``(path, index) -> FileStat``.
@@ -221,7 +225,88 @@ async def overlaid_stat(stat: OperationFn, overlay: StatOverlay,
         path (PathSpec): entry being statted.
         index (IndexCacheStore): cache index threaded through.
     """
+    _refuse_hidden(path, create=False)
     return overlay(path.virtual, await stat(path, index))
+
+
+def _refuse_hidden(path: PathSpec, create: bool) -> None:
+    """Refuse a hidden path the way nonexistence would.
+
+    ENOENT for anything acting on the path, EACCES when the caller is
+    creating it (ENOENT is nonsense as the answer to a create). Raised
+    at the op boundary so each command renders the refusal through its
+    own missing-file wording, indistinguishable from a real miss.
+
+    Args:
+        path (PathSpec): the operand being guarded.
+        create (bool): whether the op creates the path it names.
+    """
+    if path_allowed(path.virtual):
+        return
+    if create:
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES),
+                              path.virtual)
+    raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT),
+                            path.virtual)
+
+
+def _guarded_call(fn: OperationFn, create: bool, *args: Any,
+                  **kwargs: Any) -> Any:
+    """Call a backend op after guarding its PathSpec positionals.
+
+    Sync on purpose: the guard raises at call time and the backend's
+    own return shape (coroutine, async iterator) passes through
+    untouched. The first path refuses as the op's subject (ENOENT, or
+    EACCES for a create); any further path is a destination, which a
+    hidden target always refuses as EACCES (rename/copy into hidden
+    space is a create).
+
+    Args:
+        fn (OperationFn): the raw backend op.
+        create (bool): whether the op creates its first path.
+        *args: the call's positionals, PathSpecs among them.
+        **kwargs: forwarded untouched.
+    """
+    first = True
+    for arg in args:
+        if isinstance(arg, PathSpec):
+            _refuse_hidden(arg, create=create if first else True)
+            first = False
+    return fn(*args, **kwargs)
+
+
+async def _guarded_readdir(fn: OperationFn, *args: Any,
+                           **kwargs: Any) -> list[str]:
+    """Readdir with hidden names dropped from the listing.
+
+    Args:
+        fn (OperationFn): the raw backend readdir.
+        *args: the call's positionals; the first PathSpec is the
+            directory being listed.
+        **kwargs: forwarded untouched.
+    """
+    parent = next(a for a in args if isinstance(a, PathSpec))
+    _refuse_hidden(parent, create=False)
+    entries = await fn(*args, **kwargs)
+    base = parent.virtual.rstrip("/")
+    return [
+        e for e in entries
+        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+    ]
+
+
+async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
+    """Exists that answers False for a hidden path, never a refusal.
+
+    Args:
+        fn (OperationFn): the raw backend exists.
+        *args: the call's positionals; the first PathSpec is probed.
+        **kwargs: forwarded untouched.
+    """
+    probed = next(a for a in args if isinstance(a, PathSpec))
+    if not path_allowed(probed.virtual):
+        return False
+    return bool(await fn(*args, **kwargs))
 
 
 @overload
@@ -375,6 +460,44 @@ class CommandIO:
             raise NotImplementedError(
                 f"operation {op!r} is not supported on this backend")
         return fn
+
+
+_GUARD_ENOENT_SLOTS = ("read_bytes", "read_stream", "stat", "read_range",
+                       "set_attrs", "unlink", "rmdir", "rm_r", "truncate",
+                       "rename", "copy", "dir_copy", "find")
+
+_GUARD_EACCES_SLOTS = ("write", "mkdir", "append", "create")
+
+
+def with_hidden_guard(ops: CommandIO) -> CommandIO:
+    """Return ``ops`` whose slots refuse hidden paths like missing ones.
+
+    The commands factory hands this copy to every generic command, the
+    same shape as ``with_read_cache``, so hidden-path enforcement lands
+    once for the whole command tier (resolve_glob derives from the
+    wrapped readdir). The module-level IO constants stay raw: the ops
+    tables built from them serve the dispatcher, which enforces hiding
+    itself at the door, and their tests introspect slot identity. The
+    guards read the current session at call time, so one wrapped copy
+    is shared across sessions.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+    """
+    changes: dict[str, Any] = {
+        "readdir": functools.partial(_guarded_readdir, ops.readdir)
+    }
+    for slot in _GUARD_ENOENT_SLOTS:
+        fn = getattr(ops, slot)
+        if fn is not None:
+            changes[slot] = functools.partial(_guarded_call, fn, False)
+    for slot in _GUARD_EACCES_SLOTS:
+        fn = getattr(ops, slot)
+        if fn is not None:
+            changes[slot] = functools.partial(_guarded_call, fn, True)
+    if ops.exists is not None:
+        changes["exists"] = functools.partial(_guarded_exists, ops.exists)
+    return replace(ops, **changes)
 
 
 async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,

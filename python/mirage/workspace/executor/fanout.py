@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic.crossmount.fanout.du import \
 from mirage.commands.builtin.generic.crossmount.types import RunSingle
 from mirage.commands.errors import FindParseError
 from mirage.commands.spec.types import FlagValue
-from mirage.context import mount_allowed
+from mirage.context import mount_allowed, path_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -95,7 +95,8 @@ def _allowed_descendants(registry: MountRegistry,
         path (str): parent path to scan beneath.
     """
     return [
-        m for m in registry.descendant_mounts(path) if mount_allowed(m.prefix)
+        m for m in registry.descendant_mounts(path)
+        if mount_allowed(m.prefix) and path_allowed("/" + m.prefix.strip("/"))
     ]
 
 

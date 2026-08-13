@@ -64,6 +64,7 @@ import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from './store/base.ts'
 import type { Session } from './session/session.ts'
+import type { SessionProfile } from './session/profile.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { stripSlash } from '../utils/slash.ts'
 import type { WatchRuntime } from '../watch/base.ts'
@@ -472,9 +473,15 @@ export class Workspace {
     sessionId: string,
     options: {
       mounts?: ReadonlyMap<string, string> | Record<string, string> | readonly string[] | null
+      /**
+       * A role's narrowing bundle; its fields unpack onto the session,
+       * with an explicit `mounts` option overriding the profile's.
+       */
+      profile?: SessionProfile | null
     } = {},
   ): Session {
-    const mounts = options.mounts ?? null
+    const profile = options.profile ?? null
+    const mounts = options.mounts ?? profile?.mounts ?? null
     let modes: Map<string, MountMode> | null = null
     if (mounts !== null) {
       modes = new Map<string, MountMode>()
@@ -495,7 +502,13 @@ export class Workspace {
         if (!modes.has(p)) modes.set(p, MountMode.EXEC)
       }
     }
-    return this.sessionManager.create(sessionId, { mountModes: modes })
+    const session = this.sessionManager.create(sessionId, { mountModes: modes })
+    if (profile !== null) {
+      session.hiddenPaths = profile.hiddenPaths ?? null
+      session.hiddenVars = profile.hiddenVars ?? null
+      if (profile.env != null) Object.assign(session.env, profile.env)
+    }
+    return session
   }
 
   getSession(sessionId: string): Session {

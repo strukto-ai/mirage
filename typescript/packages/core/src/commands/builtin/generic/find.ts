@@ -35,6 +35,7 @@ import {
   type PredNode,
 } from '../findEval.ts'
 import type { LinkView } from '../../../ops/types.ts'
+import { pathAllowed } from '../../../context/session_context.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -511,7 +512,11 @@ export async function findGeneric(
       ),
     )
     withLinks.sort(compareCodePoints)
-    matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
+    // Hidden rows drop here, above the native-op/walk fork and after
+    // the link merge, so a mount's visibility behavior cannot depend
+    // on whether its backend ships a native find op.
+    const visibleRows = withLinks.filter((row) => pathAllowed(row))
+    matches.push(...respellRaw(visibleRows, root.virtual, root.rawPath))
   }
   // Start points print in operand order (GNU); each root's rows were
   // sorted above, and a global sort here would interleave them.

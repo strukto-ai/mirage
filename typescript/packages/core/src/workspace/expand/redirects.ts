@@ -23,6 +23,7 @@ import {
 import { NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
+import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
 import { expandNode, unescapeHeredoc } from './node.ts'
 import type { ExecuteFn } from './node.ts'
@@ -153,7 +154,7 @@ export async function expandRedirects(
         body = await expandNode(heredocNode, session, executeFn, callStack)
       } else if (typeof body === 'string' && r.expandVars) {
         let s: string = body
-        for (const [k, v] of Object.entries(session.env)) {
+        for (const [k, v] of Object.entries(visibleEnv(session))) {
           s = s.replaceAll('$' + k, v)
         }
         body = s

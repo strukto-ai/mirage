@@ -73,7 +73,17 @@ export interface Target {
   // Sessions a case can name via its `session` field. Grants take either the
   // mapping form ({ '/data': 'read' }) or the list form (['/data'], which
   // inherits the mount's own mode).
-  sessions?: Record<string, Record<string, string> | string[]>
+  sessions?: Record<
+    string,
+    | Record<string, string>
+    | string[]
+    | {
+        mounts?: Record<string, string> | string[]
+        hidden_paths?: { paths?: string[]; patterns?: string[] }
+        hidden_vars?: { names?: string[]; patterns?: string[] }
+        env?: Record<string, string>
+      }
+  >
   // Session environment every case on this target runs under. The
   // conformance runner passes the same map to the real binary, so a CLI
   // option that reads a variable is compared under one environment.

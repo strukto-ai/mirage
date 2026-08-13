@@ -36,7 +36,8 @@ from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
-from mirage.workspace.session.state import env_snapshot, session_view
+from mirage.workspace.session.state import (env_is_readonly, env_snapshot,
+                                            session_view, visible_env)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -261,10 +262,10 @@ def _export_lines(session: Session, flags: set[str]) -> list[str]:
     """
     if "f" in flags:
         return []
+    env = visible_env(session)
     lines: list[str] = []
-    for name in sorted(session.env):
-        lines.append(
-            f"declare -x {name}={_bash_declare_quote(session.env[name])}")
+    for name in sorted(env):
+        lines.append(f"declare -x {name}={_bash_declare_quote(env[name])}")
     return lines
 
 
@@ -286,8 +287,12 @@ def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
     if "f" in flags or "A" in flags:
         return []
     arrays_only = "a" in flags
+    env = visible_env(session)
     lines: list[str] = []
-    for name in sorted(session.readonly_vars):
+    # env_is_readonly answers False for a hidden name, so a hidden
+    # readonly never prints even its bare `declare -r NAME` row.
+    for name in sorted(n for n in session.readonly_vars
+                       if env_is_readonly(session, n)):
         arr = session.arrays.get(name)
         if arr is not None:
             parts = [
@@ -298,9 +303,8 @@ def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
             continue
         if arrays_only:
             continue
-        if name in session.env:
-            lines.append(
-                f"declare -r {name}={_bash_declare_quote(session.env[name])}")
+        if name in env:
+            lines.append(f"declare -r {name}={_bash_declare_quote(env[name])}")
         else:
             lines.append(f"declare -r {name}")
     return lines
@@ -416,13 +420,18 @@ async def handle_readonly(
 
 
 def _unset_variable(session: Session, name: str) -> None:
-    """Remove a whole scalar or array variable.
+    """Clear what the env door does not own after a whole-variable unset.
+
+    The scalar half is the view's (``unset`` popped it, or quietly kept
+    it for a hidden name — a direct pop here would undo that refusal);
+    this clears the array storage and the getopts residue. A hidden
+    name can never hold an array, because ``set_var`` refuses hidden
+    names for both shapes.
 
     Args:
         session (Session): shell session state.
         name (str): a bare variable name (no subscript).
     """
-    session.env.pop(name, None)
     session.arrays.pop(name, None)
     if name == "OPTIND":
         session._getopts_optind = None
@@ -578,13 +587,13 @@ async def handle_printenv(
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if name:
-        val = session.env.get(name)
+        val = visible_env(session).get(name)
         if val is None:
             return None, IOResult(exit_code=1), ExecutionNode(
                 command="printenv", exit_code=1)
         out = f"{val}\n".encode()
     else:
-        lines = [f"{k}={v}" for k, v in session.env.items()]
+        lines = [f"{k}={v}" for k, v in visible_env(session).items()]
         out = ("\n".join(sorted(lines)) + "\n").encode()
     return out, IOResult(), ExecutionNode(command="printenv", exit_code=0)
 
@@ -771,7 +780,7 @@ async def handle_read(
                                                           exit_code=1)
 
     line = line_bytes.decode(errors="replace").rstrip("\n")
-    ifs = session.env.get("IFS", " \t\n")
+    ifs = visible_env(session).get("IFS", " \t\n")
     if ifs == " \t\n":
         # GNU trims IFS whitespace from both ends before splitting.
         line = line.strip(" \t\n")
@@ -917,7 +926,7 @@ async def handle_set(
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if not args:
-        lines = [f"{k}={v}" for k, v in session.env.items()]
+        lines = [f"{k}={v}" for k, v in visible_env(session).items()]
         out = ("\n".join(sorted(lines)) + "\n").encode()
         return out, IOResult(), ExecutionNode(command="set", exit_code=0)
     i = 0

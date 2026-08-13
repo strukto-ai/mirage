@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import functools
+from collections.abc import Iterator, Mapping
 
 from mirage.ops.types import SessionView
-from mirage.policy import Policies, pre_session_gate
+from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.array import ShellArray, array_values
+from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import Session
 
@@ -27,37 +30,96 @@ def env_snapshot(session: Session) -> dict[str, str]:
 
     Every tier that hands the env onward as a process view (command
     kwargs, ``inv.env``, guest ``RunArgs.env``, the ``env`` builtin)
-    copies through here, so a filter added later lands on all of them
-    by construction rather than on however many hand-rolled copies
-    someone remembers.
+    copies through here, so the hidden-vars filter lands on all of
+    them by construction rather than on however many hand-rolled
+    copies someone remembers.
 
     Args:
         session (Session): the session whose env to copy.
     """
-    return dict(session.env)
+    if session.hidden_vars is None:
+        return dict(session.env)
+    return {
+        name: value
+        for name, value in session.env.items()
+        if not var_hidden(session.hidden_vars, name)
+    }
 
 
 def env_get(session: Session, name: str) -> str | None:
-    """The variable's value, None when unset.
+    """The variable's value, None when unset or hidden.
 
     Sync on purpose: ``$X`` expansion is the hot path, so a read stays
-    a dict lookup.
+    a dict lookup plus the hidden check.
 
     Args:
         session (Session): the session holding the environment.
         name (str): variable name.
     """
+    if var_hidden(session.hidden_vars, name):
+        return None
     return session.env.get(name)
 
 
 def env_is_readonly(session: Session, name: str) -> bool:
     """Whether ``readonly`` has marked the name.
 
+    A hidden name answers False: is_readonly speaks about the
+    session's visible world, and calling a name that reads as unset
+    "readonly" would leak it.
+
     Args:
         session (Session): the session holding the readonly set.
         name (str): variable name.
     """
+    if var_hidden(session.hidden_vars, name):
+        return False
     return name in session.readonly_vars
+
+
+class _VisibleEnv(Mapping[str, str]):
+    """A live, read-only view of the session env minus hidden names.
+
+    Handed to expansion instead of a filtered copy so a ``$X`` read
+    stays one dict lookup plus the hidden check, and later writes to
+    the session show through without rebuilding anything.
+    """
+
+    __slots__ = ("_session", )
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def __getitem__(self, name: str) -> str:
+        if var_hidden(self._session.hidden_vars, name):
+            raise KeyError(name)
+        return self._session.env[name]
+
+    def __iter__(self) -> Iterator[str]:
+        hidden = self._session.hidden_vars
+        for name in self._session.env:
+            if not var_hidden(hidden, name):
+                yield name
+
+    def __len__(self) -> int:
+        hidden = self._session.hidden_vars
+        return sum(1 for name in self._session.env
+                   if not var_hidden(hidden, name))
+
+
+def visible_env(session: Session) -> Mapping[str, str]:
+    """The env mapping a reader tier should resolve names against.
+
+    The raw dict when nothing is hidden (the common case pays
+    nothing), a filtering view otherwise. Read-only by type: writers
+    go through ``set_var``/``unset_var``, never a mapping.
+
+    Args:
+        session (Session): the session holding the environment.
+    """
+    if session.hidden_vars is None:
+        return session.env
+    return _VisibleEnv(session)
 
 
 async def set_var(session: Session, policies: Policies | None, name: str,
@@ -83,8 +145,15 @@ async def set_var(session: Session, policies: Policies | None, name: str,
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: a pre_session policy refused the write.
+        PolicyDenied: the name is hidden for this session, or a
+            pre_session policy refused the write.
     """
+    if var_hidden(session.hidden_vars, name):
+        # A landed write would clobber the real value the host's wiring
+        # still reads, and a swallowed one would gaslight the writer;
+        # refuse loudly instead, the vars twin of EACCES on a create
+        # into hidden path space.
+        raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
     if name in session.readonly_vars:
         raise ReadonlyVariableError(name)
     rendered = value if isinstance(value, str) else " ".join(
@@ -118,6 +187,11 @@ async def unset_var(session: Session, policies: Policies | None,
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: a pre_session policy refused the write.
     """
+    if var_hidden(session.hidden_vars, name):
+        # Hidden reads as unset and bash's unset of a missing name is
+        # a quiet no-op; popping the real value would let a session
+        # mutate state it cannot see.
+        return
     if name in session.readonly_vars:
         raise ReadonlyVariableError(name)
     await pre_session_gate(

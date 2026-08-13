@@ -17,6 +17,7 @@ import { FlagView } from '../../spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
+import { hiddenPathsActive, pathAllowed } from '../../../context/session_context.ts'
 import { isMissingPath } from '../../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellRaw } from '../../../utils/path.ts'
@@ -378,7 +379,11 @@ async function duOne(
   if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (flags.s && roots.length === 0) {
+  if (flags.s && roots.length === 0 && !hiddenPathsActive()) {
+    // The one-total fast path trusts the backend's own sum, which a
+    // session hiding paths cannot: hidden leaves would be counted into
+    // a total their names never justify, so that session takes the
+    // entries walk below instead.
     const total = (await computeSize(path)) + linkTotal
     return [[`${fmt(total)}\t${label}`], total]
   }
@@ -393,6 +398,13 @@ async function duOne(
   }
 
   let entries = toVirtual(raw, path).concat(leaves)
+  const visible = entries.filter(([leaf]) => pathAllowed(leaf))
+  if (visible.length !== entries.length) {
+    // Same honesty rule as shadowed leaves: the total is the sum of
+    // what the session may see, never the backend's own number.
+    entries = visible
+    total = entries.reduce((acc, [, size]) => acc + size, 0)
+  }
   if (roots.length > 0) {
     // The backend's own total counted the shadowed leaves, so the
     // honest number is the sum of what survived.

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
+import { pathAllowed } from '../../../context/session_context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
@@ -28,7 +29,7 @@ import {
   type ReaddirFn,
   type StatFn,
 } from '../../../types.ts'
-import { eisdir } from '../../../utils/errors.ts'
+import { eacces, eisdir, enoent } from '../../../utils/errors.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -153,6 +154,159 @@ export interface CommandIO<A extends Accessor = Accessor> {
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+/** Refuse a hidden path the way nonexistence would: ENOENT for anything
+ * acting on the path, EACCES when the caller is creating it (ENOENT is
+ * nonsense as the answer to a create). Raised at the op boundary so
+ * each command renders the refusal through its own missing-file
+ * wording, indistinguishable from a real miss. */
+function refuseHidden(path: PathSpec, create: boolean): void {
+  if (pathAllowed(path.virtual)) return
+  throw create ? eacces(path.virtual) : enoent(path.virtual)
+}
+
+function visibleChildren(entries: string[], parent: PathSpec): string[] {
+  const base = parent.virtual.replace(/\/+$/, '')
+  return entries.filter((e) => {
+    const trimmed = e.replace(/\/+$/, '')
+    return pathAllowed(`${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
+  })
+}
+
+/**
+ * Return `ops` whose slots refuse hidden paths like missing ones.
+ *
+ * The commands factory hands this copy to every generic command, the
+ * same shape as `withReadCache`, so hidden-path enforcement lands once
+ * for the whole command tier (resolveGlobOf derives from the wrapped
+ * readdir). The backends' own IO constants stay raw: the ops tables
+ * built from them serve the dispatcher, which enforces hiding itself
+ * at the door. The guards read the current session at call time, so
+ * one wrapped copy is shared across sessions.
+ */
+export function withHiddenGuard<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  const guarded: CommandIO<A> = {
+    ...ops,
+    readdir: async (accessor, path, index) => {
+      refuseHidden(path, false)
+      return visibleChildren(await ops.readdir(accessor, path, index), path)
+    },
+    readBytes: (accessor, path, index) => {
+      refuseHidden(path, false)
+      return ops.readBytes(accessor, path, index)
+    },
+    readStream: (accessor, path, index) => {
+      refuseHidden(path, false)
+      return ops.readStream(accessor, path, index)
+    },
+    stat: (accessor, path, index) => {
+      refuseHidden(path, false)
+      return ops.stat(accessor, path, index)
+    },
+  }
+  const rr = ops.readRange
+  if (rr !== undefined) {
+    guarded.readRange = (accessor, path, index, offset, size) => {
+      refuseHidden(path, false)
+      return rr(accessor, path, index, offset, size)
+    }
+  }
+  const w = ops.write
+  if (w !== undefined) {
+    guarded.write = (accessor, path, data) => {
+      refuseHidden(path, true)
+      return w(accessor, path, data)
+    }
+  }
+  const ex = ops.exists
+  if (ex !== undefined) {
+    guarded.exists = async (accessor, path) => {
+      if (!pathAllowed(path.virtual)) return false
+      return ex(accessor, path)
+    }
+  }
+  const mk = ops.mkdir
+  if (mk !== undefined) {
+    guarded.mkdir = (accessor, path, parents) => {
+      refuseHidden(path, true)
+      return mk(accessor, path, parents)
+    }
+  }
+  const ap = ops.append
+  if (ap !== undefined) {
+    guarded.append = (accessor, path, data) => {
+      refuseHidden(path, true)
+      return ap(accessor, path, data)
+    }
+  }
+  const cr = ops.create
+  if (cr !== undefined) {
+    guarded.create = (accessor, path) => {
+      refuseHidden(path, true)
+      return cr(accessor, path)
+    }
+  }
+  const ul = ops.unlink
+  if (ul !== undefined) {
+    guarded.unlink = (accessor, path) => {
+      refuseHidden(path, false)
+      return ul(accessor, path)
+    }
+  }
+  const rd = ops.rmdir
+  if (rd !== undefined) {
+    guarded.rmdir = (accessor, path) => {
+      refuseHidden(path, false)
+      return rd(accessor, path)
+    }
+  }
+  const rt = ops.rmR
+  if (rt !== undefined) {
+    guarded.rmR = (accessor, path) => {
+      refuseHidden(path, false)
+      return rt(accessor, path)
+    }
+  }
+  const tr = ops.truncate
+  if (tr !== undefined) {
+    guarded.truncate = (accessor, path, length) => {
+      refuseHidden(path, false)
+      return tr(accessor, path, length)
+    }
+  }
+  const rn = ops.rename
+  if (rn !== undefined) {
+    guarded.rename = (accessor, src, dst) => {
+      refuseHidden(src, false)
+      refuseHidden(dst, true)
+      return rn(accessor, src, dst)
+    }
+  }
+  const cp = ops.copy
+  if (cp !== undefined) {
+    guarded.copy = (accessor, src, dst) => {
+      refuseHidden(src, false)
+      refuseHidden(dst, true)
+      return cp(accessor, src, dst)
+    }
+  }
+  const dc = ops.dirCopy
+  if (dc !== undefined) {
+    guarded.dirCopy = (accessor, src, dst) => {
+      refuseHidden(src, false)
+      refuseHidden(dst, true)
+      return dc(accessor, src, dst)
+    }
+  }
+  const fd = ops.find
+  if (fd !== undefined) {
+    guarded.find = (accessor, path, options) => {
+      refuseHidden(path, false)
+      return fd(accessor, path, options)
+    }
+  }
+  return guarded
 }
 
 /**

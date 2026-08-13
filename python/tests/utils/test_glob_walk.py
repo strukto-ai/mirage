@@ -17,11 +17,13 @@ import dataclasses
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
-from mirage.types import PathSpec
+from mirage.context import reset_current_session, set_current_session
+from mirage.types import HiddenPaths, PathSpec
 from mirage.utils.glob_walk import (DEFAULT_MAX_GLOB_MATCHES, expand_pattern,
                                     has_glob, is_word_shaped,
                                     make_resolve_glob, resolve_glob_with,
                                     spell_match)
+from mirage.workspace.session.session import Session
 
 TREE = {
     "/notion": ["/notion/pages", "/notion/databases"],
@@ -300,3 +302,35 @@ async def test_make_resolve_glob_index_defaults_to_null():
     spec = glob_spec("/notion/pages/Demo*", "/notion")
     result = await resolve(NOOPAccessor(), [spec])
     assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_glob_with_drops_hidden_matches():
+    sess = Session(session_id="narrowed",
+                   hidden_paths=HiddenPaths(patterns=("*.json", )))
+    token = set_current_session(sess)
+    try:
+        spec = glob_spec("/notion/pages/Demo_page__uuid1/page.*", "/notion")
+        result = await resolve_glob_with(fake_readdir, NOOPAccessor(), [spec],
+                                         None)
+    finally:
+        reset_current_session(token)
+    assert [r.virtual
+            for r in result] == ["/notion/pages/Demo_page__uuid1/page.md"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_glob_with_all_hidden_falls_back_to_literal():
+    sess = Session(session_id="narrowed",
+                   hidden_paths=HiddenPaths(patterns=("*.json", )))
+    token = set_current_session(sess)
+    try:
+        spec = glob_spec("/notion/pages/Roadmap__uuid2/page.*", "/notion")
+        result = await resolve_glob_with(fake_readdir, NOOPAccessor(), [spec],
+                                         None)
+    finally:
+        reset_current_session(token)
+    assert len(result) == 1
+    assert result[0].resolved
+    assert result[0].pattern is None
+    assert result[0].virtual == "/notion/pages/Roadmap__uuid2/page.*"

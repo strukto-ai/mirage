@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 import tree_sitter
@@ -28,7 +28,7 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -88,7 +88,7 @@ def _lookup_var(var: str,
             pass False because they handle unset themselves. Specials
             (``@ * # ? $ ! 0``) never raise, matching bash >= 4.4.
     """
-    env = session.env
+    env = visible_env(session)
     last_exit_code = session.last_exit_code
     positional = getattr(session, "positional_args", None)
     nounset = strict and bool(session.shell_options.get("nounset"))
@@ -467,7 +467,7 @@ def _case_mod(op: str, val: str, pattern: str) -> str:
     return "".join(chars)
 
 
-def _arith_int(text: str, env: dict[str, str]) -> int | None:
+def _arith_int(text: str, env: Mapping[str, str]) -> int | None:
     """Resolve an arithmetic-context operand (offsets, subscripts).
 
     bash evaluates substring offsets and array subscripts as
@@ -475,7 +475,7 @@ def _arith_int(text: str, env: dict[str, str]) -> int | None:
 
     Args:
         text (str): the raw operand text.
-        env (dict[str, str]): session environment for name resolution.
+        env (Mapping[str, str]): session environment for name resolution.
     """
     try:
         return int(text.strip())
@@ -491,7 +491,7 @@ def _arith_int(text: str, env: dict[str, str]) -> int | None:
         return None
 
 
-def _substring(val: str, groups: list[str], env: dict[str, str]) -> str:
+def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
     if not groups:
         return val
     offset = _arith_int(groups[0], env)
@@ -511,7 +511,7 @@ def _substring(val: str, groups: list[str], env: dict[str, str]) -> str:
     return val[offset:offset + length]
 
 
-def _array_index(idx_text: str, env: dict[str, str]) -> int:
+def _array_index(idx_text: str, env: Mapping[str, str]) -> int:
     """Resolve a numeric or arithmetic array subscript.
 
     bash evaluates subscripts in arithmetic context (``${a[i+1]}``);
@@ -520,14 +520,14 @@ def _array_index(idx_text: str, env: dict[str, str]) -> int:
 
     Args:
         idx_text (str): the raw subscript text.
-        env (dict[str, str]): session environment for name resolution.
+        env (Mapping[str, str]): session environment for name resolution.
     """
     resolved = _arith_int(idx_text, env)
     return resolved if resolved is not None else 0
 
 
-def _value_op(op: str, val: str, groups: list[str], env: dict[str,
-                                                              str]) -> str:
+def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
+                                                                 str]) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
         return _glob_strip(val, pattern, op in ("##", "%%"), op in ("#", "##"))
@@ -565,7 +565,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
         # ${v:$((o))}.
         msg = f"bash: ${{{p.var_name or ''}}}: bad substitution\n"
         raise ExitSignal(2, stderr=msg.encode(), contained_code=2)
-    env = session.env
+    env = visible_env(session)
     arrays = getattr(session, "arrays", {})
 
     groups: list[str] = []
@@ -657,7 +657,10 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                     and call_stack.get_local(p.var_name) is not None):
                 call_stack.set_local(p.var_name, default)
             else:
-                env[p.var_name] = default
+                # ${X:=} writes the raw session env, not the visible
+                # view (which is read-only): the known ungated session
+                # write, same as $((X=5)) and printf -v.
+                session.env[p.var_name] = default
         return default
     if p.op == ":-":
         return val if val else (groups[0] if groups else "")
@@ -673,13 +676,13 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
 
 
 def _slice_array(arr: ShellArray, groups: list[str],
-                 env: dict[str, str]) -> list[str]:
+                 env: Mapping[str, str]) -> list[str]:
     """Resolve ``${a[@]:offset:length}`` against a shell array.
 
     Args:
         arr (ShellArray): the array being sliced.
         groups (list[str]): the raw offset and length words.
-        env (dict[str, str]): environment for the arithmetic context.
+        env (Mapping[str, str]): environment for the arithmetic context.
     """
     if not groups:
         return array_values(arr)
@@ -781,9 +784,10 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
     else:
         arrays = getattr(session, "arrays", {})
         arr = arrays.get(p.var_name)
+    env = visible_env(session)
     if arr is None:
         name = p.var_name or ""
-        arr = [session.env[name]] if name in session.env else []
+        arr = [env[name]] if name in env else []
     if p.indirect_op:
         return [str(i) for i in array_indices(arr)]
     values = array_values(arr)
@@ -795,5 +799,5 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(arr, groups, session.env)
-    return [_value_op(p.op, el, groups, session.env) for el in values]
+        return _slice_array(arr, groups, env)
+    return [_value_op(p.op, el, groups, env) for el in values]

@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context import path_allowed
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
@@ -205,7 +206,16 @@ async def resolve_glob_with(
         if p.resolved:
             result.append(p)
         elif p.pattern:
-            matched = await expand_pattern(readdir, accessor, p, index)
+            # The hidden filter sits here, in the one loop every backend's
+            # resolve_glob runs through, because per-backend glob modules
+            # bind raw readdirs that never pass the command-door guard. It
+            # runs before the empty-match test so an all-hidden match set
+            # reads as no matches and falls back to the literal word,
+            # exactly what bash prints when nothing matched.
+            matched = [
+                m for m in await expand_pattern(readdir, accessor, p, index)
+                if path_allowed(m.virtual)
+            ]
             if not matched and is_word_shaped(p):
                 # bash with nullglob off: an unmatched glob word stays
                 # the literal; the command then errors on it like GNU

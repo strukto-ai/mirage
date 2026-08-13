@@ -38,6 +38,13 @@ POLICY_WRITE_OPS = DISPATCH_WRITE_OPS | frozenset({"setattr", "symlink"})
 # directions (create and readlink) rather than a router to a mount.
 NAMESPACE_TABLE_OPS = frozenset({"symlink", "readlink"})
 
+# Ops that create the path they name. A hidden target refuses these as
+# EACCES rather than ENOENT, because "does not exist" is nonsense as
+# the answer to a create the caller is spelling out; every other op on
+# a hidden path answers ENOENT, the no-name-leak rule.
+HIDDEN_CREATE_OPS = frozenset(
+    {"write", "write_bytes", "append", "create", "mkdir", "symlink"})
+
 # The attribute fields a setattr op can carry, in one place so the
 # requested/residual split and the overlay write read the same names.
 SETATTR_KEYS = ("mode", "uid", "gid", "atime", "mtime")

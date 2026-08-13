@@ -16,6 +16,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
+import { visibleEnv } from '../session/state.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { shlexSplit } from '../../utils/shlex.ts'
@@ -259,7 +260,10 @@ export async function expandNode(
         const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack)
         const expr = parenExpr.slice(1, -1)
         try {
-          const { value, updates } = evaluateArith(expr, session.env)
+          // Reads resolve against the visible env, so a hidden name
+          // counts as unset; the write-back below is the known ungated
+          // $((X=5)) hole and stays raw until expansion goes async.
+          const { value, updates } = evaluateArith(expr, visibleEnv(session))
           Object.assign(session.env, updates)
           return prefix + value.toString()
         } catch (err) {
@@ -295,7 +299,7 @@ export async function expandNode(
     let value: bigint
     let updates: Record<string, string>
     try {
-      ;({ value, updates } = evaluateArith(expr, session.env))
+      ;({ value, updates } = evaluateArith(expr, visibleEnv(session)))
     } catch (err) {
       if (err instanceof ArithError) return tsNode.text
       throw err

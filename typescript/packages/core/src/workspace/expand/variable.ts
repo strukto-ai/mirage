@@ -26,6 +26,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
+import { visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -117,7 +118,7 @@ export function lookupVar(
   callStack: CallStack | null,
   strict = true,
 ): string {
-  const env = session.env
+  const env = visibleEnv(session)
   const lastExitCode = session.lastExitCode
   const positional = session.positionalArgs
   const nounset = strict && session.shellOptions.nounset === true
@@ -584,7 +585,7 @@ export async function expandArrayAt(
 ): Promise<string[]> {
   if (node.type === NT.SIMPLE_EXPANSION) return positionalArgs(session, callStack)
   const p = parseBraces(node)
-  const env = session.env
+  const env = visibleEnv(session)
   let arr: ShellArray | undefined
   if (p.subscript === null && p.varName === '@') {
     // "${@}" splats the positional parameters; every op below then
@@ -665,7 +666,7 @@ export async function expandBraces(
       2,
     )
   }
-  const env = session.env
+  const env = visibleEnv(session)
   const arrays = session.arrays
 
   const groups: string[] = []
@@ -765,7 +766,11 @@ export async function expandBraces(
     if (callStack !== null && callStack.getLocal(p.varName ?? '') !== null) {
       callStack.setLocal(p.varName ?? '', defaultVal)
     } else if (p.varName !== null) {
-      env[p.varName] = defaultVal
+      // ${X:=} writes the raw session env, not the visible view (a
+      // filtered copy under hidden vars, where the write would be
+      // silently lost): the known ungated session write, same as
+      // $((X=5)) and printf -v.
+      session.env[p.varName] = defaultVal
     }
     return defaultVal
   }

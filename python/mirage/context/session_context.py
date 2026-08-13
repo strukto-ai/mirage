@@ -16,6 +16,7 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
 
 from mirage.types import MountMode, weaker_mode
+from mirage.utils.hidden import path_hidden
 
 if TYPE_CHECKING:
     from mirage.workspace.session.session import Session
@@ -60,6 +61,38 @@ def _session_mode(mount_prefix: str) -> "MountMode | None":
     if sess is None or sess.mount_modes is None:
         return MountMode.EXEC
     return sess.mount_modes.get(_norm_prefix(mount_prefix))
+
+
+def hidden_paths_active() -> bool:
+    """Whether the current session hides any paths at all.
+
+    For a summarizing fast path (du -s asks the backend for one total)
+    that must not be trusted when hidden leaves could be inside it.
+
+    Args:
+        None
+    """
+    sess = _current_session.get()
+    return sess is not None and sess.hidden_paths is not None
+
+
+def path_allowed(virtual: str) -> bool:
+    """Whether the current session's hidden-paths spec leaves this
+    path visible.
+
+    The path twin of ``mount_allowed``: enumeration surfaces filter
+    names through it and the doors answer ENOENT (EACCES for creates)
+    when it says no, so hiding reads as nonexistence, never as a
+    denial that leaks the name. True when no session is bound or the
+    session hides nothing.
+
+    Args:
+        virtual (str): absolute virtual path.
+    """
+    sess = _current_session.get()
+    if sess is None or sess.hidden_paths is None:
+        return True
+    return not path_hidden(sess.hidden_paths, virtual)
 
 
 def mount_allowed(mount_prefix: str) -> bool:

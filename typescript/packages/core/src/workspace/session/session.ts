@@ -15,7 +15,7 @@
 import { SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { ShellArray } from '../../shell/array.ts'
-import type { MountMode } from '../../types.ts'
+import type { HiddenPaths, HiddenVars, MountMode } from '../../types.ts'
 
 /**
  * What a child shell gets its own copy of, and the parent gets back
@@ -105,6 +105,13 @@ export interface SessionInit {
    * infrastructure mounts (implicit scratch root, observer, /dev).
    */
   mountModes?: ReadonlyMap<string, MountMode> | null
+  /**
+   * Per-session visibility narrowing, siblings of mountModes: null
+   * means unrestricted, the doors enforce (data door for paths, the
+   * session door for vars), fork carries them, toJSON serializes.
+   */
+  hiddenPaths?: HiddenPaths | null
+  hiddenVars?: HiddenVars | null
   generation?: number
   pipelineTimeoutSeconds?: number | null
   lastBgJobId?: number | null
@@ -166,6 +173,8 @@ export class Session {
   cmdsubSeq = 0
   cmdsubStatus = 0
   mountModes: ReadonlyMap<string, MountMode> | null
+  hiddenPaths: HiddenPaths | null
+  hiddenVars: HiddenVars | null
   generation: number
   pipelineTimeoutSeconds: number | null
   lastBgJobId: number | null
@@ -185,6 +194,8 @@ export class Session {
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = ownRecord(init.arrays)
     this.mountModes = init.mountModes ?? null
+    this.hiddenPaths = init.hiddenPaths ?? null
+    this.hiddenVars = init.hiddenVars ?? null
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
     this.lastBgJobId = init.lastBgJobId ?? null
@@ -233,6 +244,8 @@ export class Session {
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
       mountModes: overrides.mountModes ?? this.mountModes,
+      hiddenPaths: overrides.hiddenPaths ?? this.hiddenPaths,
+      hiddenVars: overrides.hiddenVars ?? this.hiddenVars,
       generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
@@ -314,6 +327,18 @@ export class Session {
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
+    if (this.hiddenPaths !== null) {
+      data.hidden_paths = {
+        paths: [...(this.hiddenPaths.paths ?? [])],
+        patterns: [...(this.hiddenPaths.patterns ?? [])],
+      }
+    }
+    if (this.hiddenVars !== null) {
+      data.hidden_vars = {
+        names: [...(this.hiddenVars.names ?? [])],
+        patterns: [...(this.hiddenVars.patterns ?? [])],
+      }
+    }
     return data
   }
 
@@ -323,6 +348,8 @@ export class Session {
     env?: Record<string, string>
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
+    hidden_paths?: { paths?: string[]; patterns?: string[] } | null
+    hidden_vars?: { names?: string[]; patterns?: string[] } | null
     generation?: number
   }): Session {
     return new Session({
@@ -332,6 +359,14 @@ export class Session {
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
+      hiddenPaths:
+        data.hidden_paths != null
+          ? { paths: data.hidden_paths.paths ?? [], patterns: data.hidden_paths.patterns ?? [] }
+          : null,
+      hiddenVars:
+        data.hidden_vars != null
+          ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
+          : null,
     })
   }
 }

@@ -34,6 +34,8 @@ export {
   FileType,
   type FindFn,
   KERNEL_BACKENDS,
+  type HiddenPaths,
+  type HiddenVars,
   MountBackend,
   MountMode,
   type MoveFn,
@@ -515,6 +517,7 @@ export {
 export { RAMWorkspaceStateStore } from './workspace/store/ram.ts'
 export { S3WorkspaceStateStore } from './workspace/store/s3.ts'
 export { runWithSession } from './context/session_context.ts'
+export type { SessionProfile } from './workspace/session/profile.ts'
 export { CallFrame, type CallFrameInit, CallStack } from './shell/call_stack.ts'
 export { Job, JobStatus, JobTable, type JobTaskResult } from './shell/job_table.ts'
 export {

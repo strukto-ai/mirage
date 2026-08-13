@@ -21,7 +21,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.array import ShellArray
 from mirage.shell.constants import SHELL_ARGV0
 from mirage.shell.types import FunctionBody
-from mirage.types import MountMode
+from mirage.types import HiddenPaths, HiddenVars, MountMode
 
 # What a fork of this session carries over. Written down once because
 # `fork` builds a copy from it and `tests/workspace/session/test_session.py`
@@ -40,6 +40,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "readonly_vars",
     "arrays",
     "mount_modes",
+    "hidden_paths",
+    "hidden_vars",
     "generation",
     "pipeline_timeout_seconds",
     "last_bg_job_id",
@@ -119,6 +121,11 @@ class Session:
     readonly_vars: set[str] = field(default_factory=set)
     arrays: dict[str, ShellArray] = field(default_factory=dict)
     mount_modes: dict[str, MountMode] | None = None
+    # Per-session visibility narrowing, siblings of mount_modes: None
+    # means unrestricted, the doors enforce (data door for paths, the
+    # session door for vars), fork carries them, to_dict serializes.
+    hidden_paths: HiddenPaths | None = None
+    hidden_vars: HiddenVars | None = None
     generation: int = 0
     pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
@@ -169,17 +176,38 @@ class Session:
                 prefix: mode.value
                 for prefix, mode in self.mount_modes.items()
             }
+        if self.hidden_paths is not None:
+            data["hidden_paths"] = {
+                "paths": list(self.hidden_paths.paths),
+                "patterns": list(self.hidden_paths.patterns),
+            }
+        if self.hidden_vars is not None:
+            data["hidden_vars"] = {
+                "names": list(self.hidden_vars.names),
+                "patterns": list(self.hidden_vars.patterns),
+            }
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
         modes = data.get("mount_modes")
-        if modes is not None:
+        paths = data.get("hidden_paths")
+        vars_ = data.get("hidden_vars")
+        if modes is not None or paths is not None or vars_ is not None:
             data = dict(data)
+        if modes is not None:
             data["mount_modes"] = {
                 prefix: MountMode(mode)
                 for prefix, mode in modes.items()
             }
+        if paths is not None:
+            data["hidden_paths"] = HiddenPaths(
+                paths=tuple(paths.get("paths", ())),
+                patterns=tuple(paths.get("patterns", ())))
+        if vars_ is not None:
+            data["hidden_vars"] = HiddenVars(
+                names=tuple(vars_.get("names", ())),
+                patterns=tuple(vars_.get("patterns", ())))
         return cls(**data)
 
     @property

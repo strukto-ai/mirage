@@ -21,7 +21,7 @@ from typing import Any
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
-from mirage.context import mount_allowed
+from mirage.context import mount_allowed, path_allowed
 from mirage.io import IOResult, OpReport
 from mirage.observe.context import record
 from mirage.observe.record import OpRecord
@@ -33,17 +33,16 @@ from mirage.types import ConsistencyPolicy, FileStat, PathSpec, ResourceName
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import owner_prefix
 from mirage.utils.ranges import slice_window
-from mirage.workspace.dispatcher.constants import (DISPATCH_READ_OPS,
-                                                   DISPATCH_WRITE_OPS,
-                                                   NAMESPACE_TABLE_OPS,
-                                                   POLICY_WRITE_OPS,
-                                                   SETATTR_KEYS)
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.session import assert_mount_allowed
 from mirage.workspace.snapshot.drift import DriftQueue
+
+from mirage.workspace.dispatcher.constants import (  # isort: skip
+    DISPATCH_READ_OPS, DISPATCH_WRITE_OPS, HIDDEN_CREATE_OPS,
+    NAMESPACE_TABLE_OPS, POLICY_WRITE_OPS, SETATTR_KEYS)
 
 
 def _memory_answered(report: OpReport | None,
@@ -65,6 +64,38 @@ def _memory_answered(report: OpReport | None,
     """
     if report is not None:
         report.served(ResourceName.RAM.value, moved)
+
+
+def _hidden_refusal(op: str, virtual: str) -> OSError:
+    """The error a hidden path answers: ENOENT, or EACCES for a create.
+
+    Args:
+        op (str): the dispatched op name.
+        virtual (str): the hidden virtual path.
+    """
+    if op in HIDDEN_CREATE_OPS:
+        return PermissionError(errno.EACCES, os.strerror(errno.EACCES),
+                               virtual)
+    return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), virtual)
+
+
+def _visible_entries(entries: list[str], parent: str) -> list[str]:
+    """Drop listing entries the current session's spec hides.
+
+    Entry shapes vary by backend (bare names, trailing-slash names,
+    full paths), so each is keyed by its final segment against the
+    listed directory, the same normalization ``merge_readdir`` dedups
+    by.
+
+    Args:
+        entries (list[str]): the merged listing.
+        parent (str): the directory that was listed, as a virtual path.
+    """
+    base = parent.rstrip("/")
+    return [
+        e for e in entries
+        if path_allowed(f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
+    ]
 
 
 def _window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
@@ -149,6 +180,8 @@ class Dispatcher:
         # completed op and stays before the stamp.
         await pre_ops_gate(policies, op, path, write, "")
         _memory_answered(report)
+        if op == "readdir" and isinstance(fallback, list):
+            fallback = _visible_entries(fallback, path.virtual)
         bound = await post_ops_gate(policies, op, path, write, "", fallback)
         if bound is not None:
             return await apply_op_limit(fallback, bound)
@@ -169,6 +202,17 @@ class Dispatcher:
         # probes cannot recurse into it.
         if self._drift is not None and self._drift.pending:
             await self._drift.drain(self._namespace.registry.mount_for)
+        # Hidden paths answer before anything else can: the typed path
+        # is checked so a link inside hidden space cannot be followed
+        # out of it, the followed path is re-checked so a visible link
+        # cannot lead in, and a rename destination is a create.
+        if not path_allowed(path.virtual):
+            raise _hidden_refusal(op, path.virtual)
+        dst = kwargs.get("dst")
+        if (op == "rename" and isinstance(dst, PathSpec)
+                and not path_allowed(dst.virtual)):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES),
+                                  dst.virtual)
         if op in NAMESPACE_TABLE_OPS:
             return (await self._namespace_table_op(op, path, kwargs,
                                                    report), IOResult())
@@ -179,6 +223,8 @@ class Dispatcher:
             followed = self._namespace.follow(path.virtual)
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
+                if not path_allowed(path.virtual):
+                    raise _hidden_refusal(op, path.virtual)
         try:
             mount = self._namespace.mount_for(path.virtual)
         except ValueError:
@@ -285,9 +331,11 @@ class Dispatcher:
                     len(result) if isinstance(result,
                                               (bytes, bytearray)) else None)
         if op == "readdir":
-            result = merge_readdir(
-                result, [m.prefix for m in self._namespace.registry.mounts()],
-                self._namespace, path.virtual)
+            result = _visible_entries(
+                merge_readdir(
+                    result,
+                    [m.prefix for m in self._namespace.registry.mounts()],
+                    self._namespace, path.virtual), path.virtual)
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)

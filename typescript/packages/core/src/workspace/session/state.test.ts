@@ -19,7 +19,7 @@ import { Policies } from '../../policy/policies.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { Session } from './session.ts'
-import { envSnapshot, sessionView } from './state.ts'
+import { envSnapshot, sessionView, visibleEnv } from './state.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -135,5 +135,76 @@ describe('sessionView', () => {
     // raw session object behind them.
     const [view] = makeView()
     expect('session' in view).toBe(false)
+  })
+})
+
+function makeHiddenView(): [SessionView, Session] {
+  const session = new Session({
+    sessionId: 's',
+    cwd: '/',
+    env: { PUBLIC: '1', SLACK_TOKEN: 'xoxb', AWS_SECRET_KEY: 'k' },
+    hiddenVars: { names: ['SLACK_TOKEN'], patterns: ['AWS_*'] },
+  })
+  return [sessionView(session), session]
+}
+
+describe('hidden vars in the session door', () => {
+  it('a hidden var reads as unset', () => {
+    const [view] = makeHiddenView()
+    expect(view.get('SLACK_TOKEN')).toBeNull()
+    expect(view.get('AWS_SECRET_KEY')).toBeNull()
+    expect(view.get('PUBLIC')).toBe('1')
+  })
+
+  it('snapshot omits hidden vars', () => {
+    // Every copy-out routes through envSnapshot, so one omission here
+    // is invisibility in inv.env, RunArgs.env and the env builtin at
+    // once.
+    const [view] = makeHiddenView()
+    const snap = view.snapshot()
+    expect('SLACK_TOKEN' in snap).toBe(false)
+    expect('AWS_SECRET_KEY' in snap).toBe(false)
+    expect(snap.PUBLIC).toBe('1')
+  })
+
+  it('setting a hidden var is refused and leaves it intact', async () => {
+    // A write that landed would clobber the real value the host's
+    // wiring still reads, and a write that silently vanished would be
+    // a swallow; the door refuses loudly instead, the vars twin of
+    // EACCES on a create into hidden path space.
+    const [view, session] = makeHiddenView()
+    await expect(view.set('SLACK_TOKEN', 'fake')).rejects.toBeInstanceOf(PolicyDenied)
+    expect(session.env.SLACK_TOKEN).toBe('xoxb')
+  })
+
+  it('unsetting a hidden var is quiet and writes nothing', async () => {
+    // Hidden reads as unset, and bash's unset of a missing name is a
+    // quiet no-op; popping the real value would let a session mutate
+    // state it cannot see.
+    const [view, session] = makeHiddenView()
+    await view.unset('SLACK_TOKEN')
+    expect(session.env.SLACK_TOKEN).toBe('xoxb')
+  })
+
+  it('a hidden readonly var reports not readonly', () => {
+    // isReadonly answers about the session's visible world; saying
+    // "readonly" about a name that reads as unset would leak it.
+    const [view, session] = makeHiddenView()
+    session.readonlyVars.add('SLACK_TOKEN')
+    expect(view.isReadonly('SLACK_TOKEN')).toBe(false)
+  })
+
+  it('visibleEnv is the raw record when nothing is hidden', () => {
+    const session = new Session({ sessionId: 's', cwd: '/', env: { A: '1' } })
+    expect(visibleEnv(session)).toBe(session.env)
+  })
+
+  it('visibleEnv filters hidden names', () => {
+    const [, session] = makeHiddenView()
+    const env = visibleEnv(session)
+    expect('SLACK_TOKEN' in env).toBe(false)
+    expect('AWS_SECRET_KEY' in env).toBe(false)
+    expect(env.PUBLIC).toBe('1')
+    expect(Object.keys(env).sort()).toEqual(['PUBLIC', 'PWD'])
   })
 })

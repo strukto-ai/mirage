@@ -14,6 +14,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.context import path_allowed
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec
@@ -505,6 +506,10 @@ async def _find_root(
                                         args,
                                         tree,
                                         follow=follow))
+    # Hidden rows drop here, above the native-op/walk fork and after the
+    # link merge, so a mount's visibility behavior cannot depend on
+    # whether its backend ships a native find op.
+    results = [r for r in results if path_allowed(r)]
     return respell_raw(results, search_path.virtual, search_path.raw_path)
 
 
@@ -718,6 +723,8 @@ async def walk_find(
     need_empty = tree_has_empty(tree)
     results: list[str] = []
     for p, kind in sorted(collected):
+        if not path_allowed(p):
+            continue
         is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p

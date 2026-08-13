@@ -21,7 +21,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
 from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (CommandIO,
+                                                          with_hidden_guard)
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.builtin.generic_bind.provision import default_provision
 from mirage.commands.config import command
@@ -118,7 +119,10 @@ def make_generic_commands(
     for b in _BUILDERS:
         if b.name in skip:
             continue
-        base_ops = ops_over.get(b.name, ops)
+        # Hidden-path enforcement wraps here, once for every generic
+        # command; the raw adapter stays untouched for the ops tables,
+        # whose door does its own enforcement.
+        base_ops = with_hidden_guard(ops_over.get(b.name, ops))
         # A read-only backend (no write op) can't run the byte-mutation
         # commands (cp/mv/tee/gunzip/...), so don't register a command that
         # would crash when invoked.

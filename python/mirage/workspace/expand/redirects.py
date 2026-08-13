@@ -28,7 +28,7 @@ from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.node import expand_node, unescape_heredoc
 from mirage.workspace.expand.variable import _lookup_var
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, visible_env
 
 # tree-sitter-bash misses bare `$_name` refs preceded by a non-space
 # character inside heredoc bodies (they stay literal text instead of
@@ -169,7 +169,7 @@ async def expand_redirects(
                 body = await expand_node(r.target_node, session, execute_fn,
                                          call_stack)
             elif isinstance(body, str) and r.expand_vars:
-                for var, val in session.env.items():
+                for var, val in visible_env(session).items():
                     body = body.replace("$" + var, val)
             expanded.append(
                 Redirect(fd=r.fd,

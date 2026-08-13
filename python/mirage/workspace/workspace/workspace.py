@@ -47,7 +47,8 @@ from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session import Session, SessionManager, SessionStore
+from mirage.workspace.session import (Session, SessionManager, SessionProfile,
+                                      SessionStore)
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        build_mount_args, install_fingerprints,
                                        read_tar)
@@ -604,6 +605,8 @@ class Workspace:
         self,
         session_id: str,
         mounts: Mapping[str, MountMode | str] | Iterable[str] | None = None,
+        *,
+        profile: SessionProfile | None = None,
     ) -> Session:
         """Create a session, optionally restricted to per-mount modes.
 
@@ -616,7 +619,12 @@ class Workspace:
                 prefixes keeps each mount at its own configured mode (the
                 previous allowlist behavior). ``None`` leaves the
                 session unrestricted.
+            profile (SessionProfile | None): a role's narrowing bundle;
+                its fields unpack onto the session, with an explicit
+                ``mounts`` argument overriding the profile's.
         """
+        if profile is not None and mounts is None:
+            mounts = profile.mounts
         modes: dict[str, MountMode] | None = None
         if mounts is not None:
             if isinstance(mounts, str):
@@ -630,7 +638,13 @@ class Workspace:
                 modes = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
             for prefix in infrastructure_prefixes(self._implicit_root):
                 modes.setdefault(prefix, MountMode.EXEC)
-        return self._session_mgr.create(session_id, mount_modes=modes)
+        session = self._session_mgr.create(session_id, mount_modes=modes)
+        if profile is not None:
+            session.hidden_paths = profile.hidden_paths
+            session.hidden_vars = profile.hidden_vars
+            if profile.env:
+                session.env.update(profile.env)
+        return session
 
     def get_session(self, session_id: str) -> Session:
         return self._session_mgr.get(session_id)

@@ -32,10 +32,11 @@ import {
   type ShellArray,
 } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
+import { varHidden } from '../../../utils/hidden.ts'
 import { ReadonlyVariableError } from '../../session/errors.ts'
 import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
-import { envSnapshot, sessionView } from '../../session/state.ts'
+import { envSnapshot, sessionView, visibleEnv } from '../../session/state.ts'
 import type { SessionView } from '../../../ops/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../control.ts'
@@ -215,9 +216,10 @@ function exportLines(session: Session, flags: Set<string>): string[] {
   // -f selects shell functions; mirage tracks no export attribute on
   // functions, so that form lists nothing, as bash does with none exported.
   if (flags.has('f')) return []
-  return Object.keys(session.env)
+  const env = visibleEnv(session)
+  return Object.keys(env)
     .sort(compareCodePoints)
-    .map((name) => `declare -x ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+    .map((name) => `declare -x ${name}=${bashDeclareQuote(env[name] ?? '')}`)
 }
 
 function readonlyLines(session: Session, flags: Set<string>): string[] {
@@ -226,8 +228,12 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
   // for, so those forms list nothing.
   if (flags.has('f') || flags.has('A')) return []
   const arraysOnly = flags.has('a')
+  const env = visibleEnv(session)
   const lines: string[] = []
-  for (const name of [...session.readonlyVars].sort(compareCodePoints)) {
+  // A hidden readonly never prints even its bare `declare -r NAME` row.
+  for (const name of [...session.readonlyVars]
+    .filter((name) => !varHidden(session.hiddenVars, name))
+    .sort(compareCodePoints)) {
     const arr = session.arrays[name]
     if (arr !== undefined) {
       const parts: string[] = []
@@ -241,8 +247,8 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
       continue
     }
     if (arraysOnly) continue
-    if (name in session.env) {
-      lines.push(`declare -r ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
+    if (name in env) {
+      lines.push(`declare -r ${name}=${bashDeclareQuote(env[name] ?? '')}`)
     } else {
       lines.push(`declare -r ${name}`)
     }
@@ -363,10 +369,16 @@ export async function handleReadonly(
   return [null, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
 }
 
-/** Remove a whole scalar or array variable (no subscript). */
+/**
+ * Clear what the env door does not own after a whole-variable unset.
+ *
+ * The scalar half is the view's (`unset` deleted it, or quietly kept
+ * it for a hidden name — a direct delete here would undo that
+ * refusal); this clears the array storage and the getopts residue. A
+ * hidden name can never hold an array, because `setVar` refuses
+ * hidden names for both shapes.
+ */
 function unsetVariable(session: Session, name: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.env[name]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.arrays[name]
   if (name === 'OPTIND') session.getoptsOptind = null
@@ -521,7 +533,7 @@ export async function handleUnset(
 
 export function handlePrintenv(name: string | null, session: Session): Result {
   if (name !== null) {
-    const val = session.env[name]
+    const val = visibleEnv(session)[name]
     if (val === undefined) {
       return [
         null,
@@ -532,7 +544,7 @@ export function handlePrintenv(name: string | null, session: Session): Result {
     const out = new TextEncoder().encode(`${val}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
   }
-  const lines = Object.entries(session.env).map(([k, v]) => `${k}=${v}`)
+  const lines = Object.entries(visibleEnv(session)).map(([k, v]) => `${k}=${v}`)
   lines.sort(compareCodePoints)
   const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
@@ -802,7 +814,7 @@ export function handleSet(
   _callStack: CallStack | null = null,
 ): Result {
   if (args.length === 0) {
-    const lines = Object.entries(session.env).map(([k, v]) => `${k}=${v}`)
+    const lines = Object.entries(visibleEnv(session)).map(([k, v]) => `${k}=${v}`)
     lines.sort(compareCodePoints)
     const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
@@ -1122,7 +1134,7 @@ export async function handleRead(
   let lineEnd = decodedLine.length
   while (lineEnd > 0 && decodedLine.charCodeAt(lineEnd - 1) === 10) lineEnd--
   const line = decodedLine.slice(0, lineEnd)
-  const ifs = session.env.IFS ?? ' \t\n'
+  const ifs = visibleEnv(session).IFS ?? ' \t\n'
   let parts: string[]
   if (ifs === ' \t\n') {
     // GNU trims IFS whitespace from both ends before splitting; the

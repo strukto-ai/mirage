@@ -70,6 +70,40 @@ export function weakerMode(a: MountMode, b: MountMode): MountMode {
   return MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] ? a : b
 }
 
+/**
+ * What the data door treats as nonexistent for one session.
+ *
+ * A sibling of `Session.mountModes`: per-session narrowing that the
+ * doors enforce, null-on-the-session means unrestricted. Hiding is
+ * "does not exist", never "forbidden" — matching paths answer ENOENT
+ * and drop out of listings, the same no-name-leak rule `mountAllowed`
+ * applies to ungranted mounts.
+ *
+ * `paths` are exact virtual paths; hiding a path hides its whole
+ * subtree (a name you cannot see cannot be a parent you traverse), so
+ * a mount root entry hides the mount. `patterns` are globs: one with
+ * no `/` matches any single name component anywhere; one containing
+ * `/` is anchored to the full virtual path, with `*` crossing slashes
+ * exactly as GNU `find -path` does.
+ */
+export interface HiddenPaths {
+  readonly paths?: readonly string[]
+  readonly patterns?: readonly string[]
+}
+
+/**
+ * What the session door treats as unset for one session.
+ *
+ * Enforced where env leaves the session: `get` misses, `snapshot`
+ * omits, expansion sees unset. Field names differ from `HiddenPaths`
+ * on purpose — the planes' matching semantics differ, so the specs
+ * are not interchangeable.
+ */
+export interface HiddenVars {
+  readonly names?: readonly string[]
+  readonly patterns?: readonly string[]
+}
+
 const MOUNT_MODE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({
   r: MountMode.READ,
   rw: MountMode.WRITE,

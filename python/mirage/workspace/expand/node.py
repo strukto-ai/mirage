@@ -29,7 +29,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import _lookup_var, expand_braces
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 
 
@@ -267,7 +267,11 @@ async def expand_node(
         prefix = _folded_whitespace(ts_node)
         expr = await expand_arith(ts_node, session, execute_fn, call_stack)
         try:
-            value, updates = evaluate_arith(expr, session.env)
+            # Reads resolve against the visible env, so a hidden name
+            # counts as unset; the write-back below is the known
+            # ungated $((X=5)) hole and stays raw until expansion goes
+            # async.
+            value, updates = evaluate_arith(expr, visible_env(session))
         except ArithError:
             return get_text(ts_node)
         session.env.update(updates)

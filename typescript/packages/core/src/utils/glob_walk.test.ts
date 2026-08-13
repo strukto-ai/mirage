@@ -14,7 +14,9 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { runWithSession } from '../context/session_context.ts'
 import { PathSpec } from '../types.ts'
+import { Session } from '../workspace/session/session.ts'
 import { enoent } from './errors.ts'
 import { expandPattern, hasGlob, isWordShaped, resolveGlobWith, spellMatch } from './glob_walk.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
@@ -161,5 +163,38 @@ describe('resolveGlobWith', () => {
     const spec = globSpec('/notion/pages/*.nope', '/notion').dir
     const out = await resolveGlobWith(fakeReaddir, null, [spec], undefined)
     expect(out).toEqual([])
+  })
+})
+
+describe('resolveGlobWith under hidden paths', () => {
+  it('drops hidden matches', async () => {
+    const sess = new Session({ sessionId: 'narrowed' })
+    sess.hiddenPaths = { patterns: ['*.json'] }
+    const result = await runWithSession(sess, () =>
+      resolveGlobWith(
+        fakeReaddir,
+        null,
+        [globSpec('/notion/pages/Demo_page__uuid1/page.*', '/notion')],
+        undefined,
+      ),
+    )
+    expect(result.map((r) => r.virtual)).toEqual(['/notion/pages/Demo_page__uuid1/page.md'])
+  })
+
+  it('an all-hidden match set falls back to the literal', async () => {
+    const sess = new Session({ sessionId: 'narrowed' })
+    sess.hiddenPaths = { patterns: ['*.json'] }
+    const result = await runWithSession(sess, () =>
+      resolveGlobWith(
+        fakeReaddir,
+        null,
+        [globSpec('/notion/pages/Roadmap__uuid2/page.*', '/notion')],
+        undefined,
+      ),
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0]?.resolved).toBe(true)
+    expect(result[0]?.pattern).toBeNull()
+    expect(result[0]?.virtual).toBe('/notion/pages/Roadmap__uuid2/page.*')
   })
 })
