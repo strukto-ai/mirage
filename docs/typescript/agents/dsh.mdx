@@ -24,10 +24,10 @@ import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai
 const ws = new Workspace(
   {
     '/notes': [new RAMResource(), MountMode.EXEC],
-    '/redis': new RedisResource({ url: redisUrl }),
+    '/redis': [new RedisResource({ url: redisUrl }), MountMode.WRITE],
     '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
-  { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] }), 'vfs'] },
+  { mode: MountMode.EXEC, runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
 )
 
 const ctx = new Context()
@@ -36,7 +36,7 @@ await ctx.plugin(MirageFileSystem, {}).await()
 await ctx.plugin(MirageShellExecutor, {}).await()
 ```
 
-Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line:
+Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults and `run` executes it — the same two calls dsh's own tools make):
 
 ```ts
 const shell = ctx.shell
@@ -47,7 +47,7 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-The `runtimes` entry above sets [monty](https://github.com/pydantic/monty) — a sandboxed Python interpreter with no host access — up to capture `python` and `python3`, while `vfs` keeps the shell commands. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty) — a sandboxed Python interpreter with no host access — up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
 
 ```ts
 const script = await shell.run(
@@ -57,7 +57,7 @@ const script = await shell.run(
 )
 ```
 
-[`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+[`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
 ## One execution world
 
