@@ -45,10 +45,20 @@ async def read(
     path = path_spec.mount_path
 
     key = "/" + path.strip("/")
+    # Freshness is tracked per directory, never per entry, so a blob's row
+    # is exactly as fresh as its parent's listing and `get` can never
+    # report staleness of its own. The parent is therefore the probe:
+    # after a write invalidated the index the row survives carrying the
+    # *pre-write* blob sha, and reading it back served the old bytes. A
+    # miss is not a probe either -- against a live index it is a real
+    # absence, and refetching the whole tree on every ENOENT costs a
+    # recursive-tree call per miss.
+    if not accessor.truncated:
+        cut = key.rfind("/")
+        parent = key[:cut] if cut > 0 else "/"
+        if (await index.list_dir(parent)).status == LookupStatus.EXPIRED:
+            await refill_index(accessor, index)
     result = await index.get(key)
-    if (result.status == LookupStatus.EXPIRED and not accessor.truncated
-            and await refill_index(accessor, index)):
-        result = await index.get(key)
     if result.status == LookupStatus.NOT_FOUND or result.entry is None:
         raise enoent(virtual)
     if result.entry.resource_type == "folder":

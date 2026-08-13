@@ -51,11 +51,12 @@ export async function readdir(
   const key = normalizeKey(stripped)
 
   let listing = await index.listDir(key)
-  // The index is the whole listing here, not a cache in front of one, so a
-  // miss may mean the index was invalidated or its TTL lapsed rather than
-  // that the path is absent. Refetch once and ask again; only then is a
-  // miss an answer.
-  if ((listing.entries === undefined || listing.entries === null) && !accessor.truncated) {
+  // The index is the whole listing here, not a cache in front of one, so an
+  // *expired* answer means the tree aged out, not that the path is gone.
+  // Refetch once and ask again. A NOT_FOUND against a live index is a real
+  // absence and must not cost a tree fetch: refilling on any miss spends a
+  // recursive-tree call on every ENOENT.
+  if (listing.status === LookupStatus.EXPIRED && !accessor.truncated) {
     if (await refillIndex(accessor, index)) listing = await index.listDir(key)
   }
   if (listing.entries !== undefined && listing.entries !== null) {

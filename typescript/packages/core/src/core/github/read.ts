@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LookupStatus } from '../../cache/index/config.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -41,6 +42,11 @@ function indexKey(p: string): string {
   return trimmed === '' ? '/' : `/${trimmed}`
 }
 
+function parentKey(key: string): string {
+  const cut = key.lastIndexOf('/')
+  return cut <= 0 ? '/' : key.slice(0, cut)
+}
+
 export async function read(
   accessor: GitHubAccessor,
   path: PathSpec,
@@ -48,12 +54,19 @@ export async function read(
 ): Promise<Uint8Array> {
   const p = stripPrefix(path)
   if (index === undefined) throw enoent(path)
-  let result = await index.get(indexKey(p))
-  // A miss may mean the index was invalidated or expired rather than that
-  // the blob is absent; refetch once before calling it absent.
-  if ((result.entry === undefined || result.entry === null) && !accessor.truncated) {
-    if (await refillIndex(accessor, index)) result = await index.get(indexKey(p))
+  const key = indexKey(p)
+  // Freshness is tracked per directory, never per entry, so a blob's row
+  // is exactly as fresh as its parent's listing and `get` can never report
+  // staleness of its own. The parent is therefore the probe: after a write
+  // invalidated the index the row survives carrying the *pre-write* blob
+  // sha, and reading it back served the old bytes. A miss is not a probe
+  // either -- against a live index it is a real absence, and refetching the
+  // whole tree on every ENOENT costs a recursive-tree call per miss.
+  if (!accessor.truncated) {
+    const parent = await index.listDir(parentKey(key))
+    if (parent.status === LookupStatus.EXPIRED) await refillIndex(accessor, index)
   }
+  const result = await index.get(key)
   if (result.entry === undefined || result.entry === null) throw enoent(path)
   if (result.entry.resourceType === 'folder') throw eisdir(p)
   return fetchBlob(accessor.transport, accessor.owner, accessor.repo, result.entry.id)
