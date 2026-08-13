@@ -502,6 +502,7 @@ describe('monty unavailable', () => {
       name: 'monty',
       captures: ['python3', 'python'],
       language: 'python' as const,
+      confined: true,
       config: {},
       attach: () => undefined,
       run: () => Promise.reject(new MontyUnavailableError('install @pydantic/monty')),
