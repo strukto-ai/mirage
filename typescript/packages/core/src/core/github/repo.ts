@@ -19,9 +19,27 @@ export interface RepoRef {
   repo: string
 }
 
+/**
+ * gh's `[HOST/]OWNER/REPO`: the host is optional and leading, so the owner and
+ * the repository are always the last two segments. Taking the first two
+ * instead read `github.com/acme/tools` as owner `github.com`, repo `acme` --
+ * a different repository, reported as success.
+ *
+ * Args:
+ *   spec (string): the repository as the line spelled it.
+ *
+ * Returns:
+ *   RepoRef: the owner and repository names.
+ */
 export function parseRepo(spec: string): RepoRef {
-  const [owner, repo] = spec.split('/')
+  const parts = spec.split('/')
+  const repo = parts.pop()
+  const owner = parts.pop()
   if (owner === undefined || repo === undefined || owner === '' || repo === '') {
+    throw new Error(`expected the "[HOST/]OWNER/REPO" format, got "${spec}"`)
+  }
+  // One more segment is a host; two is not a repository any spelling reaches.
+  if (parts.length > 1) {
     throw new Error(`expected the "[HOST/]OWNER/REPO" format, got "${spec}"`)
   }
   return { owner, repo }

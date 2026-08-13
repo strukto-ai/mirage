@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GhConfigSchema } from '../../../../core/github/config.ts'
+import { ResourceName } from '../../../../types.ts'
 import { Operand, Option } from '../../../spec/types.ts'
 import { registerCliSpec } from '../../specs.ts'
 import { CLISpec } from '../../types.ts'
@@ -29,6 +30,11 @@ export const GH = new CLISpec({
   name: 'gh',
   description: 'GitHub CLI',
   configModel: GhConfigSchema,
+  // A write here lands on the same repository a `github` mount reads, and it
+  // lands by name rather than by any vfs path, so the mount cannot invalidate
+  // itself: without this, `gh api -X PUT .../contents/f` followed by
+  // `cat /repo/f` serves the pre-write bytes, and a delete still lists.
+  serves: [ResourceName.GITHUB],
   subcommands: [
     new CLISpec({
       name: 'repo',

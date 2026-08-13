@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type * as AccessorModule from './accessor.ts'
 import type { GitHubTransport } from '../../../../core/github/_client.ts'
 import { cliSpecFor } from '../../specs.ts'
+import { ResourceName } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import type { CLIInvocation } from '../../types.ts'
 import { GH } from './index.ts'
@@ -83,6 +84,14 @@ describe('gh tree', () => {
     const repo = GH.subcommands.find((c) => c.name === 'repo')
     expect(repo?.subcommands.map((c) => c.name)).toEqual(['view', 'fork', 'rename'])
   })
+
+  // A gh write lands on the repository a `github` mount reads, by name
+  // rather than by any vfs path, so the mount cannot invalidate itself.
+  // Without this the executor's post-write cache drop is a no-op and a
+  // committed file still reads back as its pre-write bytes.
+  it('names the mounted resource its writes invalidate', () => {
+    expect(GH.serves).toEqual([ResourceName.GITHUB])
+  })
 })
 
 describe('gh repo', () => {
@@ -106,6 +115,21 @@ describe('gh repo', () => {
   it('refuses a repository that is not OWNER/REPO', async () => {
     reset()
     await expect(view(inv(['justaname']))).rejects.toThrow(/OWNER\/REPO/)
+  })
+
+  // gh's format is [HOST/]OWNER/REPO, so the owner and repo are the *last*
+  // two segments. Reading the first two made `github.com/acme/tools` a
+  // request for `github.com/acme` -- a different repository, reported as
+  // success rather than as an error.
+  it('drops the optional host segment rather than shifting the repo', async () => {
+    reset({ full_name: 'acme/tools' })
+    await view(inv(['github.com/acme/tools']))
+    expect(CALLS[0]?.path).toBe('/repos/acme/tools')
+  })
+
+  it('refuses a spec with more segments than a host and a repository', async () => {
+    reset()
+    await expect(view(inv(['a/b/c/d']))).rejects.toThrow(/OWNER\/REPO/)
   })
 
   it('names the fork at creation time when --fork-name is given', async () => {
@@ -174,5 +198,22 @@ describe('gh api', () => {
   it('refuses a field that is not key=value', async () => {
     reset({})
     await expect(api(inv(['x'], { raw_field: ['nope'] }))).rejects.toThrow(/key=value/)
+  })
+
+  // Real gh sends no body for a call carrying no fields, so a bare DELETE
+  // is a bare DELETE rather than an empty JSON object with a content type.
+  it('sends no body at all when no field was given', async () => {
+    reset({})
+    await api(inv(['repos/o/r'], { method: 'DELETE' }))
+    expect(CALLS[0]).toEqual({ method: 'DELETE', path: '/repos/o/r' })
+  })
+
+  // -F types a value for a JSON body; on a GET the same value has to reach
+  // the query string, where everything is a string.
+  it('stringifies a typed field when the method puts it in the query', async () => {
+    reset({})
+    await api(inv(['search/code'], { method: 'GET', field: ['per_page=5', 'draft=true'] }))
+    expect(CALLS[0]?.params).toEqual({ per_page: '5', draft: 'true' })
+    expect(CALLS[0]?.body).toBeUndefined()
   })
 })
