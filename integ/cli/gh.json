@@ -6,10 +6,10 @@
       "targets": [
         "cli-gh"
       ],
-      "command": "gh repo view | head -3",
+      "command": "gh repo view | head -5",
       "expect": {
         "exit": 0,
-        "stdout": "{\n  \"name\": \"repo-cli\",\n  \"full_name\": \"integ/repo-cli\",\n",
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n--\n# repo-v1\n\n",
         "stderr": ""
       }
     },
@@ -22,7 +22,7 @@
       "command": "gh repo view integ/repo-cli | head -2",
       "expect": {
         "exit": 0,
-        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n",
         "stderr": ""
       }
     },
@@ -35,7 +35,7 @@
       "command": "gh repo view github.com/integ/repo-cli | head -2",
       "expect": {
         "exit": 0,
-        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n",
         "stderr": ""
       }
     },
@@ -296,6 +296,32 @@
       "expect": {
         "exit": 0,
         "stdout": "gh repo rename: Rename a repository\n\nUsage: gh repo rename [flags] <NEW-NAME>\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_expands_owner_and_repo",
+      "seq": 569023,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api 'repos/{owner}/{repo}' | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_expands_a_placeholder_in_a_typed_field",
+      "seq": 569025,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X GET repos/integ/repo-cli/contents/README.md -F ref='{branch}' | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"type\": \"file\",\n",
         "stderr": ""
       }
     }

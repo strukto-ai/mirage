@@ -37,11 +37,13 @@ In YAML the same install rides the `clis:` section; see the
 | --------- | ------------------------------------------------------------- |
 | `token`   | the API token, as `GH_TOKEN` carries for real gh               |
 | `repo`    | the default repository, as `[HOST/]OWNER/REPO`                 |
+| `branch` | the current branch, for `{branch}` in an endpoint |
 | `baseUrl` | the API base, for GitHub Enterprise Server                     |
 
-`repo` is what real gh reads off the current directory's git remote. A
-workspace has no remote, so the install carries it, and a line that names
-no repository uses it. Two installs under different head words are two
+`repo` and `branch` are what real gh reads off the current directory's git
+remote and checkout. A workspace has neither, so the install carries them:
+`repo` answers a line that names no repository, and both feed the
+`{owner}`/`{repo}`/`{branch}` placeholders. Two installs under different head words are two
 accounts.
 
 ## Reading is the mount, acting is the CLI
@@ -87,6 +89,10 @@ gh repo fork acme/tools --fork-name tools-patched
 gh repo rename tools-v2 -R acme/tools
 ```
 
+`view` prints what gh prints: a `name:` line, a `description:` line, then
+`--` and the README, with the separator omitted when the repository has
+none. For the repository object as JSON, use `gh api repos/OWNER/REPO`.
+
 `rename` takes the **new name** as the operand and the repository to
 rename on `-R`, which is the reverse of what the shape of the line
 suggests; that is upstream's grammar, not a mirage choice.
@@ -110,7 +116,15 @@ gh api -X GET search/code -f q='repo:acme/tools TODO'
 gh api repos/acme/tools/issues -F draft=false -F milestone=3
 gh api repos/acme/tools/contents/NOTES.md -X DELETE -f message=rm -f sha=<blob-sha>
 gh api graphql -f query='{viewer{login}}'
+
+gh api 'repos/{owner}/{repo}/releases'
+gh api 'repos/{owner}/{repo}/branches/{branch}'
 ```
+
+`{owner}`, `{repo}` and `{branch}` expand from the install, the way real
+gh expands them from the current repository. Any other brace pair is left
+exactly as typed and reaches the wire, which is gh's behavior too. Quote
+the endpoint so the shell does not eat the braces.
 
 The rules are gh's own:
 
@@ -124,6 +138,10 @@ The rules are gh's own:
   bare `DELETE` rather than an empty JSON object with a content type. Some
   endpoints read those differently.
 - The leading slash is optional.
+- A placeholder expands in an endpoint and in a `-F` value, but not in a
+  `-f` one, which is the split gh's own `--help` describes.
+- A read (`GET`, `HEAD`, `OPTIONS`) leaves the mount's cache alone; only a
+  write expires it.
 
 Output is JSON on stdout, so the rest of the shell composes with it:
 
@@ -140,8 +158,7 @@ differs. Everything else matches `gh` 2.85.
 | Divergence                                                                 | Why                                                                                            |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `gh api` pretty-prints the response; real gh prints the body verbatim       | the reader is usually an agent or `jq`, and an indented body is what a human reads              |
-| `gh repo view` prints the REST repository object, not gh's text summary     | upstream's summary is a GraphQL call with its own field set; `--json`/`-q`/`-t` are not built   |
-| `{owner}`, `{repo}` and `{branch}` are **not** substituted in an endpoint   | not built yet; write the names out, or the request 404s on the literal braces                    |
+| `gh repo view` has no `--json`/`-q`/`-t`; the default text view matches      | upstream's field set is GraphQL's, with 75 names; `gh api repos/O/R` is the JSON route          |
 | `--paginate`, `-q/--jq`, `-H`, `--input`, `--silent`, `-i` are not built    | not built yet; pipe to `jq` for selection, and paginate with `-f page=2`                        |
 | `-F` reads no `@file` values, and `key[sub]=` / `key[]=` nesting is flat    | not built yet                                                                                   |
 | `repo rename` has no `-y/--yes`                                             | there is no prompt to skip: nothing in a workspace is interactive                                |

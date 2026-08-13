@@ -1407,7 +1407,12 @@ async function openGitHub(target: Target): Promise<Open> {
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('gh') === true) {
-    ws.registerCli('gh', GH, { token: 'ghp-integ', base_url: base, repo: GH_CLI_REPO })
+    ws.registerCli('gh', GH, {
+      token: 'ghp-integ',
+      base_url: base,
+      repo: GH_CLI_REPO,
+      branch: 'main',
+    })
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }

@@ -1093,6 +1093,7 @@ class GitHubService:
                 "token": "ghp-integ",
                 "base_url": self.url,
                 "repo": GH_CLI_REPO,
+                "branch": "main",
             }),
         }
 
