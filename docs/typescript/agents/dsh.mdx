@@ -18,7 +18,7 @@ Three Cordis plugins. `MirageService` owns the workspace; the two providers inje
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import { MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
+import { buildRuntime, MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 const ws = new Workspace(
@@ -27,7 +27,7 @@ const ws = new Workspace(
     '/redis': new RedisResource({ url: redisUrl }),
     '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
-  { runtimes: ['monty', 'vfs'] },
+  { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] }), 'vfs'] },
 )
 
 const ctx = new Context()
@@ -47,12 +47,9 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-The `runtimes: ['monty', 'vfs']` entry in the workspace above specifies who captures what: [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, is the workspace's Python and takes every `python` and `python3` invocation — a script file, inline `-c` code, or code piped on stdin — while `vfs` keeps the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty) — a sandboxed Python interpreter with no host access — up to capture `python` and `python3`, while `vfs` keeps the shell commands. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
 
 ```ts
-const inline = await shell.run(shell.resolve({ command: `python3 -c 'print(2 + 3)'` }))
-// inline.stdout.text === '5\n'
-
 const script = await shell.run(
   shell.resolve({
     command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /notes/report.txt',

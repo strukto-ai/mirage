@@ -22,7 +22,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import type { ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { buildRuntime, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 // Monty is sandboxed compute with no host access: the shell's
@@ -89,10 +89,7 @@ async function pythonUnderMonty(ctx: Context): Promise<void> {
   console.log('=== python3: monty ===')
   await ctx.fs.writeText(await ctx.fs.resolve('/notes/report.py'), REPORT_SCRIPT)
   const shell = ctx.shell
-  const ran = await bash(
-    shell,
-    'REPORT_OWNER=mirage python3 /notes/report.py > /notes/report.txt',
-  )
+  const ran = await bash(shell, 'REPORT_OWNER=mirage python3 /notes/report.py > /notes/report.txt')
   console.log('exit:', ran.exitCode)
   const report = await bash(shell, 'cat /notes/report.txt')
   console.log(report.stdout.text.trim())
@@ -100,14 +97,17 @@ async function pythonUnderMonty(ctx: Context): Promise<void> {
 
 async function main(): Promise<void> {
   // EXEC admits code execution (the mode ladder is READ < WRITE < EXEC);
-  // registering monty routes python3 lines to the sandboxed interpreter
-  // instead of the default pyodide.
+  // monty is set up to capture python and python3, so those lines run on
+  // the sandboxed interpreter instead of the default pyodide.
   const ws = new Workspace(
     {
       '/notes': [new RAMResource(), MountMode.EXEC],
       '/docs': [new RAMResource(), MountMode.WRITE],
     },
-    { mode: MountMode.EXEC, runtimes: ['monty', 'vfs'] },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] }), 'vfs'],
+    },
   )
   await ws.fs.writeFile('/docs/readme.md', '# demo\nmirage inside dsh\n')
 

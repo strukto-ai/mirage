@@ -23,7 +23,13 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { Context } from '@deepseek-ai/cordis'
-import { MountMode, RAMResource, SlackResource, Workspace } from '@struktoai/mirage-node'
+import {
+  buildRuntime,
+  MountMode,
+  RAMResource,
+  SlackResource,
+  Workspace,
+} from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -77,7 +83,10 @@ async function main(): Promise<void> {
       '/slack': [new SlackResource({ token }), MountMode.EXEC],
       '/notes': [new RAMResource(), MountMode.WRITE],
     },
-    { mode: MountMode.EXEC, runtimes: ['monty', 'vfs'] },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] }), 'vfs'],
+    },
   )
   const ctx = await composeWorld(ws)
   try {
