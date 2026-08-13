@@ -184,6 +184,19 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+    // An already-aborted signal never fires its listener, so answer before
+    // dispatch: the command must not run at all.
+    if (spec.signal?.aborted === true) {
+      return {
+        exitCode: null,
+        signal: 'SIGTERM',
+        timedOut: false,
+        aborted: true,
+        timeoutMs: spec.timeoutMs,
+        stdout: { text: '', truncated: false },
+        stderr: { text: '', truncated: false },
+      }
+    }
     const controller = new AbortController()
     let timedOut = false
     let aborted = false
@@ -233,6 +246,15 @@ export class MirageShellExecutor extends ShellExecutor {
 
   start(spec: ShellExecSpec): ShellProcess {
     const controller = new AbortController()
+    if (spec.signal?.aborted === true) {
+      controller.abort()
+      return new MirageShellProcess(
+        Promise.reject(new Error('command aborted before start')),
+        controller,
+        spec.stdoutMaxBytes,
+        this.stderrMaxBytes,
+      )
+    }
     const onAbort = (): void => {
       controller.abort()
     }

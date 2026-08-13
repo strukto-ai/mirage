@@ -115,6 +115,19 @@ describe('run', () => {
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBeNull()
   })
+
+  it('never dispatches when the signal is already aborted', async () => {
+    const { shell, ws } = await makeShell()
+    const controller = new AbortController()
+    controller.abort()
+    const result = await shell.run(
+      shell.resolve({ command: 'echo ran > /data/out.txt', signal: controller.signal }),
+    )
+    expect(result.aborted).toBe(true)
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode).toBeNull()
+    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+  })
 })
 
 describe('start', () => {
@@ -144,5 +157,18 @@ describe('start', () => {
     const proc = shell.start(shell.resolve({ command: 'true' }))
     await proc.done
     expect(proc.kill()).toBe(false)
+  })
+
+  it('never dispatches when the signal is already aborted', async () => {
+    const { shell, ws } = await makeShell()
+    const controller = new AbortController()
+    controller.abort()
+    const proc = shell.start(
+      shell.resolve({ command: 'echo ran > /data/out.txt', signal: controller.signal }),
+    )
+    await proc.done
+    expect(proc.status).toBe('killed')
+    expect(proc.exitCode).toBeNull()
+    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
   })
 })

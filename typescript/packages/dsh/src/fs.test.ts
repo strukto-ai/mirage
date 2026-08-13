@@ -19,13 +19,14 @@ import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import { MountMode, RAMResource } from '@struktoai/mirage-core'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
+import type { MirageFsConfig } from './fs.ts'
 import { MirageService } from './service.ts'
 
 const workspaces: Workspace[] = []
 
 async function makeFs(
   seed: Record<string, string | Uint8Array> = {},
-  options: { cwd?: string; readOnly?: boolean } = {},
+  options: { cwd?: string; readOnly?: boolean; diffBasisMaxBytes?: number } = {},
 ): Promise<{ fs: MirageFileSystem; ws: Workspace }> {
   const ram = new RAMResource()
   const ws = new Workspace({ '/data': [ram, MountMode.WRITE] })
@@ -47,7 +48,13 @@ async function makeFs(
   }
   const ctx = new Context()
   await ctx.plugin(MirageService, { workspace: target }).await()
-  await ctx.plugin(MirageFileSystem, options.cwd !== undefined ? { cwd: options.cwd } : {}).await()
+  const config: MirageFsConfig = {
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.diffBasisMaxBytes !== undefined
+      ? { diffBasisMaxBytes: options.diffBasisMaxBytes }
+      : {}),
+  }
+  await ctx.plugin(MirageFileSystem, config).await()
   return { fs: ctx.fs as MirageFileSystem, ws: target }
 }
 
@@ -208,6 +215,16 @@ describe('listDir', () => {
     expect(await errorCode(fs.listDir(await fs.resolve('/data/a.txt')))).toBe('FS_NOT_DIRECTORY')
     expect(await errorCode(fs.listDir(await fs.resolve('/data/nope')))).toBe('FS_NOT_FOUND')
   })
+
+  it('lists a cyclic symlink as an entry of unknown kind', async () => {
+    const { fs, ws } = await makeFs({ 'a.txt': 'hello' })
+    await ws.fs.links?.symlink('/data/loop', '/data/loop', Date.now())
+    const entries = await fs.listDir(await fs.resolve('/data'))
+    expect(entries.map((e) => e.name)).toEqual(['a.txt', 'loop'])
+    const loop = entries.find((e) => e.name === 'loop')
+    expect(loop?.type).toBe('other')
+    expect(String(loop?.target.targetKey)).toBe('/data/loop')
+  })
 })
 
 describe('writeText', () => {
@@ -262,6 +279,27 @@ describe('writeText', () => {
     const { fs } = await makeFs({ 'a.txt': 'x' }, { readOnly: true })
     const target = await fs.resolve('/data/a.txt')
     expect(await errorCode(fs.writeText(target, 'y'))).toBe('FS_PERMISSION_DENIED')
+  })
+
+  it('measures the diff basis limit in UTF-8 bytes, not code units', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'old' }, { diffBasisMaxBytes: 10 })
+    const target = await fs.resolve('/data/a.txt')
+    // 4 code units but 12 UTF-8 bytes: over the limit, so no basis.
+    const outcome = await fs.writeText(target, '文文文文')
+    expect(outcome.operation).toBe('update')
+    expect(outcome.before).toBeNull()
+    expect(await fs.readText(target)).toBe('文文文文')
+  })
+
+  it('drops the per-target lock entry once the write settles', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'old' })
+    const target = await fs.resolve('/data/a.txt')
+    await Promise.all([fs.writeText(target, 'one'), fs.writeText(target, 'two much longer')])
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0)
+    })
+    const locks = (fs as unknown as { locks: Map<string, Promise<void>> }).locks
+    expect(locks.size).toBe(0)
   })
 })
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'node:buffer'
 import { posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
@@ -94,7 +95,7 @@ export class MirageFileSystem extends FileSystem {
   // Per-targetKey tail promise: serializes mutating ops so the
   // read -> guard -> write window cannot interleave (one concurrent writer
   // wins, the rest observe the new version and reject as stale).
-  private readonly locks = new Map<string, Promise<unknown>>()
+  private readonly locks = new Map<string, Promise<void>>()
 
   constructor(ctx: Context, config: MirageFsConfig = {}) {
     super(ctx)
@@ -122,12 +123,19 @@ export class MirageFileSystem extends FileSystem {
   }
 
   private withLock<T>(key: FsTargetKey, body: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(String(key)) ?? Promise.resolve()
+    const mapKey = String(key)
+    const previous = this.locks.get(mapKey) ?? Promise.resolve()
     const next = previous.then(body, body)
-    this.locks.set(
-      String(key),
-      next.catch(() => undefined),
+    // The stored tail is void (an outcome would pin whole file contents in
+    // the map) and drops on settlement unless a newer op queued behind it.
+    const tail = next.then(
+      () => undefined,
+      () => undefined,
     )
+    this.locks.set(mapKey, tail)
+    void tail.then(() => {
+      if (this.locks.get(mapKey) === tail) this.locks.delete(mapKey)
+    })
     return next
   }
 
@@ -269,7 +277,18 @@ export class MirageFileSystem extends FileSystem {
 
   private async dirEntry(parentKey: string, name: string): Promise<FsDirEntry> {
     const childPath = parentKey === '/' ? `/${name}` : `${parentKey}/${name}`
-    const followed = this.follow(childPath)
+    let followed: string
+    try {
+      followed = this.follow(childPath)
+    } catch {
+      // A cyclic link must not reject the whole listing; it lists as an
+      // entry of unknown kind keyed on its own path.
+      return {
+        name,
+        type: 'other',
+        target: { targetKey: FsTargetKey(childPath), displayPath: childPath },
+      }
+    }
     const target: FsTarget = { targetKey: FsTargetKey(followed), displayPath: childPath }
     let stat: FileStat
     try {
@@ -338,7 +357,7 @@ export class MirageFileSystem extends FileSystem {
   // sides fit the exclusive limit, else null (dsh renders a whole-file
   // diff then). Never fails the write itself.
   private async diffBasis(target: FsTarget, content: string): Promise<string | null> {
-    if (content.length >= this.diffBasisMaxBytes) return null
+    if (Buffer.byteLength(content, 'utf8') >= this.diffBasisMaxBytes) return null
     let bytes: Uint8Array
     try {
       bytes = await this.fsOps.readFile(String(target.targetKey))
