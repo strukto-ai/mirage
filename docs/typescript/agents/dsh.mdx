@@ -1,0 +1,61 @@
+---
+title: DeepSeek Harness
+description: Register Mirage as the filesystem and shell of DeepSeek Harness (dsh), so its file tools and bash tool run on mounted data.
+icon: /images/deepseek-logo.svg
+---
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is a plugin-based agent harness on Cordis where the filesystem and the shell are swappable capability seams. `@struktoai/mirage-dsh` provides both seams over one Mirage workspace: `ctx.fs` for dsh's read/write/edit tools and `ctx.shell` for its bash tool. Anything Mirage mounts — S3, Slack, Notion, Postgres, Google Drive — becomes the world those tools operate in.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell
+```
+
+## Compose
+
+Three Cordis plugins, mirroring dsh's own E2B provider group. `MirageService` owns the workspace; the two providers inject it:
+
+```ts
+import { Context } from '@deepseek-ai/cordis'
+import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
+
+const ws = new Workspace({
+  '/notes': [new RAMResource(), MountMode.WRITE],
+})
+
+const ctx = new Context()
+await ctx.plugin(MirageService, { workspace: ws }).await()
+await ctx.plugin(MirageFileSystem, {}).await()
+await ctx.plugin(MirageShellExecutor, {}).await()
+
+const target = await ctx.fs.resolve('/notes/todo.txt')
+await ctx.fs.writeText(target, 'ship it\n')
+
+const shell = ctx.shell
+const result = await shell.run(shell.resolve({ command: 'grep -rn ship /notes' }))
+```
+
+`MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads. Mount with `MountMode.WRITE` where dsh's write tools should work — Mirage mounts are read-only by default.
+
+## One execution world
+
+dsh's architecture expects the filesystem and shell providers to share one execution world, so that a path from one seam is valid in the other. Both providers here read the same `ctx.mirage` workspace: `ctx.fs.processPath(target)` returns a virtual path that `ctx.shell` commands resolve to the same file, and a file written by the shell stats and edits through `ctx.fs`.
+
+## Semantics
+
+- **Targets are canonical virtual paths.** `resolve()` follows Mirage namespace symlinks; `lstat()` probes the path entry itself and reports `symlink` for a link.
+- **Versions are metadata tokens.** `FsVersion` derives from the backend's fingerprint, revision, or `modified` + `size`, so dsh's stale-write guards (`createIfAbsent`, `replaceIfVersion`) work without content hashing. A backend that reports none of those degrades to always-fresh.
+- **Errors carry dsh codes.** Mirage's POSIX-stamped errors map onto the seam taxonomy: a missing path is `FS_NOT_FOUND`, a directory in a file slot is `FS_NOT_REGULAR_FILE`, a policy denial or read-only mount is `FS_PERMISSION_DENIED`.
+- **Every op walks the workspace door.** Session grants, admission policies, cache read-through, and post-write invalidation fire exactly as they do for a Mirage shell command.
+
+## Sandboxing and policy
+
+Both providers report `sandboxMode` as `undefined` and ignore per-call `sandboxPolicy`: dsh's sandbox seam confines host OS processes, and there is no OS process here to confine. Confinement comes from Mirage instead — mount modes, session grants, and the policy layer bound what any command or file op can touch, uniformly across both seams.
+
+## Limitations
+
+- `ctx.shell.start()` delivers output once the command completes; Mirage buffers a command's output rather than streaming it, and `kill()` aborts cooperatively at executor boundaries.
+- dsh's `ctx.subprocess`, terminal, and LSP seams are not provided: Mirage's shell is an interpreter, not an OS. Compose profiles without those capabilities, or point them at a Mirage FUSE mount when real processes must see mounted data.
+- Built against the published `@deepseek-ai/dsh-fs` and `@deepseek-ai/dsh-shell` release candidates; dsh is in developer preview and its seams may change.
