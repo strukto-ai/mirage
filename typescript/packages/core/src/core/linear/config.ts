@@ -24,7 +24,7 @@ import { normalizeFields } from '../../utils/normalize.ts'
 export const LinearConfigSchema = z.object({
   apiKey: secretStr(),
   workspace: z.string().optional(),
-  teamIds: z.array(z.string()).optional(),
+  teamIds: z.array(z.string()).readonly().optional(),
   baseUrl: z.string().optional(),
 })
 

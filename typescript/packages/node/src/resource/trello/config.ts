@@ -25,7 +25,7 @@ const TrelloConfigSchema = z.object({
   apiKey: secretStr(),
   apiToken: secretStr(),
   workspaceId: z.string().optional(),
-  boardIds: z.array(z.string()).optional(),
+  boardIds: z.array(z.string()).readonly().optional(),
   baseUrl: z.string().optional(),
 })
 
