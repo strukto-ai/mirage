@@ -311,6 +311,11 @@
     {
       "short": "-P",
       "type": "bool"
+    },
+    {
+      "long": "--separate-dirs",
+      "short": "-S",
+      "type": "bool"
     }
   ],
   "rest": {
