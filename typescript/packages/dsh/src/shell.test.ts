@@ -22,6 +22,13 @@ import type { MirageShellConfig } from './shell.ts'
 
 const workspaces: Workspace[] = []
 
+async function attachShell(ws: Workspace, config: MirageShellConfig): Promise<MirageShellExecutor> {
+  const ctx = new Context()
+  await ctx.plugin(MirageService, { workspace: ws }).await()
+  await ctx.plugin(MirageShellExecutor, config).await()
+  return ctx.shell as MirageShellExecutor
+}
+
 async function makeShell(
   seed: Record<string, string> = {},
   config: MirageShellConfig = {},
@@ -31,10 +38,7 @@ async function makeShell(
   for (const [path, content] of Object.entries(seed)) {
     await ws.fs.writeFile(`/data/${path}`, content)
   }
-  const ctx = new Context()
-  await ctx.plugin(MirageService, { workspace: ws }).await()
-  await ctx.plugin(MirageShellExecutor, config).await()
-  return { shell: ctx.shell as MirageShellExecutor, ws }
+  return { shell: await attachShell(ws, config), ws }
 }
 
 afterEach(async () => {
@@ -127,6 +131,105 @@ describe('run', () => {
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBeNull()
     expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+  })
+})
+
+describe('session isolation', () => {
+  it('gives each run a clean slate by default', async () => {
+    const { shell } = await makeShell()
+    await shell.run(shell.resolve({ command: 'export FOO=leak; greet() { echo hi; }; cd /data' }))
+    const probe = await shell.run(shell.resolve({ command: 'echo "[$FOO]"; pwd; type -t greet' }))
+    expect(probe.stdout.text).toBe('[]\n/\n')
+    expect(probe.exitCode).not.toBe(0)
+  })
+
+  it('stays isolated when a spec carries an empty workdir', async () => {
+    const { shell } = await makeShell()
+    await shell.run({ ...shell.resolve({ command: 'export FOO=leak; cd /data' }), workdir: '' })
+    const probe = await shell.run({
+      ...shell.resolve({ command: 'echo "[$FOO]"; pwd' }),
+      workdir: '',
+    })
+    expect(probe.stdout.text).toBe('[]\n/\n')
+  })
+
+  it('keeps start() isolated on an empty workdir too', async () => {
+    const { shell } = await makeShell()
+    const proc = shell.start({ ...shell.resolve({ command: 'export BG=leak' }), workdir: '' })
+    await proc.done
+    const probe = await shell.run({ ...shell.resolve({ command: 'echo "[$BG]"' }), workdir: '' })
+    expect(probe.stdout.text.trim()).toBe('[]')
+  })
+})
+
+describe('session binding', () => {
+  it('persists exports, cwd, and functions across runs', async () => {
+    const { shell } = await makeShell({}, { sessionId: 's1' })
+    const setup = await shell.run(
+      shell.resolve({
+        command: 'export GREETING=salut; greet() { echo "$GREETING from $PWD"; }; cd /data',
+      }),
+    )
+    expect(setup.exitCode).toBe(0)
+    const out = await shell.run(shell.resolve({ command: 'greet' }))
+    expect(out.stdout.text.trim()).toBe('salut from /data')
+  })
+
+  it('keeps differently bound executors apart on one workspace', async () => {
+    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    workspaces.push(ws)
+    const alpha = await attachShell(ws, { sessionId: 'alpha' })
+    const beta = await attachShell(ws, { sessionId: 'beta' })
+    await alpha.run(alpha.resolve({ command: 'export WHO=alpha' }))
+    const cross = await beta.run(beta.resolve({ command: 'echo "[$WHO]"' }))
+    expect(cross.stdout.text.trim()).toBe('[]')
+    const back = await alpha.run(alpha.resolve({ command: 'echo "[$WHO]"' }))
+    expect(back.stdout.text.trim()).toBe('[alpha]')
+    const direct = await ws.execute('echo "[$WHO]"')
+    expect(direct.stdoutText.trim()).toBe('[]')
+  })
+
+  it('adopts an existing session instead of recreating it', async () => {
+    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    workspaces.push(ws)
+    ws.createSession('pre')
+    await ws.execute('export SEED=planted', { sessionId: 'pre' })
+    const shell = await attachShell(ws, { sessionId: 'pre' })
+    const out = await shell.run(shell.resolve({ command: 'echo "$SEED"' }))
+    expect(out.stdout.text.trim()).toBe('planted')
+  })
+
+  it('seeds a created session at the configured workdir', async () => {
+    const { shell } = await makeShell({}, { sessionId: 'seeded', workdir: '/data' })
+    const out = await shell.run(shell.resolve({ command: 'pwd; echo "$PWD"' }))
+    expect(out.stdout.text).toBe('/data\n/data\n')
+  })
+
+  it('treats an explicit workdir as a one-call subshell', async () => {
+    const { shell } = await makeShell({}, { sessionId: 's2' })
+    await shell.run(shell.resolve({ command: 'cd /data' }))
+    const sub = await shell.run(shell.resolve({ command: 'pwd', workdir: '/' }))
+    expect(sub.stdout.text.trim()).toBe('/')
+    const back = await shell.run(shell.resolve({ command: 'pwd' }))
+    expect(back.stdout.text.trim()).toBe('/data')
+  })
+
+  it('keeps a per-call env override out of the session', async () => {
+    const { shell } = await makeShell({}, { sessionId: 's3' })
+    const once = await shell.run(
+      shell.resolve({ command: 'echo "[$TOKEN]"', env: { TOKEN: 'once' } }),
+    )
+    expect(once.stdout.text.trim()).toBe('[once]')
+    const later = await shell.run(shell.resolve({ command: 'echo "[$TOKEN]"' }))
+    expect(later.stdout.text.trim()).toBe('[]')
+  })
+
+  it('binds start() to the session too', async () => {
+    const { shell } = await makeShell({}, { sessionId: 's4' })
+    const proc = shell.start(shell.resolve({ command: 'export BG=yes' }))
+    await proc.done
+    const out = await shell.run(shell.resolve({ command: 'echo "$BG"' }))
+    expect(out.stdout.text.trim()).toBe('yes')
   })
 })
 

@@ -36,7 +36,11 @@ const STDERR_MARKER = '\n--- stderr ---\n'
 
 /** Configuration for the mirage shell executor. */
 export interface MirageShellConfig {
-  /** Default working directory for commands. Defaults to `/`. */
+  /**
+   * Default working directory for commands. Defaults to `/`. With
+   * `sessionId` it instead seeds the bound session's initial cwd, and the
+   * session's own cwd is the default from then on.
+   */
   workdir?: string
   /** Default foreground timeout in milliseconds. Defaults to 120000. */
   defaultTimeoutMs?: number
@@ -46,6 +50,18 @@ export interface MirageShellConfig {
   stdoutMaxBytes?: number
   /** stderr capture budget in bytes. Defaults to 64000. */
   stderrMaxBytes?: number
+  /**
+   * Bind every command to this named workspace session. By default each
+   * command runs in an ephemeral fork of the workspace's default session,
+   * so nothing persists between calls, which is the one-shot contract of
+   * dsh's bash tool. With a session bound, `cd`, `export`, and function
+   * definitions persist across calls, the persistent-shell contract. The
+   * session is created on first use if the workspace does not have it; an
+   * existing session is adopted as is. A spec carrying an explicit
+   * `workdir` or `env` still runs as a one-call subshell of the bound
+   * session, per mirage's `ExecuteOptions` semantics.
+   */
+  sessionId?: string
 }
 
 function collect(text: string, maxBytes: number): CollectedOutput {
@@ -56,14 +72,23 @@ function collect(text: string, maxBytes: number): CollectedOutput {
 function executeOptions(
   spec: ShellExecSpec,
   signal: AbortSignal,
+  sessionId: string | undefined,
+  fallbackWorkdir: string,
 ): ExecuteOptions & { provision?: false } {
   const env = {
     ...(spec.env ?? {}),
     ...((spec.dshEnv as Record<string, string> | undefined) ?? {}),
   }
+  // Unbound, `cwd` is always present so every command runs in an ephemeral
+  // fork of the default session: isolation must not hinge on a spec
+  // happening to carry a workdir. Bound, an absent workdir runs in the
+  // session itself, which is what lets its state persist.
+  const cwd =
+    spec.workdir !== '' ? spec.workdir : sessionId === undefined ? fallbackWorkdir : undefined
   return {
     signal,
-    ...(spec.workdir !== '' ? { cwd: spec.workdir } : {}),
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(spec.stdin !== undefined ? { stdin: new TextEncoder().encode(spec.stdin) } : {}),
   }
@@ -148,6 +173,12 @@ class MirageShellProcess implements ShellProcess {
  * path from `ctx.fs` means the same file here. There is no OS process
  * behind a command: `signal` in results is a compatibility value for kills,
  * and abort/timeout act cooperatively at the executor's own boundaries.
+ *
+ * Every command runs in an ephemeral fork of the workspace's default
+ * session, so no shell state survives from one call to the next, matching
+ * the one-shot contract of dsh's bash tool. Configuring a `sessionId`
+ * binds all commands to one named session instead, whose cwd, exports,
+ * and functions persist across calls.
  */
 export class MirageShellExecutor extends ShellExecutor {
   static readonly inject = ['mirage']
@@ -158,6 +189,8 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly maxTimeoutMs: number
   private readonly stdoutMaxBytes: number
   private readonly stderrMaxBytes: number
+  private readonly sessionId: string | undefined
+  private sessionReady: Promise<void> | null = null
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
@@ -167,12 +200,17 @@ export class MirageShellExecutor extends ShellExecutor {
     this.maxTimeoutMs = config.maxTimeoutMs ?? MAX_TIMEOUT_MS
     this.stdoutMaxBytes = config.stdoutMaxBytes ?? DEFAULT_STDOUT_MAX_BYTES
     this.stderrMaxBytes = config.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES
+    this.sessionId = config.sessionId
   }
 
   resolve(request: ShellExecRequest): ShellExecSpec {
+    // Bound to a session, an unspecified workdir stays empty so the
+    // session's own cwd governs; filling the default here would turn
+    // every call into a subshell and nothing would ever persist.
+    const workdir = request.workdir ?? (this.sessionId === undefined ? this.workdir : '')
     return {
       command: request.command,
-      workdir: request.workdir ?? this.workdir,
+      workdir,
       timeoutMs: Math.min(request.timeoutMs ?? this.defaultTimeoutMs, this.maxTimeoutMs),
       stdoutMaxBytes: request.stdoutMaxBytes ?? this.stdoutMaxBytes,
       signal: request.signal,
@@ -181,6 +219,23 @@ export class MirageShellExecutor extends ShellExecutor {
       dshEnv: request.dshEnv,
       sandboxPolicy: request.sandboxPolicy,
     }
+  }
+
+  private ensureSession(): Promise<void> {
+    if (this.sessionId === undefined) return Promise.resolve()
+    this.sessionReady ??= this.provisionSession(this.sessionId).catch((err: unknown) => {
+      this.sessionReady = null
+      throw err
+    })
+    return this.sessionReady
+  }
+
+  private async provisionSession(sessionId: string): Promise<void> {
+    await this.workspace.ensureSessionsLoaded()
+    if (this.workspace.listSessions().some((s) => s.sessionId === sessionId)) return
+    const session = this.workspace.createSession(sessionId)
+    session.cwd = this.workdir
+    session.env.PWD = this.workdir
   }
 
   async run(spec: ShellExecSpec): Promise<ShellRunResult> {
@@ -212,9 +267,10 @@ export class MirageShellExecutor extends ShellExecutor {
     }
     spec.signal?.addEventListener('abort', onAbort, { once: true })
     try {
+      await this.ensureSession()
       const result = await this.workspace.execute(
         spec.command,
-        executeOptions(spec, controller.signal),
+        executeOptions(spec, controller.signal, this.sessionId, this.workdir),
       )
       return {
         exitCode: result.exitCode,
@@ -259,8 +315,13 @@ export class MirageShellExecutor extends ShellExecutor {
       controller.abort()
     }
     spec.signal?.addEventListener('abort', onAbort, { once: true })
-    const run = this.workspace
-      .execute(spec.command, executeOptions(spec, controller.signal))
+    const run = this.ensureSession()
+      .then(() =>
+        this.workspace.execute(
+          spec.command,
+          executeOptions(spec, controller.signal, this.sessionId, this.workdir),
+        ),
+      )
       .finally(() => spec.signal?.removeEventListener('abort', onAbort))
     return new MirageShellProcess(run, controller, spec.stdoutMaxBytes, this.stderrMaxBytes)
   }
