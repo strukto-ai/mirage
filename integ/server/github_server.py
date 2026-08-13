@@ -578,6 +578,8 @@ class FakeGitHub:
         # repository has to be told where it landed, and every caller
         # resolves that by asking /user first.
         self.login = DEFAULT_LOGIN
+        # The command line's seed, kept so `POST /reset` can rebuild it.
+        self.seed: tuple[list[str], list[str]] = ([], [])
 
     def repo(self,
              owner: str,
@@ -948,8 +950,14 @@ class GitHubServer:
         if raw is None:
             return _error(422,
                           "Invalid request.\n\n\"content\" wasn't supplied.")
+        # GitHub accepts a wrapped payload -- it wraps its own at 60 columns --
+        # so whitespace is stripped before validating rather than refused by
+        # it. `base64 file` wraps at 76 by default, and rejecting that made
+        # the fake stricter than the service it stands in for, which turns a
+        # correct task into a 422 that only reproduces here.
+        packed = "".join(str(raw).split())
         try:
-            data = base64.b64decode(str(raw), validate=True)
+            data = base64.b64decode(packed, validate=True)
         except Exception:  # noqa: BLE001
             return _error(422, "Invalid request.\n\n\"content\" is invalid.")
         branch = repo.branch_for(str(body.get("branch") or ""))
@@ -1415,6 +1423,25 @@ class GitHubServer:
             content_type = "text/plain; charset=utf-8"
         return web.Response(body=data, content_type=content_type.split(";")[0])
 
+    async def reset(self, request: web.Request) -> web.Response:
+        """Rebuild the seeded state, dropping every write since startup.
+
+        The write battery runs once per host against one shared process, so
+        without this the second host reads the first host's writes and the
+        two disagree over state rather than over behaviour.
+
+        Args:
+            request (web.Request): the incoming request.
+
+        Returns:
+            web.Response: 200 once the seed is back.
+        """
+        del request
+        self.state.repos.clear()
+        self.state.login = DEFAULT_LOGIN
+        seed_state(self.state, *self.state.seed)
+        return web.json_response({"ok": True})
+
     async def unrouted(self, request: web.Request) -> web.Response:
         """Answer 404 for an endpoint the fake does not implement, loudly.
 
@@ -1823,6 +1850,9 @@ def build_app(server: GitHubServer) -> web.Application:
     # is matched and ignored.
     app.router.add_get("/raw/{owner}/{repo}/{ref}/{path:.*}",
                        server.raw_content)
+    # Harness-only, never a GitHub route: the battery calls it between hosts
+    # so a write case starts from the seed rather than the previous run.
+    app.router.add_post("/reset", server.reset)
     app.router.add_route("*", "/{tail:.*}", server.unrouted)
     return app
 
@@ -1893,8 +1923,20 @@ def seed_metadata(state: FakeGitHub, source: Path) -> None:
         state.repo(owner, name, branch).meta.update(meta)
 
 
-async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
-    state = FakeGitHub()
+def seed_state(state: FakeGitHub, repos: list[str],
+               metadata: list[str]) -> None:
+    """Fill a fake with the repositories the command line asked for.
+
+    Split out of `_serve` so `POST /reset` can rebuild the same state: the
+    battery runs twice against one process (once per host), so a write case
+    would otherwise see the previous host's writes and the second run would
+    disagree with the first for no reason of its own.
+
+    Args:
+        state (FakeGitHub): the store to fill.
+        repos (list[str]): `owner/name=<fixture>[:flag...]` specs.
+        metadata (list[str]): metadata-only JSON files.
+    """
     fixtures = Path(__file__).resolve().parents[1] / "fixtures"
     for spec in repos:
         full_name, _, fixture = spec.partition("=")
@@ -1917,6 +1959,12 @@ async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
             state.repos[full_name].truncated = True
     for spec in metadata:
         seed_metadata(state, fixtures / spec)
+
+
+async def _serve(port: int, repos: list[str], metadata: list[str]) -> None:
+    state = FakeGitHub()
+    state.seed = (repos, metadata)
+    seed_state(state, repos, metadata)
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()

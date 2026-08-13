@@ -1277,6 +1277,16 @@ jobs:
           cat /tmp/discord.log
           echo "DISCORD_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
 
+      - name: Start fake GitHub API
+        if: matrix.facet == 'cli'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/github_server.py \
+            --port 5098 --repo integ/repo-cli=github/repo-v1 \
+            > /tmp/github.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "GITHUB_ENDPOINT=" /tmp/github.log && break; sleep 1; done
+          cat /tmp/github.log
+          echo "GITHUB_URL=http://127.0.0.1:5098" >> "$GITHUB_ENV"
+
       # The ntn and linear CLIs ride the notion mock (self-started by each
       # runner under NOTION_ENABLED) and the fake Linear GraphQL server.
       - name: Start fake Linear API and the Notion mock
@@ -1310,6 +1320,21 @@ jobs:
       - name: Run ${{ matrix.facet }} battery (typescript host)
         working-directory: integ
         run: pnpm exec tsx runners/typescript/main.ts --facet ${{ matrix.facet }} --strict
+
+      # A 404 is an answer to a real client -- "no such repository", "no such
+      # file" -- so an endpoint the fake does not implement is indistinguishable
+      # from a negative result, and what comes out is a confident wrong
+      # conclusion rather than an error. The fake names every unrouted request
+      # on stderr; this is what makes that a failure rather than a log line.
+      - name: Fail on any unrouted GitHub request
+        if: matrix.facet == 'cli'
+        run: |
+          if grep -q "no route for" /tmp/github.log; then
+            echo "The gh battery reached endpoints the fake does not implement:"
+            grep "no route for" /tmp/github.log | sort -u
+            exit 1
+          fi
+          echo "no unrouted GitHub requests"
 
       - name: Stop GreenMail
         if: always() && (matrix.facet == 'email' || matrix.facet == 'cli')

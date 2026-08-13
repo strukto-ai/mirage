@@ -50,6 +50,7 @@ import {
   DISCORD,
   GWS,
   HIMALAYA,
+  GH,
   GIT,
   LINEAR,
   NTN,
@@ -1367,6 +1368,10 @@ async function openSlack(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+// The repository the `gh` install defaults to, standing in for the current
+// git remote real gh reads. Seeded by the fake alongside the mounted one.
+const GH_CLI_REPO = 'integ/repo-cli'
+
 // The fake api.github.com server (integ/server/github_server.py) is external
 // and shared across both hosts, mirroring the fake Slack server. It used to
 // have to be out of process for the python host, whose GitHubResource
@@ -1376,8 +1381,21 @@ async function openGitHub(target: Target): Promise<Open> {
   let base = process.env.GITHUB_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('github target requires GITHUB_URL')
-  const mounts: Record<string, GitHubResource | [GitHubResource, MountMode]> = {}
+  // The write battery runs once per host against one shared fake, so it
+  // starts from the seed rather than from the other host's writes.
+  if (target.clis?.includes('gh') === true) {
+    const reset = await fetch(`${base}/reset`, { method: 'POST' })
+    if (!reset.ok) throw new Error(`github /reset failed: ${String(reset.status)}`)
+  }
+  const mounts: Record<
+    string,
+    GitHubResource | RAMResource | [GitHubResource, MountMode]
+  > = {}
   for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
     const [owner, repo] = String(m.repo).split('/')
     const resource = await GitHubResource.create({
       token: 'ghp-integ',
@@ -1388,6 +1406,9 @@ async function openGitHub(target: Target): Promise<Open> {
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('gh') === true) {
+    ws.registerCli('gh', GH, { token: 'ghp-integ', base_url: base, repo: GH_CLI_REPO })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
