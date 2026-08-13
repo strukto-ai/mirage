@@ -47,6 +47,9 @@ export function classifyWord(
     if (!isDir && `${path}/` === mount.prefix) {
       isDir = true
     }
+    // `rawPath` keeps the spelling as typed, the way relativeSpec does:
+    // `virtual` has already lost any `..`, and `cd -P` has to resolve the
+    // link a `..` follows before applying it.
     if (wordHasGlob) {
       const lastSlash = path.lastIndexOf('/')
       return new PathSpec({
@@ -54,6 +57,7 @@ export function classifyWord(
         virtual: path,
         directory: path.slice(0, lastSlash + 1),
         pattern: path.slice(lastSlash + 1),
+        rawPath: w,
         resolved: false,
       })
     }
@@ -62,6 +66,7 @@ export function classifyWord(
         resourcePath: stripSlash(path),
         virtual: path,
         directory: `${path}/`,
+        rawPath: w,
         resolved: false,
       })
     }
@@ -70,6 +75,7 @@ export function classifyWord(
       resourcePath: stripSlash(path),
       virtual: path,
       directory: path.slice(0, lastSlash + 1),
+      rawPath: w,
       resolved: true,
     })
   }

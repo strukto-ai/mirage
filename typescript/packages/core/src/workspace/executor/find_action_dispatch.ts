@@ -16,12 +16,16 @@ import { stripSlash } from '../../utils/slash.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
+import type { ChildMounts, StatPath } from '../../ops/types.ts'
 
 export async function applyFindActions(
   stdout: ByteSource | null,
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   registry: MountRegistry,
   cwd: string,
+  childMounts: ChildMounts | null = null,
+  statPath: StatPath | null = null,
 ): Promise<[ByteSource | null, Uint8Array]> {
   const hasDelete = flagKwargs.delete === true
   const hasPrint0 = flagKwargs.print0 === true
@@ -40,7 +44,14 @@ export async function applyFindActions(
   let outputMatches: string[]
 
   if (hasDelete) {
-    const deletable = matches.filter((p) => !registry.isMountRoot(p))
+    // Skip structural rows: mount points, and the namespace-only
+    // ancestors above a nested mount, are not unlinkable entries;
+    // refusing matches Unix semantics. Ancestors use the raw mount
+    // table like isMountRoot: an ungranted mount still pins its
+    // ancestors in the namespace.
+    const deletable = matches.filter(
+      (p) => !registry.isMountRoot(p) && registry.descendantMounts(p).length === 0,
+    )
     const ordered = [...deletable].sort(
       (a, b) => (b.match(/\//g) ?? []).length - (a.match(/\//g) ?? []).length,
     )
@@ -93,7 +104,12 @@ export async function applyFindActions(
           [ps],
           [],
           { args_l: true, d: true },
-          { stdin: null, cwd },
+          {
+            stdin: null,
+            cwd,
+            ...(childMounts !== null ? { childMounts } : {}),
+            ...(statPath !== null ? { statPath } : {}),
+          },
         )
         if (lsOut !== null) {
           const line = new TextDecoder().decode(await materialize(lsOut)).replace(/\n+$/, '')

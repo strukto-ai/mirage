@@ -176,6 +176,7 @@ async def handle_command_provision(
                                     command=cmd_str,
                                     prefix=mount.prefix.rstrip("/"),
                                     index=mount.resource.index,
+                                    spec=spec,
                                     **flag_kwargs)
     if not result.command:
         result.command = cmd_str

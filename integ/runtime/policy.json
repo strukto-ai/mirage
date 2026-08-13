@@ -20,7 +20,7 @@
           "command": "python3 -c \"print(argv[0])\"",
           "expect": {
             "exit": 0,
-            "stdout": "main.py\n"
+            "stdout": "-c\n"
           }
         },
         {
@@ -35,7 +35,7 @@
           "command": "python3 -c \"print(argv[0])\"",
           "expect": {
             "exit": 0,
-            "stdout": "main.py\n"
+            "stdout": "-c\n"
           }
         }
       ]
@@ -62,7 +62,7 @@
           "command": "python3 -c \"print(argv[0])\"",
           "expect": {
             "exit": 0,
-            "stdout": "main.py\n"
+            "stdout": "-c\n"
           }
         },
         {
@@ -127,7 +127,7 @@
           "command": "python3 -c \"print(argv[0])\"",
           "expect": {
             "exit": 0,
-            "stdout": "main.py\n"
+            "stdout": "-c\n"
           }
         },
         {

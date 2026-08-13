@@ -38,8 +38,11 @@ export async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return runThrough(bytes, new DecompressionStream('deflate-raw'))
 }
 
+// `compress` is optional because a codec may be decompress-only: every
+// permissively licensed bzip2 implementation decompresses only, so mirage
+// reads a .tar.bz2 and refuses to create one.
 export interface CompressionCodec {
-  compress(bytes: Uint8Array): Promise<Uint8Array>
+  compress?(bytes: Uint8Array): Promise<Uint8Array>
   decompress(bytes: Uint8Array): Promise<Uint8Array>
 }
 

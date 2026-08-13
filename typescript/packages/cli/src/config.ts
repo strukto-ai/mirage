@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '@struktoai/mirage-core'
 import { ALLOWED_KEYS, DaemonConfigError } from '@struktoai/mirage-server'
 import type { Command } from 'commander'
 import { emit, fail } from './output.ts'
@@ -65,7 +66,7 @@ function listFile(): void {
   }
   const unknown = Object.keys(table)
     .filter((k) => !ALLOWED_KEYS.has(k))
-    .sort()
+    .sort(compareCodePoints)
   if (unknown.length > 0) {
     process.stderr.write(
       'warning: unknown [daemon] keys (daemon will refuse to ' + `start): ${unknown.join(', ')}\n`,

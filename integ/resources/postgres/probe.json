@@ -93,6 +93,85 @@
         "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pg_prov_rg",
+      "seq": 610097,
+      "targets": [
+        "postgres"
+      ],
+      "provision": true,
+      "command": "rg x /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=unknown\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_head_reports_and_continues",
+      "seq": 610098,
+      "targets": [
+        "postgres"
+      ],
+      "command": "head -n 2 /pg/__nf_missing__.txt /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "==> /pg/public/tables/books/rows.jsonl <==\n{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n",
+        "stderr": "head: /pg/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_wc_reports_and_continues",
+      "seq": 610099,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /pg/public/tables/books/rows.jsonl /pg/__nf_missing__.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "5 /pg/public/tables/books/rows.jsonl\n5 total\n",
+        "stderr": "wc: /pg/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_cat_reports_and_continues",
+      "seq": 610100,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/__nf_missing__.txt /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": "cat: /pg/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_tail_reports_and_continues",
+      "seq": 610101,
+      "targets": [
+        "postgres"
+      ],
+      "command": "tail -n 2 /pg/__nf_missing__.txt /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "==> /pg/public/tables/books/rows.jsonl <==\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": "tail: /pg/__nf_missing__.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pg_cat_dir_operand_reports_eisdir",
+      "seq": 610102,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg/public/tables/books /pg/public/tables/books/rows.jsonl",
+      "expect": {
+        "exit": 1,
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": "cat: /pg/public/tables/books: Is a directory\n"
+      }
     }
   ]
 }

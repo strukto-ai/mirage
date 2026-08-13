@@ -22,11 +22,41 @@ import type { CommandOpts, ProvisionFn } from '../../config.ts'
 import { RegisteredCommand } from '../../config.ts'
 import { BINARY_EXTENSIONS } from '../grep_helper.ts'
 import { getExtension } from '../../resolve.ts'
+import { compileSpec } from '../../spec/compile.ts'
+import { flagKwargName } from '../../spec/constants.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
 import type { ReaddirOp, ResolveGlobOp, StatOp } from './adapter.ts'
 
 // Cap on entries visited by a planning walk (grep -r): beyond it the
 // estimate degrades to an UNKNOWN floor instead of walking forever.
 export const MAX_PLAN_WALK = 1000
+
+/**
+ * Read the option a spelling names, whatever this command calls it.
+ *
+ * A provision function is shared across commands, so it cannot name a
+ * dest the way a handler does: `-c` is `bytes` on head and `c` on tail.
+ * The invoked command's spec carries that mapping, so resolve the
+ * spelling through it rather than guessing both names.
+ */
+function flagOf(opts: CommandOpts, spelling: string): FlagValue | undefined {
+  const spec = opts.spec
+  if (spec === undefined) return undefined
+  const dest = compileSpec(spec).dest.get(spelling)
+  if (dest === undefined) return undefined
+  return new FlagView(opts.flags, spec).raw(flagKwargName(dest))
+}
+
+/**
+ * Whether -r/-R asked this command to recurse.
+ *
+ * Only a boolean -r/-R means recursion: `touch -r REF` names a reference
+ * file and walks nothing, so a value-typed option under the same letter
+ * must not degrade the estimate.
+ */
+function walksASubtree(opts: CommandOpts): boolean {
+  return ['-r', '-R'].some((spelling) => flagOf(opts, spelling) === true)
+}
 
 /**
  * Expand glob operands the way the executor would. Without a resolver
@@ -249,7 +279,7 @@ export function makeHeadTailProvision<A extends Accessor>(
     }
     // head spells the byte cap 'bytes' (the canonical -c/--bytes dest);
     // tail declares -c short-only, so its cap still arrives as 'c'.
-    const c = opts.flags.c ?? opts.flags.bytes
+    const c = flagOf(opts, '-c')
     if (typeof c === 'string') {
       const cBytes = Number.parseInt(c, 10)
       const total = resolved.reduce((acc, [, size]) => acc + Math.min(cBytes, size), 0)
@@ -452,7 +482,7 @@ export function writeMetadataProvision(
   opts: CommandOpts,
 ): Promise<ProvisionResult> {
   const n = Math.max(1, paths.length)
-  const recursive = opts.flags.r === true || opts.flags.R === true
+  const recursive = walksASubtree(opts)
   return Promise.resolve(
     new ProvisionResult({
       command: opts.command ?? '',
@@ -484,7 +514,7 @@ export function makeSedProvision<A extends Accessor>(stat: StatOp<A>): Provision
   const base = makeFileReadProvision(stat)
   return async (accessor: A, paths: PathSpec[], texts: string[], opts: CommandOpts) => {
     const result = (await base(accessor, paths, texts, opts)) as ProvisionResult
-    if (opts.flags.i === true) result.precision = Precision.UNKNOWN
+    if (flagOf(opts, '-i') !== undefined) result.precision = Precision.UNKNOWN
     return result
   }
 }
@@ -503,7 +533,7 @@ export function makeSearchProvision<A extends Accessor>(
   const base = makeFileReadProvision(stat, resolveGlob)
   return async (accessor: A, paths: PathSpec[], texts: string[], opts: CommandOpts) => {
     const rendered = [opts.command ?? '', ...texts, ...paths.map((p) => p.virtual)].join(' ')
-    const recursive = opts.flags.r === true || opts.flags.R === true
+    const recursive = walksASubtree(opts)
     if (recursive && readdir !== undefined && paths.length > 0) {
       const roots = await expandGlobs(resolveGlob, accessor, paths, opts.index ?? undefined)
       const [sized, complete] = await walkFiles(

@@ -26,7 +26,7 @@ import { rename as s3Rename } from '../../../core/s3/rename.ts'
 import { rmR as s3RmR } from '../../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../../core/s3/rmdir.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
-import { stream as s3Stream } from '../../../core/s3/stream.ts'
+import { readRange as s3ReadRange, stream as s3Stream } from '../../../core/s3/stream.ts'
 import { truncate as s3Truncate } from '../../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../../core/s3/unlink.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
@@ -35,6 +35,7 @@ import type { CommandIO } from '../generic_bind/index.ts'
 export const S3_IO: CommandIO<S3Accessor> = {
   readdir: s3Readdir,
   readBytes: s3Read,
+  readRange: s3ReadRange,
   readStream: s3Stream,
   stat: s3Stat,
   isMounted: () => true,

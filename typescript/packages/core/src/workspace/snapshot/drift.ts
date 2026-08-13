@@ -55,6 +55,12 @@ interface RegistryLike {
   allMounts(): readonly MountEntry[]
 }
 
+// The drain needs only path-to-mount resolution, so the door can pass
+// its namespace (which answers mountFor) without holding the registry.
+export interface MountLookup {
+  mountFor(path: string): MountEntry | null
+}
+
 /**
  * Fingerprint checks a load queued, drained on the first async op.
  *
@@ -93,7 +99,7 @@ export class DriftQueue {
    * Subsequent calls are no-ops. Stats run concurrently so first-op
    * latency does not scale linearly with the number of recorded reads.
    */
-  async drain(registry: RegistryLike, statFn: (path: string) => Promise<unknown>): Promise<void> {
+  async drain(registry: MountLookup, statFn: (path: string) => Promise<unknown>): Promise<void> {
     this.isPending = false
     if (this.entries.length === 0) return
     const pending = this.entries
@@ -119,7 +125,7 @@ export class DriftQueue {
  */
 export function installDriftState(
   registry: RegistryLike,
-  cache: { remove(key: string): Promise<void> },
+  cache: { evictPaths(paths: Iterable<string>): void },
   drift: DriftQueue,
   state: { fingerprints?: FingerprintEntry[]; live_only_mounts?: string[] },
   policy: DriftPolicy,
@@ -128,9 +134,10 @@ export function installDriftState(
   const entries = state.fingerprints ?? []
   if (entries.length === 0) return
   if (policy === DriftPolicy.OFF) {
-    for (const e of entries) {
-      void cache.remove(e.path)
-    }
+    // Synchronously: this function returns into a sync `fromState`, so
+    // a fire-and-forget `remove()` would let the very next read be
+    // served the snapshot bytes OFF exists to bypass.
+    cache.evictPaths(entries.map((e) => e.path))
     return
   }
   for (const e of entries) {
@@ -215,7 +222,7 @@ export function liveOnlyMountPrefixes(registry: RegistryLike): string[] {
  * workspace's op-resolution machinery.
  */
 export async function checkDrift(
-  registry: RegistryLike,
+  registry: MountLookup,
   statFn: (path: string) => Promise<unknown>,
   path: string,
   recorded: string,

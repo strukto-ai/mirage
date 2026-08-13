@@ -36,6 +36,87 @@ def load_targets(root: Path) -> dict:
     return {t["id"]: t for t in data["targets"]}
 
 
+def load_services(root: Path) -> dict:
+    """The service -> per-host required env vars table.
+
+    An empty list means the host needs nothing because its adapter starts
+    an in-process fake; the two hosts differ here (python self-hosts s3,
+    ssh, hf, box, databricks, discord, linear and dify, typescript does
+    not), so the asymmetry is spelled out per host rather than inferred.
+
+    Args:
+        root (Path): the integ directory.
+
+    Returns:
+        dict: service name -> {"python": [...], "typescript": [...]}.
+    """
+    return validate_services(json.loads((root / "targets.json").read_text()))
+
+
+def validate_services(data: dict) -> dict:
+    """Reject a services table that has drifted from the target list.
+
+    Args:
+        data (dict): the parsed targets.json.
+
+    Returns:
+        dict: the validated services table.
+    """
+    services = data["services"]
+    named = {t["service"] for t in data["targets"] if t.get("service")}
+    undeclared = sorted(named - set(services))
+    if undeclared:
+        raise KeyError(f"targets.json: services missing an entry: "
+                       f"{', '.join(undeclared)}")
+    unused = sorted(set(services) - named)
+    if unused:
+        raise KeyError(f"targets.json: services entry names no target: "
+                       f"{', '.join(unused)}")
+    for name, hosts in services.items():
+        if set(hosts) != {"python", "typescript"}:
+            raise KeyError(f"targets.json: service {name!r} must declare "
+                           f"both 'python' and 'typescript'")
+    return services
+
+
+def parse_allow_skip(services: dict, value: str) -> set[str]:
+    """Service names a caller declares it knowingly does not provision.
+
+    Rejects a name that is not a real service so the list cannot rot into
+    a typo that quietly widens what --strict tolerates.
+
+    Args:
+        services (dict): the table from load_services.
+        value (str): comma-separated service names, possibly empty.
+
+    Returns:
+        set[str]: the declared service names.
+    """
+    names = {n.strip() for n in value.split(",") if n.strip()}
+    unknown = sorted(names - set(services))
+    if unknown:
+        raise KeyError(f"--allow-skip names unknown service(s): "
+                       f"{', '.join(unknown)}")
+    return names
+
+
+def missing_env(services: dict, target: dict, host: str) -> list[str]:
+    """Env vars this host needs for this target and does not have.
+
+    Args:
+        services (dict): the table from load_services.
+        target (dict): a target entry.
+        host (str): "python" or "typescript".
+
+    Returns:
+        list[str]: unset variable names, empty when the target can run.
+    """
+    service = target.get("service")
+    if service is None:
+        return []
+    return [v for v in services[service][host] if not os.environ.get(v)]
+
+
 def discover_case_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for name in CASE_DIRS:
@@ -51,7 +132,41 @@ def load_cases(root: Path) -> list[dict]:
             case["_source"] = str(path.relative_to(root))
             cases.append(case)
     cases.sort(key=lambda c: c.get("seq", 1 << 30))
+    validate_cases(root, cases)
     return cases
+
+
+def validate_cases(root: Path, cases: list[dict]) -> None:
+    """Fail loudly on the two ways a case silently stops being tested.
+
+    A duplicate id collides in the parity runner, which keys rows by
+    (target, id), so one of the pair is dropped from the py/ts diff
+    without a word. A target id that matches no manifest entry means the
+    case never runs anywhere, which reads as "passing" everywhere.
+
+    Args:
+        root (Path): the integ directory.
+        cases (list[dict]): every loaded case.
+    """
+    known = set(load_targets(root))
+    seen: dict[str, str] = {}
+    duplicates: list[str] = []
+    unknown: list[str] = []
+    for case in cases:
+        first = seen.get(case["id"])
+        if first is not None:
+            duplicates.append(f"{case['id']} ({first} and {case['_source']})")
+        else:
+            seen[case["id"]] = case["_source"]
+        for target in case["targets"]:
+            if target not in known:
+                unknown.append(f"{case['id']} -> {target}"
+                               f" ({case['_source']})")
+    if duplicates:
+        raise ValueError("duplicate case ids: " + "; ".join(duplicates))
+    if unknown:
+        raise ValueError("cases naming an unknown target: " +
+                         "; ".join(unknown))
 
 
 def build_fixture(
@@ -185,7 +300,21 @@ def bind_mount(case: dict, mount_path: str) -> dict:
     return bound
 
 
-async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
+async def run_case(ws, case: dict) -> tuple[int, str, str, float, str | None]:
+    """Run one case and return what it produced.
+
+    The post-condition a case declares under ``check`` is returned beside
+    stdout rather than in place of it, so a case can pin both what the
+    command printed and what it left behind.
+
+    Args:
+        ws: the workspace the case runs against.
+        case (dict): the case as loaded from disk.
+
+    Returns:
+        tuple: exit code, stdout, stderr, elapsed seconds, and the stat
+        line for the case's ``check`` (None when it declares none).
+    """
     if case.get("clear_cache"):
         # A full clear means the file cache AND every mount's index cache:
         # remote listings live in the per-resource index, and a listing
@@ -199,14 +328,16 @@ async def run_case(ws, case: dict) -> tuple[int, str, str, float]:
     start = time.monotonic()
     if case.get("provision"):
         plan = await ws.execute(case["command"], provision=True)
-        return 0, provision_line(plan) + "\n", "", time.monotonic() - start
+        return 0, provision_line(
+            plan) + "\n", "", time.monotonic() - start, None
     result = await ws.execute(case["command"], session_id=case.get("session"))
     elapsed = time.monotonic() - start
     out = await result.stdout_str()
     err = await result.stderr_str()
+    check_out = None
     if case.get("check") is not None:
-        out = await stat_check(ws, case["check"])
-    return result.exit_code, out, err, elapsed
+        check_out = await stat_check(ws, case["check"])
+    return result.exit_code, out, err, elapsed, check_out
 
 
 async def run_scenario(read_ws, mutate, steps: list[dict]) -> tuple[int, str]:
@@ -223,8 +354,12 @@ async def run_scenario(read_ws, mutate, steps: list[dict]) -> tuple[int, str]:
     return exit_code, "".join(outs)
 
 
-def compare(case: dict, exit_code: int, out: str, err: str,
-            elapsed: float) -> list[str]:
+def compare(case: dict,
+            exit_code: int,
+            out: str,
+            err: str,
+            elapsed: float,
+            check_out: str | None = None) -> list[str]:
     expect = case["expect"]
     diffs: list[str] = []
     if exit_code != expect["exit"]:
@@ -233,6 +368,8 @@ def compare(case: dict, exit_code: int, out: str, err: str,
         diffs.append(f"stdout: expected {expect['stdout']!r}, got {out!r}")
     if err.rstrip("\n") != expect["stderr"].rstrip("\n"):
         diffs.append(f"stderr: expected {expect['stderr']!r}, got {err!r}")
+    if case.get("check") is not None and check_out != expect["check"]:
+        diffs.append(f"check: expected {expect['check']!r}, got {check_out!r}")
     bounds = expect.get("elapsed")
     if bounds is not None and not bounds["min"] <= elapsed <= bounds["max"]:
         diffs.append(f"elapsed: expected [{bounds['min']}, {bounds['max']}]"

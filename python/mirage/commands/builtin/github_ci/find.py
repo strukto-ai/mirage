@@ -23,6 +23,7 @@ from mirage.commands.builtin.github_ci.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
@@ -36,7 +37,7 @@ async def find_provision(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
@@ -65,7 +66,7 @@ async def find(
     L: bool = False,
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run
     # would fetch every run's logs. Filtering is the shared generic walk.

@@ -21,6 +21,7 @@ import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { buildTree, keep, startBasename } from '../../commands/builtin/findEval.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 async function collect(
   accessor: NotionStatAccessor,
@@ -94,5 +95,5 @@ export async function find(
     }
     results.push(rel)
   }
-  return results.sort()
+  return results.sort(compareCodePoints)
 }

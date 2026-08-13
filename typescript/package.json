@@ -61,7 +61,6 @@
     "knip": "^6.26.0",
     "prettier": "^3.8.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.0.0",
-    "vitest": "^3.2.6"
+    "typescript-eslint": "^8.0.0"
   }
 }

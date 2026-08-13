@@ -22,7 +22,11 @@ import { Session } from '../session/session.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCommand } from './command.ts'
+import { filterUnderPrefixes } from './fanout.ts'
 import { basename } from '../../core/ram/utils.ts'
+import { OpsRegistry } from '../../ops/registry.ts'
+import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace.ts'
 
 const NEVER_EXECUTE: ExecuteNodeFn = () => {
   throw new Error('executeNode should not have been called')
@@ -127,6 +131,58 @@ describe('fanOutTraversal mount-entry synthesis honors the expression tree', () 
   })
 })
 
+describe('find actions on structural rows', () => {
+  function nestedGhostRegistry(): MountRegistry {
+    const parent = new RAMResource()
+    parent.store.files.set('/top.txt', new TextEncoder().encode('hello\n'))
+    const deep = new RAMResource()
+    deep.store.files.set('/leaf.txt', new TextEncoder().encode('deep\n'))
+    const reg = new MountRegistry({ '/': parent, '/ghost/very/deep/': deep }, MountMode.WRITE)
+    wireRegistry(reg)
+    return reg
+  }
+
+  it('-ls renders namespace-only ancestor rows', async () => {
+    const reg = nestedGhostRegistry()
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const [out, io] = await handleCommand(
+      NEVER_EXECUTE,
+      STAT_ONLY_DISPATCH,
+      reg,
+      ['find', '/', '-ls'],
+      s,
+    )
+    expect(io.exitCode).toBe(0)
+    const text = out === null ? '' : new TextDecoder().decode(await materialize(out))
+    const rows = text
+      .split('\n')
+      .filter((l) => l !== '')
+      .map((l) => l.split(/[\t ]+/).at(-1))
+    expect(rows).toContain('/ghost')
+    expect(rows).toContain('/ghost/very')
+    expect(rows).toContain('/ghost/very/deep')
+  })
+
+  it('-delete skips structural rows and exits 0', async () => {
+    const reg = nestedGhostRegistry()
+    const s = new Session({ sessionId: 'test', cwd: '/' })
+    const [, io] = await handleCommand(
+      NEVER_EXECUTE,
+      STAT_ONLY_DISPATCH,
+      reg,
+      ['find', '/', '-delete'],
+      s,
+    )
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe('')
+    const [after] = await handleCommand(NEVER_EXECUTE, STAT_ONLY_DISPATCH, reg, ['find', '/'], s)
+    const text = after === null ? '' : new TextDecoder().decode(await materialize(after))
+    expect(text).toContain('/ghost/very/deep')
+    expect(text).not.toContain('/top.txt')
+    expect(text).not.toContain('leaf.txt')
+  })
+})
+
 describe('fanOutTraversal -maxdepth applies to child-mount depth', () => {
   it('a deeper child entry beyond the budget is excluded', async () => {
     const child = new RAMResource()
@@ -145,5 +201,198 @@ describe('fanOutTraversal -maxdepth applies to child-mount depth', () => {
     const text = out === null ? '' : new TextDecoder().decode(await materialize(out))
     expect(text).toContain('/data/a')
     expect(text).not.toContain('/data/a/b.txt')
+  })
+})
+
+describe('filterUnderPrefixes', () => {
+  it('reads du paths after the size column', async () => {
+    // du renders SIZE\tPATH, so the path is the second field; reading
+    // the first kept every shadowed du row in the parent's output.
+    const out = await filterUnderPrefixes(
+      new TextEncoder().encode('1000\t/base/inner\n1010\t/base\n'),
+      ['/base/inner'],
+      'du',
+    )
+    expect(new TextDecoder().decode(out)).toBe('1010\t/base\n')
+  })
+
+  it('still reads find and grep paths from the front', async () => {
+    const found = await filterUnderPrefixes(
+      new TextEncoder().encode('/base/inner/x\n/base/y\n'),
+      ['/base/inner'],
+      'find',
+    )
+    expect(new TextDecoder().decode(found)).toBe('/base/y\n')
+    const grepped = await filterUnderPrefixes(
+      new TextEncoder().encode('/base/inner/x:hit\n/base/y:hit\n'),
+      ['/base/inner'],
+      'grep',
+    )
+    expect(new TextDecoder().decode(grepped)).toBe('/base/y:hit\n')
+  })
+})
+
+describe('fanOutTraversal du at a descendant mount boundary', () => {
+  async function runLines(cmds: string[], top = 10, real = 7): Promise<string> {
+    const parser = await getTestParser()
+    const parent = new RAMResource()
+    parent.store.files.set('/top.txt', new Uint8Array(top))
+    parent.store.dirs.add('/inner')
+    parent.store.files.set('/inner/leftover.txt', new Uint8Array(1000))
+    const child = new RAMResource()
+    child.store.files.set('/real.txt', new Uint8Array(real))
+    const registry = new OpsRegistry()
+    registry.registerResource(parent)
+    registry.registerResource(child)
+    const ws = new Workspace(
+      { '/base': parent, '/base/inner': child },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    try {
+      let out = ''
+      for (const cmd of cmds) out = stdoutStr(await ws.execute(cmd))
+      return out
+    } finally {
+      await ws.close()
+    }
+  }
+
+  function runLine(cmd: string): Promise<string> {
+    return runLines([cmd])
+  }
+
+  // A nested mount's bytes belong to every directory above it. Pinned on
+  // coreutils 9.7 over a tmpfs mounted at the same spot: `du
+  // --apparent-size -B1 base` prints `7 base/inner` then `17 base`,
+  // children before parents. Only `-x`, which mirage does not implement,
+  // reports the parent's own 10. The 1000 shadowed bytes under the mount
+  // point count nowhere, in GNU or here.
+  it('folds the child mount into its ancestors', async () => {
+    expect(await runLine('du /base')).toBe('7\t/base/inner\n17\t/base\n')
+  })
+
+  it('hides shadowed leaves under -a', async () => {
+    expect(await runLine('du -a /base')).toBe(
+      '7\t/base/inner/real.txt\n7\t/base/inner\n10\t/base/top.txt\n17\t/base\n',
+    )
+  })
+
+  // `-s` is one total per argument, mount boundary or not (GNU 9.7 prints
+  // the single row `17 base`).
+  it('is one row per operand under -s', async () => {
+    expect(await runLine('du -s /base')).toBe('17\t/base\n')
+  })
+
+  // GNU `du -c` prints exactly one grand total covering everything it
+  // walked. Pinned on coreutils 9.7 over a tmpfs mounted at the same spot:
+  // `du -c --apparent-size -B1 base` reports `7 base/inner`, `17 base`,
+  // `17 total`.
+  it('prints one total across the mounts under -c', async () => {
+    expect(await runLine('du -c /base')).toBe('7\t/base/inner\n17\t/base\n17\ttotal\n')
+  })
+
+  it('prints one total under -sc', async () => {
+    expect(await runLine('du -sc /base')).toBe('17\t/base\n17\ttotal\n')
+  })
+
+  // Summing each mount's already-humanized total would round twice and
+  // report 3.0K; the sub-runs render exact bytes and only the merge
+  // humanizes.
+  it('humanizes the total once under -ch', async () => {
+    expect(await runLines(['du -ch /base'], 1500, 1500)).toBe(
+      '1.5K\t/base/inner\n2.9K\t/base\n2.9K\ttotal\n',
+    )
+  })
+
+  // `--max-depth` prunes only what is printed: the mount's bytes still
+  // reach the operand row.
+  it('prunes printing not accounting under --max-depth', async () => {
+    expect(await runLine('du --max-depth=0 /base')).toBe('17\t/base\n')
+  })
+
+  // `tree` is not fanned out at all: one root line, one drawing, one
+  // summary, with the nested mount crossed inside the generic. Pinned on
+  // tree 2.2.1, which draws the mounted entries under the mount point and
+  // none of the ones it covers.
+  it('renders tree as one document across the boundary', async () => {
+    expect(await runLine('tree /base')).toBe(
+      '/base\n|-- inner\n|   `-- real.txt\n`-- top.txt\n\n2 directories, 2 files\n',
+    )
+  })
+
+  it('drops the shadowed ls -R group whole', async () => {
+    expect(await runLine('ls -R /base')).toBe('/base:\ninner\ntop.txt\n\n/base/inner:\nreal.txt\n')
+  })
+
+  // A nested mount is not a reason for a link to disappear. GNU lists
+  // `/base/link.txt` and sizes it at 13 (its target string) whether or not
+  // something is mounted at `/base/inner`; the fan-out used to run every
+  // sub-command link-blind, so both rows vanished.
+  it('still sees symlinks in every sub-run', async () => {
+    const found = await runLines(['ln -s /base/top.txt /base/link.txt', 'find /base'])
+    expect(found).toContain('/base/link.txt')
+    const sized = await runLines(['ln -s /base/top.txt /base/link.txt', 'du -a /base'])
+    // Post-order, siblings sorted: inner, link.txt, top.txt, then the
+    // operand carrying all three (7 + 13 + 10).
+    expect(sized).toBe(
+      '7\t/base/inner/real.txt\n7\t/base/inner\n13\t/base/link.txt\n10\t/base/top.txt\n30\t/base\n',
+    )
+  })
+})
+
+describe('fanOutTraversal operands spanning mounts', () => {
+  async function runLine(cmd: string): Promise<string> {
+    const parser = await getTestParser()
+    const parent = new RAMResource()
+    parent.store.files.set('/top.txt', new Uint8Array(10))
+    parent.store.dirs.add('/inner')
+    parent.store.files.set('/inner/leftover.txt', new Uint8Array(1000))
+    const child = new RAMResource()
+    child.store.files.set('/real.txt', new TextEncoder().encode('hit here\n'))
+    const other = new RAMResource()
+    other.store.files.set('/o.txt', new TextEncoder().encode('hit there\n'))
+    const registry = new OpsRegistry()
+    registry.registerResource(parent)
+    registry.registerResource(child)
+    registry.registerResource(other)
+    const ws = new Workspace(
+      { '/base': parent, '/base/inner': child, '/other': other },
+      { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+    )
+    try {
+      return stdoutStr(await ws.execute(cmd))
+    } finally {
+      await ws.close()
+    }
+  }
+
+  // A per-operand native run is single-mount, so an operand holding a
+  // nested mount used to report the parent's shadowed keys and none of
+  // the mount's own: `du /base` and `du /base /other` disagreed about the
+  // same tree. GNU counts a mounted filesystem in the same run either way.
+  it('fans out inside each operand for du -c', async () => {
+    expect(await runLine('du -c /base /other')).toBe(
+      '9\t/base/inner\n19\t/base\n10\t/other\n29\ttotal\n',
+    )
+  })
+
+  it('fans out inside each operand for find and grep -r', async () => {
+    const found = await runLine('find /base /other')
+    expect(found).toContain('/base/inner/real.txt')
+    expect(found).not.toContain('/base/inner/leftover.txt')
+    expect(await runLine('grep -r hit /base /other')).toBe(
+      '/base/inner/real.txt:hit here\n/other/o.txt:hit there\n',
+    )
+  })
+
+  // `ls -R` renders `PATH:` then bare names, so a line filter that reads a
+  // path off every line drops the header and keeps the entries, landing
+  // the shadowed `leftover.txt` in `/base`'s own group. GNU (coreutils 9.7
+  // over a tmpfs at the same spot) prints the mounted directory's entries
+  // under its own header, one blank line between groups.
+  it('drops the shadowed ls -R group whole and separates the rest', async () => {
+    expect(await runLine('ls -R /base /other')).toBe(
+      '/base:\ninner\ntop.txt\n\n/base/inner:\nreal.txt\n\n/other:\no.txt\n',
+    )
   })
 })

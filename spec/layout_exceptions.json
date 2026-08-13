@@ -1,0 +1,41 @@
+{
+  "baseline": 302,
+  "baseline_reason": "Every divergence below the excused ones predates the gate and each needs its own decision, so --strict fails on a rise rather than demanding zero. Lower this number whenever a divergence is closed; the gate fails on a drop too, so an improvement cannot be silently spent. Items 31-37 of the cleanup plan are scoped from this report. The unit is one module, never one directory: a one-sided directory counts once per module inside it, so it cannot absorb new modules without moving the number. An excused directory is the deliberate exception -- it excuses its whole subtree, because the excuse is that there is no counterpart to mirror, which makes growth inside it expected rather than drift.",
+  "directories": {
+    "python_only": {
+      "runtime/wasm": "The wasmtime WASI host. npm ships quickjs-emscripten and pyodide with their own hosts and python has no equivalent, so there is nothing to mirror. CLAUDE.md says do not port it.",
+      "bridge": "sync.py and thread.py exist to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
+      "agents/agno": "Ecosystem split: agno is a python-only framework.",
+      "agents/camel": "Ecosystem split: camel is a python-only framework, and pyproject declares it conflicting with the openai extra.",
+      "agents/openai_agents": "Ecosystem split: the openai-agents SDK is python-only.",
+      "agents/openhands": "Ecosystem split: openhands is a python-only framework.",
+      "agents/pydantic_ai": "Ecosystem split: pydantic-ai is a python-only framework.",
+      "commands/builtin/hf_buckets": "hf_buckets is python's name for the backend typescript calls hf; the alias is already declared in spec/parity_exceptions.json under command_io_aliases.",
+      "core/hf_buckets": "Same hf_buckets/hf alias as above.",
+      "core/hf_buckets/du": "Same hf_buckets/hf alias as above."
+    },
+    "typescript_only": {
+      "resource/opfs": "OPFS is the one typescript-only backend, declared in spec/parity_exceptions.json. There is no browser filesystem API for python to mirror.",
+      "core/opfs": "OPFS backend core, browser-only.",
+      "core/opfs/du": "OPFS backend core, browser-only.",
+      "ops/opfs": "OPFS op table, browser-only.",
+      "commands/builtin/opfs": "OPFS command wrappers, browser-only.",
+      "generated": "browser/src/generated/wasm.ts is a build artifact embedded for the browser bundle, not a source module.",
+      "workspace/fixtures": "Test-only helpers: unreachable from the barrel, absent from dist (tsup entry is src/index.ts and files is [\"dist\"]), and imported only by tests.",
+      "cli/bin": "An npm package declares its executable as a real file under bin/; python declares console_scripts in pyproject.toml instead.",
+      "server/bin": "Same npm bin convention as cli/bin.",
+      "commands/builtin/hf": "typescript's name for python's hf_buckets; see the alias in spec/parity_exceptions.json.",
+      "core/hf": "Same hf/hf_buckets alias as above.",
+      "core/hf/du": "Same hf/hf_buckets alias as above."
+    }
+  },
+  "modules": {
+    "ops": {
+      "python_only": {
+        "file": "MirageFile: a sync file object over the Ops facade for embedding python code (with open-style usage). An npm consumer holds promises, not file objects, so there is nothing to mirror.",
+        "open": "The open() constructor for MirageFile; same embedding convenience as ops/file.",
+        "os_patch": "Patches the host interpreter's builtins.open/os functions onto a workspace, a CPython-only trick with no npm analogue."
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ import {
   ResourceName,
   lstripSlash,
   makeResolveGlob,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
@@ -254,7 +255,7 @@ export class OPFSResource implements Resource {
     await walkFiles(handle, '', files)
     const dirs: string[] = []
     await walkDirs(handle, '', dirs)
-    dirs.sort()
+    dirs.sort(compareCodePoints)
     return {
       type: this.kind,
       files,

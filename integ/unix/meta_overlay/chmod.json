@@ -30,8 +30,9 @@
       },
       "expect": {
         "exit": 0,
-        "stdout": "mode=601 mtime=2026-01-02T15:30:00\n",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "",
+        "check": "mode=601 mtime=2026-01-02T15:30:00\n"
       }
     },
     {
@@ -63,8 +64,9 @@
       },
       "expect": {
         "exit": 0,
-        "stdout": "mode=701\n",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "",
+        "check": "mode=701\n"
       }
     },
     {

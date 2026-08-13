@@ -17,7 +17,10 @@ import errno
 import pytest
 
 from mirage import Action, CommandContext, Deny, GuardSpec, Policy, Workspace
-from mirage.policy import ExecuteResultContext, OpsContext, OpsResultContext
+from mirage.commands.builtin.utils.limit import LimitExceededError
+from mirage.io import IOResult
+from mirage.policy import (ExecuteResultContext, OpsContext, OpsResultContext,
+                           PolicyError)
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountMode, OnExceed
 
@@ -197,6 +200,175 @@ async def test_post_ops_deny_still_records_the_completed_write():
             await ws.ops.write("/data/prod/x.txt", b"data\n")
         assert any(r.op == "write" for r in ws.ops.records)
         assert await ws.ops.read("/data/prod/x.txt") == b"data\n"
+    finally:
+        await ws.close()
+
+
+class SuppressProdReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Deny("no reads\n")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
+    # The suppressed result is the only place a read's byte count
+    # lived, so without carrying it on the exception the record says
+    # zero and network_bytes under-reports traffic that happened.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        ws.ops.records.clear()
+        ws.policies.add(SuppressProdReads())
+        with pytest.raises(PermissionError):
+            await ws.ops.read("/data/prod/x.txt")
+        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert len(reads) == 1
+        assert reads[0].bytes == 10
+    finally:
+        await ws.close()
+
+
+class CapProdReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Limit(max_bytes=3)
+        return None
+
+
+class CachingRAM(RAMResource):
+    caches_reads = True
+    name = "s3"
+
+
+@pytest.mark.asyncio
+async def test_a_capped_read_records_what_the_backend_moved():
+    # A post_ops Limit truncates what the caller receives; the transfer
+    # already happened, so recording the capped length would under-report
+    # network_bytes by whatever the cap removed.
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        ws.ops.records.clear()
+        ws.policies.add(CapProdReads())
+        assert await ws.ops.read("/data/prod/x.txt") == b"012"
+        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert [r.bytes for r in reads] == [10]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
+    # The deny suppresses a result the cache produced, so nothing
+    # crossed the network; recording it against the backend would count
+    # traffic that never happened.
+    ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        await ws.apply_io(
+            IOResult(reads={"/data/prod/x.txt": b"0123456789"},
+                     cache=["/data/prod/x.txt"]))
+        ws.ops.records.clear()
+        ws.policies.add(SuppressProdReads())
+        with pytest.raises(PermissionError):
+            await ws.ops.read("/data/prod/x.txt")
+        rec = ws.ops.records[-1]
+        assert rec.source == "ram"
+        assert rec.is_cache is True
+        assert ws.ops.network_bytes == 0
+    finally:
+        await ws.close()
+
+
+class HardCapProdReads(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual.startswith("/data/prod/"):
+            return Limit(max_bytes=3, on_exceed=OnExceed.ERROR)
+        return None
+
+
+class ColdRemote(RAMResource):
+    caches_reads = False
+    name = "s3"
+
+
+@pytest.mark.asyncio
+async def test_a_hard_capped_read_records_what_the_backend_moved():
+    # An ERROR-mode cap refuses the caller the bytes, but the backend
+    # already moved them; dropping the record loses the whole transfer
+    # rather than just truncating it.
+    ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        ws.ops.records.clear()
+        ws.policies.add(HardCapProdReads())
+        with pytest.raises(LimitExceededError):
+            await ws.ops.read("/data/prod/x.txt")
+        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert [(r.source, r.bytes) for r in reads] == [("s3", 10)]
+        assert ws.ops.network_bytes == 10
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_hard_capped_warm_read_is_not_network_traffic():
+    # Same refusal, but the cache produced the bytes, so the transfer
+    # it stands for never happened.
+    ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        await ws.apply_io(
+            IOResult(reads={"/data/prod/x.txt": b"0123456789"},
+                     cache=["/data/prod/x.txt"]))
+        ws.ops.records.clear()
+        ws.policies.add(HardCapProdReads())
+        with pytest.raises(LimitExceededError):
+            await ws.ops.read("/data/prod/x.txt")
+        rec = ws.ops.records[-1]
+        assert rec.source == "ram"
+        assert rec.is_cache is True
+        assert ws.ops.network_bytes == 0
+    finally:
+        await ws.close()
+
+
+class BrokenPostOps(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext):
+        if ctx.write and ctx.path.virtual == "/data/prod/x.txt":
+            return 42
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
+    # The backend applied the write, then a step after it (here an
+    # invalid post_ops return, but any foreign bookkeeping error looks
+    # the same) blew up. The error must propagate AND the transfer must
+    # stay on the books: the door stamped the report at completion, so
+    # the record does not depend on what kind of exception followed.
+    ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
+    try:
+        await ws.execute("mkdir -p /data/prod")
+        ws.ops.records.clear()
+        ws.policies.add(BrokenPostOps())
+        with pytest.raises(PolicyError):
+            await ws.ops.write("/data/prod/x.txt", b"123456")
+        assert await ws.ops.read("/data/prod/x.txt") == b"123456"
+        writes = [r for r in ws.ops.records if r.op == "write"]
+        assert [(r.source, r.bytes) for r in writes] == [("s3", 6)]
+        assert ws.ops.network_bytes >= 6
     finally:
         await ws.close()
 

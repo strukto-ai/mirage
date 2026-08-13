@@ -14,73 +14,54 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.cat import cat as generic_cat
-from mirage.commands.builtin.generic.cat import needs_display
-from mirage.commands.builtin.mongodb._provision import file_read_provision
-from mirage.commands.builtin.mongodb.io import resolve_glob
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.cat import cat_generic
+from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.mongodb.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.types import ScopeLevel
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadResult
 
 
-@command("cat",
-         resource="mongodb",
-         spec=SPECS["cat"],
-         provision=file_read_provision)
+async def stream_any(accessor: MongoDBAccessor, path: PathSpec, *,
+                     index: IndexCacheStore) -> PolymorphicReadResult:
+    """Read one path by scope: documents stream, everything else renders.
+
+    Mirrors the TS ``streamAny``: a documents scope has a native cursor
+    to stream from, while collection/database renderings materialize.
+
+    Args:
+        accessor (MongoDBAccessor): Backend handle.
+        path (PathSpec): Resolved operand.
+        index (IndexCacheStore): Index cache store.
+    """
+    scope = detect_scope(path)
+    if scope.level == ScopeLevel.DOCUMENTS:
+        return read_stream(accessor, path, index)
+    return await mongodb_read(accessor, path, index)
+
+
+@command("cat", resource="mongodb", spec=SPECS["cat"])
 async def cat(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        # Single file: return the read result directly (bytes) or a cachable
-        # tee returned AS stdout so the cache fills as the consumer reads.
-        # Multiple files: a joined stdout is a different object from the
-        # per-file cachables, so the cache-fill background drain races the
-        # consumer on the same network stream and poisons the cache. Read each
-        # file fully to bytes: cache real bytes directly and concatenate.
-        if len(paths) == 1:
-            p = paths[0]
-            scope = detect_scope(p)
-            if scope.level == ScopeLevel.DOCUMENTS:
-                value: ByteSource = CachableAsyncIterator(
-                    read_stream(accessor, p, index))
-            else:
-                value = await mongodb_read(accessor, p, index)
-            io = IOResult(reads={p.mount_path: value}, cache=[p.mount_path])
-            source: ByteSource = value
-        else:
-            reads: dict[str, ByteSource] = {}
-            parts: list[bytes] = []
-            for p in paths:
-                scope = detect_scope(p)
-                if scope.level == ScopeLevel.DOCUMENTS:
-                    data = b"".join([
-                        chunk
-                        async for chunk in read_stream(accessor, p, index)
-                    ])
-                else:
-                    data = await mongodb_read(accessor, p, index)
-                reads[p.mount_path] = data
-                parts.append(data)
-            io = IOResult(reads=reads, cache=list(reads))
-            source = async_chain(*parts)
-        if needs_display(flags):
-            return generic_cat(source, flags=flags), io
-        return source, io
-    source = _resolve_source(stdin, "cat: missing operand")
-    if needs_display(flags):
-        return generic_cat(source, flags=flags), IOResult()
-    return source, IOResult()
+    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    return await cat_generic(resolved,
+                             list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             bound_op(IO.stat, accessor, index),
+                             bound_op(stream_any, accessor, index),
+                             local=IO.local)

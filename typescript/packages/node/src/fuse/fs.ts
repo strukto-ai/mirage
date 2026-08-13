@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type OpRecord, runWithSession, type Session, type Workspace } from '@struktoai/mirage-core'
+import { type OpRecord, type Ops, runWithSession, type Session } from '@struktoai/mirage-core'
 import { type FuseAttr, MountCore } from './core.ts'
 import { classifyError } from './errors.ts'
 
@@ -42,8 +42,8 @@ export interface MirageFSOptions {
 export class MirageFS {
   readonly core: MountCore
 
-  constructor(ws: Workspace, options: MirageFSOptions = {}) {
-    this.core = new MountCore(ws, options)
+  constructor(ops: Ops, options: MirageFSOptions = {}) {
+    this.core = new MountCore(ops, options)
   }
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */

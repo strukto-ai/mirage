@@ -23,10 +23,11 @@ from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.errors import EvalError
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue,
-                                  PrefixSource, RunArgs, RunResult,
-                                  ScriptSource)
-from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
+                                  RunResult, ScriptSource)
+from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -122,14 +123,13 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
         self._dispatch: DispatchFn | None = None
-        self._mount_prefixes: PrefixSource | None = None
+        self._resolver: MountResolver | None = None
         self._runtime = WasmRuntime(self._wasm, "js")
 
-    def attach(self, dispatch: DispatchFn,
-               mount_prefixes: PrefixSource) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         if self._dispatch is None:
             self._dispatch = dispatch
-            self._mount_prefixes = mount_prefixes
+            self._resolver = resolver
 
     async def run(self, args: RunArgs) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
@@ -142,9 +142,10 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         # alone, so the js command keeps its spelling.
         named = [args.prog] if args.prog else []
         argv += ["-e", args.code, *named, *args.args]
-        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
-                  if self._dispatch is not None else None)
-        fs = GuestFs(bridge=bridge, mount_prefixes=self._mount_prefixes)
+        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
+                           self._resolver)
+                if self._dispatch is not None else None)
+        fs = WasmVFS(core=core)
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,

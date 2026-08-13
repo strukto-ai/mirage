@@ -127,6 +127,16 @@ export const GWS = new CLISpec({
       subcommands: apiGroups('slides'),
     }),
     new CLISpec({
+      name: 'calendar',
+      description: 'Google calendar API commands',
+      subcommands: apiGroups('calendar'),
+    }),
+    new CLISpec({
+      name: 'forms',
+      description: 'Google forms API commands',
+      subcommands: apiGroups('forms'),
+    }),
+    new CLISpec({
       name: 'gmail',
       description: 'Google gmail API commands',
       subcommands: [

@@ -21,7 +21,7 @@ from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
-from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_mode
+from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_chmod
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
                                                        fail, finish,
@@ -317,6 +317,7 @@ async def _apply_attrs(
 
 
 async def _walk_stats(
+    namespace: Namespace,
     dispatch: Callable[..., Any],
     root: PathSpec,
     root_stat: FileStat,
@@ -325,11 +326,14 @@ async def _walk_stats(
 
     Each entry's stat is captured during the walk because chmod's
     symbolic clauses (``u+x``) build on the entry's own current mode.
-    Symlinks never appear: they are namespace state, so no backend
-    readdir reports one, which is exactly GNU chmod -R's rule of
-    changing neither a traversed link nor its referent.
+    Symlinks are skipped by name: the door's readdir reports them (they
+    are namespace structure), GNU chmod -R changes neither a traversed
+    link nor its referent, and the skip must come before the stat
+    because stat follows a link and would descend through a directory
+    link.
 
     Args:
+        namespace (Namespace): addressing authority (link table).
         dispatch (Callable): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
@@ -340,6 +344,8 @@ async def _walk_stats(
         directory = queue.pop(0)
         children, _ = await dispatch("readdir", directory)
         for child_virtual in children:
+            if namespace.is_link(child_virtual):
+                continue
             child = PathSpec.from_str_path(child_virtual)
             child_stat, _ = await dispatch("stat", child)
             entries.append((child, child_stat))
@@ -367,7 +373,7 @@ async def _walk_owned(
         root (PathSpec): subtree root.
         root_stat (FileStat): the root's stat, already read.
     """
-    walked = await _walk_stats(dispatch, root, root_stat)
+    walked = await _walk_stats(namespace, dispatch, root, root_stat)
     links = [path for path, _stat in namespace.link_stats_below(root.virtual)]
     return [path for path, _stat in walked], links
 
@@ -397,7 +403,7 @@ async def handle_chmod(
     if len(operands) < 2:
         return fail("chmod", "chmod: missing operand\n", 2)
     mode_text = operand_text(operands[0])
-    if parse_mode(mode_text, 0) is None:
+    if parse_chmod(mode_text, 0) is None:
         return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
 
     recursive = "R" in flags
@@ -409,7 +415,7 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if recursive:
-            entries = await _walk_stats(dispatch, resolved, stat)
+            entries = await _walk_stats(namespace, dispatch, resolved, stat)
         else:
             entries = [(resolved, stat)]
         for path, path_stat in entries:
@@ -420,7 +426,7 @@ async def handle_chmod(
             else:
                 current = (DEFAULT_DIR_MODE if path_stat.type
                            == FileType.DIRECTORY else DEFAULT_FILE_MODE)
-            new_mode = parse_mode(mode_text, current)
+            new_mode = parse_chmod(mode_text, current)
             if new_mode is None:
                 return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n",
                             1)

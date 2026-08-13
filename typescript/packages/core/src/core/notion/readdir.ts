@@ -18,12 +18,21 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
 import {
+  dataSourceSegmentName,
   databaseSegmentName,
+  normalizeDataSource,
   normalizeDatabase,
   pageSegmentName,
   toJsonBytes,
 } from './normalize.ts'
-import { getChildPages, queryDatabase, searchDatabases, searchTopLevelPages } from './pages.ts'
+import {
+  getChildPages,
+  getDataSource,
+  getDatabase,
+  queryDataSource,
+  searchDataSources,
+  searchTopLevelPages,
+} from './pages.ts'
 import { parseSegment, sanitizeName } from './pathing.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -35,6 +44,16 @@ export interface NotionReaddirAccessor {
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   return typeof value === 'string' ? value : ''
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
 }
 
 export async function readdir(
@@ -87,17 +106,23 @@ export async function readdir(
         return listing.entries.map((entry) => `${prefix}${entry}`)
       }
     }
-    const databases = await searchDatabases(accessor.transport)
+    // Search answers with data sources since 2025-09-03, so the set of
+    // databases is their distinct parents. Each one still costs a retrieve,
+    // because only the database object carries the title and url this
+    // directory is named and rendered from.
+    const owners: string[] = []
+    for (const dataSource of await searchDataSources(accessor.transport)) {
+      const owner = pickString(asRecord(dataSource.parent), 'database_id')
+      if (owner !== '' && !owners.includes(owner)) owners.push(owner)
+    }
     const entries: [string, IndexEntry][] = []
-    for (const database of databases) {
+    for (const databaseId of owners) {
+      const database = await getDatabase(accessor.transport, databaseId)
       const name = databaseSegmentName(database)
-      // The search result carries the full database object, so the rendered
-      // database.json size is known here; the database dir's own readdir
-      // copies it onto the file entry.
       entries.push([
         name,
         new IndexEntry({
-          id: pickString(database, 'id'),
+          id: databaseId,
           name,
           resourceType: 'notion/database',
           remoteTime: pickString(database, 'last_edited_time'),
@@ -147,7 +172,7 @@ export async function readdir(
       const stored = dirLookup.entry?.extra.database_json_size
       if (typeof stored === 'number') databaseJsonSize = stored
     }
-    const rows = await queryDatabase(accessor.transport, parsedDatabase.id)
+    const database = await getDatabase(accessor.transport, parsedDatabase.id)
     const entries: [string, IndexEntry][] = [
       [
         'database.json',
@@ -157,6 +182,51 @@ export async function readdir(
           resourceType: 'file',
           vfsName: 'database.json',
           size: databaseJsonSize,
+        }),
+      ],
+    ]
+    for (const stub of asArray(database.data_sources)) {
+      const record = asRecord(stub)
+      const segment = dataSourceSegmentName(record)
+      entries.push([
+        segment,
+        new IndexEntry({
+          id: pickString(record, 'id'),
+          name: segment,
+          resourceType: 'notion/data_source',
+          remoteTime: pickString(database, 'last_edited_time'),
+          vfsName: segment,
+        }),
+      ])
+    }
+    if (index !== undefined) await index.setDir(idxKey, entries)
+    return entries.map(([name]) => `${prefix}/${key}/${name}`)
+  }
+
+  if (parts[0] === 'databases' && parts.length === 3) {
+    let parsedSource: { id: string; title: string }
+    try {
+      parsedSource = parseSegment(lastSegment)
+    } catch {
+      throw enoent(p)
+    }
+    if (index !== undefined) {
+      const listing = await index.listDir(idxKey)
+      if (listing.entries !== undefined && listing.entries !== null) {
+        return listing.entries.map((entry) => `${prefix}${entry}`)
+      }
+    }
+    const dataSource = await getDataSource(accessor.transport, parsedSource.id)
+    const rows = await queryDataSource(accessor.transport, parsedSource.id)
+    const entries: [string, IndexEntry][] = [
+      [
+        'data_source.json',
+        new IndexEntry({
+          id: `${parsedSource.id}:data_source`,
+          name: 'data_source.json',
+          resourceType: 'file',
+          vfsName: 'data_source.json',
+          size: toJsonBytes(normalizeDataSource(dataSource)).byteLength,
         }),
       ],
     ]
@@ -178,9 +248,11 @@ export async function readdir(
     return entries.map(([name]) => `${prefix}/${key}/${name}`)
   }
 
+  // A row page sits two levels below its database (database, then data
+  // source), so a page directory under `databases/` starts at depth 4.
   if (
     (parts[0] === 'pages' && parts.length >= 2) ||
-    (parts[0] === 'databases' && parts.length >= 3)
+    (parts[0] === 'databases' && parts.length >= 4)
   ) {
     let parsed: { id: string; title: string }
     try {

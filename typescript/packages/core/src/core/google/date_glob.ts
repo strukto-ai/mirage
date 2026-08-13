@@ -14,16 +14,16 @@
 
 import { GLOB_CHARS } from '../../utils/glob_walk.ts'
 
-function iso(year: number, month: number, day: number): string {
+function day(year: number, month: number, date: number): string {
   const mm = String(month).padStart(2, '0')
-  const dd = String(day).padStart(2, '0')
-  return `${String(year)}-${mm}-${dd}T00:00:00Z`
+  const dd = String(date).padStart(2, '0')
+  return `${String(year)}-${mm}-${dd}`
 }
 
-function isValidDate(year: number, month: number, day: number): boolean {
-  if (month < 1 || month > 12 || day < 1) return false
-  const d = new Date(Date.UTC(year, month - 1, day))
-  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day
+function isValidDate(year: number, month: number, date: number): boolean {
+  if (month < 1 || month > 12 || date < 1) return false
+  const d = new Date(Date.UTC(year, month - 1, date))
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === date
 }
 
 function parseFixedInt(s: string | undefined, expectedLength: number): number | null {
@@ -31,7 +31,14 @@ function parseFixedInt(s: string | undefined, expectedLength: number): number | 
   return Number.parseInt(s, 10)
 }
 
-export function globToModifiedRange(pattern: string | null | undefined): [string, string] | null {
+/**
+ * Translate a date-prefixed glob into a half-open range of floating dates.
+ *
+ * Kept separate from `globToModifiedRange` because a caller bucketing in a
+ * named time zone has to build its own bounds from the dates; UTC instants
+ * would silently shift the window by the zone's offset.
+ */
+export function globToDateRange(pattern: string | null | undefined): [string, string] | null {
   if (!pattern) return null
   let metaIndex = -1
   for (const ch of GLOB_CHARS) {
@@ -44,28 +51,34 @@ export function globToModifiedRange(pattern: string | null | undefined): [string
   if (parts.length === 1) {
     const year = parseFixedInt(parts[0], 4)
     if (year === null) return null
-    return [iso(year, 1, 1), iso(year + 1, 1, 1)]
+    return [day(year, 1, 1), day(year + 1, 1, 1)]
   }
   if (parts.length === 2) {
     const year = parseFixedInt(parts[0], 4)
     const month = parseFixedInt(parts[1], 2)
     if (year === null || month === null) return null
     if (!isValidDate(year, month, 1)) return null
-    if (month === 12) return [iso(year, month, 1), iso(year + 1, 1, 1)]
-    return [iso(year, month, 1), iso(year, month + 1, 1)]
+    if (month === 12) return [day(year, month, 1), day(year + 1, 1, 1)]
+    return [day(year, month, 1), day(year, month + 1, 1)]
   }
   if (parts.length === 3) {
     const year = parseFixedInt(parts[0], 4)
     const month = parseFixedInt(parts[1], 2)
-    const day = parseFixedInt(parts[2], 2)
-    if (year === null || month === null || day === null) return null
-    if (!isValidDate(year, month, day)) return null
-    const start = new Date(Date.UTC(year, month - 1, day))
-    const next = new Date(start.getTime() + 86400000)
+    const date = parseFixedInt(parts[2], 2)
+    if (year === null || month === null || date === null) return null
+    if (!isValidDate(year, month, date)) return null
+    const next = new Date(Date.UTC(year, month - 1, date) + 86400000)
     return [
-      iso(year, month, day),
-      iso(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()),
+      day(year, month, date),
+      day(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()),
     ]
   }
   return null
+}
+
+/** Translate a date-prefixed glob into an RFC3339 modifiedTime range. */
+export function globToModifiedRange(pattern: string | null | undefined): [string, string] | null {
+  const span = globToDateRange(pattern)
+  if (span === null) return null
+  return [`${span[0]}T00:00:00Z`, `${span[1]}T00:00:00Z`]
 }

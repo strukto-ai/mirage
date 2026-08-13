@@ -21,7 +21,10 @@ import {
   compare,
   integRoot,
   loadCases,
+  loadServices,
   loadTargets,
+  missingEnv,
+  parseAllowSkip,
   bindMount,
   runCase,
   runScenario,
@@ -37,19 +40,30 @@ interface EmitRow {
   exit: number
   stdout: string
   stderr: string
+  check: string | null
 }
 
-function parseArgs(): { targets: string[]; emit: string | undefined; facet: string | undefined } {
+function parseArgs(): {
+  targets: string[]
+  emit: string | undefined
+  facet: string | undefined
+  strict: boolean
+  allowSkip: string
+} {
   const targets: string[] = []
   let emit: string | undefined
   let facet: string | undefined
+  let strict = false
+  let allowSkip = ''
   const argv = process.argv.slice(2)
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
     else if (argv[i] === '--facet' && i + 1 < argv.length) facet = argv[++i]
     else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
+    else if (argv[i] === '--strict') strict = true
+    else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
   }
-  return { targets, emit, facet }
+  return { targets, emit, facet, strict, allowSkip }
 }
 
 async function runTarget(
@@ -61,6 +75,11 @@ async function runTarget(
 ): Promise<void> {
   const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
   try {
+    // A target's declared environment. A CLI whose spec reads a variable
+    // (ntn's --notion-version off NOTION_API_VERSION) behaves differently with
+    // and without it, so the conformance runner passes the same map to the real
+    // binary and the comparison stays like for like.
+    Object.assign(ws.env, target.env ?? {})
     for (const mount of target.mounts) {
       await seedFixture(ws, mount.fixture, mount.path, root)
       if (mount.seed_root) await seedMountRoot(ws, mount.path)
@@ -75,11 +94,18 @@ async function runTarget(
       if (!c.targets.includes(target.id)) continue
       if (c.consistency !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
-      const { exitCode, out, err, elapsed } = await runCase(ws, bound)
+      const { exitCode, out, err, elapsed, checkOut } = await runCase(ws, bound)
       if (emit !== null) {
-        emit.push({ target: target.id, id: bound.id, exit: exitCode, stdout: out, stderr: err })
+        emit.push({
+          target: target.id,
+          id: bound.id,
+          exit: exitCode,
+          stdout: out,
+          stderr: err,
+          check: checkOut,
+        })
       } else if (report !== null) {
-        report.record(target.id, bound.id, compare(bound, exitCode, out, err, elapsed))
+        report.record(target.id, bound.id, compare(bound, exitCode, out, err, elapsed, checkOut))
       }
     }
   } finally {
@@ -95,6 +121,10 @@ async function runTarget(
       c.consistency === 'always' ? ConsistencyPolicy.ALWAYS : ConsistencyPolicy.LAZY
     const opened = await consistencyAdapter(target, policy)
     try {
+      // Same rule as the ordinary path: a target's declared environment reaches
+      // every workspace a case can run against, or a consistency scenario would
+      // silently run under a different one.
+      Object.assign(opened.ws.env, target.env ?? {})
       const { exitCode, out } = await runScenario(opened.ws, opened.mutate, c.scenario)
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })
@@ -110,9 +140,10 @@ async function runTarget(
 async function main(): Promise<void> {
   const root = integRoot()
   const manifest = loadTargets(root)
+  const services = loadServices(root)
   const cases = loadCases(root)
 
-  const { targets, emit: emitPath, facet } = parseArgs()
+  const { targets, emit: emitPath, facet, strict, allowSkip } = parseArgs()
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
@@ -130,6 +161,12 @@ async function main(): Promise<void> {
   const report = emitPath ? null : new Report()
   const emit: EmitRow[] | null = emitPath ? [] : null
   let ran = 0
+  // A facet can be split across CI jobs (core's databases and vector stores
+  // run in integ-database/integ-data), so a job names the services it
+  // knowingly does not provision. Anything skipping outside this list is a
+  // broken job, which is the whole point of --strict.
+  const allowed = parseAllowSkip(services, allowSkip)
+  const envSkipped: string[] = []
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -141,91 +178,12 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: no typescript adapter\n`)
       continue
     }
-    if (target.service === 's3' && !process.env.S3_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: S3_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'databricks' && !process.env.DATABRICKS_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: DATABRICKS_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'ssh' && !process.env.SSH_HOST) {
-      process.stderr.write(`skip [${id}]: SSH_HOST not set\n`)
-      continue
-    }
-    if (target.service === 'nextcloud' && !process.env.NEXTCLOUD_URL) {
-      process.stderr.write(`skip [${id}]: NEXTCLOUD_URL not set\n`)
-      continue
-    }
-    if (target.service === 'gws' && !process.env.GWS_URL) {
-      process.stderr.write(`skip [${id}]: GWS_URL not set\n`)
-      continue
-    }
-    if (target.service === 'email' && !process.env.EMAIL_HOST) {
-      process.stderr.write(`skip [${id}]: EMAIL_HOST not set\n`)
-      continue
-    }
-    if (target.service === 'hf' && !process.env.HF_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: HF_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'box' && !process.env.BOX_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: BOX_ENDPOINT not set\n`)
-      continue
-    }
-    if (
-      (target.service === 'github' || target.service === 'github_ci') &&
-      !process.env.GITHUB_URL
-    ) {
-      process.stderr.write(`skip [${id}]: GITHUB_URL not set\n`)
-      continue
-    }
-    if (target.service === 'slack' && !process.env.SLACK_URL) {
-      process.stderr.write(`skip [${id}]: SLACK_URL not set\n`)
-      continue
-    }
-    if (target.service === 'trello' && !process.env.TRELLO_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: TRELLO_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'discord' && !process.env.DISCORD_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: DISCORD_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'linear' && !process.env.LINEAR_ENDPOINT) {
-      process.stderr.write(`skip [${id}]: LINEAR_ENDPOINT not set\n`)
-      continue
-    }
-    if (target.service === 'postgres' && !process.env.POSTGRES_DSN) {
-      process.stderr.write(`skip [${id}]: POSTGRES_DSN not set\n`)
-      continue
-    }
-    if (target.service === 'mongodb' && !process.env.MONGODB_URI) {
-      process.stderr.write(`skip [${id}]: MONGODB_URI not set\n`)
-      continue
-    }
-    if (target.service === 'chroma' && !process.env.CHROMA_HOST) {
-      process.stderr.write(`skip [${id}]: CHROMA_HOST not set\n`)
-      continue
-    }
-    if (target.service === 'qdrant' && !process.env.QDRANT_HOST) {
-      process.stderr.write(`skip [${id}]: QDRANT_HOST not set\n`)
-      continue
-    }
-    if (target.service === 'lancedb' && !process.env.LANCEDB_ENABLED) {
-      process.stderr.write(`skip [${id}]: LANCEDB_ENABLED not set\n`)
-      continue
-    }
-    if (target.service === 'notion' && !process.env.NOTION_ENABLED) {
-      process.stderr.write(`skip [${id}]: NOTION_ENABLED not set\n`)
-      continue
-    }
-    if (target.service === 'jaeger' && !process.env.JAEGER_URL) {
-      process.stderr.write(`skip [${id}]: JAEGER_URL not set\n`)
-      continue
-    }
-    if (target.service === 'langfuse' && !process.env.LANGFUSE_URL) {
-      process.stderr.write(`skip [${id}]: LANGFUSE_URL not set\n`)
+    const missing = missingEnv(services, target, 'typescript')
+    if (missing.length) {
+      process.stderr.write(`skip [${id}]: ${missing.join(', ')} not set\n`)
+      if (target.service === undefined || !allowed.has(target.service)) {
+        envSkipped.push(`${id} (${missing.join(', ')})`)
+      }
       continue
     }
     await runTarget(target, cases, root, report, emit)
@@ -238,6 +196,18 @@ async function main(): Promise<void> {
   // so zero of them running is always a broken job, never a valid run.
   if (facet !== undefined && ran === 0) {
     process.stderr.write(`facet '${facet}' ran no targets\n`)
+    process.exit(2)
+  }
+
+  // The facet guard above only fires when *every* target skipped, so a
+  // two-target facet that loses one still reports green. CI passes --strict,
+  // which starts every service its facet declares, so there a missing
+  // variable is a broken job rather than a local convenience.
+  if (strict && envSkipped.length) {
+    process.stderr.write(
+      `strict: ${String(envSkipped.length)} target(s) skipped for missing env: ` +
+        `${envSkipped.join('; ')}\n`,
+    )
     process.exit(2)
   }
   if (emitPath) {

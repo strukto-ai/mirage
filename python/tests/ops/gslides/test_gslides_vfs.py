@@ -17,34 +17,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.gslides import GSlidesAccessor
+from mirage import MountMode, Workspace
+from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
-from mirage.ops.gslides import OPS as GSLIDES_OPS
-from mirage.ops.registry import RegisteredOp
-from mirage.types import MountMode
+from mirage.resource.gslides import GSlidesConfig, GSlidesResource
 
 
-def _make_gslides_ops():
-    accessor = GSlidesAccessor(config=None, token_manager=None)
-    index = RAMIndexCacheStore()
-    ops_list = []
-    for fn in GSLIDES_OPS:
-        if isinstance(fn, RegisteredOp):
-            ops_list.append(fn)
-        elif hasattr(fn, "_registered_ops"):
-            ops_list.extend(fn._registered_ops)
-    mount = OpsMount(
-        prefix="/gslides/",
-        resource_type="gslides",
-        accessor=accessor,
-        index=index,
-        mode=MountMode.READ,
-        ops=ops_list,
-    )
-    return Ops([mount]), index
+def _make_gslides_ops() -> tuple[Ops, IndexCacheStore]:
+    # Mounting re-derives the resource's index from the workspace's
+    # config, so the store to seed is the one the mount ends up with.
+    resource = GSlidesResource(
+        config=GSlidesConfig(client_id="x", refresh_token="y"))
+    ws = Workspace({"/gslides/": resource}, mode=MountMode.READ)
+    return ws.ops, resource.index
 
 
 @pytest.mark.asyncio

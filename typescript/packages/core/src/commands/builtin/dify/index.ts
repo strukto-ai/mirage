@@ -21,6 +21,8 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DIFY_FIND } from './find.ts'
 import { DIFY_IO } from './io.ts'
 import { DIFY_SEARCH } from './search.ts'
+import { withDefaultProvisions } from '../generic_bind/provision.ts'
+import { resolveGlobOf } from '../generic_bind/adapter.ts'
 
 const DIFY_OVERRIDES = new Set(['find', 'search'])
 
@@ -33,6 +35,10 @@ export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
     overrides: DIFY_OVERRIDES,
     opsOverrides: { ls: DIFY_LIGHT_STAT_OPS },
   }),
-  ...DIFY_FIND,
-  ...DIFY_SEARCH,
+  ...withDefaultProvisions(
+    [...DIFY_FIND, ...DIFY_SEARCH],
+    DIFY_IO.stat,
+    resolveGlobOf(DIFY_IO),
+    DIFY_IO.readdir,
+  ),
 ]

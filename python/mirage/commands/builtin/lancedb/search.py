@@ -17,6 +17,7 @@ from mirage.commands.builtin.lancedb._provision import metadata_provision
 from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.lancedb.search import search_rows_output
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -28,7 +29,7 @@ async def search_provision(
     accessor: LanceDBAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("search " + " ".join(texts))
 
@@ -45,16 +46,15 @@ async def search(
     method: str = "semantic",
     top_k: str | int | None = None,
     threshold: str | float = 0.0,
-    **_extra: object,
+    cwd: PathSpec | None = None,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("search: query is required")
     if method != "semantic":
         raise ValueError("search: only the 'semantic' method is supported")
     query = texts[0]
-    cwd = _extra.get("cwd")
-    target_paths = default_paths(paths,
-                                 cwd if isinstance(cwd, PathSpec) else None)
+    target_paths = default_paths(paths, cwd)
     mount_prefix = mount_prefix_of(
         target_paths[0].virtual,
         target_paths[0].resource_path) if target_paths else ""

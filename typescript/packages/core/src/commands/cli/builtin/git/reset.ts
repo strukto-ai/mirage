@@ -31,6 +31,7 @@ import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const UNSTAGED_HEADER = 'Unstaged changes after reset:'
@@ -129,6 +130,12 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   if (unstaged.size === 0) return [null, new IOResult()]
   const lines = [UNSTAGED_HEADER]
-  for (const [path, letter] of [...unstaged.entries()].sort()) lines.push(`${letter}\t${path}`)
+  // Python is `sorted(unstaged.items())`, a tuple sort: path then letter.
+  // A bare .sort() here compared `${path},${letter}` instead, which orders
+  // `a+b` before `a` because ',' outranks '+'.
+  const entries = [...unstaged.entries()].sort(
+    (a, b) => compareCodePoints(a[0], b[0]) || compareCodePoints(a[1], b[1]),
+  )
+  for (const [path, letter] of entries) lines.push(`${letter}\t${path}`)
   return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]
 }

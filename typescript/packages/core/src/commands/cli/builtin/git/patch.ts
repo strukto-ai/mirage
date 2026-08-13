@@ -18,6 +18,7 @@ import { unifiedDiff } from '../../../builtin/diff_helper.ts'
 import { short } from './format.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 // git's blob abbreviation inside an index line is fixed at seven, unlike the
@@ -96,7 +97,7 @@ export async function treeDiff(
     beforeTree === null ? new Map<string, TreeEntry>() : await treeEntries(repo, beforeTree)
   const after =
     afterTree === null ? new Map<string, TreeEntry>() : await treeEntries(repo, afterTree)
-  const paths = [...new Set([...before.keys(), ...after.keys()])].sort()
+  const paths = [...new Set([...before.keys(), ...after.keys()])].sort(compareCodePoints)
   const out: string[] = []
   for (const path of paths) {
     const old = before.get(path) ?? null

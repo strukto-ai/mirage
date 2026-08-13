@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "ls_astral_sorts_after_bmp",
+      "seq": 960050,
+      "note": "Issue #370. U+E000 encodes as EE 80 80 and U+1F600 as F0 9F 98 80, so GNU ls lists the BMP name first in both C and C.UTF-8 locales, which is also Python's code-point order. TypeScript's default comparator comes from UTF-16 code units, where the surrogate D83D outranks E000, and listed them backwards.",
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/astral && touch '/data/astral/.txt' '/data/astral/😀.txt' && ls /data/astral",
+      "expect": {
+        "exit": 0,
+        "stdout": ".txt\n😀.txt\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "find_astral_sorts_after_bmp",
+      "seq": 960051,
+      "note": "The same ordering through find's traversal, which sorts entries independently of ls.",
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/astralf && touch '/data/astralf/.txt' '/data/astralf/😀.txt' && find /data/astralf -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/astralf/.txt\n/data/astralf/😀.txt\n",
+        "stderr": ""
+      },
+      "flags": ["type"]
+    }
+  ]
+}

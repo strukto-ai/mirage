@@ -1,4 +1,36 @@
 {
+  "services": {
+    "box": { "python": [], "typescript": ["BOX_ENDPOINT"] },
+    "chroma": { "python": ["CHROMA_HOST"], "typescript": ["CHROMA_HOST"] },
+    "databricks": { "python": [], "typescript": ["DATABRICKS_ENDPOINT"] },
+    "dify": { "python": [], "typescript": ["DIFY_ENDPOINT"] },
+    "discord": { "python": [], "typescript": ["DISCORD_ENDPOINT"] },
+    "dropbox": { "python": [], "typescript": [] },
+    "email": { "python": ["EMAIL_HOST"], "typescript": ["EMAIL_HOST"] },
+    "github": { "python": ["GITHUB_URL"], "typescript": ["GITHUB_URL"] },
+    "github_ci": { "python": ["GITHUB_URL"], "typescript": ["GITHUB_URL"] },
+    "gridfs": { "python": [], "typescript": [] },
+    "gws": { "python": ["GWS_URL"], "typescript": ["GWS_URL"] },
+    "hf": { "python": [], "typescript": ["HF_ENDPOINT"] },
+    "http": { "python": [], "typescript": [] },
+    "jaeger": { "python": ["JAEGER_URL"], "typescript": ["JAEGER_URL"] },
+    "lancedb": { "python": ["LANCEDB_ENABLED"], "typescript": ["LANCEDB_ENABLED"] },
+    "langfuse": { "python": ["LANGFUSE_URL"], "typescript": ["LANGFUSE_URL"] },
+    "linear": { "python": [], "typescript": ["LINEAR_ENDPOINT"] },
+    "mem0": { "python": [], "typescript": [] },
+    "mongodb": { "python": ["MONGODB_URI"], "typescript": ["MONGODB_URI"] },
+    "nextcloud": { "python": ["NEXTCLOUD_URL"], "typescript": ["NEXTCLOUD_URL"] },
+    "notion": { "python": ["NOTION_ENABLED"], "typescript": ["NOTION_ENABLED"] },
+    "onedrive": { "python": [], "typescript": [] },
+    "postgres": { "python": ["POSTGRES_DSN"], "typescript": ["POSTGRES_DSN"] },
+    "qdrant": { "python": ["QDRANT_HOST"], "typescript": ["QDRANT_HOST"] },
+    "redis": { "python": [], "typescript": [] },
+    "s3": { "python": [], "typescript": ["S3_ENDPOINT"] },
+    "sharepoint": { "python": [], "typescript": [] },
+    "slack": { "python": ["SLACK_URL"], "typescript": ["SLACK_URL"] },
+    "ssh": { "python": [], "typescript": ["SSH_HOST"] },
+    "trello": { "python": ["TRELLO_ENDPOINT"], "typescript": ["TRELLO_ENDPOINT"] }
+  },
   "targets": [
     {
       "id": "ram",
@@ -91,6 +123,30 @@
           "resource": "ram",
           "backend": "memory",
           "alias_of": "/data"
+        }
+      ]
+    },
+    {
+      "id": "ram-nested",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data/inner",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/ghost/deep",
+          "resource": "ram",
+          "backend": "memory"
         }
       ]
     },
@@ -978,6 +1034,32 @@
       ]
     },
     {
+      "id": "cli-gh",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "facet": "cli",
+      "clis": [
+        "gh"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-cli",
+          "mode": "read"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "github_ci",
       "hosts": [
         "python",
@@ -1153,6 +1235,32 @@
       ]
     },
     {
+      "id": "gcal",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "facet": "cli",
+      "epoch": "2026-02-01T00:00:00Z",
+      "calendar": "calendar/v1",
+      "mounts": [
+        {
+          "path": "/cal",
+          "resource": "gcal",
+          "backend": "gcal"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "ram"
+        }
+      ],
+      "clis": [
+        "gws"
+      ]
+    },
+    {
       "id": "gmail",
       "hosts": [
         "python",
@@ -1239,6 +1347,8 @@
       "epoch": "2026-02-01T00:00:00Z",
       "apps": "google-apps/v1",
       "mail": "gmail/v1",
+      "calendar": "calendar/v1",
+      "forms": "forms/v1",
       "clis": [
         "gws"
       ],
@@ -1343,7 +1453,10 @@
           "resource": "ram",
           "backend": "memory"
         }
-      ]
+      ],
+      "env": {
+        "NOTION_API_VERSION": "2025-09-03"
+      }
     },
     {
       "id": "cli-linear",

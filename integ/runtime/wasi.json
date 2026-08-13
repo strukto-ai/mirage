@@ -87,6 +87,110 @@
           }
         }
       ]
+    },
+    {
+      "id": "open_modes_dispatch_the_establishing_op",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/ram/new.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /ram/new.txt"],
+            "ops_absent": ["write /ram/new.txt"]
+          }
+        },
+        {
+          "command": "cat /ram/new.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        },
+        {
+          "command": "python3 -c \"open('/ram/seed.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["truncate /ram/seed.txt"]
+          }
+        },
+        {
+          "command": "cat /ram/seed.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        },
+        {
+          "command": "python3 -c \"open('/ram/new.txt', 'x')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "FileExistsError"
+          }
+        },
+        {
+          "command": "python3 -c \"f = open('/ram/fresh.txt', 'x'); f.write('fresh'); f.close()\" && cat /ram/fresh.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "fresh",
+            "ops_contain": ["create /ram/fresh.txt"]
+          }
+        },
+        {
+          "command": "python3 -c \"open('/ram/nope.txt', 'r+')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "FileNotFoundError"
+          }
+        },
+        {
+          "command": "python3 -c \"open('/ram/seed.txt', 'rr')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "invalid mode: 'rr'"
+          }
+        }
+      ]
+    },
+    {
+      "id": "listdir_classifies_through_stat",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "seed.txt": "seed\n",
+              "sub/inner.txt": "in\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print(sorted(os.listdir('/ram'))); print(os.path.isdir('/ram/sub'), os.path.isfile('/ram/seed.txt'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['seed.txt', 'sub']\nTrue True\n"
+          }
+        }
+      ]
     }
   ]
 }

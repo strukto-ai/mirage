@@ -425,3 +425,43 @@ def test_filesystem_alias_roles():
     assert sess.mount_modes["/a"] == MountMode.WRITE
     with pytest.raises(ValueError):
         ws.create_session("bits", mounts={"/a": "w"})
+
+
+def test_tree_does_not_disclose_an_ungranted_nested_mount():
+    """`tree` crosses a mount boundary from the mount table alone.
+
+    A crossing entry's row is synthesized as a directory without asking
+    any backend, so the dispatcher never sees it and cannot refuse it:
+    before the session filter, `tree /base` drew `private` and counted
+    it, while `ls`, `find` and `du` on the same tree all hid it.
+    """
+    base = _seed("top.txt", b"public\n")
+    private = _seed("secret.txt", b"SECRET\n")
+    ws = Workspace({"/base": base, "/base/private": private})
+    ws.create_session("agent", mounts=["/base"])
+
+    async def run():
+        return await ws.execute("tree /base", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    out = (io.stdout or b"").decode()
+    assert "private" not in out
+    assert out == "/base\n`-- top.txt\n\n1 directory, 1 file\n"
+
+
+def test_tree_still_crosses_a_granted_nested_mount():
+    """The filter must not cost a session the mounts it does hold."""
+    base = _seed("top.txt", b"public\n")
+    inner = _seed("leaf.txt", b"deep\n")
+    ws = Workspace({"/base": base, "/base/inner": inner})
+    ws.create_session("agent", mounts=["/base", "/base/inner"])
+
+    async def run():
+        return await ws.execute("tree /base", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert (io.stdout or b"").decode() == (
+        "/base\n|-- inner\n|   `-- leaf.txt\n`-- top.txt\n\n"
+        "2 directories, 2 files\n")

@@ -21,15 +21,11 @@ class OpRecord:
 
     Args:
         op (str): Operation type ("read", "write", "stat", "readdir", etc.).
-        path (str): Virtual path (mount_prefix + rel_path).
+        path (str): Virtual path, mount prefix included.
         source (str): Resource name ("s3", "ram", "disk").
         bytes (int): Bytes transferred (0 for metadata ops).
         timestamp (int): UTC epoch milliseconds.
         duration_ms (int): Wall-clock duration.
-        mount_prefix (str): The mount prefix this op was served through
-            (e.g. "/s3"). Empty when recorded outside any mount frame.
-            Stored explicitly so consumers don't have to re-derive it
-            from the virtual path.
         fingerprint (str | None): For read ops on a backend that supports
             snapshot+replay, the content-derived identifier the backend
             returned (e.g. S3 ``ETag``, md5). Used to detect drift at
@@ -51,7 +47,6 @@ class OpRecord:
     bytes: int
     timestamp: int
     duration_ms: int
-    mount_prefix: str = field(default="")
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
 
@@ -59,10 +54,3 @@ class OpRecord:
     def is_cache(self) -> bool:
         """Whether this op was served from the in-memory cache."""
         return self.source == "ram"
-
-    @property
-    def rel_path(self) -> str:
-        """Path relative to the mount root (strips mount_prefix)."""
-        if self.mount_prefix and self.path.startswith(self.mount_prefix):
-            return self.path[len(self.mount_prefix):] or "/"
-        return self.path

@@ -60,9 +60,10 @@ async function runCheck(
   files: Record<string, string>,
   flags: Record<string, string | boolean | number | string[]> = {},
   cwd = '/',
+  paths: string[] = ['/sums.txt'],
 ): Promise<[string, string, number]> {
   const result = await checksumGeneric(
-    [spec('/sums.txt')],
+    paths.map(spec),
     opts({ check: true, ...flags }, cwd),
     makeStream(files),
     hasher,
@@ -218,5 +219,86 @@ describe('checksum --check', () => {
         'md5sum: WARNING: 1 line is improperly formatted\n',
     )
     expect(code).toBe(0)
+  })
+
+  it('verifies every list operand', async () => {
+    const [out, err, code] = await runCheck(
+      {
+        '/one.txt': '5aabc  /a.txt\n',
+        '/two.txt': '5adef  /b.txt\n',
+        '/a.txt': 'abc',
+        '/b.txt': 'def',
+      },
+      {},
+      '/',
+      ['/one.txt', '/two.txt'],
+    )
+    expect(out).toBe('/a.txt: OK\n/b.txt: OK\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+
+  it('reports a missing list operand and continues', async () => {
+    const [out, err, code] = await runCheck(
+      { '/one.txt': '5aabc  /a.txt\n', '/a.txt': 'abc' },
+      {},
+      '/',
+      ['/one.txt', '/nope.txt'],
+    )
+    expect(out).toBe('/a.txt: OK\n')
+    expect(err).toBe('md5sum: /nope.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('keeps operand order when the missing list comes first', async () => {
+    const [out, err, code] = await runCheck(
+      { '/one.txt': '5aabc  /a.txt\n', '/a.txt': 'abc' },
+      {},
+      '/',
+      ['/nope.txt', '/one.txt'],
+    )
+    expect(out).toBe('/a.txt: OK\n')
+    expect(err).toBe('md5sum: /nope.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('a directory list operand is the literal "read error"', async () => {
+    // GNU 9.7: `md5sum -c d` on a directory says "read error", not the
+    // EISDIR strerror (its fopen succeeds, the read fails).
+    function stream(p: PathSpec): AsyncIterable<Uint8Array> {
+      async function* gen(): AsyncIterable<Uint8Array> {
+        await Promise.resolve()
+        if (p.virtual === '/d') {
+          const err = new Error(p.virtual) as Error & { code: string }
+          err.code = 'EISDIR'
+          throw err
+        }
+        yield ENC.encode(p.virtual === '/one.txt' ? '5aabc  /a.txt\n' : 'abc')
+      }
+      return gen()
+    }
+    const result = await checksumGeneric(
+      [spec('/d'), spec('/one.txt')],
+      opts({ check: true }),
+      stream,
+      hasher,
+      'md5sum',
+    )
+    const [out, io] = result ?? [null, new IOResult()]
+    expect(DEC.decode(await materialize(out))).toBe('/a.txt: OK\n')
+    expect(DEC.decode(await materialize(io.stderr))).toBe('md5sum: /d: read error\n')
+    expect(io.exitCode).toBe(1)
+  })
+
+  it('--status keeps a missing list operand strerror', async () => {
+    const [out, err, code] = await runCheck(
+      { '/one.txt': '5aabc  /a.txt\n', '/a.txt': 'abc' },
+      { status: true },
+      '/',
+      ['/one.txt', '/nope.txt'],
+    )
+    expect(out).toBe('')
+    expect(err).toBe('md5sum: /nope.txt: No such file or directory\n')
+    expect(code).toBe(1)
   })
 })

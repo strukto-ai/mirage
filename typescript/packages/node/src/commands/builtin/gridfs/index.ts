@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, makeGenericCommands, type RegisteredCommand } from '@struktoai/mirage-core'
+import {
+  ResourceName,
+  makeGenericCommands,
+  resolveGlobOf,
+  withDefaultProvisions,
+  type RegisteredCommand,
+} from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
 import { GRIDFS_IO } from './io.ts'
 import { GRIDFS_MKDIR } from './mkdir.ts'
@@ -30,9 +36,10 @@ export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GridFSAccessor>(ResourceName.GRIDFS, GRIDFS_IO, {
     overrides: GRIDFS_OVERRIDES,
   }),
-  ...GRIDFS_STAT,
-  ...GRIDFS_RM,
-  ...GRIDFS_MKDIR,
-  ...GRIDFS_TEE,
-  ...GRIDFS_TOUCH,
+  ...withDefaultProvisions(
+    [...GRIDFS_STAT, ...GRIDFS_RM, ...GRIDFS_MKDIR, ...GRIDFS_TEE, ...GRIDFS_TOUCH],
+    GRIDFS_IO.stat,
+    resolveGlobOf(GRIDFS_IO),
+    GRIDFS_IO.readdir,
+  ),
 ]

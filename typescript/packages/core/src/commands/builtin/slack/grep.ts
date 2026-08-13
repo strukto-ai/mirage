@@ -35,6 +35,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { prependStderr } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveSlackGlob = resolveGlobOf(SLACK_IO)
 
@@ -55,7 +56,8 @@ async function grepCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const pattern = patternArg(texts, opts.flags)
-  const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
+  const fl = new FlagView(opts.flags, specOf('grep'))
+  const maxCount = fl.asInt('m') ?? null
 
   const pushdownWarnings: string[] = []
   const firstPath = paths[0]
@@ -64,7 +66,7 @@ async function grepCommand(
     // Slack search matches whole words while grep matches substrings, and
     // the native path returns search results verbatim as the output, so a
     // bare literal would under-report. Only -w makes the two agree.
-    if (scope.useNative && opts.flags.w === true) {
+    if (scope.useNative && fl.asBool('w')) {
       const filePrefix = mountPrefixOf(firstPath.virtual, firstPath.resourcePath)
       const query = buildQuery(pattern, scope)
       const count = maxCount ?? 100

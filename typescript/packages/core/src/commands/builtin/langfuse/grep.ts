@@ -34,6 +34,7 @@ import { grepGeneric } from '../generic/grep.ts'
 import { compilePattern, patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
 import { fileReadProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveLangfuseGlob = resolveGlobOf(LANGFUSE_IO)
 
@@ -125,9 +126,10 @@ async function grepCommand(
   const first = paths[0]
   if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(first)
-    const ignoreCase = opts.flags.i === true
-    const fixedString = opts.flags.F === true
-    const wholeWord = opts.flags.w === true
+    const fl = new FlagView(opts.flags, specOf('grep'))
+    const ignoreCase = fl.asBool('i')
+    const fixedString = fl.asBool('F')
+    const wholeWord = fl.asBool('w')
     const pat = compilePattern(pattern, ignoreCase, fixedString, wholeWord)
     if (scope.level === 'traces' || scope.level === 'root') {
       const traces = await fetchTraces(accessor.transport, { limit })

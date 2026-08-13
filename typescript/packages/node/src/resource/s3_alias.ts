@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  type ConfigOf,
+  normalizeFields,
+  redactConfigWithSchema,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from './s3/config.ts'
 
 /**
@@ -40,20 +47,6 @@ export interface S3AliasConfig {
   profile?: string
   region?: string
   endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
-
-export interface S3AliasConfigRedacted {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  region: string
-  endpoint: string
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
@@ -90,6 +83,13 @@ const ALIAS_SCHEMA = z.object({
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint each provider's rule fills in.
+export type S3AliasConfigRedacted = RedactedConfig<
+  ConfigOf<typeof ALIAS_SCHEMA>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 export interface Alias<C extends S3AliasConfig, R> {
   toS3Config: (config: C) => S3Config

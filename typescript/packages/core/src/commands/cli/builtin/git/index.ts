@@ -14,7 +14,8 @@
 
 import { Operand, Option } from '../../../spec/types.ts'
 import { registerCliSpec } from '../../specs.ts'
-import { CLISpec, UsageStyle } from '../../types.ts'
+import { CLISpec } from '../../types.ts'
+import { UsageStyle } from '../../../spec/types.ts'
 import { add } from './add.ts'
 import { branch } from './branch.ts'
 import { checkout } from './checkout.ts'

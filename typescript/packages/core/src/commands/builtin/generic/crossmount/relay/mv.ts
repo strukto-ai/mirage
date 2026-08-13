@@ -16,13 +16,16 @@ import type { PathSpec } from '../../../../../types.ts'
 import { mvGeneric, parseMvFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
+import { FlagView } from '../../../../spec/types.ts'
+import { specOf } from '../../../../spec/builtins.ts'
 
 // Move operands that span mounts via the shared generic mv. Pure wiring:
 // copy through the transfer primitives, then unlink the source on its own
 // mount.
 export async function runMv(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   // Maps an operand to its storage identity. Without it a move between
   // two prefixes over one store would copy the object onto itself and
@@ -49,7 +52,7 @@ export async function runMv(
     flat,
     stat,
     { readBytes, write, mkdir, readdir, unlink, rmdir },
-    parseMvFlags(flagKwargs),
+    parseMvFlags(new FlagView(flagKwargs, specOf('mv'))),
     undefined,
     storageKey,
   )

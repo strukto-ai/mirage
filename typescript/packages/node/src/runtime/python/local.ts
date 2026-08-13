@@ -14,15 +14,16 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import {
+  HOME_CONFIG_KEYS,
   PythonRuntime,
   registerRuntime,
+  type HomeConfig,
   type RunArgs,
   type RunResult,
   type RuntimeOptions,
 } from '@struktoai/mirage-core'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
-const LOCAL_CONFIG_KEYS: readonly string[] = ['home']
 
 /**
  * Run Python code on a host interpreter as a subprocess.
@@ -41,8 +42,8 @@ export class LocalRuntime extends PythonRuntime {
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, LOCAL_CONFIG_KEYS)
-    const home = (this.config as { home?: string }).home
+    super(options, HOME_CONFIG_KEYS)
+    const home = (this.config as HomeConfig).home
     const chosen = home !== undefined && home !== '' ? home : process.env[LOCAL_HOME_ENV]
     this.python = chosen !== undefined && chosen !== '' ? chosen : 'python3'
   }

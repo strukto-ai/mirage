@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.fanout.du import du_total
+from mirage.commands.builtin.generic.crossmount.fanout.du import (
+    du_total, merge_du_totals)
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
 from mirage.io import IOResult
 from mirage.types import PathSpec
@@ -53,3 +54,17 @@ def testdu_total_humanizes_from_exact_bytes_without_rounding_twice():
 def testdu_total_leaves_a_row_without_a_tab_alone():
     out = du_total([_op(b"odd-row\n0\ttotal\n")], human=True).decode()
     assert out == "odd-row\n0B\ttotal\n"
+
+
+def testmerge_du_totals_takes_rendered_blocks():
+    # The mount fan-out has no OperandRun to hand over: its blocks are one
+    # per mount, not one per operand.
+    out = merge_du_totals(
+        [b"10\t/base\n10\ttotal\n", b"7\t/base/inner\n7\ttotal\n"],
+        human=False).decode()
+    assert out == "10\t/base\n7\t/base/inner\n17\ttotal\n"
+
+
+def testmerge_du_totals_still_totals_with_no_blocks():
+    # GNU prints "0 total" even when every operand failed.
+    assert merge_du_totals([], human=False).decode() == "0\ttotal\n"

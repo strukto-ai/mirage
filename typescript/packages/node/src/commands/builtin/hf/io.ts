@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandIO } from '@struktoai/mirage-core'
+import { type CommandIO, rangeOf } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { SCOPE_ERROR } from '../../../core/hf/constants.ts'
 import { create as hfCreate } from '../../../core/hf/create.ts'
@@ -30,6 +30,7 @@ import { write as hfWrite } from '../../../core/hf/write.ts'
 export const HF_IO: CommandIO<HfAccessor> = {
   readdir: hfReaddir,
   readBytes: hfRead,
+  readRange: rangeOf(hfRead),
   readStream: hfStream,
   stat: hfStat,
   du: { size: hfDu, entries: hfDuAll },

@@ -16,12 +16,13 @@ import type { PathSpec } from '../../../../../types.ts'
 import { cmpGeneric } from '../../cmp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, flatten, streamOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 // Byte-compare two files on different mounts via the shared generic. Pure
 // wiring: both sides are read through dispatch-relayed primitives.
 export async function runCmp(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const flat = flatten(scopes)

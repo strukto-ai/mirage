@@ -40,6 +40,7 @@ import {
   GDocsResource,
   GDriveResource,
   GmailResource,
+  GCalResource,
   GCSResource,
   GitHubResource,
   GitHubCIResource,
@@ -49,6 +50,7 @@ import {
   DISCORD,
   GWS,
   HIMALAYA,
+  GH,
   GIT,
   LINEAR,
   NTN,
@@ -94,7 +96,6 @@ import { Double, MongoClient } from 'mongodb'
 import pg from 'pg'
 import { installFakeNavigator, makeMockRoot } from '../../../typescript/packages/browser/src/test-utils.ts'
 import { startFakeDropbox, type FakeDropbox } from '../../server/dropbox.ts'
-import { startMockServer as startNotionMock } from '../../server/notion_server.ts'
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 import { startPythonServer } from './server_process.ts'
@@ -363,6 +364,9 @@ const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
 const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
 const EMAIL_USERNAME = 'integ@example.com'
 const EMAIL_PASSWORD = 'secret'
+const EMAIL_SENT_FOLDER = 'Sent'
+// Doubles as the workspace id on the fake notion server.
+const NOTION_TOKEN = 'integ-test'
 
 // The GreenMail server is external and shared; its REST API purges every
 // mailbox between runs. Seeding appends RFC822 payloads over IMAP so folder
@@ -386,7 +390,12 @@ async function openEmail(target: Target): Promise<Open> {
       logger: false,
     })
     await imap.connect()
-    const known = new Set(['INBOX'])
+    // GreenMail hands a new account nothing but an INBOX, where every
+    // real provider ships a sent mailbox already made. himalaya files a
+    // copy of each sent message into one, so create it here rather than
+    // leave the copy with nowhere to land.
+    await imap.mailboxCreate(EMAIL_SENT_FOLDER)
+    const known = new Set(['INBOX', EMAIL_SENT_FOLDER])
     for (const entry of entries) {
       const folder = entry.folder ?? 'INBOX'
       if (!known.has(folder)) {
@@ -678,7 +687,15 @@ async function openGraphConsistency(
 }
 
 async function openNotion(target: Target): Promise<Open> {
-  const { server, port } = await startNotionMock()
+  let base = process.env.NOTION_URL ?? ''
+  while (base.endsWith('/')) base = base.slice(0, -1)
+  if (base === '') throw new Error('notion target requires NOTION_URL')
+  const reset = await fetch(`${base}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workspace: NOTION_TOKEN }),
+  })
+  if (!reset.ok) throw new Error(`notion /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, NotionResource | RAMResource | [NotionResource, MountMode]> = {}
   for (const mount of target.mounts) {
     if (mount.resource === 'ram') {
@@ -686,21 +703,20 @@ async function openNotion(target: Target): Promise<Open> {
       continue
     }
     const resource = new NotionResource({
-      apiKey: 'integ-test',
-      baseUrl: `http://127.0.0.1:${String(port)}/v1`,
+      apiKey: NOTION_TOKEN,
+      baseUrl: `${base}/v1`,
     })
     mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('ntn') === true) {
     ws.registerCli('ntn', NTN, {
-      api_key: 'integ-test',
-      base_url: `http://127.0.0.1:${String(port)}/v1`,
+      api_key: NOTION_TOKEN,
+      base_url: `${base}/v1`,
     })
   }
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    server.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
@@ -1103,6 +1119,41 @@ async function seedGwsApps(base: string, entries: GwsAppEntry[]): Promise<void> 
   }
 }
 
+interface CalendarEntry {
+  summary: string
+  // A timed event carries dateTime with a mandatory offset; an all-day one
+  // carries a floating date and no zone at all.
+  start: { date?: string; dateTime?: string }
+  end: { date?: string; dateTime?: string }
+}
+
+interface SeedCalendar {
+  id: string
+  summary: string
+  timeZone?: string
+  accessRole?: string
+  hidden?: boolean
+  events?: CalendarEntry[]
+}
+
+interface SeedForm {
+  title: string
+  documentTitle?: string
+  description?: string
+  items?: Record<string, unknown>[]
+  responses?: Record<string, unknown>[]
+}
+
+interface CalendarFixture {
+  events: CalendarEntry[]
+  calendars?: SeedCalendar[]
+}
+
+function gwsManifest<T>(name: string | undefined): T | undefined {
+  if (name === undefined) return undefined
+  return JSON.parse(readFileSync(join(integRoot(), 'fixtures', `${name}.json`), 'utf8')) as T
+}
+
 interface MailEntry {
   from: string
   to: string
@@ -1170,16 +1221,32 @@ async function seedGwsMail(base: string, entries: MailEntry[]): Promise<void> {
   }
 }
 
+// Events are API objects, so they seed through events.insert and take the
+// ids the server mints; the manifest pins the times, which is what the day
+// directories are derived from.
+async function seedGwsCalendar(base: string, entries: CalendarEntry[]): Promise<void> {
+  for (const entry of entries) {
+    await gwsJson(`${base}/calendar/v3/calendars/primary/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    })
+  }
+}
+
 function gwsNativeResource(
   resource: string,
   base: string,
-): GDocsResource | GSheetsResource | GSlidesResource | GmailResource {
+): GDocsResource | GSheetsResource | GSlidesResource | GmailResource | GCalResource {
   // apiBase points the backend at the fake server through the same
   // config field a real embedder uses; nothing is monkey-patched.
   const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
   if (resource === 'gdocs') return new GDocsResource(config)
   if (resource === 'gsheets') return new GSheetsResource(config)
   if (resource === 'gmail') return new GmailResource(config)
+  // today is pinned so the rolling window is the same on both hosts and
+  // lands on the seeded events.
+  if (resource === 'gcal') return new GCalResource({ ...config, today: '2026-02-11' })
   return new GSlidesResource(config)
 }
 
@@ -1188,11 +1255,20 @@ async function openGws(target: Target): Promise<Open> {
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('gdrive target requires GWS_URL')
   // Native mounts (gdocs/gsheets/gslides) render the modified date into
-  // filenames, so those targets pin the server clock.
+  // filenames, so those targets pin the server clock. Secondary calendars
+  // and seeded form responses ride the same call rather than being
+  // inserted: a calendar's accessRole and a form response are both states
+  // no API call can produce.
+  const calendar = gwsManifest<CalendarFixture>(target.calendar)
+  const forms = gwsManifest<SeedForm[]>(target.forms)
+  const reset: Record<string, unknown> = {}
+  if (target.epoch !== undefined) reset.epoch = target.epoch
+  if (calendar?.calendars !== undefined) reset.calendars = calendar.calendars
+  if (forms !== undefined) reset.forms = forms
   await gwsJson(`${base}/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(target.epoch !== undefined ? { epoch: target.epoch } : {}),
+    body: JSON.stringify(reset),
   })
   const mounts: Record<
     string,
@@ -1233,14 +1309,11 @@ async function openGws(target: Target): Promise<Open> {
     })
     folderIds[m.path] = parent
   }
-  if (target.apps !== undefined) {
-    const manifest = join(integRoot(), 'fixtures', `${target.apps}.json`)
-    await seedGwsApps(base, JSON.parse(readFileSync(manifest, 'utf8')) as GwsAppEntry[])
-  }
-  if (target.mail !== undefined) {
-    const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
-    await seedGwsMail(base, JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[])
-  }
+  const apps = gwsManifest<GwsAppEntry[]>(target.apps)
+  if (apps !== undefined) await seedGwsApps(base, apps)
+  const mail = gwsManifest<MailEntry[]>(target.mail)
+  if (mail !== undefined) await seedGwsMail(base, mail)
+  if (calendar !== undefined) await seedGwsCalendar(base, calendar.events)
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('gws') === true) {
     // A target may scope the gws install to one mount's folder, the
@@ -1295,16 +1368,34 @@ async function openSlack(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
+// The repository the `gh` install defaults to, standing in for the current
+// git remote real gh reads. Seeded by the fake alongside the mounted one.
+const GH_CLI_REPO = 'integ/repo-cli'
+
 // The fake api.github.com server (integ/server/github_server.py) is external
-// and shared across both hosts, mirroring the fake Slack server. Out of
-// process is required for the python host, whose GitHubResource fetches the
-// repo tree with a blocking urlopen from its constructor.
+// and shared across both hosts, mirroring the fake Slack server. It used to
+// have to be out of process for the python host, whose GitHubResource
+// fetched the repo tree with a blocking urlopen from its constructor; that
+// fetch is awaited now, so being shared is the only reason left.
 async function openGitHub(target: Target): Promise<Open> {
   let base = process.env.GITHUB_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('github target requires GITHUB_URL')
-  const mounts: Record<string, GitHubResource | [GitHubResource, MountMode]> = {}
+  // The write battery runs once per host against one shared fake, so it
+  // starts from the seed rather than from the other host's writes.
+  if (target.clis?.includes('gh') === true) {
+    const reset = await fetch(`${base}/reset`, { method: 'POST' })
+    if (!reset.ok) throw new Error(`github /reset failed: ${String(reset.status)}`)
+  }
+  const mounts: Record<
+    string,
+    GitHubResource | RAMResource | [GitHubResource, MountMode]
+  > = {}
   for (const m of target.mounts) {
+    if (m.resource === 'ram') {
+      mounts[m.path] = new RAMResource()
+      continue
+    }
     const [owner, repo] = String(m.repo).split('/')
     const resource = await GitHubResource.create({
       token: 'ghp-integ',
@@ -1315,6 +1406,14 @@ async function openGitHub(target: Target): Promise<Open> {
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  if (target.clis?.includes('gh') === true) {
+    ws.registerCli('gh', GH, {
+      token: 'ghp-integ',
+      base_url: base,
+      repo: GH_CLI_REPO,
+      branch: 'main',
+    })
+  }
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
 }
 
@@ -1357,6 +1456,11 @@ async function openDify(target: Target): Promise<Open> {
 async function openTrello(target: Target): Promise<Open> {
   const endpoint = process.env.TRELLO_ENDPOINT
   if (!endpoint) throw new Error('trello target requires TRELLO_ENDPOINT')
+  // The server outlives a single run here, so cards and comments the write
+  // cases create have to be rolled back to the fixture before they run
+  // again -- and before the other host's run, which shares this server.
+  const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
+  if (!reset.ok) throw new Error(`trello /reset failed: ${String(reset.status)}`)
   const mounts: Record<string, TrelloResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -1544,6 +1648,7 @@ export const ADAPTERS: Record<string, (target: Target) => Promise<Open>> = {
   nextcloud: openNextcloud,
   gridfs: openGridfs,
   ssh: openSsh,
+  gcal: openGws,
   gdrive: openGws,
   gdocs: openGws,
   gsheets: openGws,

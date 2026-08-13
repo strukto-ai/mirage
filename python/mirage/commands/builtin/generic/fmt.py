@@ -1,9 +1,41 @@
 import textwrap
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.operands import (materialized_read,
+                                                    merge_split_errors,
+                                                    split_readable)
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+
+
+@dataclass(frozen=True, slots=True)
+class FmtFlags:
+    width: int = 75
+    goal: int | None = None
+    prefix: str | None = None
+    split_only: bool = False
+    tagged: bool = False
+    crown: bool = False
+    uniform: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
+    fl = FlagView(flags, spec=SPECS["fmt"])
+    goal_value = fl.as_str("goal")
+    return FmtFlags(
+        width=int(fl.as_str("width") or "75"),
+        goal=int(goal_value) if goal_value is not None else None,
+        prefix=fl.as_str("prefix"),
+        split_only=fl.as_bool("split_only"),
+        tagged=fl.as_bool("tagged_paragraph"),
+        crown=fl.as_bool("crown_margin"),
+        uniform=fl.as_bool("uniform_spacing"),
+    )
 
 
 def _leading_spaces(line: str) -> str:
@@ -85,4 +117,38 @@ async def fmt(
                      crown).encode(), IOResult()
 
 
-__all__ = ["fmt"]
+async def fmt_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run fmt over resolved operands; mirrors fmtGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by fmt.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    parsed = parse_flags(opts.flags)
+    readable, err = await split_readable(paths, stat, "fmt")
+    if err and not readable:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await fmt(readable,
+                  read_bytes=materialized_read(stream),
+                  stdin=opts.stdin,
+                  width=parsed.width,
+                  goal=parsed.goal,
+                  prefix=parsed.prefix,
+                  split_only=parsed.split_only,
+                  tagged=parsed.tagged,
+                  crown=parsed.crown,
+                  uniform=parsed.uniform), err)
+
+
+__all__ = ["fmt", "fmt_generic"]

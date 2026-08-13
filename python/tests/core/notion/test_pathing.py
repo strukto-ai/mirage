@@ -116,6 +116,47 @@ class TestNormalizePage:
         assert "Hello" in result["markdown"]
         assert len(result["blocks"]) == 1
 
+    def test_a_row_carries_its_cells(self):
+        # A database row's cells are its `properties`, and they are the
+        # reason the row exists. Without them `cat` on a row answered with
+        # metadata and an empty markdown, and the row's actual data was
+        # reachable only through `ntn datasources query`.
+        page = {
+            "id": "row-1",
+            "parent": {
+                "type": "data_source_id",
+                "data_source_id": "ds-1",
+            },
+            "properties": {
+                "Name": {
+                    "id": "title",
+                    "type": "title",
+                    "title": [{
+                        "plain_text": "Write spec"
+                    }],
+                },
+                "Priority": {
+                    "id": "pri",
+                    "type": "number",
+                    "number": 2,
+                },
+            },
+        }
+        result = normalize_page(page, [])
+        assert result["properties"]["Priority"]["number"] == 2
+        assert result["parent_id"] == "ds-1"
+        # Kept as Notion's own property objects, not flattened, so the
+        # ids and types the schema is written in survive the render.
+        assert result["properties"]["Name"]["id"] == "title"
+
+    def test_a_page_without_properties_renders_an_empty_map(self):
+        result = normalize_page({"id": "p1"}, [])
+        assert result["properties"] == {}
+
+    def test_a_non_object_properties_is_not_forwarded(self):
+        result = normalize_page({"id": "p1", "properties": []}, [])
+        assert result["properties"] == {}
+
     def test_to_json_bytes(self):
         data = to_json_bytes({"key": "value"})
         assert isinstance(data, bytes)

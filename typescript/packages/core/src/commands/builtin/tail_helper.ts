@@ -18,6 +18,58 @@ export function parseN(n: string | null): [number, boolean] {
   return [Number.parseInt(n, 10), false]
 }
 
+export interface TailCounts {
+  lines: number | null
+  fromLine: number | null
+  byteCount: number | null
+  fromByte: number | null
+}
+
+/**
+ * Fill in whatever a caller left off a `TailCounts`.
+ *
+ * The struct is a plain object, so a caller that omits a field — or a
+ * JavaScript one that passes something else entirely — supplies undefined,
+ * and a bare `!== null` test waves that straight into the first branch,
+ * where `slice(NaN)` quietly returns the whole input. Python's twin is a
+ * dataclass whose four fields all default to None and has no such hole;
+ * reading every field through `?? null` gives this side the same floor.
+ */
+export function normalizeCounts(counts: TailCounts): TailCounts {
+  return {
+    lines: counts.lines ?? null,
+    fromLine: counts.fromLine ?? null,
+    byteCount: counts.byteCount ?? null,
+    fromByte: counts.fromByte ?? null,
+  }
+}
+
+/**
+ * Split tail's `-n`/`-c` values by which end they count from.
+ *
+ * GNU gives both flags the same sign grammar: a leading `+` counts forward
+ * from the start of the input, 1-indexed, so `+0` and `+1` both mean the
+ * whole thing; any other spelling counts back from the end. Every caller
+ * used to apply that grammar to `-n` and take the absolute value of `-c`,
+ * which silently turned `tail -c +3` into the last three bytes — so the
+ * split lives here, once, beside the parser it is built from. Mirrors
+ * Python's `parse_counts`.
+ */
+export function parseCounts(nRaw: string | null, cRaw: string | null): TailCounts {
+  const counts: TailCounts = { lines: null, fromLine: null, byteCount: null, fromByte: null }
+  if (nRaw !== null) {
+    const [count, plusMode] = parseN(nRaw)
+    if (plusMode) counts.fromLine = count
+    else counts.lines = count
+  }
+  if (cRaw !== null) {
+    const [count, plusMode] = parseN(cRaw)
+    if (plusMode) counts.fromByte = count
+    else counts.byteCount = count
+  }
+  return counts
+}
+
 // GNU-style validation for head/tail -n/-c. Mirrors Python's int() raising on
 // a non-numeric value; returns the error line (with the bad value) or null.
 export function numberFlagError(
@@ -34,14 +86,15 @@ export function numberFlagError(
   return null
 }
 
-export function tailBytes(
-  data: Uint8Array,
-  lines: number,
-  bytesMode: number | null = null,
-  plusMode = false,
-): Uint8Array {
-  if (bytesMode !== null) {
-    const targetBytes = Math.abs(bytesMode)
+export function tailBytes(data: Uint8Array, rawCounts: TailCounts): Uint8Array {
+  const counts = normalizeCounts(rawCounts)
+  if (counts.fromByte !== null) {
+    // GNU counts `-c +N` from byte N, 1-indexed, so +0 and +1 both mean the
+    // whole input.
+    return data.slice(Math.max(0, counts.fromByte - 1))
+  }
+  if (counts.byteCount !== null) {
+    const targetBytes = Math.abs(counts.byteCount)
     if (targetBytes === 0) return new Uint8Array(0)
     const start = Math.max(0, data.byteLength - targetBytes)
     return data.slice(start)
@@ -50,10 +103,10 @@ export function tailBytes(
   const trimmed =
     parts.length > 0 && parts[parts.length - 1]?.byteLength === 0 ? parts.slice(0, -1) : parts
   let selected: Uint8Array[]
-  if (plusMode) {
-    selected = trimmed.slice(Math.max(0, lines - 1))
+  if (counts.fromLine !== null) {
+    selected = trimmed.slice(Math.max(0, counts.fromLine - 1))
   } else {
-    const targetLines = Math.abs(lines)
+    const targetLines = Math.abs(counts.lines ?? 10)
     if (targetLines === 0) return new Uint8Array(0)
     selected = trimmed.slice(-targetLines)
   }

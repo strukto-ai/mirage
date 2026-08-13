@@ -114,6 +114,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           // with zero infrastructure, like git init); the library default
           // stays ram. An explicit store always wins.
           store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
+          // Whichever of the two built it, no sibling workspace shares
+          // it, so this workspace is the one that closes it.
+          ownsStore: true,
           ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
         })
       } catch (e) {

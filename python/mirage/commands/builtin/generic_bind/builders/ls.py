@@ -16,12 +16,14 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.ls import ls as generic_ls
+from mirage.commands.builtin.generic.ls import ls_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay
-from mirage.types import LsSortBy, PathSpec
+from mirage.ops.types import ChildMounts, LinkView, StatOverlay
+from mirage.types import PathSpec
 
 
 async def ls(
@@ -30,58 +32,37 @@ async def ls(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    args_l: bool = False,
-    args_1: bool = False,
-    a: bool = False,
-    A: bool = False,
-    h: bool = False,
-    t: bool = False,
-    S: bool = False,
-    r: bool = False,
-    R: bool = False,
-    d: bool = False,
-    F: bool = False,
-    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
-    **kwargs,
+    child_mounts: ChildMounts | None = None,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("ls: no resource")
     if not paths:
-        cwd_str = cwd.virtual if isinstance(cwd, PathSpec) else cwd
+        cwd_virtual = cwd.virtual if isinstance(cwd, PathSpec) else cwd
         cwd_rp = (cwd.resource_path
                   if isinstance(cwd, PathSpec) else cwd.strip("/"))
         paths = [
-            PathSpec(virtual=cwd_str,
-                     directory=cwd_str,
+            PathSpec(virtual=cwd_virtual,
+                     directory=cwd_virtual,
                      resolved=False,
                      resource_path=cwd_rp)
         ]
-    paths = await ops.resolve_glob(accessor, paths, index)
-    sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
+    resolved = await ops.resolve_glob(accessor, paths, index)
     stat_fn = partial(ops.stat, accessor)
     if stat_overlay is not None:
         stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
-    return await generic_ls(
-        paths,
-        readdir=partial(ops.readdir, accessor),
-        stat=stat_fn,
-        long=args_l,
-        one_per_line=args_1,
-        all_files=a or A,
-        human=h,
-        sort_by=sort_by,
-        reverse=r,
-        recursive=R,
-        list_dir=d,
-        classify=F,
-        index=index,
-        links=links,
-        deref=L,
-    )
+    return await ls_generic(resolved,
+                            list(texts),
+                            CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
+                            partial(ops.readdir, accessor),
+                            stat_fn,
+                            index=index,
+                            links=links,
+                            child_mounts=child_mounts)
 
 
 BUILDER = Builder('ls', ls, None, False, None)

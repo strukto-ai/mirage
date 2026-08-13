@@ -15,13 +15,14 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
-from mirage.commands.builtin.generic.cat import cat as generic_cat
-from mirage.commands.builtin.generic.cat import needs_display
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.builtin.generic_bind.builders.common import split_readable
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain, chain_cachables
+from mirage.commands.builtin.generic.cat import cat_generic
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,51 +34,15 @@ async def cat(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    wants_display = needs_display(flags)
-    if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, index)
-        paths, err = await split_readable(ops, accessor, paths, index, "cat")
-        if not paths:
-            return None, IOResult(exit_code=1 if err else 0,
-                                  stderr=err or None)
-        if len(paths) == 1:
-            p = paths[0]
-            cachable = CachableAsyncIterator(
-                ops.read_stream(accessor, p, index))
-            io = IOResult(reads={p.mount_path: cachable}, cache=[p.mount_path])
-            source: ByteSource = cachable
-        elif ops.local:
-            cachables = [
-                CachableAsyncIterator(ops.read_stream(accessor, p, index))
-                for p in paths
-            ]
-            io = IOResult(reads={
-                p.mount_path: c
-                for p, c in zip(paths, cachables)
-            },
-                          cache=[p.mount_path for p in paths])
-            source = chain_cachables(*cachables)
-        else:
-            reads: dict[str, ByteSource] = {}
-            parts: list[bytes] = []
-            for p in paths:
-                data = await ops.read_bytes(accessor, p, index)
-                reads[p.mount_path] = data
-                parts.append(data)
-            io = IOResult(reads=reads, cache=list(reads))
-            source = async_chain(*parts)
-        if err:
-            io.stderr = err
-            io.exit_code = 1
-        if wants_display:
-            return generic_cat(source, flags=flags), io
-        return source, io
-    source = _resolve_source(stdin, "cat: missing operand")
-    if wants_display:
-        return generic_cat(source, flags=flags), IOResult()
-    return source, IOResult()
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await cat_generic(resolved,
+                             list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             dir_aware_stat(ops, accessor, index),
+                             bound_op(ops.read_stream, accessor, index),
+                             local=ops.local)
 
 
 BUILDER = Builder('cat', cat, None, False, concat_aggregate, read=True)

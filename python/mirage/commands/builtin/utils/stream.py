@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 
 from mirage.io.types import ByteSource
+
+# The backend config a platform command threads through to its reader.
+# Generic rather than a union: the config and the reader that consumes
+# it must be the same backend's, which a union would not enforce.
+ConfigT = TypeVar("ConfigT")
+PathT = TypeVar("PathT")
 
 
 async def _read_stdin_async(stdin: ByteSource | None) -> bytes | None:
@@ -51,11 +57,11 @@ def _resolve_source(
 
 
 async def resolve_text_input(
-    read_bytes: Callable[..., Any],
-    config: object,
+    read_bytes: Callable[[ConfigT, PathT], Awaitable[bytes]],
+    config: ConfigT,
     *,
     inline_text: str | None,
-    file_path: str | None,
+    file_path: PathT | None,
     stdin: ByteSource | None,
     error_message: str,
 ) -> str:
@@ -65,13 +71,15 @@ async def resolve_text_input(
         read_bytes (Callable): backend read ``(config, path) -> bytes``.
         config: the backend config passed through to ``read_bytes``.
         inline_text (str | None): text given inline on the command line.
-        file_path (str | None): path operand to read the text from.
+        file_path (PathT | None): the operand to read the text from, in
+            whatever shape ``read_bytes`` takes -- a backend reader wants
+            the mount-relative path, not the virtual one.
         stdin (ByteSource | None): piped input.
         error_message (str): raised when no source provides text.
     """
     if inline_text:
         return inline_text
-    if file_path:
+    if file_path is not None:
         return (await read_bytes(config, file_path)).decode(errors="replace")
     raw = await _read_stdin_async(stdin)
     if raw is not None:

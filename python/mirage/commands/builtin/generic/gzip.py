@@ -1,15 +1,29 @@
 import zlib
-from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.constants import flag_kwarg_name
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def extract_level(extra: dict[str, Any]) -> int:
+def extract_level(fl: FlagView) -> int:
+    """The compression level -1..-9 asked for, or zlib's default.
+
+    The digits are short-only options, so each is its own dest -- except
+    ``-1``, which the parser disambiguates to ``args_1``
+    (``AMBIGUOUS_NAMES``). Reading the bag by the bare digit therefore
+    missed ``gzip -1`` entirely.
+
+    Args:
+        fl (FlagView): Flag view constructed with the gzip spec.
+    """
     for n in range(9, 0, -1):
-        if extra.get(str(n)):
+        if fl.as_bool(flag_kwarg_name(str(n))):
             return n
     return zlib.Z_DEFAULT_COMPRESSION
 
@@ -93,3 +107,39 @@ async def gzip(
 
 
 __all__ = ["gzip", "extract_level"]
+
+
+@dataclass(frozen=True, slots=True)
+class GzipFlags:
+    decompress: bool = False
+    keep: bool = False
+    force: bool = False
+    to_stdout: bool = False
+    level: int | None = None
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> GzipFlags:
+    fl = FlagView(flags, spec=SPECS["gzip"])
+    return GzipFlags(
+        decompress=fl.as_bool("d"),
+        keep=fl.as_bool("k"),
+        force=fl.as_bool("f"),
+        to_stdout=fl.as_bool("c"),
+        level=extract_level(fl),
+    )
+
+
+async def gzip_generic(paths, texts, opts: CommandOpts, read_bytes,
+                       write_bytes, unlink):
+    parsed = parse_flags(opts.flags)
+    return await gzip(paths,
+                      read_bytes=read_bytes,
+                      write_bytes=write_bytes,
+                      unlink=unlink,
+                      stdin=opts.stdin,
+                      decompress=parsed.decompress,
+                      keep=parsed.keep,
+                      force=parsed.force,
+                      to_stdout=parsed.to_stdout,
+                      level=(parsed.level if parsed.level is not None else
+                             zlib.Z_DEFAULT_COMPRESSION))

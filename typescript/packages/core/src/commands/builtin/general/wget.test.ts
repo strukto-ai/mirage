@@ -85,7 +85,7 @@ describe('wget', () => {
   })
 
   it('-O specifies destination', async () => {
-    const r = await runWget(['https://x.test/file'], { O: '/tmp/dest.bin' })
+    const r = await runWget(['https://x.test/file'], { args_O: '/tmp/dest.bin' })
     const written = r.writes['/tmp/dest.bin']
     expect(written).toBeInstanceOf(Uint8Array)
     if (written instanceof Uint8Array) {
@@ -114,7 +114,7 @@ describe('wget', () => {
   // response code.
   it('exits 8 on a 404 and still creates an empty destination', async () => {
     mockFetch('not found', 404)
-    const r = await runWget(['https://x.test/missing'], { O: '/tmp/w.txt' })
+    const r = await runWget(['https://x.test/missing'], { args_O: '/tmp/w.txt' })
     expect(r.exitCode).toBe(8)
     expect(r.err).toContain('ERROR 404:')
     const written = r.writes['/tmp/w.txt']
@@ -124,7 +124,7 @@ describe('wget', () => {
 
   it('-q keeps exit 8 but silences the message', async () => {
     mockFetch('not found', 404)
-    const r = await runWget(['https://x.test/missing'], { O: '/tmp/w.txt', q: true })
+    const r = await runWget(['https://x.test/missing'], { args_O: '/tmp/w.txt', q: true })
     expect(r.exitCode).toBe(8)
     expect(r.err).toBe('')
   })

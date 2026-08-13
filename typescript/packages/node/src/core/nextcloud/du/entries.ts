@@ -2,6 +2,7 @@ import { FileType, lstripSlash, stripSlash, type PathSpec } from '@struktoai/mir
 import type { NextcloudAccessor } from '../../../accessor/nextcloud.ts'
 import { isNotFound, rawPathOf } from '../util.ts'
 import { statOrNull } from './walk.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 export async function entries(
   accessor: NextcloudAccessor,
@@ -26,6 +27,9 @@ export async function entries(
   } catch (error) {
     if (!isNotFound(error)) throw error
   }
-  found.sort(([left], [right]) => left.localeCompare(right))
+  // Python is `found.sort()`, a code-point tuple sort. localeCompare applies
+  // ICU collation, which reorders ASCII (punctuation carries less weight)
+  // and disagrees with Python on far more than astral names.
+  found.sort(([left], [right]) => compareCodePoints(left, right))
   return [found, total]
 }

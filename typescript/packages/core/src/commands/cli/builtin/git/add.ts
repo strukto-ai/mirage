@@ -38,6 +38,7 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import type { RepoLocation, WorkTree } from './types.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 // git records one of two modes for a regular file and reads only the owner
 // execute bit to choose. A mount that reports no mode at all stages the ordinary
@@ -227,7 +228,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
       )
     }
     const staged = new Map<string, StagedEntry>()
-    for (const path of [...stage].sort()) {
+    for (const path of [...stage].sort(compareCodePoints)) {
       const data = await readFile(dispatch, under(repo.location.worktree, path))
       const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
       const info = found.files.get(path)

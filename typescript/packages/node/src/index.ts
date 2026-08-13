@@ -96,6 +96,7 @@ export {
   type DatabricksProfile,
 } from './resource/databricks_volume/profile.ts'
 export {
+  normalizeS3Config,
   redactConfig as redactS3Config,
   type S3Config,
   type S3ConfigRedacted,
@@ -384,6 +385,13 @@ export {
   type GmailConfig,
   type GmailConfigRedacted,
 } from './resource/gmail/config.ts'
+export { GCalResource, type GCalResourceState } from './resource/gcal/gcal.ts'
+export {
+  normalizeGCalConfig,
+  redactGCalConfig,
+  type GCalConfig,
+  type GCalConfigRedacted,
+} from './resource/gcal/config.ts'
 export { EmailResource, type EmailResourceState } from './resource/email/email.ts'
 export {
   buildEmailConfig,

@@ -70,9 +70,17 @@ JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 # `stat` is here because GNU stat lstats, but it takes -L to dereference
 # after all, which route's `dereferences` reads back out of the command
 # line; `file`, `du` and `find` are the same shape.
+#
+# `tar` and `zip` are here for a different reason and deliberately carry
+# no DEREFERENCE_FLAGS entry: they dereference too, but their planner
+# has to be the one doing it. Rewriting the operand up here would hand
+# the planner a target it can no longer tell was reached through a link,
+# so `tar` could not store a symlink member at all and neither archiver
+# could apply its own cross-mount refusal or ELOOP wording. tar's -h and
+# zip's -y are read by the planner instead.
 NO_FOLLOW_COMMANDS = frozenset({
     "rm", "mv", "ln", "readlink", "rmdir", "unlink", "stat", "file", "du",
-    "find"
+    "find", "tar", "zip"
 })
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS

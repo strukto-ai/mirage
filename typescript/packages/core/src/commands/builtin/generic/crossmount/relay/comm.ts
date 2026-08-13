@@ -17,12 +17,13 @@ import type { PathSpec } from '../../../../../types.ts'
 import { commGeneric } from '../../comm.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, flatten, streamOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 // Compare two sorted files on different mounts via the generic comm. Pure wiring: every operand is read through dispatch-relayed
 // primitives on its owning mount, matching the single-mount builder.
 export async function runComm(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const result = await commGeneric(flatten(scopes), crossOpts(flagKwargs), streamOp(dispatch))

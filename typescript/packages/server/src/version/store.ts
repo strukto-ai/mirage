@@ -15,6 +15,7 @@
 import git from 'isomorphic-git'
 import type { FsClient, GitRepo, VersionBackend } from './backend.ts'
 import { HeadMovedError } from './errors.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 const AUTHOR = { name: 'mirage', email: 'mirage@local', timestamp: 0, timezoneOffset: 0 }
 
@@ -165,9 +166,9 @@ export class VersionStore {
     for (const path of Object.keys(a)) {
       if (!(path in b)) deleted.push(path)
     }
-    added.sort()
-    modified.sort()
-    deleted.sort()
+    added.sort(compareCodePoints)
+    modified.sort(compareCodePoints)
+    deleted.sort(compareCodePoints)
     return { added, modified, deleted }
   }
 }

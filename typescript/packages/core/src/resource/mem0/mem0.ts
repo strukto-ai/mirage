@@ -34,10 +34,6 @@ export class Mem0Resource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return MEM0_COMMANDS
   }

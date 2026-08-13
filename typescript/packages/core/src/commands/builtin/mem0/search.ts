@@ -10,6 +10,7 @@ import { metadataProvision } from '../generic_bind/provision.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { defaultPaths } from '../utils/operands.ts'
 import { MEM0_IO } from './io.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENCODER = new TextEncoder()
 const resolveGlob = resolveGlobOf(MEM0_IO)
@@ -31,7 +32,8 @@ async function searchCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const query = texts[0] ?? ''
-  const method = typeof opts.flags.method === 'string' ? opts.flags.method : 'semantic'
+  const fl = new FlagView(opts.flags, specOf('search'))
+  const method = fl.asStr('method') ?? 'semantic'
   if (method !== 'semantic') {
     return [
       null,
@@ -41,11 +43,8 @@ async function searchCommand(
       }),
     ]
   }
-  const topK =
-    typeof opts.flags.top_k === 'string'
-      ? Number.parseInt(opts.flags.top_k, 10)
-      : accessor.config.defaultSearchLimit
-  const threshold = typeof opts.flags.threshold === 'string' ? Number(opts.flags.threshold) : 0
+  const topK = fl.asInt('top_k') ?? accessor.config.defaultSearchLimit
+  const threshold = fl.asFloat('threshold') ?? 0
   const targets = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
   const first = targets[0]
   const mountPrefix = first === undefined ? '' : mountPrefixOf(first.virtual, first.resourcePath)

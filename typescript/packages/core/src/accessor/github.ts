@@ -23,8 +23,10 @@ export class GitHubAccessor extends Accessor {
   readonly repo: string
   readonly ref: string
   readonly defaultBranch: string
-  readonly truncated: boolean
-  readonly tree: Record<string, TreeEntry>
+  // Reseated by GitHubResource.refresh: the tree is the mount's whole
+  // listing, so a refetch after a write replaces it wholesale.
+  truncated: boolean
+  tree: Record<string, TreeEntry>
 
   constructor(opts: {
     transport: GitHubTransport

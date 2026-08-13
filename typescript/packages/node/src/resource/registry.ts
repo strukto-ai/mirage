@@ -19,6 +19,7 @@ import {
   type LanceDBConfig,
   type QdrantConfig,
   type Resource,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 
 /**
@@ -237,6 +238,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeGitHubCIConfig } = await import('./github_ci/config.ts')
     return new GitHubCIResource(normalizeGitHubCIConfig(config))
   },
+  gcal: async (config) => {
+    const { GCalResource } = await import('./gcal/gcal.ts')
+    const { normalizeGCalConfig } = await import('./gcal/config.ts')
+    return new GCalResource(normalizeGCalConfig(config))
+  },
   gdocs: async (config) => {
     const { GDocsResource } = await import('./gdocs/gdocs.ts')
     const { normalizeGDocsConfig } = await import('./gdocs/config.ts')
@@ -298,7 +304,7 @@ const CUSTOM: Record<string, ResourceFactory> = {}
  * has added.
  */
 export function knownResources(): string[] {
-  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort()
+  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort(compareCodePoints)
 }
 
 /**

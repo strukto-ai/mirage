@@ -143,14 +143,42 @@ export interface CommandIO<A extends Accessor = Accessor> {
   find?: FindOp<A>
   du?: DuOps<A>
   maxDuEntries?: number
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  append?: (...args: any[]) => unknown
+  // Typed like `write`, now that the tee generic actually calls it. It stayed
+  // an `any` bag for as long as nothing read it, which is what let five
+  // backends wire a slot no builder could consume.
+  append?: (accessor: A, path: PathSpec, data: Uint8Array) => Promise<void>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAttrs?: (...args: any[]) => unknown
 }
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+/**
+ * A `readRange` slot built from a backend read that already takes a byte
+ * window as its options argument.
+ *
+ * Without the slot the ops factory reads the whole object and slices, so
+ * `head -c 100` on a 2 GiB S3 key downloads 2 GiB. Python has pushed the
+ * window down on every one of these backends since the slot existed by
+ * pointing `read_range` at its own `read_bytes`; this is the same move,
+ * spelled for a read whose window arrives in an options object.
+ *
+ * Args:
+ *   read: the backend's whole-file read, whose fourth argument is an
+ *     `{offset?, size?}` window.
+ */
+export function rangeOf<A extends Accessor = Accessor>(
+  read: (
+    accessor: A,
+    path: PathSpec,
+    index: IndexCacheStore | undefined,
+    options: { offset?: number; size?: number },
+  ) => Promise<Uint8Array>,
+): NonNullable<CommandIO<A>['readRange']> {
+  return (accessor, path, index, offset, size) =>
+    read(accessor, path, index, size === null ? { offset } : { offset, size })
 }
 
 // Whether a path that failed with ENOENT is an implicit directory. Keyed

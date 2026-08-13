@@ -18,8 +18,11 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { deflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { lstripSlash } from '../../../utils/slash.ts'
-import { gnuBasename } from '../../../utils/path.ts'
+import { fnmatch } from '../../../utils/fnmatch.ts'
+import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
+import { gnuBasename, respellOne } from '../../../utils/path.ts'
+import type { MemberKind } from './archive/types.ts'
+import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 
 const ENC = new TextEncoder()
 
@@ -61,7 +64,26 @@ interface ZipItem {
   compressed: Uint8Array
   crc: number
   method: number
+  // Unix mode bits in the high half of external_attr, which is where
+  // Info-ZIP puts them and where a symlink entry is told from a file.
+  externalAttr: number
   localOffset: number
+}
+
+// One entry the plan decided to store, before its bytes are read.
+interface ZipMember {
+  name: string
+  kind: MemberKind
+  path: PathSpec | null
+  target: string
+}
+
+// What one `zip` run decided. `write` is false when nothing matched, in
+// which case Info-ZIP leaves no archive behind at all.
+interface ZipPlan {
+  members: ZipMember[]
+  warnings: string[]
+  write: boolean
 }
 
 function concat(chunks: readonly Uint8Array[]): Uint8Array {
@@ -104,7 +126,8 @@ function buildZip(items: ZipItem[]): Uint8Array {
     const nameBytes = ENC.encode(item.name)
     const central = new Uint8Array(46 + nameBytes.byteLength)
     writeU32LE(central, 0, 0x02014b50)
-    writeU16LE(central, 4, 20)
+    // Unix in the high byte, so the mode bits below are read as such.
+    writeU16LE(central, 4, (3 << 8) | 20)
     writeU16LE(central, 6, 20)
     writeU16LE(central, 8, 0)
     writeU16LE(central, 10, item.method)
@@ -118,7 +141,7 @@ function buildZip(items: ZipItem[]): Uint8Array {
     writeU16LE(central, 32, 0)
     writeU16LE(central, 34, 0)
     writeU16LE(central, 36, 0)
-    writeU32LE(central, 38, 0)
+    writeU32LE(central, 38, item.externalAttr)
     writeU32LE(central, 42, item.localOffset)
     central.set(nameBytes, 46)
     parts.push(central)
@@ -138,14 +161,118 @@ function buildZip(items: ZipItem[]): Uint8Array {
   return concat(parts)
 }
 
+// Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
+// indented with a tab and -q silences it; the "Nothing to do!" error is
+// not a warning and survives -q. Exit 12 is Info-ZIP's ZE_NONE.
+const WARNING_PREFIX = '\tzip warning: '
+// What Info-ZIP calls a path it could not reach. It does not distinguish
+// absent from unreadable, and a dangling symlink under the default
+// follow prints exactly this too.
+const NOT_MATCHED = 'name not matched: '
+const NOTHING_TO_DO_EXIT = 12
+// Unix mode bits in the high half of external_attr.
+const DIR_MODE = ((0o40755 << 16) | 0x10) >>> 0
+const FILE_MODE = (0o100644 << 16) >>> 0
+const LINK_MODE = (0o120777 << 16) >>> 0
+
+// What zip needs from the mount it runs on. `stat` and `walk` are what
+// make a directory operand archivable at all.
+export interface ZipDeps {
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>
+  write: (p: PathSpec, data: Uint8Array) => Promise<void>
+  stat: StatFn
+  walk: WalkFn
+}
+
+// The entry name Info-ZIP stores for a path as the operand typed it. A
+// leading slash is stripped in silence (unlike tar, which warns), a
+// directory carries a trailing slash, and `-j` throws the directory part
+// away entirely.
+function memberName(spelled: string, kind: MemberKind, junk: boolean): string {
+  let name = lstripSlash(spelled)
+  if (junk) name = gnuBasename(rstripSlash(name))
+  if (kind === 'dir' && name !== '' && !name.endsWith('/')) return `${name}/`
+  return name
+}
+
+// Whether an Info-ZIP `-x` pattern matches this entry name. Info-ZIP
+// matches the whole stored name, anchored, with wildcards crossing
+// slashes: `d/sub/*` takes `d/sub/` and everything under it, `*.txt`
+// takes every `.txt` at any depth, and a bare `b.txt` matches nothing
+// below the top. That is the opposite of GNU tar's unanchored
+// `--exclude`, which is why the two have separate matchers.
+function excluded(name: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) => fnmatch(name, pattern))
+}
+
+/**
+ * Decide every entry of a new archive, before writing any of it.
+ *
+ * Info-ZIP's defaults are tar's inverted twice over: a directory operand
+ * contributes only itself unless `-r` says to descend, and a symlink is
+ * followed unless `-y` says to store the link. Both are parameters of the
+ * shared scan, so the traversal is the same one `tar -c` uses.
+ */
+async function planZip(
+  paths: readonly PathSpec[],
+  archive: PathSpec,
+  deps: ZipDeps,
+  opts: CommandOpts,
+): Promise<ZipPlan> {
+  const fl = new FlagView(opts.flags, specOf('zip'))
+  const recurse = fl.asBool('r')
+  const junk = fl.asBool('j')
+  const exclude = fl.asList('x')
+  const members: ZipMember[] = []
+  const warnings: string[] = []
+  for (const path of paths) {
+    const raw = path.rawPath
+    const base = rstripSlash(path.virtual) || '/'
+    const scan = await scanOperand(path, {
+      stat: deps.stat,
+      walk: deps.walk,
+      links: opts.links ?? null,
+      mounts: opts.mounts ?? null,
+      dereference: !fl.asBool('y'),
+      recurse,
+    })
+    for (const problem of scan.problems) {
+      const shown = respellOne(problem.path, base, raw)
+      if (problem.fatal === true) warnings.push(NOT_MATCHED + shown)
+      else warnings.push(`${shown}: ${problem.reason ?? ''}`)
+    }
+    if (scan.missing) continue
+    for (const crossing of scan.crossings) {
+      warnings.push(`${respellOne(crossing, base, raw)}: ${OTHER_FILESYSTEM}`)
+    }
+    for (const entry of scan.entries) {
+      const name = memberName(respellOne(entry.namePath, base, raw), entry.kind, junk)
+      if (name === '' || excluded(name, exclude)) continue
+      // -j has no directory to name, so Info-ZIP drops directory entries
+      // under it entirely rather than storing bare slashes.
+      if (junk && entry.kind === 'dir') continue
+      const read = entry.read ?? null
+      // Info-ZIP never stores the archive it is writing, and says
+      // nothing about it.
+      if (read !== null && read.virtual === archive.virtual) continue
+      members.push({ name, kind: entry.kind, path: read, target: entry.target ?? '' })
+    }
+  }
+  return { members, warnings, write: members.length > 0 }
+}
+
+function warningText(warnings: readonly string[], quiet: boolean): string {
+  if (quiet) return ''
+  return warnings.map((line) => WARNING_PREFIX + line + '\n').join('')
+}
+
 export async function zipGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  deps: ZipDeps,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('zip'))
-  if (paths.length < 2) {
+  if (paths.length === 0) {
     return [
       null,
       new IOResult({
@@ -155,32 +282,51 @@ export async function zipGeneric(
     ]
   }
   const archivePath = paths[0]
-  const filePaths = paths.slice(1)
   if (archivePath === undefined) return [null, new IOResult()]
-  const junkPaths = fl.asBool('j')
   const quiet = fl.asBool('q')
+  const plan = await planZip(paths.slice(1), archivePath, deps, opts)
+  if (!plan.write) {
+    // Info-ZIP writes no archive when nothing matched, and the error is
+    // not a warning: -q does not silence it.
+    const message =
+      warningText(plan.warnings, quiet) + `\nzip error: Nothing to do! (${archivePath.rawPath})\n`
+    return [null, new IOResult({ exitCode: NOTHING_TO_DO_EXIT, stderr: ENC.encode(message) })]
+  }
 
   const items: ZipItem[] = []
   const outputLines: string[] = []
-  for (const p of filePaths) {
-    const raw = await materialize(stream(p))
-    const data = new Uint8Array(raw.byteLength)
-    data.set(raw)
-    const arcname = junkPaths ? gnuBasename(p.virtual) : lstripSlash(p.virtual)
-    const compressed = await deflateRaw(data)
+  for (const member of plan.members) {
+    let data = new Uint8Array(0)
+    if (member.kind === 'link') {
+      data = ENC.encode(member.target)
+    } else if (member.path !== null) {
+      const raw = await materialize(deps.stream(member.path))
+      data = new Uint8Array(raw.byteLength)
+      data.set(raw)
+    }
+    const stored = member.kind === 'dir'
+    const compressed = stored ? data : await deflateRaw(data)
     items.push({
-      name: arcname,
+      name: member.name,
       data,
       compressed,
       crc: crc32(data),
-      method: 8,
+      method: stored ? 0 : 8,
+      externalAttr:
+        member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
       localOffset: 0,
     })
-    if (!quiet) outputLines.push(`  adding: ${arcname}`)
+    outputLines.push(`  adding: ${member.name}`)
   }
   const archive = buildZip(items)
-  await write(archivePath, archive)
+  await deps.write(archivePath, archive)
   const stdout: ByteSource | null =
-    outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-  return [stdout, new IOResult({ writes: { [archivePath.mountPath]: archive } })]
+    !quiet && outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
+  return [
+    stdout,
+    new IOResult({
+      writes: { [archivePath.mountPath]: archive },
+      stderr: ENC.encode(warningText(plan.warnings, quiet)),
+    }),
+  ]
 }

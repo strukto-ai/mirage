@@ -148,7 +148,7 @@ export function lookupVar(
   }
   if (/^\d+$/.test(name)) {
     const idx = parseInt(name, 10)
-    if (idx === 0) return 'mirage'
+    if (idx === 0) return session.argv0
     if (callStack) {
       const fromCall = callStack.getPositional(idx)
       if (fromCall !== '') return fromCall
@@ -165,7 +165,10 @@ export function lookupVar(
   if (fromArray !== undefined) {
     return arrayGet(fromArray, 0)
   }
-  if (name === 'PWD') return session.cwd
+  // $PWD is deliberately absent here: `cd` writes it into the env like any
+  // exported variable, so it can be assigned, unset and printed by `env`,
+  // exactly as bash allows. Resolving it here instead would make `PWD=/x`
+  // and `unset PWD` silently do nothing.
   if (name === 'HOME') return homeDir(session) ?? ''
   if (!(name in env)) {
     if (nounset) throw unbound(name)
@@ -538,10 +541,34 @@ function sliceArray(arr: ShellArray, groups: string[], env: Record<string, strin
 // plain, slice, per-element strip/replace/case ops, and ${!a[@]}
 // indices. False for single-word forms (${a[*]}, ${#a[@]}, non-@
 // subscript, or a default/alternate op acting on the joined value).
+// The positional parameters in scope, function args winning.
+function positionalArgs(session: Session, callStack: CallStack | null): string[] {
+  if (callStack !== null && callStack.getAllPositional().length > 0) {
+    return callStack.getAllPositional()
+  }
+  return session.positionalArgs
+}
+
+// Whether a parsed "${...}" splats one word per element. Two spellings
+// mean the same thing: an `@` subscript on a name (`${a[@]}`) and the
+// positional parameters themselves (`${@}`, which bash word-splits
+// exactly like the bare `$@`). `${*}` and `${a[*]}` are excluded
+// because they join.
+function isAtSplat(p: { subscript: string | null; varName: string | null }): boolean {
+  if (p.subscript === '@') return true
+  return p.subscript === null && p.varName === '@'
+}
+
 export function isMultiwordAt(node: TSNodeLike): boolean {
+  if (node.type === NT.SIMPLE_EXPANSION) {
+    // Bare "$@" is the positional splat. It word-splits exactly like
+    // "${a[@]}" and stitches onto surrounding literals the same way, so
+    // it takes the same path rather than a rule of its own.
+    return node.text.trim() === '$@'
+  }
   if (node.type !== NT.EXPANSION) return false
   const p = parseBraces(node)
-  if (p.subscript !== '@' || p.lengthOp) return false
+  if (!isAtSplat(p) || p.lengthOp) return false
   if (p.indirectOp || p.op === null) return true
   return MULTIWORD_AT_OPS.has(p.op)
 }
@@ -555,9 +582,22 @@ export async function expandArrayAt(
   callStack: CallStack | null,
   expandChild: ExpandChild,
 ): Promise<string[]> {
+  if (node.type === NT.SIMPLE_EXPANSION) return positionalArgs(session, callStack)
   const p = parseBraces(node)
   const env = session.env
-  let arr = session.arrays[p.varName ?? '']
+  let arr: ShellArray | undefined
+  if (p.subscript === null && p.varName === '@') {
+    // "${@}" splats the positional parameters; every op below then
+    // applies per element, which is what bash does for "${@/x/y}". A
+    // slice is the exception: bash numbers the parameters from 1 there,
+    // so index 0 is the shell's own name and "${@:0}" yields it ahead
+    // of $1. Pinned on bash 5.2.37; macOS bash 3.2 drops it, so probe
+    // this one in docker, not locally.
+    const params = positionalArgs(session, callStack)
+    arr = p.op === ':' ? [session.argv0, ...params] : params
+  } else {
+    arr = session.arrays[p.varName ?? '']
+  }
   if (arr === undefined) {
     const scalar = env[p.varName ?? '']
     arr = scalar === undefined ? [] : [scalar]

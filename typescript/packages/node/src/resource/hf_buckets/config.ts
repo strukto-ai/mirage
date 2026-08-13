@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  type ConfigOf,
+  normalizeFields,
+  redactConfigWithSchema,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
 
@@ -32,14 +39,6 @@ export interface HfBucketsConfig {
   keyPrefix?: string
 }
 
-export interface HfBucketsConfigRedacted {
-  bucket: string
-  token?: string
-  endpoint: string
-  timeoutMs?: number
-  keyPrefix?: string
-}
-
 const HfBucketsConfigSchema = z.object({
   bucket: z.string(),
   token: secretStr().optional(),
@@ -47,6 +46,13 @@ const HfBucketsConfigSchema = z.object({
   timeoutMs: z.number().optional(),
   keyPrefix: z.string().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the endpoint the redactor fills in.
+export type HfBucketsConfigRedacted = RedactedConfig<
+  ConfigOf<typeof HfBucketsConfigSchema>,
+  'token'
+>
 
 export function redactHfBucketsConfig(config: HfBucketsConfig): HfBucketsConfigRedacted {
   return redactConfigWithSchema(HfBucketsConfigSchema, {
@@ -78,15 +84,6 @@ export interface HfRepoConfig {
   revision?: string
 }
 
-export interface HfRepoConfigRedacted {
-  repoId: string
-  token?: string
-  endpoint: string
-  timeoutMs?: number
-  keyPrefix?: string
-  revision?: string
-}
-
 const HfRepoConfigSchema = z.object({
   repoId: z.string(),
   token: secretStr().optional(),
@@ -95,6 +92,10 @@ const HfRepoConfigSchema = z.object({
   keyPrefix: z.string().optional(),
   revision: z.string().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the endpoint the redactor fills in.
+export type HfRepoConfigRedacted = RedactedConfig<ConfigOf<typeof HfRepoConfigSchema>, 'token'>
 
 export function redactHfRepoConfig(config: HfRepoConfig): HfRepoConfigRedacted {
   return redactConfigWithSchema(HfRepoConfigSchema, {

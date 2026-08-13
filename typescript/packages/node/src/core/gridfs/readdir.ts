@@ -19,6 +19,7 @@ import {
   rstripSlash,
   type IndexCacheStore,
   type PathSpec,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { gridfsPrefix, iterLatest, prefixQuery, stripKeyPrefix } from './_client.ts'
@@ -74,13 +75,15 @@ export async function readdir(
       }
     }
   }
-  names.sort()
+  names.sort(compareCodePoints)
   if (names.length > SCOPE_ERROR) {
     console.warn(
       `gridfs readdir: ${fullVirtualKey} returned ${String(names.length)} entries (limit ${String(SCOPE_ERROR)})`,
     )
   }
-  const virtualEntries = names.map((e) => (prefix !== '' ? `${prefix}${e}` : e)).sort()
+  const virtualEntries = names
+    .map((e) => (prefix !== '' ? `${prefix}${e}` : e))
+    .sort(compareCodePoints)
   if (index !== undefined) {
     const indexEntries: [string, IndexEntry][] = names.map((e) => {
       const name = e.split('/').pop() ?? ''

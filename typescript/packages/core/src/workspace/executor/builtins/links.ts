@@ -334,6 +334,18 @@ export async function pathStat(
   return overlay !== null ? overlay(virtual, stat) : stat
 }
 
+// List one virtual path through the workspace, as virtual paths.
+//
+// Resolves through the op dispatcher rather than one backend, so a
+// directory served by another mount answers. This is what a walker reads
+// once it crosses a mount boundary: the subtree under a nested mount
+// lives in a resource the walker's own accessor cannot open.
+export async function pathReaddir(dispatch: DispatchFn, virtual: string): Promise<string[]> {
+  const spec = PathSpec.fromStrPath(virtual, '')
+  const [entries] = await dispatch('readdir', spec)
+  return entries as string[]
+}
+
 // Whether a resolved virtual path names something that exists.
 export async function pathExists(dispatch: DispatchFn, virtual: string): Promise<boolean> {
   try {

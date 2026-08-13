@@ -12,14 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
+import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
+import { record } from '../../observe/context.ts'
 import { loadS3Module, rawPathOf, s3Key, withClient } from './_client.ts'
 
 export async function create(accessor: S3Accessor, path: PathSpec): Promise<void> {
   const { PutObjectCommand } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
+  const start = performance.now()
   await withClient(accessor.config, async (client) => {
     await client.send(
       new PutObjectCommand({
@@ -29,5 +31,6 @@ export async function create(accessor: S3Accessor, path: PathSpec): Promise<void
       }),
     )
   })
+  record('create', path.virtual, ResourceName.S3, 0, start)
   await invalidateAfterWrite(path)
 }

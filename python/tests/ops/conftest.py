@@ -14,39 +14,20 @@
 
 import asyncio
 
-from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
 from mirage.resource.ram import RAMResource
 from mirage.resource.ram.store import RAMStore
-from mirage.types import MountMode
-
-
-def _ram_registered_ops():
-    resource = RAMResource()
-    return resource.ops_list()
 
 
 def run(coro):
     return asyncio.run(coro)
 
 
-def make_ops(mode=MountMode.WRITE):
-    store = RAMStore()
-    accessor = RAMAccessor(store)
-    mounts = [
-        OpsMount(
-            prefix="/data/",
-            resource_type="ram",
-            accessor=accessor,
-            index=RAMIndexCacheStore(),
-            mode=mode,
-            ops=_ram_registered_ops(),
-        )
-    ]
-    ops = Ops(mounts)
-    return ops, store
+def make_ops(mode=MountMode.WRITE) -> tuple[Ops, RAMStore]:
+    resource = RAMResource()
+    ws = Workspace({"/data/": resource}, mode=mode)
+    return ws.ops, resource._store
 
 
 def make_ops_with_dir(mode=MountMode.WRITE):

@@ -23,6 +23,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(CHROMA_IO)
 
@@ -30,9 +31,9 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 function defaultName(
-  flags: Record<string, string | boolean | number | string[]>,
+  flags: Record<string, FlagValue>,
   texts: readonly string[],
-): Record<string, string | boolean | number | string[]> {
+): Record<string, FlagValue> {
   if (typeof flags.name === 'string') return flags
   const first = texts[0]
   if (first !== undefined && !first.startsWith('-') && !['(', ')', '!'].includes(first)) {

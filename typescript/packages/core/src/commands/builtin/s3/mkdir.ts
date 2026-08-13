@@ -20,7 +20,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { writeMetadataProvision } from '../generic_bind/provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
 
@@ -36,8 +36,9 @@ async function mkdirCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('mkdir: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const verbose = opts.flags.verbose === true
-  const parents = opts.flags.parents === true
+  const fl = new FlagView(opts.flags, specOf('mkdir'))
+  const verbose = fl.asBool('verbose')
+  const parents = fl.asBool('parents')
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {
@@ -55,5 +56,4 @@ export const S3_MKDIR = command({
   spec: specOf('mkdir'),
   fn: mkdirCommand,
   write: true,
-  provision: writeMetadataProvision,
 })

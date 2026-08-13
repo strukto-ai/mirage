@@ -16,6 +16,9 @@ import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseCpFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
+import { FlagView } from '../../../../spec/types.ts'
+import { specOf } from '../../../../spec/builtins.ts'
 
 // Copy operands that span mounts via the shared generic cp. Pure wiring: the
 // generic runs in its primitive (no native copy) mode, reading from the
@@ -23,7 +26,7 @@ import { flatten, readBytesOp, readdirOp, statOp } from '../utils.ts'
 // primitives.
 export async function runCp(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   // Maps an operand to its storage identity so two prefixes over one
   // store compare equal.
@@ -43,7 +46,7 @@ export async function runCp(
     flat,
     stat,
     { readBytes, write, mkdir, readdir },
-    parseCpFlags(flagKwargs),
+    parseCpFlags(new FlagView(flagKwargs, specOf('cp'))),
     undefined,
     storageKey,
   )

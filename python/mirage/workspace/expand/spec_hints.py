@@ -67,3 +67,26 @@ def spec_word_kinds(
     # nothing to override here: leaving them None sent `find \( ... \)`
     # back to the shape heuristic, which read "(" as the bare path "/(".
     return list(parse_command(spec, argv, cwd="/").word_kinds)
+
+
+def spec_word_bases(
+    spec: CommandSpec,
+    argv: list[str],
+    cwd: str,
+) -> list[str | None] | None:
+    """Per-position base directories for a spec that declares one.
+
+    tar's -C is a chdir for the operands typed after it, so those words
+    are not relative to the session cwd at all. The parser already walks
+    the line positionally, so it is what says where each word stood;
+    this asks it, and only for the one command family that can answer
+    (None everywhere else, so 92 of 93 specs pay nothing).
+
+    Args:
+        spec (CommandSpec): command specification.
+        argv (list[str]): command arguments (without command name).
+        cwd (str): the working directory the line was typed under.
+    """
+    if spec.operand_base is None:
+        return None
+    return list(parse_command(spec, argv, cwd=cwd).word_bases)

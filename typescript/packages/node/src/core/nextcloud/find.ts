@@ -10,6 +10,7 @@ import {
   type FindOptions,
   type PathSpec,
   type PredNode,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import {
@@ -169,7 +170,7 @@ function matchingKeys(
   return [...candidates.values()]
     .filter((candidate) => matches(candidate, scope, criteria))
     .map((candidate) => candidate.key)
-    .sort()
+    .sort(compareCodePoints)
 }
 
 function searchQuery(criteria: FindCriteria): FilesSearchQuery {

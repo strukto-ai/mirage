@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.ntn.util import parse_json_flag
+from mirage.commands.cli.builtin.ntn.util import (content_or_stdin, first_text,
+                                                  notion_config, pretty_json)
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import to_json_bytes
-from mirage.core.notion.pages import update_page
+from mirage.core.notion.pages import replace_page_markdown
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
@@ -26,6 +26,12 @@ async def edit(
         inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    body = parse_json_flag(fl.as_str("json"), "--json")
-    page = await update_page(inv.config, fl.as_str("page") or "", body)
-    return yield_bytes(to_json_bytes(page)), IOResult()
+    page_id = first_text(inv.texts, "page id")
+    markdown = await content_or_stdin(fl.as_str("content"), inv.stdin)
+    # The PATCH answers with the page's new markdown, which is what
+    # `--json` is for; printing the id under it would throw the response
+    # away on the one flag that asks for it.
+    edited = await replace_page_markdown(notion_config(inv), page_id, markdown)
+    if fl.as_bool("json"):
+        return yield_bytes(pretty_json(edited)), IOResult()
+    return yield_bytes(f"{page_id}\n".encode()), IOResult()

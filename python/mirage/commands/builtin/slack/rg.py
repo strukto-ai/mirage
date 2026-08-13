@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.slack.formatters import (build_query,
                                           format_file_grep_results,
                                           format_grep_results)
@@ -49,7 +49,7 @@ async def rg(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)

@@ -48,8 +48,11 @@ const OCT_CHARS = new Set('01234567')
  * output); an unknown escape like `\z` passes through as `\z`. `tr` has
  * its own reader (`commands/builtin/utils/escapes.ts`) because only the
  * shell writes bytes: `\xHH` here names a byte, not a code point.
+ *
+ * Exported for its test only, mirroring how Python's `_interpret_escapes`
+ * is re-exported from `builtins/__init__.py`.
  */
-function interpretEchoEscapes(text: string): string {
+export function interpretEchoEscapes(text: string): string {
   const out: string[] = []
   let i = 0
   const n = text.length

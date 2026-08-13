@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind import CommandIO, DuOps
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
+from mirage.core.box.du import entries as _du_entries
+from mirage.core.box.du import size as _du_size
 from mirage.core.box.exists import exists as _exists
 from mirage.core.box.mkdir import mkdir as _mkdir
 from mirage.core.box.read import read as _read
@@ -38,6 +40,11 @@ IO = CommandIO(
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,
+    # Own the du walk instead of taking the builder's, which is capped at
+    # max_du_entries and reports a partial total past it. A Box tree over
+    # that cap is ordinary, and a silently wrong total is worse than a
+    # slow one; this matches the typescript table.
+    du=DuOps(size=_du_size, entries=_du_entries),
     write=_write,
     exists=_exists,
     mkdir=_mkdir,

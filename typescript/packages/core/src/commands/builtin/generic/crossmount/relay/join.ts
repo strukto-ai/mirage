@@ -17,12 +17,13 @@ import type { PathSpec } from '../../../../../types.ts'
 import { joinGeneric } from '../../join.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, flatten, streamOp } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 // Join two files on different mounts via the shared generic join. Pure wiring: every operand is read through dispatch-relayed
 // primitives on its owning mount, matching the single-mount builder.
 export async function runJoin(
   scopes: PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
   const result = await joinGeneric(flatten(scopes), crossOpts(flagKwargs), streamOp(dispatch))

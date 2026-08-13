@@ -20,6 +20,8 @@ from mirage.commands.builtin.dify.io import IO as _IO
 from mirage.commands.builtin.dify.search import search
 from mirage.commands.builtin.generic_bind import (make_generic_commands,
                                                   with_read_cache)
+from mirage.commands.builtin.generic_bind.provision import \
+    with_default_provisions
 from mirage.core.dify.stat import stat_light
 
 _DIFY_OVERRIDES = {"cat", "find"}
@@ -34,7 +36,6 @@ COMMANDS = [
         overrides=_DIFY_OVERRIDES,
         ops_overrides={"ls": _DIFY_LIGHT_STAT_OPS},
     ),
-    make_cat(_DIFY_CACHED_OPS),
-    find,
-    search,
+    *with_default_provisions([make_cat(_DIFY_CACHED_OPS), find, search],
+                             _IO.stat, _IO.resolve_glob, _IO.readdir),
 ]

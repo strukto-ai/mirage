@@ -23,6 +23,7 @@ from mirage.io.types import materialize
 from mirage.resource.ram import RAMResource
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import RunArgs
 from mirage.types import FileStat, FileType
@@ -92,8 +93,8 @@ class CountingDispatch:
 
     The seam for the append row: every runtime takes the dispatch as an
     injected callable, so byte accounting needs no new hook. Supports
-    the full op vocabulary the runtimes emit (monty's OS callbacks and
-    GuestFs's bridge calls).
+    the full op vocabulary the runtimes emit, which both tiers now
+    reach through RuntimeVFS.
 
     Args:
         files (dict[str, bytes]): initial virtual file contents.
@@ -464,6 +465,49 @@ async def test_capability_reaches_the_mount(runtime: str, row: Row):
         await ws.close()
 
 
+ROOT_WRITE_PY = ("from pathlib import Path\n"
+                 "Path('/mine.txt').write_text('R')")
+ROOT_WRITE_JS = ("const w = std.open('/mine.txt', 'w'); "
+                 "w.puts('R'); w.close()")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        pytest.param("monty"),
+        pytest.param("wasi", marks=wasi_live),
+        pytest.param("quickjs", marks=quickjs_live),
+    ],
+)
+async def test_a_root_mount_is_served_like_any_other(runtime: str):
+    """A mount at `/` reaches the guest, and the shell sees the write.
+
+    `/` is the one prefix a runtime could plausibly treat as its own,
+    so it is the one worth pinning: wasi has a build directory rooted
+    there and pyodide (TypeScript) has Emscripten's filesystem. Neither
+    may swallow a mount the embedder actually made. Verified through
+    the shell rather than the runtime, so a runtime that wrote only to
+    its own private tree fails here.
+
+    Args:
+        runtime (str): registry name of the runtime under test.
+    """
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.EXEC,
+                   runtimes=[runtime, "vfs"])
+    try:
+        line = ROOT_WRITE_JS if runtime == "quickjs" else ROOT_WRITE_PY
+        prefix = "node -e" if runtime == "quickjs" else "python3 -c"
+        code, out = await _sh(ws, f'{prefix} "{line}"')
+        assert code == 0, f"{line}: exit {code}: {out}"
+        code, seen = await _sh(ws, "cat /mine.txt")
+        assert code == 0, f"cat failed: {seen}"
+        assert "R" in seen
+    finally:
+        await ws.close()
+
+
 APPEND_LOOP_PY = ("for i in range(8):\n"
                   "    with open('/data/log.txt', 'a') as f:\n"
                   "        f.write('xyz')")
@@ -477,14 +521,8 @@ APPEND_LOOP_JS = ("for (let i = 0; i < 8; i++) { "
     "runtime",
     [
         pytest.param("monty"),
-        pytest.param("wasi",
-                     marks=(wasi_live,
-                            pytest.mark.xfail(strict=True,
-                                              reason=APPEND_AMPLIFIED))),
-        pytest.param("quickjs",
-                     marks=(quickjs_live,
-                            pytest.mark.xfail(strict=True,
-                                              reason=APPEND_AMPLIFIED))),
+        pytest.param("wasi", marks=wasi_live),
+        pytest.param("quickjs", marks=quickjs_live),
     ],
 )
 async def test_append_ships_only_the_deltas(runtime: str):
@@ -500,7 +538,7 @@ async def test_append_ships_only_the_deltas(runtime: str):
     """
     dispatch = CountingDispatch({"/data/log.txt": b"S" * 64})
     rt = build_runtime(runtime)
-    rt.attach(dispatch, lambda: ["/data/"])
+    rt.attach(dispatch, PrefixResolver(lambda: ["/data/"]))
     code = APPEND_LOOP_JS if runtime == "quickjs" else APPEND_LOOP_PY
     result = await rt.run(RunArgs(code=code))
     await rt.close()

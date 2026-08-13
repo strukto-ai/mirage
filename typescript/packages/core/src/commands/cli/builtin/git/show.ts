@@ -36,6 +36,7 @@ import { diffstat, statTable } from './summary.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
 import { checkOperands, fatal, revisionArg } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const MERGE_PARENTS = 1
 
@@ -119,7 +120,7 @@ async function diffSection(repo: Repo, commit: CommitFacts, flags: ShowFlags): P
             before.get(path)?.oid !== after.get(path)?.oid ||
             before.get(path)?.mode !== after.get(path)?.mode,
         )
-        .sort()
+        .sort(compareCodePoints)
       return changed.map((path) => `${path}\n`).join('')
     }
     const lines = statTable(await diffstat(repo, before, after))

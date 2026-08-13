@@ -26,9 +26,11 @@ from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.parts import expand_parts
 from mirage.workspace.expand.spec_hints import (spec_for_command,
+                                                spec_word_bases,
                                                 spec_word_kinds)
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.route import WordPolicy, route, word_policy
+from mirage.workspace.route import (WordPolicy, end_options_after_program,
+                                    route, word_policy)
 from mirage.workspace.session import Session
 
 
@@ -103,18 +105,40 @@ async def expand_argv(
     consumed = registry.match_command_prefix(expanded)
     name = " ".join(expanded[:consumed])
 
+    # Before anything reads the line: an option carrying a program hands
+    # the words after it to that program, and POSIX's own `--` is how
+    # that handoff is spelled. Only when the interpreter is what runs,
+    # though: a shell function of the same name takes the line instead
+    # (bash's own rule), and it must receive the words as typed rather
+    # than a marker meant for a parser it does not have. `command
+    # python3` masks the function for its inner run, which is exactly
+    # when the rewrite applies again. A CLI cannot reach here at all,
+    # since register_cli refuses a shell builtin's name.
+    if name not in session.functions:
+        expanded = expanded[:consumed] + end_options_after_program(
+            name, expanded[consumed:])
+
     policy = word_policy(route(name, session, registry))
     word_kinds: list[ValueType | None] | None = None
+    word_bases: list[str | None] | None = None
     if policy is WordPolicy.MOUNT:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
+            # Before anything reads the line: an option carrying a
+            # program hands the words after it to that program, and
+            # POSIX's own `--` is how that is said.
             extra: list[ValueType | None] = ["str"] * (consumed - 1)
             word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
+            bases = spec_word_bases(spec, expanded[consumed:], session.cwd)
+            if bases is not None:
+                head: list[str | None] = [None] * (consumed - 1)
+                word_bases = head + bases
 
     classified = classify_parts(expanded,
                                 registry,
                                 session.cwd,
-                                word_kinds=word_kinds)
+                                word_kinds=word_kinds,
+                                word_bases=word_bases)
     # set -f: glob words become literal paths for every consumer,
     # including backend pushdown, so `cat *.txt` looks up a file
     # literally named `*.txt` like bash with noglob.

@@ -17,15 +17,100 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.types import ByteSource
 from mirage.shell.array import ShellArray
+from mirage.shell.constants import SHELL_ARGV0
 from mirage.shell.types import FunctionBody
 from mirage.types import MountMode
+
+# What a fork of this session carries over. Written down once because
+# `fork` builds a copy from it and `tests/workspace/session/test_session.py`
+# asserts that every dataclass field is either here or in
+# TRANSIENT_FIELDS, so a field added later cannot be silently dropped by
+# a hand-written literal the way `script_name` was.
+INHERITED_FIELDS: tuple[str, ...] = (
+    "session_id",
+    "cwd",
+    "logical_cwd",
+    "env",
+    "created_at",
+    "functions",
+    "last_exit_code",
+    "shell_options",
+    "readonly_vars",
+    "arrays",
+    "mount_modes",
+    "generation",
+    "pipeline_timeout_seconds",
+    "last_bg_job_id",
+    "positional_args",
+    "script_name",
+    "_getopts_pos",
+    "_getopts_optind",
+)
+
+# State that belongs to the line being executed, not to the shell, so a
+# fork starts it fresh: the errexit marker, the source nesting depth, the
+# stdin the caller happened to pass and the running function's locals.
+TRANSIENT_FIELDS: tuple[str, ...] = (
+    "errexit_immune",
+    "source_depth",
+    "_stdin_buffer",
+    "_stdin_source",
+    "_local_vars",
+    "_local_arrays",
+    "_cmdsub_seq",
+    "_cmdsub_status",
+)
+
+# What a child shell gets its own copy of, and the parent gets back
+# afterwards. A `( … )` subshell and a nested `bash`/`sh` are both child
+# shells and both read this list, so neither can drift into isolating a
+# field the other leaks. `last_exit_code` is deliberately absent: `$?`
+# after a child shell is the child's status, which is the one thing it
+# reports back.
+CHILD_SHELL_FIELDS: tuple[str, ...] = (
+    "cwd",
+    "logical_cwd",
+    "source_depth",
+    "env",
+    "functions",
+    "shell_options",
+    "readonly_vars",
+    "arrays",
+    "positional_args",
+    "script_name",
+    "last_bg_job_id",
+    "_getopts_pos",
+    "_getopts_optind",
+)
+
+
+def copy_state(value: Any) -> Any:
+    """Copy one session field deeply enough that a child cannot write back.
+
+    Args:
+        value (Any): the field value.
+    """
+    if isinstance(value, dict):
+        return {k: copy_state(v) for k, v in value.items()}
+    if isinstance(value, set):
+        return set(value)
+    if isinstance(value, list):
+        return list(value)
+    return value
 
 
 @dataclass
 class Session:
     session_id: str
     cwd: str = "/"
+    # The spelling `cd` arrived at: `..` simplified textually, symlinks
+    # left alone. bash reports it as `$PWD` and `pwd -L`, and applies the
+    # next `cd`'s `..` to it. None whenever it would equal `cwd`, which is
+    # every session that has not walked through a symlink. `cwd` stays
+    # physical because it is what every operand resolves against.
+    logical_cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     functions: dict[str, FunctionBody] = field(default_factory=dict)
@@ -38,6 +123,10 @@ class Session:
     pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
+    # What `$0` expands to. None is the shell itself; a nested `bash`/`sh`
+    # sets it to the script file it is running, or to the name given after
+    # `-c`, and restores it afterwards.
+    script_name: str | None = None
     # Transient `set -e` marker: True when the failure just returned
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.
@@ -46,7 +135,7 @@ class Session:
     # program loop absorbs its signal only while a file is being sourced.
     source_depth: int = field(default=0, repr=False)
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
-    _stdin_source: object = field(default=None, repr=False)
+    _stdin_source: ByteSource | None = field(default=None, repr=False)
     _local_vars: dict[str, str | None] | None = field(default=None, repr=False)
     # Arrays shadowed by `local -a` / `declare -a` in the running
     # function; None means the caller had no array of that name.
@@ -93,52 +182,71 @@ class Session:
             }
         return cls(**data)
 
+    @property
+    def argv0(self) -> str:
+        """What ``$0`` expands to.
+
+        None is the shell itself; a nested `bash`/`sh` sets it to the
+        script it is running, or to the name given after `-c`. An empty
+        name is a name, so it is not folded into the default: GNU
+        ``bash -c 'echo "[$0]"' ""`` prints ``[]``.
+        """
+        return SHELL_ARGV0 if self.script_name is None else self.script_name
+
+    def __post_init__(self) -> None:
+        # bash exports `$PWD` from startup, so a session that has never
+        # run `cd` still has one. Seeding here rather than at lookup time
+        # is what makes it an ordinary variable: assignable, unsettable,
+        # and listed by `env`.
+        self.env.setdefault("PWD", self.cwd)
+
     def fork(self, **overrides: Any) -> "Session":
         """Return a copy of this session with overrides applied.
 
-        Mutable containers (env, functions, readonly_vars, arrays,
-        shell_options) are shallow-copied so mutations on the fork do
-        not leak back into the source. Every field, including
-        capability fields like ``mount_modes``, is propagated, so
-        callers cannot accidentally forget one when adding new fields.
+        Every inherited field is copied deeply enough that mutations on
+        the fork do not leak back into the source. The field list is
+        INHERITED_FIELDS rather than a literal written out here, so a
+        field added to the dataclass is propagated by construction.
+
+        A caller that moves the fork with ``cwd`` supplies a physical
+        path with no typed spelling behind it, so the source's logical
+        name is dropped rather than left describing where the fork is
+        not -- the same reasoning as `shell_dirs.set_cwd`. Deciding it
+        here rather than at each call site is what keeps
+        ``execute(cwd=...)`` from reporting the persistent session's old
+        directory from ``pwd``.
 
         Args:
             **overrides: Field-name kwargs to override on the copy.
         """
         defaults: dict[str, Any] = {
-            "session_id":
-            self.session_id,
-            "cwd":
-            self.cwd,
-            "env":
-            dict(self.env),
-            "created_at":
-            self.created_at,
-            "functions":
-            dict(self.functions),
-            "last_exit_code":
-            self.last_exit_code,
-            "shell_options":
-            dict(self.shell_options),
-            "readonly_vars":
-            set(self.readonly_vars),
-            "arrays": {
-                k: list(v)
-                for k, v in self.arrays.items()
-            },
-            "mount_modes":
-            (dict(self.mount_modes) if self.mount_modes is not None else None),
-            "generation":
-            self.generation,
-            "pipeline_timeout_seconds":
-            self.pipeline_timeout_seconds,
-            "last_bg_job_id":
-            self.last_bg_job_id,
-            "positional_args":
-            list(self.positional_args),
+            name: copy_state(getattr(self, name))
+            for name in INHERITED_FIELDS
         }
         defaults.update(overrides)
-        forked = Session(**defaults)
-        forked._getopts_pos = self._getopts_pos
-        forked._getopts_optind = self._getopts_optind
-        return forked
+        if "cwd" in overrides and "logical_cwd" not in overrides:
+            defaults["logical_cwd"] = None
+            # `$PWD` names where the session is, so it follows the move
+            # even when the caller also supplied an env to layer on.
+            defaults["env"] = {**defaults["env"], "PWD": overrides["cwd"]}
+        return Session(**defaults)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Copy the state a child shell runs on top of.
+
+        Args:
+            None
+        """
+        return {
+            name: copy_state(getattr(self, name))
+            for name in CHILD_SHELL_FIELDS
+        }
+
+    def restore(self, state: dict[str, Any]) -> None:
+        """Put back a snapshot, ending a child shell.
+
+        Args:
+            state (dict[str, Any]): what ``snapshot`` returned.
+        """
+        for name, value in state.items():
+            setattr(self, name, value)

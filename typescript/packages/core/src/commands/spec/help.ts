@@ -12,7 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type CommandSpec, type Option } from './types.ts'
+import { ARG_PLACEHOLDER } from './constants.ts'
+import { type CommandSpec, type Operand, type Option, UsageStyle } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+
+/**
+ * The bare name of an option's value, declared or derived.
+ *
+ * clap derives one from the long spelling when the author declares no
+ * `value_name`: dashes to underscores, uppercased. Deriving it the same way
+ * means only the options that actually override it have to say so.
+ */
+export function optionMetavar(opt: Option): string {
+  if (opt.metavar !== null) return opt.metavar
+  const spelling = opt.long ?? opt.short ?? ''
+  return spelling.replace(/^-+/, '').replaceAll('-', '_').toUpperCase()
+}
+
+/**
+ * One operand's slot in a clap usage line. Required slots take angle brackets
+ * and optional ones square, which is the only thing clap's usage line says
+ * about arity besides the trailing ellipsis on a variadic.
+ */
+export function operandSlot(operand: Operand, ellipsis = false): string {
+  const name = operand.name === '' ? ARG_PLACEHOLDER : operand.name
+  const slot = operand.required ? `<${name}>` : `[${name}]`
+  return ellipsis ? `${slot}...` : slot
+}
 
 function valueLabel(opt: Option): string {
   if (opt.type === 'bool') return ''
@@ -42,41 +68,75 @@ function flagRows(spec: CommandSpec): [string, string][] {
 }
 
 /**
+ * One operand's placeholder outside the clap dialect.
+ *
+ * A spec that named the slot gets that name, which is what argparse prints
+ * too (it renders the dest, not a generic word); a spec that did not falls
+ * back to the type. Only `gh` names one outside clap today, so this is the
+ * difference between `gh api [flags] <text>` and upstream's
+ * `gh api <endpoint>`.
+ */
+function slot(operand: Operand): string {
+  if (operand.name !== '') return `<${operand.name}>`
+  return operand.type === 'path' ? '<path>' : '<text>'
+}
+
+/**
  * Render one command's help; a CLI group is the same shape plus a Commands
  * section. `subcommands` carries (name, one-line help) rows for a CLI
  * group node; when given, the usage line reads `<command> [<args>]`
  * instead of the operand slots.
  */
+function usageLine(
+  name: string,
+  spec: CommandSpec,
+  subcommands: readonly [string, string][],
+  style: UsageStyle,
+): string {
+  const clap = style === UsageStyle.CLAP
+  const bits = [name]
+  if (spec.options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
+  if (subcommands.length > 0) bits.push(clap ? '<COMMAND>' : '<command> [<args>]')
+  for (const op of spec.positional) {
+    bits.push(clap ? operandSlot(op) : slot(op))
+  }
+  if (spec.rest !== null) {
+    if (clap) bits.push(operandSlot(spec.rest, !spec.rest.required))
+    else bits.push(`[${slot(spec.rest)}...]`)
+  }
+  return `Usage: ${bits.join(' ')}`
+}
+
 export function renderHelp(
   name: string,
   spec: CommandSpec,
   subcommands: readonly [string, string][] = [],
+  style: UsageStyle = UsageStyle.ARGPARSE,
 ): string {
+  const clap = style === UsageStyle.CLAP
   const lines: string[] = []
-  if (spec.description !== null && spec.description !== '') {
-    lines.push(`${name}: ${spec.description}`)
-  } else {
+  if (spec.description === null || spec.description === '') {
     lines.push(name)
+  } else if (clap) {
+    lines.push(spec.description)
+  } else {
+    lines.push(`${name}: ${spec.description}`)
   }
   lines.push('')
 
-  const usageBits = [name]
-  if (spec.options.length > 0) usageBits.push('[flags]')
-  if (subcommands.length > 0) usageBits.push('<command> [<args>]')
-  for (const op of spec.positional) {
-    usageBits.push(op.type === 'path' ? '<path>' : '<text>')
-  }
-  if (spec.rest !== null) {
-    usageBits.push(spec.rest.type === 'path' ? '[<path>...]' : '[<text>...]')
-  }
-  lines.push(`Usage: ${usageBits.join(' ')}`)
+  lines.push(usageLine(name, spec, subcommands, style))
 
   if (subcommands.length > 0) {
     lines.push('')
     lines.push('Commands:')
     const width = Math.max(...subcommands.map(([sub]) => sub.length))
-    const sorted = [...subcommands].sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    for (const [sub, desc] of sorted) {
+    // clap prints subcommands in the order the program declares them, which is
+    // a deliberate ordering by an author rather than an alphabet, so re-sorting
+    // would lose information.
+    const subRows = clap
+      ? subcommands
+      : [...subcommands].sort((a, b) => compareCodePoints(a[0], b[0]))
+    for (const [sub, desc] of subRows) {
       const first = desc.split('\n')[0] ?? ''
       lines.push(first === '' ? `  ${sub}` : `  ${sub.padEnd(width, ' ')}  ${first}`)
     }
@@ -84,7 +144,7 @@ export function renderHelp(
 
   if (spec.options.length > 0) {
     lines.push('')
-    lines.push('Flags:')
+    lines.push(clap ? 'Options:' : 'Flags:')
     const rows = flagRows(spec)
     const width = Math.max(...rows.map(([flag]) => flag.length))
     for (const [flag, desc] of rows) {
@@ -98,4 +158,26 @@ export function renderHelp(
   }
 
   return lines.join('\n') + '\n'
+}
+
+// clap's wording for a token it has no option for. One wording for long and
+// short alike, unlike git's option/switch split, and it names the token as
+// typed. Probed against ntn 0.21.9.
+export function clapUnexpectedArgument(token: string): string {
+  return `error: unexpected argument '${token}' found`
+}
+
+// A group-level refusal in clap's shape: message, usage line, footer. clap
+// answers with the one usage line, not the whole help page git prints, and it
+// does so at every level of the tree. This lives beside the renderer rather
+// than beside the leaf refusals because the walk calls it, and the walk cannot
+// reach a module that imports the workspace.
+export function clapGroupRefusal(
+  name: string,
+  spec: CommandSpec,
+  subcommands: readonly [string, string][],
+  message: string,
+): string {
+  const usage = usageLine(name, spec, subcommands, UsageStyle.CLAP)
+  return `${message}\n\n${usage}\n\nFor more information, try '--help'.\n`
 }

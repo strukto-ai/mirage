@@ -6,14 +6,14 @@ import orjson
 
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.jq import (DEFAULT_INDENT, JqOptions, args_object,
                             eval_jsonl_stream, format_jq_output, is_jsonl_path,
                             is_streamable_jsonl_expr, jq_eval, parse_json_docs,
                             parse_seq_docs, references_args, references_inputs,
                             split_raw_lines, stream_events)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 INDENT_MIN = -1
 INDENT_MAX = 7
@@ -170,7 +170,7 @@ def parse_flags(fl: FlagView) -> JqOptions:
     )
 
 
-def assemble_inputs(chunks: list[bytes], opts: JqOptions) -> list[object]:
+def assemble_inputs(chunks: list[bytes], opts: JqOptions) -> list[JsonValue]:
     """Turn the raw inputs into the value stream the program sees.
 
     jq reads every file and stdin as one stream, so slurping spans them
@@ -187,7 +187,7 @@ def assemble_inputs(chunks: list[bytes], opts: JqOptions) -> list[object]:
             return [b"".join(chunks).decode("utf-8", errors="replace")]
         return [line for chunk in chunks for line in split_raw_lines(chunk)]
     parse = parse_seq_docs if opts.seq else parse_json_docs
-    docs: list[object] = [doc for chunk in chunks for doc in parse(chunk)]
+    docs: list[JsonValue] = [doc for chunk in chunks for doc in parse(chunk)]
     if opts.stream:
         # --stream replaces each document with its events, and slurping
         # then collects the events rather than the documents.
@@ -195,11 +195,11 @@ def assemble_inputs(chunks: list[bytes], opts: JqOptions) -> list[object]:
     return [docs] if opts.slurp else docs
 
 
-def exit_code(outputs: Sequence[object], opts: JqOptions) -> int:
+def exit_code(outputs: Sequence[JsonValue], opts: JqOptions) -> int:
     """Exit status for a run, which only -e makes interesting.
 
     Args:
-        outputs (Sequence[object]): every value the run printed.
+        outputs (Sequence[JsonValue]): every value the run printed.
         opts (JqOptions): resolved options.
     """
     if not opts.exit_status:
@@ -227,7 +227,7 @@ async def jq(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["jq"])
     opts = parse_flags(fl)
@@ -274,7 +274,7 @@ async def jq(
             chunks.append(await _read_stdin_bytes(stdin))
     docs = assemble_inputs(chunks, opts)
 
-    outputs: list[object] = []
+    outputs: list[JsonValue] = []
     if opts.null_input:
         outputs.extend(
             jq_eval(None, expr, opts.named_args,

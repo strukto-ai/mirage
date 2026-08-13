@@ -24,7 +24,6 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
-import { fileReadProvision } from './_provision.ts'
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -72,5 +71,4 @@ export const POSTGRES_WC = command({
   resource: ResourceName.POSTGRES,
   spec: specOf('wc'),
   fn: wcCommand,
-  provision: fileReadProvision,
 })

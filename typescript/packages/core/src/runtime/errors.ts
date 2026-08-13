@@ -28,3 +28,31 @@ export class EvalError extends Error {
     this.syntax = options.syntax ?? false
   }
 }
+
+/**
+ * A rename whose two ends do not live on the same mount.
+ *
+ * The dispatcher picks the mount from the source and addresses the
+ * destination against that same backend, so applying one would drop
+ * the source and write the target into the wrong store.
+ *
+ * Deliberately carries no errno. The condition is decided once, in
+ * RuntimeVFS.rename, and each encoder maps it to the number its own
+ * reference implementation answers: pathlib says EXDEV, while a WASI
+ * guest sees ENOENT because each mount is its own preopen. Unifying
+ * those two is a separate decision from writing the rule down once.
+ */
+export class CrossMountError extends Error {
+  readonly src: string
+  readonly dst: string
+  // The condition's own number, not EXDEV: each boundary's table decides
+  // the number (posix says EXDEV, the WASI wire deliberately ENOENT).
+  readonly code = 'CROSS_MOUNT'
+
+  constructor(src: string, dst: string) {
+    super(`cross-mount rename: ${src} -> ${dst}`)
+    this.name = 'CrossMountError'
+    this.src = src
+    this.dst = dst
+  }
+}

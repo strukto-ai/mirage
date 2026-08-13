@@ -21,13 +21,13 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.builtin.generic.mv import parse_mv_flags
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec, PrimitiveMove
 
 
 async def run_mv(
         scopes: list[PathSpec],
-        flag_kwargs: dict[str, object],
+        flag_kwargs: dict[str, FlagValue],
         dispatch: Callable[..., Any],
         storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Move operands that span mounts via the shared generic mv.

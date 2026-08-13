@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexConfig, IndexEntry
+from mirage.cache.index import IndexConfig
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
-from mirage.core.github.repo import fetch_default_branch_sync
-from mirage.core.github.tree import fetch_tree_sync
+from mirage.core.github.repo import fetch_default_branch
+from mirage.core.github.tree import fetch_tree, index_rows
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.resource.base import BaseResource
 from mirage.resource.github.prompt import PROMPT
@@ -49,27 +48,39 @@ class GitHubResource(BaseResource):
     def __init__(
         self,
         config: GitHubConfig,
-        owner: str | None = None,
-        repo: str | None = None,
-        ref: str | None = None,
+        owner: str,
+        repo: str,
+        ref: str,
+        default_branch: str,
+        tree: dict[str, TreeEntry],
+        truncated: bool = False,
     ) -> None:
+        """Build the mount from a tree that has already been fetched.
+
+        Takes the repo metadata rather than fetching it, so that
+        nothing here touches the network. Use :meth:`create` unless the
+        tree is already in hand.
+
+        Args:
+            config (GitHubConfig): token, base URL and defaults.
+            owner (str): repository owner.
+            repo (str): repository name.
+            ref (str): branch, tag or commit the mount is pinned to.
+            default_branch (str): the repo's default branch, for
+                ``is_default_branch``.
+            tree (dict[str, TreeEntry]): the recursive git tree, keyed
+                by repo-relative path.
+            truncated (bool): whether GitHub truncated that tree, in
+                which case readdir falls back to per-directory fetches.
+        """
         super().__init__()
-        owner = owner or config.owner
-        repo = repo or config.repo
-        ref = ref or config.ref
-        if owner is None or repo is None:
-            raise ValueError(
-                "GitHubResource requires owner and repo, either as "
-                "constructor kwargs or in GitHubConfig")
-        default_branch = fetch_default_branch_sync(config, owner, repo)
-        tree, truncated = fetch_tree_sync(config, owner, repo, ref)
         self.accessor = GitHubAccessor(config,
                                        owner,
                                        repo,
                                        ref,
                                        default_branch,
                                        truncated=truncated)
-        self._populate_index_sync(tree)
+        self._populate_index(tree)
         from mirage.commands.builtin.github import COMMANDS as _github_cmds
         from mirage.ops.github import OPS as _github_vfs_ops
 
@@ -78,33 +89,59 @@ class GitHubResource(BaseResource):
         for fn in _github_vfs_ops:
             self.register_op(fn)
 
-    def _populate_index_sync(self, tree: dict[str, TreeEntry]) -> None:
-        dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
-        for path, entry in tree.items():
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                parent, name = "/" + parts[0], parts[1]
-            else:
-                parent, name = "/", parts[0]
-            resource_type = "folder" if entry.type == "tree" else "file"
-            idx_entry = IndexEntry(
-                id=entry.sha,
-                name=name,
-                resource_type=resource_type,
-                size=entry.size,
-            )
-            dirs[parent].append((name, idx_entry))
-        self._github_index_entries = {
-            ("/" + parent.strip("/") + "/" + name).replace("//", "/"): entry
-            for parent, entries in dirs.items()
-            for name, entry in entries
-        }
-        self._github_index_children = {
-            parent:
-            sorted(("/" + parent.strip("/") + "/" + name).replace("//", "/")
-                   for name, _ in entries)
-            for parent, entries in dirs.items()
-        }
+    @classmethod
+    async def build(
+        cls,
+        config: GitHubConfig,
+        owner: str | None = None,
+        repo: str | None = None,
+        ref: str | None = None,
+    ) -> "GitHubResource":
+        """Fetch the repo's tree, then build the mount around it.
+
+        The two GitHub round trips this needs are why construction is
+        async. They used to run in ``__init__`` over a blocking
+        ``urlopen``, which froze whatever event loop the caller was on —
+        for the daemon that meant every other mount's in-flight I/O and
+        the FUSE queue stalling for the length of a recursive-tree call.
+        Mirrors the TypeScript ``GitHubResource.create``.
+
+        Args:
+            config (GitHubConfig): token, base URL and defaults.
+            owner (str | None): repository owner; falls back to
+                ``config.owner``.
+            repo (str | None): repository name; falls back to
+                ``config.repo``.
+            ref (str | None): branch, tag or commit; falls back to
+                ``config.ref``.
+
+        Returns:
+            GitHubResource: a mount pinned to ``ref``.
+
+        Raises:
+            ValueError: neither the kwargs nor the config name a repo.
+        """
+        owner = owner or config.owner
+        repo = repo or config.repo
+        ref = ref or config.ref
+        if owner is None or repo is None:
+            raise ValueError(
+                "GitHubResource requires owner and repo, either as "
+                "build() kwargs or in GitHubConfig")
+        default_branch = await fetch_default_branch(config, owner, repo)
+        tree, truncated = await fetch_tree(config, owner, repo, ref)
+        return cls(config,
+                   owner,
+                   repo,
+                   ref,
+                   default_branch,
+                   tree,
+                   truncated=truncated)
+
+    def _populate_index(self, tree: dict[str, TreeEntry]) -> None:
+        entries, children = index_rows(tree)
+        self._github_index_entries = entries
+        self._github_index_children = children
         self._github_index_expiry = (datetime.now(timezone.utc) +
                                      timedelta(days=365))
         self._seed_github_index()

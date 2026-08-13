@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { gridfsKey, latestFile, rawPathOf } from './_client.ts'
 import { downloadBytes } from './read.ts'
@@ -25,6 +25,7 @@ export async function truncate(
 ): Promise<void> {
   const raw = rawPathOf(path)
   const key = gridfsKey(raw, accessor.config)
+  const startMs = performance.now()
   const doc = await latestFile(accessor, key)
   let data = doc === null ? new Uint8Array(0) : await downloadBytes(accessor, path, doc._id)
   if (data.byteLength > length) {
@@ -35,5 +36,6 @@ export async function truncate(
     data = padded
   }
   await uploadBytes(accessor, key, data)
+  record('truncate', path.virtual, ResourceName.GRIDFS, 0, startMs)
   await invalidateAfterWrite(path)
 }

@@ -20,9 +20,10 @@ import {
   invalidIntError,
   missingRequiredError,
   missingValueError,
+  oldOptionError,
   unknownOptionError,
 } from '../../../commands/spec/usage.ts'
-import type { CommandSpec } from '../../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
@@ -56,10 +57,15 @@ export function parseFlags(
   spec: CommandSpec | null,
   cmdName: string,
   cwd: string,
+  // The session environment, so an option declaring one gets its value
+  // from there. Filled inside the parse rather than after it, or an
+  // env-supplied int would go unchecked and an env-supplied path would
+  // stay a bare string.
+  env?: Readonly<Record<string, string>>,
 ): [
   PathSpec[],
   string[],
-  Record<string, string | boolean | number | string[]>,
+  Record<string, FlagValue>,
   string[],
   string[],
   [string, readonly string[]][],
@@ -68,6 +74,9 @@ export function parseFlags(
   [string, string, readonly string[]][],
   [string, string][],
   [string, string][],
+  string[],
+  string | null,
+  string[],
   string[],
 ] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
@@ -81,7 +90,7 @@ export function parseFlags(
   }
 
   if (spec !== null) {
-    const parsed = parseCommand(spec, argv, cwd)
+    const parsed = parseCommand(spec, argv, cwd, env)
     const flagKwargs = parseToKwargs(parsed)
 
     for (const [key, value] of Object.entries(flagKwargs)) {
@@ -116,6 +125,9 @@ export function parseFlags(
       parsed.invalidIntOptions,
       parsed.invalidFloatOptions,
       parsed.missingRequiredOptions,
+      parsed.oldOptionNeedsValue,
+      parsed.missingRequiredOperands,
+      parsed.typedDests,
     ]
   }
 
@@ -125,7 +137,7 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], [], [], [], [], []]
+  return [paths, texts, {}, [], [], [], [], [], [], [], [], [], null, [], []]
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
@@ -141,8 +153,13 @@ export function optionError(
   invalidInt: readonly [string, string][],
   invalidFloat: readonly [string, string][],
   missingRequired: readonly string[],
+  oldOptionNeedsValue: string | null = null,
 ): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
+  // An old-style cluster short of an argument outranks every scan error
+  // below: tar counts the cluster's needs before argp validates a letter,
+  // so `tar Qf` and `tar fQ` both name f, not Q.
+  if (oldOptionNeedsValue !== null) return oldOptionError(cmdName, oldOptionNeedsValue)
   // Scan-order between unknown and ambiguous options: GNU stops at the
   // first offending token, so `grep --c --bogus` reports the ambiguity
   // and the reversed line reports --bogus.

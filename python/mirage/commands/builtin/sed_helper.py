@@ -16,6 +16,17 @@ import re
 from typing import Any
 
 _SIMPLE_CMDS = frozenset("dDpPhHgGxNq")
+# GNU answers a missing script with its whole thirty-nine line usage block
+# and exit 1; mirage names the problem in one line instead, because the
+# block is GNU's own prose and reproducing it buys a mirage user nothing.
+# `no input files` and its exit 4 are GNU's exact spelling for `sed -i`
+# with no operands, and mirage reuses them when there is no stdin either --
+# it has no terminal for GNU's blocking read to reach. Both live here so
+# the generic and its builder cannot drift apart again; there used to be
+# four spellings across the two languages.
+SED_MISSING_SCRIPT = "sed: missing script"
+SED_NO_INPUT_FILES = "sed: no input files"
+SED_NO_INPUT_EXIT = 4
 
 
 def _apply_repl(m: "re.Match[str]", repl: str) -> str:

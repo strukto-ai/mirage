@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface SeaweedFSConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  endpoint?: string
-  region?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface SeaweedFSConfigRedacted extends Omit<SeaweedFSConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const SeaweedFSConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const SeaweedFSConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type SeaweedFSConfig = ConfigOf<typeof SeaweedFSConfigSchema>
+
+export type SeaweedFSConfigRedacted = RedactedConfig<SeaweedFSConfig, 'presignedUrlProvider'>
 
 export function seaweedfsToS3Config(config: SeaweedFSConfig): S3Config {
   return {

@@ -314,3 +314,19 @@ async def test_an_explicitly_empty_parents_array_is_still_the_callers():
                           flags={"json": '{"name": "n", "parents": []}'}))
     assert post.await_args.args[2] == {"name": "n", "parents": []}
     assert "supportsAllDrives" not in post.await_args.args[1]
+
+
+def test_fill_path_percent_encodes_a_reserved_character():
+    # A Google holiday calendar id carries "#", which opens a URL fragment:
+    # unencoded, the request reached /calendars/en.usa and 404'd.
+    path, query = fill_path(
+        "/calendars/{calendarId}/events",
+        {"calendarId": "en.usa#holiday@group.v.calendar.google.com"})
+    assert path == ("/calendars/en.usa%23holiday%40group.v.calendar."
+                    "google.com/events")
+    assert query == {}
+
+
+def test_fill_path_leaves_an_ordinary_id_addressable():
+    path, _ = fill_path("/files/{fileId}", {"fileId": "1AbC-_dEf"})
+    assert path == "/files/1AbC-_dEf"

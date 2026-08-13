@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isEnoent } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -26,6 +27,7 @@ import {
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../ops/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
@@ -40,10 +42,6 @@ interface WalkEntry {
   path: string
   depth: number
   file: boolean
-}
-
-export function isEnoent(err: unknown): boolean {
-  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
 }
 
 export function modifiedTs(modified: string | null): number | null {
@@ -182,7 +180,7 @@ export async function walkFind(
   const results: string[] = []
   const tree = prefixPathNodes(optionsTree(options), prefix)
   const needEmpty = treeHasEmpty(tree)
-  collected.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  collected.sort((a, b) => compareCodePoints(a.path, b.path))
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
     const stripped =

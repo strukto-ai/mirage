@@ -25,6 +25,7 @@ import {
   runDu,
 } from '../../generic/du.ts'
 import { type Builder, type CommandIO, resolveGlobOf } from '../adapter.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**
  * Entry allowance shared by every operand of one `du` invocation.
@@ -107,7 +108,7 @@ async function walkEntries(
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
   const total = await duWalk(ops, accessor, index, path, budget, entries)
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }
 

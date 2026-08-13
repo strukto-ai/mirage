@@ -81,7 +81,14 @@ class CommandContext:
 
     Args:
         command (str): the command name.
-        paths (tuple[PathSpec, ...]): positional path operands.
+        paths (tuple[PathSpec, ...]): every path the line names, the
+            positional operands first and then the values of any
+            path-valued flags. What a path-pattern guard matches on.
+        operands (tuple[PathSpec, ...]): the positional operands alone.
+            A rule that reads a slot by position (mv's source, ln's
+            target, tar's files) has to use this: with the flag values
+            mixed in, ``tar -xf a.tar -C /mnt`` would read the ``-C``
+            destination as a file being archived.
         argv (tuple[str, ...]): raw argv after the command name; the
             hook fires before flag parsing, so shorthand flags are raw
             tokens.
@@ -94,6 +101,7 @@ class CommandContext:
     argv: tuple[str, ...]
     cwd: str
     registry: MountRootQuery
+    operands: tuple[PathSpec, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

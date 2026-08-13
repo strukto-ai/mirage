@@ -21,6 +21,7 @@ import { MEDIUM, parsePretty, type CommitFacts, type LogFormat } from './format.
 import { touches } from './pickaxe.ts'
 import { loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const HEAD_REF = 'HEAD'
 const BRANCH_PREFIX = 'refs/heads/'
@@ -158,7 +159,7 @@ async function resolvedRefs(repo: Repo): Promise<Map<string, string>> {
 export async function refCommits(repo: Repo): Promise<CommitFacts[]> {
   const refs = await resolvedRefs(repo)
   const commits: CommitFacts[] = []
-  for (const name of [...refs.keys()].sort()) {
+  for (const name of [...refs.keys()].sort(compareCodePoints)) {
     const oid = refs.get(name)
     if (oid === undefined) continue
     const commit = await peelToCommit(repo, oid)
@@ -179,7 +180,7 @@ export async function decorations(repo: Repo): Promise<Map<string, string[]>> {
   const refs = await loadRefs(repo.dispatch, repo.location.gitdir, repo.location.commondir)
   const resolved = await resolvedRefs(repo)
   const labels = new Map<string, string[]>()
-  for (const name of [...resolved.keys()].sort()) {
+  for (const name of [...resolved.keys()].sort(compareCodePoints)) {
     if (name === HEAD_REF) continue
     const oid = resolved.get(name)
     if (oid === undefined) continue

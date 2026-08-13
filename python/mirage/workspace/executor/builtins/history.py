@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.resource.history import HISTORY_PREFIX
 from mirage.workspace.session.session import Session
@@ -29,14 +30,14 @@ def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
 
 
 def _parse_args(
-        args: list[str]) -> tuple[dict[str, object], list[str], str | None]:
+        args: list[str]) -> tuple[dict[str, FlagValue], list[str], str | None]:
     """Parse history builtin args the way bash getopt does.
 
     Args:
         args (list[str]): Raw tokens after the command name.
 
     Returns:
-        tuple[dict[str, object], list[str], str | None]: Flags dict,
+        tuple[dict[str, JsonValue], list[str], str | None]: Flags dict,
         operand texts, and an error message (None when parsing
         succeeded). Any dash-leading token is option-parsed, digits
         included (`history -1` is an invalid option in bash); `--` or
@@ -45,7 +46,7 @@ def _parse_args(
         the offset when attached (`-d3`, and `-dc` deletes entry "c"),
         otherwise the next token.
     """
-    flags: dict[str, object] = {}
+    flags: dict[str, FlagValue] = {}
     texts: list[str] = []
     options_done = False
     i = 0

@@ -28,3 +28,27 @@ class EvalError(Exception):
     def __init__(self, message: str, syntax: bool = False) -> None:
         super().__init__(message)
         self.syntax = syntax
+
+
+class CrossMountError(Exception):
+    """A rename whose two ends do not live on the same mount.
+
+    The dispatcher picks the mount from the source and addresses the
+    destination against that same backend, so applying one would drop
+    the source and write the target into the wrong store.
+
+    Deliberately carries no errno. The condition is decided once, in
+    `RuntimeVFS.rename`, and each encoder maps it to the number its own
+    reference implementation answers: pathlib says EXDEV, while a WASI
+    guest sees ENOENT because each mount is its own preopen. Unifying
+    those two is a separate decision from writing the rule down once.
+
+    Args:
+        src (str): the rename source, in virtual path space.
+        dst (str): the rename destination, in virtual path space.
+    """
+
+    def __init__(self, src: str, dst: str) -> None:
+        super().__init__(f"cross-mount rename: {src} -> {dst}")
+        self.src = src
+        self.dst = dst

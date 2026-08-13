@@ -81,7 +81,6 @@ def test_record_with_virtual_prefix():
     push_mount_prefix("")
     scope.close()
     assert records[0].path == "/s3/data/file.json"
-    assert records[0].mount_prefix == "/s3"
 
 
 def test_record_without_prefix():
@@ -90,7 +89,6 @@ def test_record_without_prefix():
     record("read", "/data/file.json", "s3", 100, 0)
     scope.close()
     assert records[0].path == "/data/file.json"
-    assert records[0].mount_prefix == ""
 
 
 def test_record_prefix_already_applied():

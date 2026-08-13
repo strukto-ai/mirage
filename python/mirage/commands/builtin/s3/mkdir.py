@@ -14,29 +14,23 @@
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.provision import \
-    write_metadata_provision
 from mirage.commands.builtin.s3.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.s3.mkdir import mkdir as mkdir_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("mkdir",
-         resource="s3",
-         spec=SPECS["mkdir"],
-         write=True,
-         provision=write_metadata_provision)
+@command("mkdir", resource="s3", spec=SPECS["mkdir"], write=True)
 async def mkdir(
     accessor: S3Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["mkdir"])
     parents = fl.as_bool("parents")

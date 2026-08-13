@@ -32,6 +32,18 @@ export interface FileCache {
   // entries went stale, only which mount's keyspace did. Stores that own
   // their keyspace remotely push the filter down rather than enumerating.
   evictPrefix(prefix: string): Promise<void>
+  /**
+   * Drop the given keys, synchronously.
+   *
+   * The load-time counterpart to {@link FileCache.remove}: `fromState`
+   * is sync, so it cannot await a per-path removal — and a fire-and-
+   * forget `void remove(...)` would let a read issued right after load
+   * be served the very snapshot bytes the caller asked to bypass (and
+   * would surface a rejection as an unhandled one). Stores whose state
+   * cannot be mutated synchronously (redis) implement this as a
+   * documented no-op. Mirrors Python `FileCacheMixin.evict_paths`.
+   */
+  evictPaths(paths: Iterable<string>): void
   exists(key: string | PathSpec): Promise<boolean>
   isFresh(key: string, remoteFingerprint: string): Promise<boolean>
   clear(): Promise<void>

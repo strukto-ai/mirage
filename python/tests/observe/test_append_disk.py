@@ -15,25 +15,15 @@
 import asyncio
 from pathlib import Path
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
 from mirage.resource.disk import DiskResource
-from mirage.types import MountMode
 
 
 def _make_ops(tmp_path: Path) -> tuple[Ops, DiskResource]:
     disk = DiskResource(root=tmp_path)
-    mount = OpsMount(
-        prefix="/disk/",
-        resource_type="disk",
-        accessor=disk.accessor,
-        index=RAMIndexCacheStore(),
-        mode=MountMode.WRITE,
-        ops=disk.ops_list(),
-    )
-    ops = Ops(mounts=[mount])
-    return ops, disk
+    ws = Workspace({"/disk/": disk}, mode=MountMode.WRITE)
+    return ws.ops, disk
 
 
 def test_append_creates_file(tmp_path):

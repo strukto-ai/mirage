@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -181,6 +181,49 @@ async def test_apply_mtime_filter_drops_entries_with_no_modified_time():
         return FileStat(name="a.txt",
                         size=1,
                         modified=None,
+                        type=FileType.TEXT)
+
+    out = await apply_mtime_filter(
+        ["/a.txt"],
+        mtime_min=1.0,
+        mtime_max=None,
+        stat=stat,
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_apply_mtime_filter_honours_a_reported_utc_offset():
+    """A backend that reports +09:00 means +09:00, not UTC.
+
+    Stamping UTC over the offset moved the entry nine hours, which is
+    enough to push it out of a window it belongs in.
+    """
+    moment = datetime(2025, 6, 1, 12, 0, tzinfo=timezone(timedelta(hours=9)))
+
+    async def stat(_spec: PathSpec) -> FileStat:
+        return FileStat(name="a.txt",
+                        size=1,
+                        modified=moment.isoformat(),
+                        type=FileType.TEXT)
+
+    out = await apply_mtime_filter(
+        ["/a.txt"],
+        mtime_min=moment.timestamp() - 60,
+        mtime_max=moment.timestamp() + 60,
+        stat=stat,
+    )
+    assert out == ["/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_apply_mtime_filter_drops_a_malformed_timestamp():
+    """An unparseable stamp drops the entry instead of raising out of find."""
+
+    async def stat(_spec: PathSpec) -> FileStat:
+        return FileStat(name="a.txt",
+                        size=1,
+                        modified="not-a-date",
                         type=FileType.TEXT)
 
     out = await apply_mtime_filter(

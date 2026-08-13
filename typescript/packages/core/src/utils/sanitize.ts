@@ -16,6 +16,40 @@
 const UNSAFE_CHARS = /[^\p{L}\p{N}_\s\-.]/gu
 const MULTI_UNDERSCORE = /_+/g
 const MAX_LEN = 100
+// POSIX NAME_MAX on ext4 and APFS alike, and it counts BYTES. Truncating by
+// characters is the same number only for ASCII: a 100-character CJK title is
+// 300 bytes.
+export const NAME_MAX_BYTES = 255
+
+const UTF8 = new TextEncoder()
+const UTF8_DECODER = new TextDecoder('utf-8')
+
+/**
+ * Trim a string to fit a byte budget without splitting a character.
+ *
+ * Returns `text` unchanged when it already fits, else the longest prefix
+ * whose UTF-8 encoding is at most `budget` bytes.
+ */
+export function truncateBytes(text: string, budget: number): string {
+  if (budget <= 0) return ''
+  const raw = UTF8.encode(text)
+  if (raw.length <= budget) return text
+  // Cut on a character boundary by walking back over continuation bytes
+  // (0b10xxxxxx), so the slice never ends mid-sequence and the decoder has
+  // nothing to replace. Decoding first and stripping U+FFFD afterwards
+  // needs an anchored `+` quantifier, which backtracks polynomially on an
+  // input the calendar controls.
+  let end = budget
+  while (end > 0 && ((raw[end] ?? 0) & 0xc0) === 0x80) end -= 1
+  return UTF8_DECODER.decode(raw.slice(0, end))
+}
+
+/** Trim trailing underscores, linearly. python's `str.rstrip("_")`. */
+export function stripTrailingUnderscores(value: string): string {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '_') end -= 1
+  return value.slice(0, end)
+}
 
 export function stripUnderscores(value: string): string {
   let start = 0

@@ -17,7 +17,7 @@ import type { FileCache } from '../cache/file/mixin.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import type { Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, PathSpec } from '../types.ts'
-import { enoent } from '../utils/errors.ts'
+import { enoent, isEnoent } from '../utils/errors.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { MountEntry } from './mount/mount.ts'
@@ -31,10 +31,6 @@ enum Verdict {
   STALE = 'stale',
   GONE = 'gone',
   UNKNOWN = 'unknown',
-}
-
-function isEnoent(err: unknown): boolean {
-  return (err as { code?: unknown }).code === 'ENOENT'
 }
 
 /**

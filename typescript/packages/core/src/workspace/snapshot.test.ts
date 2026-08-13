@@ -279,7 +279,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(def.env.FOO).toBe('bar')
     const w2 = ws2.sessionManager.get('worker')
     expect(w2.cwd).toBe('/data')
-    expect(w2.env).toEqual({ ROLE: 'bg' })
+    expect(w2.env).toEqual({ ROLE: 'bg', PWD: '/data' })
     const jobs2 = ws2.jobTable.listJobs()
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')

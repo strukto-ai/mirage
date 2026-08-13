@@ -1,7 +1,10 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.spec.types import CommandName
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -193,3 +196,54 @@ async def join_cmd(
 
 
 __all__ = ["join_cmd"]
+
+
+@dataclass(frozen=True, slots=True)
+class JoinFlags:
+    field1: int = 0
+    field2: int = 0
+    separator: str | None = None
+    also_unpairable: str | None = None
+    only_unpairable: str | None = None
+    empty_value: str | None = None
+    output_format: str | None = None
+    ignore_case: bool = False
+    zero_terminated: bool = False
+    check_order: bool = False
+    header: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> JoinFlags:
+    fl = FlagView(flags, spec=SPECS["join"])
+    j = fl.as_str("j")
+    return JoinFlags(
+        field1=int(j or fl.as_str("args_1") or "1") - 1,
+        field2=int(j or fl.as_str("2") or "1") - 1,
+        separator=fl.as_str("t"),
+        also_unpairable=fl.as_str("a"),
+        only_unpairable=fl.as_str("v"),
+        empty_value=fl.as_str("e"),
+        output_format=fl.as_str("o"),
+        ignore_case=fl.as_bool("ignore_case"),
+        zero_terminated=fl.as_bool("zero_terminated"),
+        check_order=fl.as_bool("check_order")
+        and not fl.as_bool("nocheck_order"),
+        header=fl.as_bool("header"),
+    )
+
+
+async def join_generic(paths, texts, opts: CommandOpts, read_bytes):
+    parsed = parse_flags(opts.flags)
+    return await join_cmd(paths,
+                          read_bytes=read_bytes,
+                          field1=parsed.field1,
+                          field2=parsed.field2,
+                          separator=parsed.separator,
+                          also_unpairable=parsed.also_unpairable,
+                          only_unpairable=parsed.only_unpairable,
+                          empty_value=parsed.empty_value,
+                          output_format=parsed.output_format,
+                          ignore_case=parsed.ignore_case,
+                          zero_terminated=parsed.zero_terminated,
+                          check_order=parsed.check_order,
+                          header=parsed.header)

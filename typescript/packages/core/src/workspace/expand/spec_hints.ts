@@ -49,3 +49,18 @@ export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (Valu
   }
   return kinds
 }
+
+// Per-position base directories for a spec that declares one. tar's -C
+// is a chdir for the operands typed after it, so those words are not
+// relative to the session cwd at all. The parser already walks the line
+// positionally, so it is what says where each word stood; this asks it,
+// and only for the one command family that can answer (null everywhere
+// else, so 92 of 93 specs pay nothing).
+export function specWordBases(
+  spec: CommandSpec,
+  argv: readonly string[],
+  cwd: string,
+): (string | null)[] | null {
+  if (spec.operandBase === null) return null
+  return [...parseCommand(spec, [...argv], cwd).wordBases]
+}

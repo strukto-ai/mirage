@@ -13,14 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import os
 import stat
+import time
 
 import pytest
 import pytest_asyncio
 
 from mirage.fuse.core import MountCore
+from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.stat_view import mtime_ns
 from mirage.workspace import Workspace
 
 
@@ -132,3 +136,119 @@ async def test_resolve_honors_root_prefix():
     core = MountCore(ws.ops, root_prefix="/data/")
     assert core.resolve("/") == "/data"
     assert core.resolve("/x.txt") == "/data/x.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_across_mounts_reports_exdev():
+    # A whole-workspace mount spans several backends; the kernel probes
+    # rename first and falls back to copy+unlink only on EXDEV, so the
+    # facade's refusal is what keeps `mv` between two backends working.
+    ws = Workspace({
+        "/data/": RAMResource(),
+        "/other/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    core = MountCore(ws.ops)
+    core.write("/data/x.txt", b"body", 0, None)
+    with pytest.raises(OSError) as exc:
+        core.rename("/data/x.txt", "/other/x.txt")
+    assert exc.value.errno == errno.EXDEV
+    assert core.read("/data/x.txt", 100, 0, None) == b"body"
+
+
+@op("read", resource="ram", filetype=".tally")
+async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
+    return b"RENDERED-AND-MUCH-LONGER"
+
+
+def _tally_core() -> MountCore:
+    resource = RAMResource()
+    resource.register_op(_read_tally)
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    return MountCore(ws.ops)
+
+
+@pytest.mark.asyncio
+async def test_partial_write_merges_against_stored_bytes():
+    # Read-modify-write hands its merged buffer to `write`, which
+    # stores, so the read that feeds it has to be the stored bytes. A
+    # mount that renders this extension would otherwise have the
+    # rendering written over the file on any partial write.
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    core.write("/data/books.tally", b"XY", 4, None)
+    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    assert stored == b"0123XY6789"
+
+
+@pytest.mark.asyncio
+async def test_read_still_renders_after_a_partial_write():
+    # The other half of the same rule: only the write path reads raw.
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    core.write("/data/books.tally", b"XY", 4, None)
+    body = core.read("/data/books.tally", 100, 0, None)
+    assert body == b"RENDERED-AND-MUCH-LONGER"
+
+
+@pytest.mark.asyncio
+async def test_buffered_write_flush_merges_against_stored_bytes():
+    core = _tally_core()
+    core.write("/data/books.tally", b"0123456789", 0, None)
+    fh = core.open("/data/books.tally")
+    core.write("/data/books.tally", b"XY", 4, fh)
+    core.release(fh)
+    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    assert stored == b"0123XY6789"
+
+
+@pytest.fixture
+def new_york_clock():
+    # Mirrors tests/utils/test_stat_view.py: a non-UTC host zone makes a
+    # local-time parse of an offset-less stamp visibly wrong.
+    if not hasattr(time, "tzset"):
+        pytest.skip("tzset unavailable on this platform")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"
+    time.tzset()
+    yield
+    if previous is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = previous
+    time.tzset()
+
+
+@pytest.mark.asyncio
+async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
+        seeded, new_york_clock):
+    # The R6 acceptance pin: the FUSE translator answers the same epoch
+    # as mirage.utils.stat_view for an offset-less stamp. Only a
+    # backend can produce one (the touch overlay always emits Z), so
+    # this is latent until a backend like nextcloud reports naive
+    # stamps; the pin is what keeps it latent.
+    naive = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05")
+    aware = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="2026-01-02T03:04:05+00:00")
+    entry = {"st_mode": 0o100644, "st_mtime": 0, "st_ctime": 0}
+    got_naive = seeded._apply_stat_attrs(dict(entry), naive)
+    got_aware = seeded._apply_stat_attrs(dict(entry), aware)
+    assert got_naive["st_mtime"] == got_aware["st_mtime"]
+    assert got_naive["st_mtime"] == mtime_ns(naive)
+
+
+@pytest.mark.asyncio
+async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
+    # 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
+    # fold keys on None, so epoch zero overwrites the construction-time
+    # default instead of leaving it in place.
+    epoch = FileStat(name="f",
+                     type=FileType.TEXT,
+                     modified="1970-01-01T00:00:00Z")
+    entry = {"st_mode": 0o100644, "st_mtime": 12345, "st_ctime": 12345}
+    got = seeded._apply_stat_attrs(dict(entry), epoch)
+    assert got["st_mtime"] == 0
+    assert got["st_ctime"] == 0

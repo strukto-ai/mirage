@@ -19,6 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { CommandSpec, Option } from '../../spec/types.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,10 +36,11 @@ async function trelloCardMoveCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const cardId = opts.flags.card_id
-  if (typeof cardId !== 'string' || cardId === '') throw new Error('--card_id is required')
-  const listId = opts.flags.list_id
-  if (typeof listId !== 'string' || listId === '') throw new Error('--list_id is required')
+  const fl = new FlagView(opts.flags, SPEC)
+  const cardId = fl.asStr('card_id')
+  if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
+  const listId = fl.asStr('list_id')
+  if (listId === undefined || listId === '') throw new Error('--list_id is required')
   const card = await cardMove(accessor.transport, cardId, listId)
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]
 }

@@ -18,6 +18,7 @@ import {
   type LanceDriver,
   type LanceRow,
   type LanceDBConfigResolved,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 
 function toStr(value: unknown): string {
@@ -76,7 +77,7 @@ export class LanceDBStore implements LanceDriver {
   async listTables(): Promise<string[]> {
     const db = await this.connection()
     const names = await db.tableNames()
-    return [...names].sort()
+    return [...names].sort(compareCodePoints)
   }
 
   async distinct(
@@ -94,7 +95,7 @@ export class LanceDBStore implements LanceDriver {
       const v = row[column]
       if (v !== null && v !== undefined) values.add(toStr(v))
     }
-    return [...values].sort()
+    return [...values].sort(compareCodePoints)
   }
 
   async tableColumns(table: string): Promise<string[]> {

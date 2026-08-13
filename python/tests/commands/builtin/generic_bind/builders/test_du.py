@@ -17,6 +17,8 @@ import pytest
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.errors import UsageError
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -118,9 +120,14 @@ async def test_no_operand_walks_the_working_directory():
 
 @pytest.mark.asyncio
 async def test_d_is_an_alias_for_max_depth():
-    by_short, _, _ = await _run(_ops(), "/db", d="0")
-    by_long, _, _ = await _run(_ops(), "/db", max_depth="0")
-    assert by_short == by_long == "5\t/db\n"
+    # The alias is the parser's: both spellings compile onto the one
+    # canonical dest, so the builder never sees a separate `d`.
+    short = parse_to_kwargs(parse_command(SPECS["du"], ["-d", "0"], cwd="/"))
+    long = parse_to_kwargs(
+        parse_command(SPECS["du"], ["--max-depth", "0"], cwd="/"))
+    assert short == long == {"max_depth": "0"}
+    out, _, _ = await _run(_ops(), "/db", **short)
+    assert out == "5\t/db\n"
 
 
 @pytest.mark.asyncio

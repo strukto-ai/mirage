@@ -64,8 +64,9 @@ export class LanceDBResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     await this.store.close()
+    await super.close()
   }
 
   ops(): readonly RegisteredOp[] {

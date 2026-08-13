@@ -25,6 +25,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 /** A description, or man's placeholder when the spec carries none. */
 function described(text: string | null | undefined): string {
@@ -94,7 +95,7 @@ function renderManEntry(name: string, hits: ManHit[]): string {
     seen.add(key)
     rows.push(filetype !== null ? `- ${kind} (filetype: ${filetype})` : `- ${kind}`)
   }
-  rows.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+  rows.sort((a, b) => compareCodePoints(a, b))
   if (hasGeneral) lines.push('- general')
   for (const r of rows) lines.push(r)
   return lines.join('\n') + '\n'
@@ -111,12 +112,14 @@ function renderManEntry(name: string, hits: ManHit[]): string {
 function renderCliEntry(head: string, verbs: readonly string[], spec: CLISpec): string | null {
   const found = findNode(spec, verbs)
   if (found === null) return null
-  return nodeHelp([head, ...found.path].join(' '), found.node)
+  // The root's dialect, so a manual page reads exactly like the --help it
+  // renders from.
+  return nodeHelp([head, ...found.path].join(' '), found.node, spec.usageStyle)
 }
 
 /** The installed-CLI section of the bare `man` listing. */
 function renderCliIndex(registry: MountRegistry): string[] {
-  const installs = [...registry.clis.items().entries()].sort(([a], [b]) => (a < b ? -1 : 1))
+  const installs = [...registry.clis.items().entries()].sort(([a], [b]) => compareCodePoints(a, b))
   if (installs.length === 0) return []
   const lines = ['# clis', '']
   for (const [name, install] of installs) {
@@ -136,7 +139,7 @@ function renderManIndex(session: Session, registry: MountRegistry): string {
   const cwdKind =
     cwdMount !== null && cwdMount.prefix !== DEV_PREFIX ? cwdMount.resource.kind : null
 
-  const kinds = [...byKind.keys()].sort()
+  const kinds = [...byKind.keys()].sort(compareCodePoints)
   const ordered: string[] = []
   if (cwdKind !== null && byKind.has(cwdKind)) ordered.push(cwdKind)
   for (const k of kinds) {
@@ -154,7 +157,7 @@ function renderManIndex(session: Session, registry: MountRegistry): string {
     const resourceCmds = allCmds
       .filter((c) => !m.isGeneralCommand(c.name))
       .slice()
-      .sort((a, b) => (a.name < b.name ? -1 : 1))
+      .sort((a, b) => compareCodePoints(a.name, b.name))
     for (const cmd of resourceCmds) {
       lines.push(`- ${cmd.name} — ${described(cmd.spec.description)}`)
     }
@@ -167,7 +170,9 @@ function renderManIndex(session: Session, registry: MountRegistry): string {
   }
   lines.push(...renderCliIndex(registry))
   lines.push('# general', '')
-  for (const [name, cmd] of [...generalSeen.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
+  for (const [name, cmd] of [...generalSeen.entries()].sort(([a], [b]) =>
+    compareCodePoints(a, b),
+  )) {
     lines.push(`- ${name} — ${described(cmd.spec.description)}`)
   }
   return lines.join('\n') + '\n'

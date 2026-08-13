@@ -1,0 +1,145 @@
+{
+  "note": "GNU coreutils 9.7 pins for `tail -c`'s sign grammar, docker debian:stable-slim. `-c -N` counts back from the end exactly like `-c N`; `-c +N` counts forward from byte N, 1-indexed, so `+1` is the whole file and a `+N` past the end is empty.",
+  "cases": [
+    {
+      "id": "tail_c_negative_is_last_n",
+      "seq": 960000,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c -3 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "az\n",
+        "stderr": ""
+      },
+      "flags": ["c"]
+    },
+    {
+      "id": "tail_c_plus_counts_from_the_start",
+      "seq": 960001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c +3 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "llo\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": ["c"]
+    },
+    {
+      "id": "tail_c_plus_one_is_the_whole_file",
+      "seq": 960002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c +1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      },
+      "flags": ["c"]
+    },
+    {
+      "id": "tail_c_plus_past_the_end_is_empty",
+      "seq": 960003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c +99 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": ["c"]
+    }
+  ]
+}

@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
+from mirage.commands.spec.types import FlagValue
 from mirage.context import effective_mount_mode
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
@@ -30,7 +31,8 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
-from mirage.ops.types import LinkView, StatOverlay, StatPath
+from mirage.ops.types import (ChildMounts, LinkView, MountView, ReaddirPath,
+                              StatOverlay, StatPath)
 from mirage.policy import resolve_limit
 from mirage.resource.base import BaseResource
 from mirage.runtime.base import Runtime
@@ -432,7 +434,7 @@ class MountEntry:
         cmd_name: str,
         paths: list[PathSpec],
         texts: list[str],
-        flag_kwargs: dict[str, object],
+        flag_kwargs: dict[str, FlagValue],
         *,
         stdin: ByteSource | None = None,
         cwd: str = "/",
@@ -445,6 +447,9 @@ class MountEntry:
         stat_overlay: StatOverlay | None = None,
         links: LinkView | None = None,
         stat_path: StatPath | None = None,
+        readdir_path: ReaddirPath | None = None,
+        child_mounts: ChildMounts | None = None,
+        mounts: MountView | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -464,7 +469,16 @@ class MountEntry:
             links (LinkView | None): the namespace's symlink facts.
             stat_path (StatPath | None): dispatcher-backed stat of one
                 path, for a traversal command's start point.
-                All three reach only the handlers that name them as a
+            readdir_path (ReaddirPath | None): dispatcher-backed readdir
+                of one path, for a walker that has to read past a mount
+                boundary (tree).
+            child_mounts (ChildMounts | None): child names the
+                namespace owes a directory (mounts and links), for
+                listing commands.
+            mounts (MountView | None): where the mount boundaries are,
+                for a walker whose output cannot be fanned out and
+                concatenated (tar, zip).
+                All six reach only the handlers that name them as a
                 parameter, so no list of command names is kept here.
         """
         extension = get_extension(paths[0].virtual) if paths else None
@@ -500,11 +514,12 @@ class MountEntry:
                                                 v.virtual, mount_prefix))
             elif isinstance(v, list) and v and all(
                     isinstance(item, PathSpec) for item in v):
+                specs = [item for item in v if isinstance(item, PathSpec)]
                 kw[k] = [
                     dataclasses.replace(item,
                                         resource_path=mount_key(
                                             item.virtual, mount_prefix))
-                    for item in v
+                    for item in specs
                 ]
             else:
                 kw[k] = v
@@ -531,6 +546,9 @@ class MountEntry:
             "stat_overlay": stat_overlay,
             "links": links,
             "stat_path": stat_path,
+            "readdir_path": readdir_path,
+            "child_mounts": child_mounts,
+            "mounts": mounts,
         }
         offered = {k: v for k, v in offered.items() if v is not None}
         if runtime is not None:
@@ -609,11 +627,20 @@ class MountEntry:
         Tries filetype-specific first, then resource-specific.
         First non-None result wins.
 
+        A caller may override the filetype by passing one, and passing
+        None asks for the by-resource op even where a filetype-scoped
+        one is registered. That is what a read-modify-write needs: it
+        hands whatever it read straight back to ``write``, which always
+        stores, so reading a rendered form would store the rendering
+        over the file. TypeScript spells the same override
+        ``readFile(path, {raw: true})``.
+
         Args:
             op_name (str): operation name (e.g. "read", "stat").
             path (str): virtual path.
         """
-        filetype = get_extension(path)
+        filetype = (kwargs.pop("filetype")
+                    if "filetype" in kwargs else get_extension(path))
         levels = self._resolve_cascade(op_name, filetype, self._ops,
                                        self._general_ops)
         if not levels:

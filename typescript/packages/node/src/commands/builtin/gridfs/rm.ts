@@ -14,6 +14,7 @@
 
 import {
   FileType,
+  FlagView,
   IOResult,
   ResourceName,
   command,
@@ -22,7 +23,6 @@ import {
   removalLines,
   resolveGlobOf,
   specOf,
-  writeMetadataProvision,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
@@ -103,10 +103,11 @@ async function rmCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('rm: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const recursive = opts.flags.r === true || opts.flags.R === true
-  const force = opts.flags.f === true
-  const removeDir = opts.flags.d === true
-  const verbose = opts.flags.v === true
+  const fl = new FlagView(opts.flags, specOf('rm'))
+  const recursive = fl.asBool('r') || fl.asBool('R')
+  const force = fl.asBool('f')
+  const removeDir = fl.asBool('d')
+  const verbose = fl.asBool('v')
   const verboseParts: string[] = []
   const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}
@@ -143,5 +144,4 @@ export const GRIDFS_RM = command({
   spec: specOf('rm'),
   fn: rmCommand,
   write: true,
-  provision: writeMetadataProvision,
 })

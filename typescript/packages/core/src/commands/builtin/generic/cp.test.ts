@@ -35,6 +35,8 @@ import {
   targetDirError,
   type CpFlags,
 } from './cp.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const DEC = new TextDecoder()
 
@@ -755,34 +757,45 @@ describe('cpGeneric -t/-T', () => {
   })
 })
 
+// Flag bags reach parseCpFlags through a spec-bound view, the way the
+// builder and the crossmount relay build it.
+function view(bag: Record<string, FlagValue>): FlagView {
+  return new FlagView(bag, specOf('cp'))
+}
+
 describe('parseCpFlags', () => {
   it('rejects conflicting and invalid combinations', () => {
-    expect(() => parseCpFlags({ backup: true, no_clobber: true })).toThrow(
+    expect(() => parseCpFlags(view({ backup: true, no_clobber: true }))).toThrow(
       'cp: --backup is mutually exclusive with -n or --update=none-fail',
     )
-    expect(() => parseCpFlags({ backup: true, update: 'none-fail' })).toThrow('mutually exclusive')
-    expect(() => parseCpFlags({ target_directory: '/d', no_target_directory: true })).toThrow(
+    expect(() => parseCpFlags(view({ backup: true, update: 'none-fail' }))).toThrow(
+      'mutually exclusive',
+    )
+    expect(() => parseCpFlags(view({ target_directory: '/d', no_target_directory: true }))).toThrow(
       'cannot combine --target-directory (-t) and --no-target-directory (-T)',
     )
-    expect(() => parseCpFlags({ update: 'bogus' })).toThrow(
+    expect(() => parseCpFlags(view({ update: 'bogus' }))).toThrow(
       "invalid argument 'bogus' for '--update'",
     )
-    expect(() => parseCpFlags({ backup: 'bogus' })).toThrow(
+    expect(() => parseCpFlags(view({ backup: 'bogus' }))).toThrow(
       "invalid argument 'bogus' for 'backup type'",
     )
   })
 
   it('resolves the GNU update and backup grammars', () => {
-    expect(parseCpFlags({ update: true }).update).toBe('older')
-    expect(parseCpFlags({ update: true }).update).toBe('older')
-    expect(parseCpFlags({ update: 'all' }).update).toBe('all')
-    expect(parseCpFlags({}).update).toBeNull()
-    const parsed = parseCpFlags({ suffix: '.bak' })
+    expect(parseCpFlags(view({ update: true })).update).toBe('older')
+    expect(parseCpFlags(view({ update: true })).update).toBe('older')
+    expect(parseCpFlags(view({ update: 'all' })).update).toBe('all')
+    expect(parseCpFlags(view({})).update).toBeNull()
+    const parsed = parseCpFlags(view({ suffix: '.bak' }))
     expect(parsed.backup).toBe('existing')
     expect(parsed.suffix).toBe('.bak')
-    expect(parseCpFlags({ backup: 't' }).backup).toBe('numbered')
-    expect(parseCpFlags({ backup: 'nil' }).backup).toBe('existing')
-    expect(parseCpFlags({ archive: true }).recursive).toBe(true)
+    // GNU 9.7: `cp --backup --suffix= f g` writes g~, so an empty suffix
+    // reads as absent rather than naming the original as its own backup.
+    expect(parseCpFlags(view({ backup: true, suffix: '' })).suffix).toBe('~')
+    expect(parseCpFlags(view({ backup: 't' })).backup).toBe('numbered')
+    expect(parseCpFlags(view({ backup: 'nil' })).backup).toBe('existing')
+    expect(parseCpFlags(view({ archive: true })).recursive).toBe(true)
   })
 })
 

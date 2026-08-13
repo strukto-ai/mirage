@@ -123,7 +123,11 @@ export class MCPNotionTransport implements NotionTransport {
 }
 
 const DEFAULT_API_BASE_URL = 'https://api.notion.com/v1'
-const API_VERSION = '2022-06-28'
+// 2025-09-03 is the generation that split databases into data sources: a
+// database became a container of data sources and the column schema moved to
+// the data source, so `/databases/{id}` no longer answers with `properties`
+// and `/search` rejects `filter.value = "database"`.
+const API_VERSION = '2025-09-03'
 
 export class NotionAPIError extends Error {
   constructor(
@@ -139,13 +143,30 @@ export class NotionAPIError extends Error {
 export interface HttpNotionTransportOptions {
   apiKey: string
   baseUrl?: string
+  /**
+   * Absent means the generation the client is written against. A CLI verb
+   * overrides it per line from --notion-version, so the override travels with
+   * the transport the call sites already hold rather than as a second argument
+   * every one of them would have to thread.
+   */
+  apiVersion?: string
 }
 
-interface RestCall {
-  method: 'GET' | 'POST' | 'PATCH'
+export interface RestCall {
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   path: string
   query?: Record<string, unknown>
-  body?: Record<string, unknown>
+  /**
+   * Any JSON value, not only an object: `ntn api` sends whatever `--data`
+   * or the pipe carried, verbatim, with no client-side object check.
+   */
+  body?: unknown
+  /**
+   * Per-request headers, which `ntn api` collects from its `Header:Value`
+   * inputs. Applied last so a caller can override a default, which is what the
+   * real CLI does (probed on the wire against ntn 0.21.9).
+   */
+  headers?: Record<string, string>
 }
 
 function restCallFor(name: string, args: Record<string, unknown>): RestCall {
@@ -167,9 +188,13 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
     const { database_id, ...rest } = args
     return { method: 'GET', path: `/databases/${String(database_id)}`, query: rest }
   }
-  if (name === 'API-post-database-query') {
-    const { database_id, ...rest } = args
-    return { method: 'POST', path: `/databases/${String(database_id)}/query`, body: rest }
+  if (name === 'API-retrieve-a-data-source') {
+    const { data_source_id, ...rest } = args
+    return { method: 'GET', path: `/data_sources/${String(data_source_id)}`, query: rest }
+  }
+  if (name === 'API-post-data-source-query') {
+    const { data_source_id, ...rest } = args
+    return { method: 'POST', path: `/data_sources/${String(data_source_id)}/query`, body: rest }
   }
   if (name === 'API-patch-block-children') {
     const { block_id, ...rest } = args
@@ -185,6 +210,14 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
   if (name === 'API-get-self') {
     return { method: 'GET', path: '/users/me' }
   }
+  if (name === 'API-retrieve-page-markdown') {
+    const { page_id, ...rest } = args
+    return { method: 'GET', path: `/pages/${String(page_id)}/markdown`, query: rest }
+  }
+  if (name === 'API-patch-page-markdown') {
+    const { page_id, ...rest } = args
+    return { method: 'PATCH', path: `/pages/${String(page_id)}/markdown`, body: rest }
+  }
   throw new NotionAPIError(`unsupported Notion tool: ${name}`)
 }
 
@@ -192,14 +225,18 @@ export class HttpNotionTransport implements NotionTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
   private readonly apiKey: string
   private readonly baseUrl: string
+  private readonly apiVersion: string
 
   constructor(opts: HttpNotionTransportOptions) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? DEFAULT_API_BASE_URL
+    this.apiVersion = opts.apiVersion ?? API_VERSION
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const call = restCallFor(name, args)
+  // The one place a request is actually made. `ntn api` is a typed path
+  // through the same door rather than a second client, so a header or an
+  // error shape can never differ between a named verb and a raw call.
+  async request(call: RestCall): Promise<Record<string, unknown>> {
     const url = new URL(`${this.baseUrl}${call.path}`)
     for (const [key, value] of Object.entries(call.query ?? {})) {
       if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -210,11 +247,16 @@ export class HttpNotionTransport implements NotionTransport {
       method: call.method,
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
-        'Notion-Version': API_VERSION,
+        'Notion-Version': this.apiVersion,
         'Content-Type': 'application/json',
+        ...(call.headers ?? {}),
       },
     }
-    if (call.method !== 'GET') init.body = JSON.stringify(call.body ?? {})
+    // GET and DELETE carry no body: the only route DELETE exists on is
+    // /v1/blocks/{id}, whose whole payload is the id in the path.
+    if (call.method !== 'GET' && call.method !== 'DELETE') {
+      init.body = JSON.stringify(call.body ?? {})
+    }
     const res = await this.fetch(url, init)
     const data = (await res.json()) as Record<string, unknown>
     if (res.status >= 400) {
@@ -226,5 +268,9 @@ export class HttpNotionTransport implements NotionTransport {
       throw new NotionAPIError(message, res.status, code)
     }
     return data
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request(restCallFor(name, args))
   }
 }

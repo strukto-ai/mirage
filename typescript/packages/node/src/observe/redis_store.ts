@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedisClientType } from 'redis'
-import type { ObserverStore } from '@struktoai/mirage-core'
+import { compareCodePoints, ObserverStoreBase } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
 
 export interface RedisObserverStoreOptions {
@@ -28,13 +28,14 @@ export interface RedisObserverStoreOptions {
  * file keys exist so readAll needs no SCAN. Mirrors the Python
  * RedisObserverStore.
  */
-export class RedisObserverStore implements ObserverStore {
+export class RedisObserverStore extends ObserverStoreBase {
   readonly url: string
   private readonly prefix: string
   private readonly indexKey: string
   private clientPromise: Promise<RedisClientType> | null = null
 
   constructor(options: RedisObserverStoreOptions = {}) {
+    super()
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.prefix = options.keyPrefix ?? 'mirage:observer:'
     this.indexKey = `${this.prefix}keys`
@@ -71,10 +72,6 @@ export class RedisObserverStore implements ObserverStore {
     await c.multi().set(`${this.prefix}${key}`, buf).sAdd(this.indexKey, key).exec()
   }
 
-  readAll(): Promise<Map<string, Uint8Array>> {
-    return this.readMatching('')
-  }
-
   async readMatching(suffix: string): Promise<Map<string, Uint8Array>> {
     const paths = (await this.indexedPaths()).filter((p) => p.endsWith(suffix))
     return this.readPaths(paths)
@@ -83,7 +80,7 @@ export class RedisObserverStore implements ObserverStore {
   private async indexedPaths(): Promise<string[]> {
     const c = await this.client()
     const members = await c.sMembers(this.indexKey)
-    return [...members].sort()
+    return [...members].sort(compareCodePoints)
   }
 
   private async readPaths(paths: string[]): Promise<Map<string, Uint8Array>> {
@@ -114,7 +111,7 @@ export class RedisObserverStore implements ObserverStore {
     if (keys.length > 0) await c.del(keys)
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     // Idempotent: the workspace closes the plane store it consumed and the
     // owning WorkspaceStateStore closes every plane it built; the second
     // close must be a no-op, not a crash on an already-quit client.

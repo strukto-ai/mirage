@@ -48,6 +48,11 @@ export interface Mount {
   drive?: string
 }
 
+export interface ServiceEnv {
+  python: string[]
+  typescript: string[]
+}
+
 export interface Target {
   id: string
   hosts: string[]
@@ -55,6 +60,8 @@ export interface Target {
   epoch?: string
   apps?: string
   mail?: string
+  calendar?: string
+  forms?: string
   dataset?: string
   agentId?: string
   facet?: string
@@ -67,12 +74,19 @@ export interface Target {
   // mapping form ({ '/data': 'read' }) or the list form (['/data'], which
   // inherits the mount's own mode).
   sessions?: Record<string, Record<string, string> | string[]>
+  // Session environment every case on this target runs under. The
+  // conformance runner passes the same map to the real binary, so a CLI
+  // option that reads a variable is compared under one environment.
+  env?: Record<string, string>
 }
 
 export interface Expect {
   exit: number
   stdout: string
   stderr: string
+  // The stat line the case's `check` must produce, asserted alongside stdout
+  // rather than in place of it.
+  check?: string
   elapsed?: { min: number; max: number }
 }
 
@@ -133,6 +147,7 @@ export interface ExecWorkspace {
   cache: { clear(): Promise<void> }
   mounts(): readonly { resource: { index?: { clear(): Promise<void> } } }[]
   createSession(sessionId: string, options: { mounts: Record<string, string> | string[] }): unknown
+  env: Record<string, string>
   close(): Promise<void>
 }
 
@@ -145,6 +160,69 @@ export function loadTargets(root: string): Map<string, Target> {
     targets: Target[]
   }
   return new Map(data.targets.map((t) => [t.id, t]))
+}
+
+/**
+ * The service -> per-host required env vars table.
+ *
+ * An empty list means the host needs nothing because its adapter starts an
+ * in-process fake; the two hosts differ here (python self-hosts s3, ssh, hf,
+ * box, databricks, discord, linear and dify, typescript does not), so the
+ * asymmetry is spelled out per host rather than inferred.
+ */
+export function loadServices(root: string): Map<string, ServiceEnv> {
+  const data = JSON.parse(readFileSync(join(root, 'targets.json'), 'utf8')) as {
+    services: Record<string, ServiceEnv>
+    targets: Target[]
+  }
+  const named = new Set(data.targets.map((t) => t.service).filter((s) => s !== undefined))
+  const declared = new Set(Object.keys(data.services))
+  const undeclared = [...named].filter((s) => !declared.has(s)).sort()
+  if (undeclared.length) {
+    throw new Error(`targets.json: services missing an entry: ${undeclared.join(', ')}`)
+  }
+  const unused = [...declared].filter((s) => !named.has(s)).sort()
+  if (unused.length) {
+    throw new Error(`targets.json: services entry names no target: ${unused.join(', ')}`)
+  }
+  for (const [name, hosts] of Object.entries(data.services)) {
+    if (!Array.isArray(hosts.python) || !Array.isArray(hosts.typescript)) {
+      throw new Error(`targets.json: service '${name}' must declare both 'python' and 'typescript'`)
+    }
+  }
+  return new Map(Object.entries(data.services))
+}
+
+/**
+ * Service names a caller declares it knowingly does not provision.
+ *
+ * Rejects a name that is not a real service so the list cannot rot into a typo
+ * that quietly widens what --strict tolerates.
+ */
+export function parseAllowSkip(services: Map<string, ServiceEnv>, value: string): Set<string> {
+  const names = new Set(
+    value
+      .split(',')
+      .map((n) => n.trim())
+      .filter((n) => n !== ''),
+  )
+  const unknown = [...names].filter((n) => !services.has(n)).sort()
+  if (unknown.length) {
+    throw new Error(`--allow-skip names unknown service(s): ${unknown.join(', ')}`)
+  }
+  return names
+}
+
+/** Env vars this host needs for this target and does not have. */
+export function missingEnv(
+  services: Map<string, ServiceEnv>,
+  target: Target,
+  host: 'python' | 'typescript',
+): string[] {
+  if (target.service === undefined) return []
+  const entry = services.get(target.service)
+  if (entry === undefined) throw new Error(`unknown service: ${target.service}`)
+  return entry[host].filter((v) => !process.env[v])
 }
 
 export function loadCases(root: string): Case[] {
@@ -167,7 +245,35 @@ export function loadCases(root: string): Case[] {
     }
   }
   cases.sort((a, b) => (a.seq ?? 1 << 30) - (b.seq ?? 1 << 30))
+  validateCases(root, cases)
   return cases
+}
+
+/**
+ * Fail loudly on the two ways a case silently stops being tested.
+ *
+ * A duplicate id collides in the parity runner, which keys rows by
+ * (target, id), so one of the pair is dropped from the py/ts diff without a
+ * word. A target id that matches no manifest entry means the case never runs
+ * anywhere, which reads as "passing" everywhere.
+ */
+export function validateCases(root: string, cases: Case[]): void {
+  const known = new Set(loadTargets(root).keys())
+  const seen = new Map<string, string>()
+  const duplicates: string[] = []
+  const unknown: string[] = []
+  for (const c of cases) {
+    const first = seen.get(c.id)
+    if (first !== undefined) duplicates.push(`${c.id} (${first} and ${c._source ?? '?'})`)
+    else seen.set(c.id, c._source ?? '?')
+    for (const t of c.targets) {
+      if (!known.has(t)) unknown.push(`${c.id} -> ${t} (${c._source ?? '?'})`)
+    }
+  }
+  if (duplicates.length) throw new Error(`duplicate case ids: ${duplicates.join('; ')}`)
+  if (unknown.length) {
+    throw new Error(`cases naming an unknown target: ${unknown.join('; ')}`)
+  }
 }
 
 export function walkFiles(base: string): string[] {
@@ -327,10 +433,23 @@ export function bindMount(c: Case, mountPath: string): Case {
   }
 }
 
+/**
+ * Run one case and return what it produced.
+ *
+ * The post-condition a case declares under `check` is returned beside stdout
+ * rather than in place of it, so a case can pin both what the command printed
+ * and what it left behind.
+ */
 export async function runCase(
   ws: ExecWorkspace,
   c: Case,
-): Promise<{ exitCode: number; out: string; err: string; elapsed: number }> {
+): Promise<{
+  exitCode: number
+  out: string
+  err: string
+  elapsed: number
+  checkOut: string | null
+}> {
   if (c.clear_cache === true) {
     // A full clear means the file cache AND every mount's index cache:
     // remote listings live in the per-resource index, and a listing
@@ -347,17 +466,19 @@ export async function runCase(
       out: provisionLine(plan) + '\n',
       err: '',
       elapsed: (performance.now() - start) / 1000,
+      checkOut: null,
     }
   }
   const result = await ws.execute(c.command, { sessionId: c.session })
   const elapsed = (performance.now() - start) / 1000
-  let out = DEC.decode(result.stdout)
-  if (c.check !== undefined) out = await statCheck(ws, c.check)
+  const out = DEC.decode(result.stdout)
+  const checkOut = c.check !== undefined ? await statCheck(ws, c.check) : null
   return {
     exitCode: result.exitCode,
     out,
     err: DEC.decode(result.stderr),
     elapsed,
+    checkOut,
   }
 }
 
@@ -367,6 +488,7 @@ export function compare(
   out: string,
   err: string,
   elapsed: number,
+  checkOut: string | null = null,
 ): string[] {
   const diffs: string[] = []
   if (exitCode !== c.expect.exit) diffs.push(`exit: expected ${c.expect.exit}, got ${exitCode}`)
@@ -374,6 +496,10 @@ export function compare(
     diffs.push(`stdout: expected ${JSON.stringify(c.expect.stdout)}, got ${JSON.stringify(out)}`)
   if (err.replace(/\n+$/, '') !== c.expect.stderr.replace(/\n+$/, ''))
     diffs.push(`stderr: expected ${JSON.stringify(c.expect.stderr)}, got ${JSON.stringify(err)}`)
+  if (c.check !== undefined && checkOut !== c.expect.check)
+    diffs.push(
+      `check: expected ${JSON.stringify(c.expect.check)}, got ${JSON.stringify(checkOut)}`,
+    )
   const bounds = c.expect.elapsed
   if (bounds !== undefined && (elapsed < bounds.min || elapsed > bounds.max))
     diffs.push(

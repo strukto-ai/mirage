@@ -37,6 +37,7 @@ import {
   pollMonitor,
   uploadChunk,
 } from './client.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 const UPLOAD_CHUNK = 10 * 327680
@@ -507,7 +508,7 @@ export async function findItems(
       maxSize: options.maxSize,
     })
   }
-  return results.sort()
+  return results.sort(compareCodePoints)
 }
 
 export async function driveRootEmpty(
@@ -565,7 +566,7 @@ export async function readdirItems(
       }),
     ])
   }
-  names.sort()
+  names.sort(compareCodePoints)
   if (index !== undefined) await index.setDir(virtualKey, entries)
   return names.map((name) => (prefix !== '' ? prefix + name : name))
 }

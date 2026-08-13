@@ -16,6 +16,8 @@ from mirage.commands.builtin.box.grep import grep
 from mirage.commands.builtin.box.io import IO as _IO
 from mirage.commands.builtin.box.rg import rg
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind.provision import \
+    with_default_provisions
 
 _BOX_OVERRIDES = {"grep", "rg"}
 
@@ -25,6 +27,6 @@ COMMANDS = [
         _IO,
         overrides=_BOX_OVERRIDES,
     ),
-    grep,
-    rg,
+    *with_default_provisions([grep, rg], _IO.stat, _IO.resolve_glob,
+                             _IO.readdir),
 ]

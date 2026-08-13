@@ -44,7 +44,7 @@ async def create_workspace(req: CreateWorkspaceRequest,
         # Map runtime entries construct their instances here, so a bad
         # entry (a wasi build dir that does not exist, an unknown
         # option) fails the create like any other config mistake.
-        kwargs = req.config.to_workspace_kwargs()
+        kwargs = await req.config.to_workspace_kwargs()
     except (FileNotFoundError, ImportError, ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     # The registry id and the state-store scope must be the same identity,
@@ -161,7 +161,7 @@ async def load_workspace(req: LoadWorkspaceRequest,
     if req.id is not None and req.id in registry:
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
-    resources = _build_load_resources(req.override)
+    resources = await _build_load_resources(req.override)
     try:
         ws = await Workspace.load(str(safe_path), resources=resources)
     except FileNotFoundError:
@@ -176,7 +176,7 @@ async def load_workspace(req: LoadWorkspaceRequest,
     return await make_detail(entry)
 
 
-def _build_load_resources(
+async def _build_load_resources(
         override: dict[str, Any] | None) -> dict[str, Any] | None:
     if not override or "mounts" not in override:
         return None
@@ -188,5 +188,6 @@ def _build_load_resources(
         config = block.get("config") or {}
         if resource_name is None:
             continue
-        out[norm_mount_prefix(prefix)] = build_resource(resource_name, config)
+        out[norm_mount_prefix(prefix)] = await build_resource(
+            resource_name, config)
     return out or None

@@ -49,6 +49,12 @@
         "has_provision": true,
         "has_write": false
       },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": false
+      },
       "gdocs": {
         "filetypes": [],
         "has_aggregate": false,
@@ -225,6 +231,7 @@
       "disk",
       "dropbox",
       "email",
+      "gcal",
       "gdocs",
       "gdrive",
       "github",
@@ -254,14 +261,7 @@
       "trello"
     ]
   },
-  "description": null,
-  "epilog": null,
-  "ignore_tokens": [],
-  "options": [],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "path"
   }
 }

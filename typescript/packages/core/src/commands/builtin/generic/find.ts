@@ -14,7 +14,8 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
-import { isEnoent, modifiedTs } from '../../../core/generic/find.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
+import { isEnoent } from '../../../utils/errors.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression, parseSize } from '../findParse.ts'
@@ -34,6 +35,7 @@ import {
   type PredNode,
 } from '../findEval.ts'
 import type { LinkView } from '../../../ops/types.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -200,7 +202,11 @@ export async function linkResults(
     if (minSize !== null && size < minSize) continue
     if (maxSize !== null && size > maxSize) continue
     if (mtimeMin !== null || mtimeMax !== null) {
-      const ts = st.modified !== null ? Date.parse(st.modified) / 1000 : null
+      // `modifiedTs` is the helper the rest of this file uses. A bare
+      // Date.parse gives NaN for a date-only or malformed stamp, which the
+      // `=== null` guard below does not catch, so every comparison came out
+      // false and the entry was kept -- where Python drops it.
+      const ts = modifiedTs(st.modified)
       if (ts === null) continue
       if (mtimeMin !== null && ts < mtimeMin) continue
       if (mtimeMax !== null && ts > mtimeMax) continue
@@ -504,7 +510,7 @@ export async function findGeneric(
         fl.asBool('L'),
       ),
     )
-    withLinks.sort()
+    withLinks.sort(compareCodePoints)
     matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
   }
   // Start points print in operand order (GNU); each root's rows were

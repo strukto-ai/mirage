@@ -12,119 +12,59 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const BLOCK_SIZE = 512
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+import { packTar, unpackTar, type TarHeader } from 'modern-tar'
+
+const DIR_MODE = 0o755
+const LINK_MODE = 0o777
+const FILE_MODE = 0o644
 
 export interface TarEntry {
   name: string
   data: Uint8Array
   isFile: boolean
+  // Directories carry no content and a trailing slash; a symlink carries
+  // its target in the header's linkname field instead of any content.
+  isDir?: boolean
+  linkname?: string
 }
 
-function writeOctalField(buf: Uint8Array, offset: number, length: number, value: number): void {
-  const str = value.toString(8).padStart(length - 1, '0')
-  const bytes = ENC.encode(str)
-  buf.set(bytes, offset)
-  buf[offset + length - 1] = 0
-}
-
-function writeStringField(buf: Uint8Array, offset: number, length: number, value: string): void {
-  const bytes = ENC.encode(value)
-  const len = Math.min(bytes.byteLength, length)
-  buf.set(bytes.subarray(0, len), offset)
-}
-
-function computeChecksum(header: Uint8Array): number {
-  let sum = 0
-  for (let i = 0; i < BLOCK_SIZE; i++) sum += header[i] ?? 0
-  return sum
-}
-
-function buildHeader(name: string, size: number): Uint8Array {
-  const header = new Uint8Array(BLOCK_SIZE)
-  header.fill(0)
-  writeStringField(header, 0, 100, name)
-  writeOctalField(header, 100, 8, 0o644) // mode
-  writeOctalField(header, 108, 8, 0) // uid
-  writeOctalField(header, 116, 8, 0) // gid
-  writeOctalField(header, 124, 12, size)
-  writeOctalField(header, 136, 12, Math.floor(Date.now() / 1000))
-  // checksum placeholder: spaces
-  for (let i = 148; i < 156; i++) header[i] = 0x20
-  header[156] = 0x30 // '0' regular file
-  writeStringField(header, 257, 6, 'ustar\0')
-  writeStringField(header, 263, 2, '00')
-  const checksum = computeChecksum(header)
-  writeOctalField(header, 148, 7, checksum)
-  header[155] = 0x20
-  return header
-}
-
-function readOctalField(buf: Uint8Array, offset: number, length: number): number {
-  const bytes = buf.subarray(offset, offset + length)
-  let str = ''
-  for (const b of bytes) {
-    if (b === 0 || b === 0x20) break
-    str += String.fromCharCode(b)
+function headerOf(entry: TarEntry): TarHeader {
+  if (entry.isDir === true) {
+    // A directory member is spelled with a trailing slash; that slash is
+    // what tells every extractor it holds no content.
+    const name = entry.name.endsWith('/') ? entry.name : `${entry.name}/`
+    return { name, size: 0, type: 'directory', mode: DIR_MODE }
   }
-  if (str === '') return 0
-  return Number.parseInt(str, 8)
-}
-
-function readStringField(buf: Uint8Array, offset: number, length: number): string {
-  const bytes = buf.subarray(offset, offset + length)
-  let end = 0
-  while (end < bytes.byteLength && bytes[end] !== 0) end += 1
-  return DEC.decode(bytes.subarray(0, end))
-}
-
-export function writeTar(entries: readonly TarEntry[]): Uint8Array {
-  const blocks: Uint8Array[] = []
-  for (const entry of entries) {
-    blocks.push(buildHeader(entry.name, entry.data.byteLength))
-    blocks.push(entry.data)
-    const padding = (BLOCK_SIZE - (entry.data.byteLength % BLOCK_SIZE)) % BLOCK_SIZE
-    if (padding > 0) blocks.push(new Uint8Array(padding))
+  const linkname = entry.linkname ?? ''
+  if (linkname !== '') {
+    return { name: entry.name, size: 0, type: 'symlink', mode: LINK_MODE, linkname }
   }
-  blocks.push(new Uint8Array(BLOCK_SIZE * 2))
-  return concat(blocks)
+  return { name: entry.name, size: entry.data.byteLength, type: 'file', mode: FILE_MODE }
 }
 
-export function readTar(data: Uint8Array): TarEntry[] {
-  const entries: TarEntry[] = []
-  let offset = 0
-  while (offset + BLOCK_SIZE <= data.byteLength) {
-    const header = data.subarray(offset, offset + BLOCK_SIZE)
-    let allZero = true
-    for (let i = 0; i < BLOCK_SIZE; i++) {
-      if (header[i] !== 0) {
-        allZero = false
-        break
-      }
+export async function writeTar(entries: readonly TarEntry[]): Promise<Uint8Array> {
+  // A directory and a symlink record their identity in the header and
+  // occupy no data blocks, whatever the caller put in `data`.
+  return packTar(
+    entries.map((entry) => {
+      const header = headerOf(entry)
+      return header.type === 'file' ? { header, body: entry.data } : { header }
+    }),
+  )
+}
+
+export async function readTar(data: Uint8Array): Promise<TarEntry[]> {
+  const parsed = await unpackTar(data)
+  return parsed.map((entry) => {
+    // A trailing slash marks a directory even on an archive written
+    // before ustar typeflags (GNU tar has always spelled it that way).
+    const isDir = entry.header.type === 'directory' || entry.header.name.endsWith('/')
+    return {
+      name: entry.header.name,
+      data: entry.data ?? new Uint8Array(0),
+      isFile: entry.header.type === 'file' && !isDir,
+      isDir,
+      linkname: entry.header.linkname ?? '',
     }
-    if (allZero) break
-    const name = readStringField(header, 0, 100)
-    const size = readOctalField(header, 124, 12)
-    const typeflag = header[156]
-    const isFile = typeflag === 0 || typeflag === 0x30
-    offset += BLOCK_SIZE
-    const fileData = data.subarray(offset, offset + size)
-    entries.push({ name, data: new Uint8Array(fileData), isFile })
-    const padded = Math.ceil(size / BLOCK_SIZE) * BLOCK_SIZE
-    offset += padded
-  }
-  return entries
-}
-
-function concat(chunks: readonly Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
-  }
-  return out
+  })
 }

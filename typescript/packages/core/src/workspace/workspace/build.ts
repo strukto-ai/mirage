@@ -38,10 +38,10 @@ export interface ControlStores {
  * per-plane options (observe / namespaceStore / sessionStore) remain as
  * direct overrides that win over the provider. A caller-passed provider
  * may be shared with sibling workspaces, so only a workspace that built
- * its own provider closes it.
+ * its own provider — or was told it owns the passed one — closes it.
  */
 export function resolveControlStores(wsId: string, options: WorkspaceOptions): ControlStores {
-  const owned = options.store === undefined
+  const owned = options.store === undefined || options.ownsStore === true
   const stateStore = options.store ?? new RAMWorkspaceStateStore()
   return {
     stateStore,

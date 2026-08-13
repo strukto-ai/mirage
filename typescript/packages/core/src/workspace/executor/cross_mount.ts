@@ -20,11 +20,12 @@ import {
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
 
 export { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
 export type { DispatchFn } from '../../commands/builtin/generic/crossmount/index.ts'
 
-type Flags = Record<string, string | boolean | number | string[]>
+type Flags = Record<string, FlagValue>
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 // Workspace-level adapter over the generic crossmount router: run the command

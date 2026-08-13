@@ -17,6 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import type { DriveFile } from '../google/drive.ts'
 import { FOLDER_MIME, MIME_TO_EXT, listFiles } from '../google/drive.ts'
 import { resolveDir } from './resolve.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // The rendered vfs filename for a Drive item.
 function vfsName(item: DriveFile): string {
@@ -40,7 +41,7 @@ export async function* iterTree(
     children.sort((a, b) => {
       const an = vfsName(a)
       const bn = vfsName(b)
-      return an < bn ? -1 : an > bn ? 1 : 0
+      return compareCodePoints(an, bn)
     })
     for (const item of children) {
       const name = vfsName(item)

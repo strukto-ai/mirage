@@ -18,6 +18,7 @@ export {
   NO_FOLLOW_COMMANDS,
   UNSUPPORTED_BUILTINS,
   dereferences,
+  endOptionsAfterProgram,
   reportsLink,
 } from './constants.ts'
 export { route, routeAll } from './route.ts'

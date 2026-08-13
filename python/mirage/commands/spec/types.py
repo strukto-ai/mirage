@@ -14,11 +14,44 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any, Literal
+from enum import Enum, StrEnum
+from typing import Any, Literal, TypeAlias
 
 from mirage.commands.spec.constants import flag_kwarg_name
 from mirage.types import PathSpec
+
+
+class UsageStyle(Enum):
+    """Which program's voice a CLI answers usage questions in.
+
+    An installed CLI is not a GNU tool, so a leaf that refuses an option
+    it does not declare answers in argparse's shape and exit code by
+    default. A CLI that mimics an existing program has to answer in that
+    program's shape instead: mirage implements a subset of git, so most
+    of git's real options arrive undeclared, and an agent that reads the
+    refusal should see what git would have said rather than learn that
+    it is talking to a reimplementation.
+
+    GIT covers the unknown-option refusal and the exit code, which is
+    what an undeclared flag produces; every other usage error (a missing
+    value, an unparseable int) stays in argparse's shape, because those
+    only happen for options a CLI does declare.
+
+    CLAP additionally governs how help is laid out and how a missing
+    operand is refused, because a clap program prints a bare description
+    line, spells the option placeholder ``[OPTIONS]``, heads the option
+    list ``Options:``, lists subcommands in declaration order, and names
+    the empty slots rather than leaving each leaf to word its own
+    complaint. Those are one decision (whose voice this is), so they
+    read off this knob rather than a second one.
+
+    It lives in the spec layer, not beside the CLI tree, because the
+    help renderer is the spec's and cannot import upward to reach it.
+    """
+
+    ARGPARSE = "argparse"
+    GIT = "git"
+    CLAP = "clap"
 
 
 class CommandName(StrEnum):
@@ -56,6 +89,20 @@ class CommandName(StrEnum):
 # == "bool" (or their negations) only, so new validator types never
 # touch classification sites.
 ValueType = Literal["bool", "str", "int", "float", "path"]
+
+# What the parser itself can put in the bag: it works on argv, so every
+# value is still text, or the bool/int a flag's own shape implies.
+ParsedFlagValue: TypeAlias = str | bool | int | list[str]
+# What a command receives. The executor rewrites PATH-typed values into
+# PathSpec on the way through (``mount.execute_cmd``), which is the one
+# member the TypeScript twin does not carry -- its bag keeps resolved
+# virtual-path strings instead. A command takes the bag as
+# ``**flags: FlagValue`` and reads it through FlagView, never by
+# unpacking these members. The mixed list is the ``pair`` shape: a pair
+# option accumulates (name, value) flattened, so a PATH-typed pair like
+# jq's ``--rawfile name file`` alternates text and PathSpec.
+FlagValue: TypeAlias = (ParsedFlagValue | PathSpec | list[PathSpec]
+                        | list[str | PathSpec])
 
 
 @dataclass(frozen=True)
@@ -118,6 +165,20 @@ class Option:
             if it had been typed (a "path" default resolves and routes, a
             defaulted value must satisfy choices). Presence of a default
             always satisfies ``required``.
+        metavar (str | None): the value's name in a usage line, bare
+            (``VERSION``, rendered ``--notion-version <VERSION>``); the
+            brackets belong to the renderer, which is the only thing
+            that knows the dialect. Only a program whose usage lines are
+            rendered in someone else's needs one, since otherwise the
+            name is derived from the long spelling.
+        env (str | None): environment variable that supplies this option
+            when the line omits it. Distinct from ``default``, and not a
+            synonym for it: an env-sourced value counts as *supplied*
+            (clap echoes it in a usage line, where a defaulted one is
+            invisible), and it is read from the session rather than
+            frozen into the spec. Declaring it here is what keeps one
+            fact in one place, since both the leaf that sends the value
+            and the renderer that reports the line need it.
         description (str | None): help text.
     """
     short: str | None = None
@@ -132,6 +193,8 @@ class Option:
     choices: tuple[str, ...] = ()
     required: bool = False
     default: str | None = None
+    metavar: str | None = None
+    env: str | None = None
     description: str | None = None
 
 
@@ -156,10 +219,34 @@ class Operand:
             clap names ``required_unless_present`` and docopt expresses as
             alternate usage patterns. It lives in the spec, not in command
             code, because Mirage classifies args before a backend is chosen.
+        name (str): the slot's name in a usage line, bare (``PAGE_ID``,
+            rendered ``<PAGE_ID>`` when required and ``[PAGE_ID]`` when
+            not); the brackets belong to the renderer, which is the only
+            thing that knows the dialect. Empty renders the generic
+            ``<path>``/``<text>`` placeholder the ordinary help uses.
+        required (bool): the line must supply this slot; one that does
+            not is a usage error the parser reports, rather than
+            something each leaf re-discovers and words its own way.
+        remainder (bool): every word from this slot on is gathered
+            verbatim, options included. This is argparse's
+            ``nargs=argparse.REMAINDER`` and POSIX's own option order:
+            the first operand ends option parsing, where GNU's default
+            permutes instead (``ls a -1`` reads ``-1`` as a flag,
+            ``POSIXLY_CORRECT=1 ls a -1`` reads it as a filename). Set
+            it for a command that dispatches to another program, which
+            is the case argparse documents it for: python3's script and
+            the words after it are the script's argv, so
+            ``python3 s.py --foo`` must hand ``--foo`` over untouched
+            while ``python3 -zz s.py`` must still refuse ``-zz`` as
+            python3's own. One switch cannot do both, which is why the
+            boundary has to be declared.
     """
     type: ValueType = "path"
     provided_by: tuple[str, ...] = ()
     text_when: tuple[str, ...] = ()
+    name: str = ""
+    required: bool = False
+    remainder: bool = False
 
 
 @dataclass(frozen=True)
@@ -170,6 +257,18 @@ class CommandSpec:
     ignore_tokens: frozenset[str] = frozenset()
     description: str | None = None
     epilog: str | None = None
+    # tar's old option style: a first word with no leading dash is a
+    # cluster of option letters whose arguments follow as separate words
+    # (`tar xzf a.tgz`). Expanded by expand_old_style before any other
+    # scanning; see oldstyle.py for the rules and why only tar has it.
+    old_option_style: bool = False
+    # The spelling of an option that changes directory for the path
+    # operands typed AFTER it (tar's -C). Positional and cumulative, the
+    # way a real chdir is: `tar -cf a.tar -C d1 x -C ../d2 y` reads d1/x
+    # and d1/../d2/y. Only path operands and the option's own value move;
+    # every other path-valued flag keeps resolving against the session
+    # cwd, which is what GNU does with -f.
+    operand_base: str | None = None
 
 
 class FlagView:
@@ -180,7 +279,7 @@ class FlagView:
     `flags.get(...) is True` and isinstance chains.
 
     Args:
-        flags (Mapping[str, object] | None): raw flag kwargs.
+        flags (Mapping[str, FlagValue] | None): raw flag kwargs.
         spec (CommandSpec | None): when given, reads of names the spec does
             not declare raise KeyError. A missing key is otherwise
             indistinguishable from "flag not passed", so a typo in the name
@@ -188,7 +287,7 @@ class FlagView:
     """
 
     def __init__(self,
-                 flags: Mapping[str, object] | None,
+                 flags: Mapping[str, FlagValue] | None,
                  spec: CommandSpec | None = None) -> None:
         self._flags = flags if flags is not None else {}
         self._allowed = spec_flag_names(spec) if spec is not None else None
@@ -257,7 +356,7 @@ class FlagView:
             return [value]
         return []
 
-    def raw(self, name: str) -> object:
+    def raw(self, name: str) -> FlagValue | None:
         return self._flags.get(self._key(name))
 
 
@@ -283,7 +382,7 @@ def spec_flag_names(spec: CommandSpec) -> frozenset[str]:
 
 @dataclass
 class ParsedArgs:
-    flags: dict[str, str | bool | int | list[str]]
+    flags: dict[str, ParsedFlagValue]
     args: list[tuple[str, ValueType]]
     cache_paths: list[str] = field(default_factory=list)
     path_flag_values: list[str] = field(default_factory=list)
@@ -291,6 +390,11 @@ class ParsedArgs:
     text_flag_values: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     word_kinds: list[ValueType | None] = field(default_factory=list)
+    # Per-position base directory, aligned with word_kinds: the absolute
+    # path a word resolves against when an operand_base option (tar's -C)
+    # moved it, and None when the session cwd still applies. Only a spec
+    # declaring operand_base ever fills this.
+    word_bases: list[str | None] = field(default_factory=list)
     # GNU-shaped option errors, reported (never raised) by the parser:
     # undeclared options ('--bogus' or the offending cluster char 'Y'),
     # abbreviated longs matching several options (typed prefix, matched
@@ -315,6 +419,22 @@ class ParsedArgs:
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
     invalid_float_options: list[tuple[str, str]] = field(default_factory=list)
     missing_required_options: list[str] = field(default_factory=list)
+    # Display names of required operand slots the line left empty, in
+    # declaration order. Reported rather than raised, like every other
+    # entry here, so the dialect that words it is the caller's choice.
+    missing_required_operands: list[str] = field(default_factory=list)
+    # Dests the line actually carried, in scan order, excluding the ones
+    # a declared default filled in afterwards. A usage line that echoes
+    # what was supplied (clap's) needs exactly this distinction: a
+    # defaulted option is invisible there, a typed one is not.
+    typed_dests: list[str] = field(default_factory=list)
+    # The old-style cluster letter whose argument ran off the end of the
+    # line (`tar xzf` with no archive). Its own report because GNU tar
+    # words it differently and exits differently from every getopt
+    # refusal above, and because it outranks all of them: tar counts the
+    # cluster's argument needs before argp ever validates a letter, so
+    # `tar Qf` and `tar fQ` both name f, not Q.
+    old_option_needs_value: str | None = None
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == "path"]

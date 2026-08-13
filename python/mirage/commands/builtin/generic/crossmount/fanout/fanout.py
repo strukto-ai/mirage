@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     merge_operand_ios, run_operands)
 from mirage.commands.builtin.generic.wc import parse_flags as parse_wc_flags
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -31,7 +31,7 @@ from mirage.types import PathSpec
 async def run_fanout(cmd_name: str,
                      scopes: list[PathSpec],
                      text_args: list[str],
-                     flag_kwargs: dict[str, object],
+                     flag_kwargs: dict[str, FlagValue],
                      run_single: RunSingle,
                      stdin: ByteSource | None = None) -> CrossResult:
     """Run a per-operand command whose operands span mounts.

@@ -87,7 +87,13 @@ export function fillPath(
     const end = path.indexOf('}', start)
     const name = path.slice(start + 1, end)
     if (!(name in params)) throw new Error(`--params must contain ${name}`)
-    path = path.slice(0, start) + String(params[name]) + path.slice(end + 1)
+    // Percent-encode the value: a Discovery path parameter is one segment,
+    // and several real ids carry characters that change what the URL means.
+    // A Google holiday calendar id
+    // ("en.usa#holiday@group.v.calendar.google.com") is the sharp case,
+    // since "#" opens a fragment and the request would reach
+    // /calendars/en.usa instead.
+    path = path.slice(0, start) + encodeURIComponent(String(params[name])) + path.slice(end + 1)
     consumed.add(name)
   }
   const query = Object.fromEntries(Object.entries(params).filter(([k]) => !consumed.has(k)))

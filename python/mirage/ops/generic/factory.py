@@ -17,7 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
-from mirage.utils.ranges import slice_window
+from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 
 
 def _make_read(fn: OpFn) -> OpFn:
@@ -45,6 +45,12 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
     A zero-length read is answered here rather than sent anywhere: no
     store can express an empty range, and the answer is known.
 
+    A window starting at or past EOF is the one case where the two paths
+    do not agree on their own: slicing yields empty, the POSIX answer,
+    while an HTTP store refuses with 416. Normalizing here rather than in
+    each reader keeps the op's contract one thing, and keeps a backend
+    from becoming the odd one out the day it grows a native range.
+
     Args:
         table (OpsTable): the backend's op table.
     """
@@ -61,7 +67,12 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
         whole = not offset and size is None
         native = table.read_range
         if native is not None and not whole:
-            return await native(accessor, path, index, offset, size)
+            try:
+                return await native(accessor, path, index, offset, size)
+            except Exception as exc:
+                if not is_unsatisfiable_range(exc):
+                    raise
+                return b""
         data = await table.read_bytes(accessor, path, index)
         if whole:
             return data
@@ -182,13 +193,12 @@ def make_generic_ops(
     command factory skips write commands on read-only backends.
 
     ``index`` is forwarded into read/readdir/stat for every backend, so
-    there is deliberately no ``forward_index`` knob here. Both write
-    paths evict the parent listing: ``dispatch`` through
-    :meth:`Dispatcher.invalidate_after_write`, and the VFS/FUSE surface
-    through the ``on_write`` hook :class:`Ops` is built with. TS keeps a
-    ``forwardIndex: false`` for ram/disk/redis/ssh because its
-    ``WorkspaceFS`` has no equivalent of that hook and reaches the ops
-    registry directly, so a forwarded index there is never evicted.
+    there is deliberately no ``forward_index`` knob here, in either
+    language. Every write path evicts the parent listing through
+    :meth:`Dispatcher.invalidate_after_write`, and both VFS/FUSE
+    surfaces (:class:`Ops` in both languages) delegate to
+    that same dispatcher, so the door that populates a listing is the
+    door that evicts it.
 
     Every op emitted here is filetype-agnostic. To serve one extension
     differently, register a filetype-scoped op on the mount; the mount

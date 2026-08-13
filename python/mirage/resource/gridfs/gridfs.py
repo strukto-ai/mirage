@@ -83,8 +83,8 @@ class GridFSResource(BaseResource):
         self.accessor = GridFSAccessor(self.config)
         for fn in GRIDFS_COMMANDS:
             self.register(fn)
-        for fn in GRIDFS_OPS:
-            self.register_op(fn)
+        for op in GRIDFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:

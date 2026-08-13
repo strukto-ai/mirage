@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from collections.abc import Iterable
 
 from mirage.utils.fnmatch import fnmatch
 
@@ -54,6 +55,46 @@ def norm(path: str) -> str:
         slash (``"foo/bar/"`` -> ``"/foo/bar"``, ``""`` -> ``"/"``).
     """
     return "/" + path.strip("/")
+
+
+def norm_dir(path: str) -> str:
+    """Normalize a virtual path to its trailing-slash directory form.
+
+    Args:
+        path: A virtual path string.
+
+    Returns:
+        The path with one leading and one trailing slash
+        (``"foo/bar"`` -> ``"/foo/bar/"``, ``""`` -> ``"/"``), the form
+        prefix comparisons need so ``/a/`` cannot match ``/ab``.
+    """
+    stripped = path.strip("/")
+    return "/" + stripped + "/" if stripped else "/"
+
+
+def owner_prefix(prefixes: Iterable[str], path: str) -> str | None:
+    """The longest mount prefix owning ``path``, or None.
+
+    The one longest-prefix rule dispatch resolves a path by, shared so a
+    registry, an ops facade, a runtime routing table and a link filter
+    cannot drift: a prefix owns its own root (with or without a trailing
+    slash) and everything at a path boundary below it, so ``/a/`` owns
+    ``/a`` and ``/a/b`` but never ``/ab``. The winner is returned in its
+    input spelling, letting each caller keep its own convention.
+
+    Args:
+        prefixes (Iterable[str]): candidate mount prefixes, any spelling.
+        path (str): the virtual path to resolve.
+    """
+    target = norm_dir(path)
+    best: str | None = None
+    best_len = -1
+    for prefix in prefixes:
+        p = norm_dir(prefix)
+        if target.startswith(p) and len(p) > best_len:
+            best = prefix
+            best_len = len(p)
+    return best
 
 
 def parent(path: str) -> str:

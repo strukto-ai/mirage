@@ -8,13 +8,7 @@
     "resources": []
   },
   "description": "Delay for a specified amount of time.",
-  "epilog": null,
-  "ignore_tokens": [],
-  "options": [],
-  "positional": [],
   "rest": {
-    "provided_by": [],
-    "text_when": [],
     "type": "str"
   }
 }

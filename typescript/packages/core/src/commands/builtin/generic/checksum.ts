@@ -18,7 +18,7 @@ import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { fsStrerror, isMissingPath, isWalkError } from '../../../utils/errors.ts'
+import { fsStrerror, isEisdir, isMissingPath, isWalkError } from '../../../utils/errors.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands } from '../utils/operands.ts'
@@ -84,7 +84,7 @@ async function checkFile(
   hasher: Hasher,
   name: string,
   opts: CommandOpts,
-): Promise<[Uint8Array | null, Uint8Array | null, number]> {
+): Promise<[string, string, number]> {
   const fl = new FlagView(opts.flags, specOf(name))
   const data = DEC.decode(await materialize(stream(p)))
   const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
@@ -143,7 +143,7 @@ async function checkFile(
   // not the per-file strerror lines) while its exit 1 stands.
   if (!parsedAny) {
     errors.push(`${name}: ${checkLabel}: no properly formatted checksum lines found`)
-    return [null, ENC.encode(`${errors.join('\n')}\n`), 1]
+    return ['', `${errors.join('\n')}\n`, 1]
   }
   const nothingVerified = fl.asBool('ignore_missing') && verified === 0
   if (!fl.asBool('status')) {
@@ -168,8 +168,8 @@ async function checkFile(
   }
   const failed =
     mismatched > 0 || readFailures > 0 || nothingVerified || (fl.asBool('strict') && malformed > 0)
-  const stdout = output.length > 0 ? ENC.encode(`${output.join('\n')}\n`) : null
-  const stderr = errors.length > 0 ? ENC.encode(`${errors.join('\n')}\n`) : null
+  const stdout = output.length > 0 ? `${output.join('\n')}\n` : ''
+  const stderr = errors.length > 0 ? `${errors.join('\n')}\n` : ''
   return [stdout, stderr, failed ? 1 : 0]
 }
 
@@ -191,10 +191,34 @@ export async function checksumGeneric(
   const fl = new FlagView(opts.flags, specOf(name))
   const check = fl.asBool('check')
   if (check && paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    const [out, stderr, exitCode] = await checkFile(stream, first, hasher, name, opts)
-    return [out, new IOResult({ stderr, exitCode })]
+    let output = ''
+    let errors = ''
+    let exitCode = 0
+    // Every operand is its own checksum list: GNU verifies each in turn
+    // and keeps going when one cannot be read; a directory operand reads
+    // as the literal "read error" (pinned on coreutils 9.7).
+    for (const p of paths) {
+      let checked: [string, string, number]
+      try {
+        checked = await checkFile(stream, p, hasher, name, opts)
+      } catch (error) {
+        if (!isWalkError(error)) throw error
+        const label = p.rawPath !== '' ? p.rawPath : p.virtual
+        const detail = isEisdir(error)
+          ? 'read error'
+          : (fsStrerror(error) ?? (error instanceof Error ? error.message : String(error)))
+        errors += `${name}: ${label}: ${detail}\n`
+        exitCode = 1
+        continue
+      }
+      output += checked[0]
+      errors += checked[1]
+      if (checked[2] !== 0) exitCode = 1
+    }
+    return [
+      output === '' ? null : ENC.encode(output),
+      new IOResult({ stderr: errors === '' ? null : ENC.encode(errors), exitCode }),
+    ]
   }
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the good hashes still

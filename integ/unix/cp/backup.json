@@ -247,6 +247,42 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "cp_suffix_empty_falls_back_to_tilde",
+      "seq": 613094,
+      "command": "mkdir -p /data/cpb7 && printf 'S\\n' > /data/cpb7/s.txt && printf 'D\\n' > /data/cpb7/d.txt && cp --backup --suffix= /data/cpb7/s.txt /data/cpb7/d.txt && cat '/data/cpb7/d.txt~' && ls /data/cpb7",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nd.txt\nd.txt~\ns.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup",
+        "suffix"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

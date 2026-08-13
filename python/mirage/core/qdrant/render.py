@@ -17,11 +17,12 @@ import json
 from typing import Any
 
 from mirage.resource.qdrant.config import QdrantConfig
+from mirage.types import JsonValue
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 
 
-def blob_bytes(value: object) -> bytes:
+def blob_bytes(value: JsonValue) -> bytes:
     if isinstance(value, bytes):
         return value
     if isinstance(value, str):

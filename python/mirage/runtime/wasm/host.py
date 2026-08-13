@@ -14,20 +14,25 @@
 
 import functools
 import posixpath
-from typing import Any, Callable
+from dataclasses import dataclass
+from typing import Any, Callable, Literal
 
 # yapf: disable
+from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import FileHandle, FileTable
 from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
                                      ENOTDIR, ENOTSUP, FDFLAG_APPEND, FT_CHR,
                                      FT_DIR, FT_REG, OFLAG_CREAT,
                                      OFLAG_DIRECTORY, OFLAG_EXCL, OFLAG_TRUNC,
-                                     OK, RIGHT_FD_WRITE, WHENCE_CUR,
-                                     WHENCE_END, WHENCE_SET, errno_for,
+                                     OK, RIGHT_FD_WRITE, errno_for,
                                      pack_dirent, pack_fdstat, pack_filestat,
                                      pack_prestat, pack_u32, pack_u64,
                                      unpack_iovs)
 # yapf: enable
-from mirage.runtime.wasm.fs import GuestFs
+from mirage.runtime.wasm.types import GuestStat
+from mirage.runtime.wasm.vfs import WasmVFS
+
+FdKind = Literal["stdin", "stdout", "stderr", "dir", "file"]
 
 wasmtime: Any
 Func: Any
@@ -63,12 +68,35 @@ def _call_guarded(fn: Callable[..., Any], caller: "wasmtime.Caller", *args:
     """
     try:
         return fn(caller, *args)
-    except (OSError, ValueError, NotImplementedError) as exc:
+    except (OSError, ValueError, NotImplementedError, CrossMountError) as exc:
         return errno_for(exc)
 
 
+@dataclass(slots=True)
+class FdEntry:
+    """One guest fd: a directory, a stdio stream, or a buffered file.
+
+    Args:
+        kind (FdKind): which of the five fd shapes this is.
+        handle (FileHandle | None): the shared buffered handle; set for
+            files and for stdin (a read-only buffer), None otherwise.
+        path (str): guest path, for dirs and files.
+        preopen (bool): the preopened root dir, which close refuses.
+        dirents (list[tuple[str, int]] | None): a dir fd's cached
+            listing, filled on the first fd_readdir.
+        stat (GuestStat | None): a file's stat at open, for mtime.
+    """
+
+    kind: FdKind
+    handle: FileHandle | None = None
+    path: str = ""
+    preopen: bool = False
+    dirents: list[tuple[str, int]] | None = None
+    stat: GuestStat | None = None
+
+
 class WasiFs:
-    """Preview1 filesystem host functions over a GuestFs router.
+    """Preview1 filesystem host functions over a WasmVFS router.
 
     One instance per run: owns the guest fd table (stdin/stdout/stderr
     plus one preopen at "/"), buffers whole files between open and
@@ -78,31 +106,19 @@ class WasiFs:
     stay native.
     """
 
-    def __init__(self, fs: GuestFs, stdin: bytes) -> None:
+    def __init__(self, fs: WasmVFS, stdin: bytes) -> None:
         self._fs = fs
         self.stdout = bytearray()
         self.stderr = bytearray()
         self._memory: "wasmtime.Memory | None" = None
-        self._next_fd = 4
-        self._fds: dict[int, dict[str, Any]] = {
-            0: {
-                "kind": "stdin",
-                "buf": stdin,
-                "pos": 0
-            },
-            1: {
-                "kind": "stdout"
-            },
-            2: {
-                "kind": "stderr"
-            },
-            3: {
-                "kind": "dir",
-                "path": "/",
-                "preopen": True,
-                "dirents": None
-            },
-        }
+        self._fds: FileTable[FdEntry] = FileTable(first_id=4)
+        self._fds.set(
+            0,
+            FdEntry(kind="stdin",
+                    handle=FileHandle(path="", buf=bytearray(stdin))))
+        self._fds.set(1, FdEntry(kind="stdout"))
+        self._fds.set(2, FdEntry(kind="stderr"))
+        self._fds.set(3, FdEntry(kind="dir", path="/", preopen=True))
 
     # -- guest memory -----------------------------------------------------
 
@@ -127,40 +143,56 @@ class WasiFs:
     def _path_arg(self, caller: "wasmtime.Caller", dirfd: int, ptr: int,
                   length: int) -> str | None:
         entry = self._fds.get(dirfd)
-        if entry is None or entry["kind"] != "dir":
+        if entry is None or entry.kind != "dir":
             return None
         rel = self._load(caller, ptr, length).decode()
-        base = entry["path"]
+        base = entry.path
         joined = rel if rel.startswith("/") else posixpath.join(base, rel)
         normed = posixpath.normpath(joined)
         return normed if normed.startswith("/") else "/" + normed
 
-    def _alloc(self, entry: dict[str, Any]) -> int:
-        fd = self._next_fd
-        self._next_fd += 1
-        self._fds[fd] = entry
-        return fd
-
     @staticmethod
     def _ino(path: str) -> int:
         return hash(path) & (2**63 - 1)
+
+    # -- fd lookups -------------------------------------------------------
+
+    def _handle(self, fd: int) -> FileHandle | None:
+        """The buffered handle under `fd`: a file's, or stdin's.
+
+        Args:
+            fd (int): the guest fd.
+        """
+        entry = self._fds.get(fd)
+        return entry.handle if entry is not None else None
+
+    def _file_handle(self, fd: int) -> FileHandle | None:
+        """The handle under `fd` only when it is a regular file.
+
+        Args:
+            fd (int): the guest fd.
+        """
+        entry = self._fds.get(fd)
+        if entry is None or entry.kind != "file":
+            return None
+        return entry.handle
 
     # -- prestat ----------------------------------------------------------
 
     def fd_prestat_get(self, caller: "wasmtime.Caller", fd: int,
                        buf: int) -> int:
         entry = self._fds.get(fd)
-        if entry is None or not entry.get("preopen"):
+        if entry is None or not entry.preopen:
             return EBADF
-        self._store(caller, buf, pack_prestat(len(entry["path"].encode())))
+        self._store(caller, buf, pack_prestat(len(entry.path.encode())))
         return OK
 
     def fd_prestat_dir_name(self, caller: "wasmtime.Caller", fd: int, ptr: int,
                             length: int) -> int:
         entry = self._fds.get(fd)
-        if entry is None or not entry.get("preopen"):
+        if entry is None or not entry.preopen:
             return EBADF
-        self._store(caller, ptr, entry["path"].encode()[:length])
+        self._store(caller, ptr, entry.path.encode()[:length])
         return OK
 
     # -- open/close -------------------------------------------------------
@@ -178,7 +210,7 @@ class WasiFs:
                 return ENOENT
             if not st.is_dir:
                 return ENOTDIR
-            fd = self._alloc({"kind": "dir", "path": path, "dirents": None})
+            fd = self._fds.add(FdEntry(kind="dir", path=path))
             self._store(caller, out, pack_u32(fd))
             return OK
         if st is not None and st.is_dir:
@@ -194,31 +226,29 @@ class WasiFs:
             # Created through the workspace now, so write modes and a
             # missing parent answer at open time, not at close.
             self._fs.create(path)
-            buf = bytearray()
+            data = b""
         elif oflags & OFLAG_TRUNC:
             self._fs.truncate(path)
-            buf = bytearray()
+            data = b""
         else:
-            buf = bytearray(self._fs.read(path))
-        fd = self._alloc({
-            "kind": "file",
-            "path": path,
-            "buf": buf,
-            "pos": len(buf) if fdflags & FDFLAG_APPEND else 0,
-            "dirty": False,
-            "writable": writable,
-            "stat": st,
-        })
+            data = self._fs.read(path)
+        handle = FileHandle.opened(path,
+                                   data,
+                                   writable=writable,
+                                   append=bool(fdflags & FDFLAG_APPEND))
+        fd = self._fds.add(
+            FdEntry(kind="file", handle=handle, path=path, stat=st))
         self._store(caller, out, pack_u32(fd))
         return OK
 
     def fd_close(self, caller: "wasmtime.Caller", fd: int) -> int:
         entry = self._fds.get(fd)
-        if entry is None or entry.get("preopen"):
+        if entry is None or entry.preopen:
             return EBADF
-        del self._fds[fd]
-        if entry["kind"] == "file" and entry["dirty"]:
-            self._fs.write(entry["path"], bytes(entry["buf"]))
+        self._fds.pop(fd)
+        h = entry.handle
+        if entry.kind == "file" and h is not None and h.dirty:
+            self._fs.flush(h.path, h.base_len, h.low_write, h.buf)
         return OK
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
@@ -226,22 +256,22 @@ class WasiFs:
         if entry is None or fd == to:
             return EBADF if entry is None else OK
         self.fd_close(caller, to)
-        self._fds[to] = self._fds.pop(fd)
+        self._fds.pop(fd)
+        self._fds.set(to, entry)
         return OK
 
     # -- read/write/seek --------------------------------------------------
 
     def fd_read(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                 count: int, nread: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or "buf" not in entry:
+        h = self._handle(fd)
+        if h is None:
             return EBADF
         total = 0
         for bptr, blen in self._iovs(caller, iovs, count):
-            chunk = bytes(entry["buf"][entry["pos"]:entry["pos"] + blen])
+            chunk = h.read(blen)
             if chunk:
                 self._store(caller, bptr, chunk)
-            entry["pos"] += len(chunk)
             total += len(chunk)
             if len(chunk) < blen:
                 break
@@ -250,12 +280,12 @@ class WasiFs:
 
     def fd_pread(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                  count: int, offset: int, nread: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry["kind"] != "file":
+        h = self._file_handle(fd)
+        if h is None:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
-            chunk = bytes(entry["buf"][pos:pos + blen])
+            chunk = h.pread(pos, blen)
             if chunk:
                 self._store(caller, bptr, chunk)
             pos += len(chunk)
@@ -273,19 +303,14 @@ class WasiFs:
         total = 0
         for bptr, blen in self._iovs(caller, iovs, count):
             data = self._load(caller, bptr, blen)
-            if entry["kind"] == "stdout":
+            if entry.kind == "stdout":
                 self.stdout += data
-            elif entry["kind"] == "stderr":
+            elif entry.kind == "stderr":
                 self.stderr += data
-            elif entry["kind"] == "file":
-                if not entry["writable"]:
+            elif entry.kind == "file" and entry.handle is not None:
+                if not entry.handle.writable:
                     return EBADF
-                buf, pos = entry["buf"], entry["pos"]
-                if pos > len(buf):
-                    buf += b"\0" * (pos - len(buf))
-                buf[pos:pos + blen] = data
-                entry["pos"] += blen
-                entry["dirty"] = True
+                entry.handle.write(data)
             else:
                 return EINVAL
             total += blen
@@ -294,45 +319,35 @@ class WasiFs:
 
     def fd_pwrite(self, caller: "wasmtime.Caller", fd: int, iovs: int,
                   count: int, offset: int, nwritten: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry["kind"] != "file":
-            return EBADF
-        if not entry["writable"]:
+        h = self._file_handle(fd)
+        if h is None or not h.writable:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
             data = self._load(caller, bptr, blen)
-            buf = entry["buf"]
-            if pos > len(buf):
-                buf += b"\0" * (pos - len(buf))
-            buf[pos:pos + blen] = data
+            h.pwrite(pos, data)
             pos += blen
             total += blen
-            entry["dirty"] = True
         self._store(caller, nwritten, pack_u32(total))
         return OK
 
     def fd_seek(self, caller: "wasmtime.Caller", fd: int, offset: int,
                 whence: int, out: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or "buf" not in entry:
+        h = self._handle(fd)
+        if h is None:
             return EBADF
-        base = {
-            WHENCE_SET: 0,
-            WHENCE_CUR: entry["pos"],
-            WHENCE_END: len(entry["buf"]),
-        }.get(whence)
-        if base is None or base + offset < 0:
+        # abi WHENCE_* numbering is POSIX's 0/1/2, which seek speaks.
+        pos = h.seek(offset, whence)
+        if pos is None:
             return EINVAL
-        entry["pos"] = base + offset
-        self._store(caller, out, pack_u64(entry["pos"]))
+        self._store(caller, out, pack_u64(pos))
         return OK
 
     def fd_tell(self, caller: "wasmtime.Caller", fd: int, out: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or "pos" not in entry:
+        h = self._handle(fd)
+        if h is None:
             return EBADF
-        self._store(caller, out, pack_u64(entry["pos"]))
+        self._store(caller, out, pack_u64(h.pos))
         return OK
 
     # -- stat -------------------------------------------------------------
@@ -342,7 +357,7 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None:
             return EBADF
-        filetype = {"dir": FT_DIR, "file": FT_REG}.get(entry["kind"], FT_CHR)
+        filetype = {"dir": FT_DIR, "file": FT_REG}.get(entry.kind, FT_CHR)
         self._store(caller, buf, pack_fdstat(filetype))
         return OK
 
@@ -351,14 +366,14 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None:
             return EBADF
-        if entry["kind"] == "file":
-            st = entry["stat"]
-            packed = pack_filestat(len(entry["buf"]), st.mtime_ns if st else 0,
-                                   FT_REG, self._ino(entry["path"]))
-        elif entry["kind"] == "dir":
-            st = self._fs.stat(entry["path"])
+        if entry.kind == "file" and entry.handle is not None:
+            mtime = entry.stat.mtime_ns if entry.stat is not None else 0
+            packed = pack_filestat(len(entry.handle.buf), mtime, FT_REG,
+                                   self._ino(entry.path))
+        elif entry.kind == "dir":
+            st = self._fs.stat(entry.path)
             packed = pack_filestat(st.size, st.mtime_ns, FT_DIR,
-                                   self._ino(entry["path"]))
+                                   self._ino(entry.path))
         else:
             packed = pack_filestat(0, 0, FT_CHR, fd)
         self._store(caller, buf, packed)
@@ -378,17 +393,10 @@ class WasiFs:
 
     def fd_filestat_set_size(self, caller: "wasmtime.Caller", fd: int,
                              size: int) -> int:
-        entry = self._fds.get(fd)
-        if entry is None or entry["kind"] != "file":
+        h = self._file_handle(fd)
+        if h is None or not h.writable:
             return EBADF
-        if not entry["writable"]:
-            return EBADF
-        buf = entry["buf"]
-        if size < len(buf):
-            del buf[size:]
-        else:
-            buf += b"\0" * (size - len(buf))
-        entry["dirty"] = True
+        h.truncate(size)
         return OK
 
     # -- readdir ----------------------------------------------------------
@@ -396,14 +404,14 @@ class WasiFs:
     def fd_readdir(self, caller: "wasmtime.Caller", fd: int, buf: int,
                    buf_len: int, cookie: int, used: int) -> int:
         entry = self._fds.get(fd)
-        if entry is None or entry["kind"] != "dir":
+        if entry is None or entry.kind != "dir":
             return EBADF
-        if entry["dirents"] is None:
-            entry["dirents"] = self._fs.readdir(entry["path"])
+        if entry.dirents is None:
+            entry.dirents = self._fs.readdir(entry.path)
         out = bytearray()
         i = cookie
-        while i < len(entry["dirents"]) and len(out) < buf_len:
-            name, filetype = entry["dirents"][i]
+        while i < len(entry.dirents) and len(out) < buf_len:
+            name, filetype = entry.dirents[i]
             record = pack_dirent(i, name.encode(), filetype)
             out += record[:buf_len - len(out)]
             i += 1

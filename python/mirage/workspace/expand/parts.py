@@ -36,13 +36,6 @@ from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
 
-def _has_at_expansion(node: tree_sitter.Node) -> bool:
-    for child in node.children:
-        if (child.type == NT.SIMPLE_EXPANSION and get_text(child) == "$@"):
-            return True
-    return False
-
-
 def _string_has_array_at(node: tree_sitter.Node) -> bool:
     return any(is_multiword_at(c) for c in node.children)
 
@@ -66,6 +59,7 @@ async def _expand_string_with_array(
                            execute_fn=execute_fn,
                            call_stack=call_stack)
     fragments: list[str] = [""]
+    splat_yielded = False
     for child in node.children:
         if child.type == NT.DQUOTE:
             continue
@@ -78,6 +72,7 @@ async def _expand_string_with_array(
             fragments[-1] = fragments[-1] + _folded_whitespace(child)
             if not words:
                 continue
+            splat_yielded = True
             if len(words) == 1:
                 fragments[-1] = fragments[-1] + words[0]
             else:
@@ -87,14 +82,14 @@ async def _expand_string_with_array(
             continue
         text = await expand_node(child, session, execute_fn, call_stack)
         fragments[-1] = fragments[-1] + text
+    if fragments == [""] and not splat_yielded:
+        # A splat that yielded nothing, with no text around it, is no word
+        # at all. One empty ELEMENT is a word though (set -- "" passes one
+        # empty argument), so the rendered text cannot decide this; only
+        # the element count can. An empty expansion beside it does not
+        # rescue the word either: with no parameters, "$u$@" is nothing.
+        return []
     return fragments
-
-
-def _get_positional_args(session: Session,
-                         call_stack: CallStack | None) -> list[str]:
-    if call_stack and call_stack.get_all_positional():
-        return call_stack.get_all_positional()
-    return getattr(session, "positional_args", None) or []
 
 
 async def _expand_brace_word(
@@ -147,11 +142,6 @@ async def expand_parts(
     """Expand a list of tree-sitter child nodes to strings."""
     result = []
     for p in parts:
-        if p.type == NT.STRING and _has_at_expansion(p):
-            positional = _get_positional_args(session, call_stack)
-            if positional:
-                result.extend(positional)
-                continue
         if p.type == NT.STRING and _string_has_array_at(p):
             words = await _expand_string_with_array(p, session, execute_fn,
                                                     call_stack)
@@ -176,9 +166,10 @@ async def expand_parts(
                     result.append(word)
         elif p.type == NT.STRING:
             # A quoted word stays a word even when it expands to "" (echo
-            # "" or "$EMPTY"), except "$@"/"${a[@]}" which yield zero words.
-            if expanded or not _has_at_expansion(p):
-                result.append(expanded)
+            # "" or "$EMPTY"). The splats that yield zero words instead
+            # ("$@", "${a[@]}") never reach here; they took the branch
+            # above.
+            result.append(expanded)
         elif p.type in (NT.RAW_STRING, NT.ANSI_C_STRING, NT.TRANSLATED_STRING):
             result.append(expanded)
         else:

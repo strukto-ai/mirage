@@ -45,6 +45,15 @@ async function firstEntry(ws: Workspace, path: string): Promise<string> {
   return basename(out.split('\n')[0]!.replace(/\/$/, ''))
 }
 
+async function pickChild(ws: Workspace, path: string, skip: string): Promise<string> {
+  const listing = (await ws.execute(`ls "${path}/"`)).stdoutText.trim().split('\n')
+  for (const line of listing) {
+    const name = basename(line.replace(/\/$/, ''))
+    if (name !== skip && name !== '') return name
+  }
+  return ''
+}
+
 async function explorePages(ws: Workspace): Promise<void> {
   console.log('\n########## PAGES ##########\n')
   await run(ws, 'ls /notion/pages/')
@@ -101,43 +110,53 @@ async function exploreDatabases(ws: Workspace): Promise<void> {
   await run(ws, `cat "${base}/database.json"`)
   await run(ws, `jq ".database_id" "${base}/database.json"`)
   await run(ws, `jq ".title" "${base}/database.json"`)
-  await run(ws, `jq ".properties | keys" "${base}/database.json"`)
+  // The container carries data source stubs, not a column schema: since
+  // 2025-09-03 `properties` lives on the data source one level down.
+  await run(ws, `jq ".data_sources" "${base}/database.json"`)
   await run(ws, `wc -l "${base}/database.json"`)
   await run(ws, `head -n 8 "${base}/database.json"`)
   await run(ws, `tail -n 5 "${base}/database.json"`)
   await run(ws, `basename "${base}/database.json"`)
   await run(ws, `dirname "${base}/database.json"`)
-  await run(ws, `tree -L 1 "${base}/"`)
+  await run(ws, `tree -L 2 "${base}/"`)
   await run(ws, `find "${base}/" -name "database.json"`)
   await run(ws, `echo "${base}/"*`)
 
-  const listing = (await ws.execute(`ls "${base}/"`)).stdoutText.trim().split('\n')
-  let row = ''
-  for (const line of listing) {
-    const name = basename(line.replace(/\/$/, ''))
-    if (name !== 'database.json' && name !== '') {
-      row = name
-      break
-    }
-  }
-  if (row === '') {
-    console.log('Database has no row pages\n')
+  const source = await pickChild(ws, base, 'database.json')
+  if (source === '') {
+    console.log('Database has no data sources\n')
     return
   }
-  const rowBase = `${base}/${row}`
+  const sourceBase = `${base}/${source}`
+  console.log(`--- data source: ${source} ---\n`)
+  await run(ws, `ls "${sourceBase}/"`)
+  await run(ws, `cat "${sourceBase}/data_source.json"`)
+  await run(ws, `jq ".properties | keys" "${sourceBase}/data_source.json"`)
+
+  const row = await pickChild(ws, sourceBase, 'data_source.json')
+  if (row === '') {
+    console.log('Data source has no row pages\n')
+    return
+  }
+  const rowBase = `${sourceBase}/${row}`
   console.log(`--- row page: ${row} ---\n`)
   await run(ws, `ls "${rowBase}/"`)
   await run(ws, `stat "${rowBase}/page.json"`)
   await run(ws, `cat "${rowBase}/page.json"`, 1200)
   await run(ws, `jq ".parent_type" "${rowBase}/page.json"`)
   await run(ws, `jq ".parent_id" "${rowBase}/page.json"`)
+  // A row's cells ride in the file, as Notion's own property objects,
+  // answering to the schema in the data_source.json above.
+  await run(ws, `jq ".properties | keys" "${rowBase}/page.json"`)
 }
 
 async function exploreCrossCutting(ws: Workspace): Promise<void> {
   console.log('\n########## CROSS-CUTTING ##########\n')
   await run(ws, 'ls /notion/')
   await run(ws, 'tree -L 2 /notion/')
-  await run(ws, 'ntn search --query a', 800)
+  // There is no `ntn search`: /search is reached through `ntn api`,
+  // exactly as the official CLI reaches it.
+  await run(ws, `ntn api v1/search -d '{"query":"a"}'`, 800)
   await run(ws, 'grep -rl "page_id" /notion/pages/', 800)
   await run(ws, 'rg -c "title" /notion/databases/', 800)
 }

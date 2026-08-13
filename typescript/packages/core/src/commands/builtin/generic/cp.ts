@@ -29,6 +29,7 @@ import {
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { extraOperandError } from '../../spec/usage.ts'
+import type { FlagView } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { DEFAULT_BACKUP_SUFFIX, backupControl, backupTarget } from '../utils/backup.ts'
 import {
@@ -41,15 +42,11 @@ import {
 import { fsStrerror, isFsError, isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { norm, parent } from '../../../utils/path.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
 const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
-
-// PATH-valued flags (-t) reach single-mount commands as PathSpec, so the
-// bag is wider than the string wire type; plain string records assign
-// fine.
-export type Flags = Record<string, string | boolean | number | string[] | PathSpec>
 
 export interface CpFlags {
   recursive: boolean
@@ -86,15 +83,6 @@ export interface TransferPolicy {
   suffix: string
 }
 
-// Python `as_str(a) or as_str(b)` twin: the first non-empty string wins,
-// an empty string reads as absent.
-export function firstStr(...values: unknown[]): string | null {
-  for (const value of values) {
-    if (typeof value === 'string' && value !== '') return value
-  }
-  return null
-}
-
 function isPrimitiveCopy(strategy: CopyStrategy): strategy is PrimitiveCopy {
   return 'readBytes' in strategy
 }
@@ -113,8 +101,8 @@ export function backupDisplaces(control: string | null): boolean {
 }
 
 // Resolve -u/--update[=UPDATE] to a GNU update mode.
-export function updateMode(cmdName: string, flags: Flags): string | null {
-  const value: unknown = flags.update
+export function updateMode(cmdName: string, fl: FlagView): string | null {
+  const value: unknown = fl.raw('update')
   if (value === undefined || value === false) return null
   if (value === true) return 'older'
   if (typeof value === 'string' && (UPDATE_MODES as readonly string[]).includes(value)) {
@@ -133,22 +121,32 @@ export function updateMode(cmdName: string, flags: Flags): string | null {
   )
 }
 
+// The --suffix value, an empty one reading as absent: GNU 9.7
+// `cp --backup --suffix= f g` writes the default `g~`, not a backup whose
+// name is the original's. Python's twin is `fl.as_str('suffix') or None`.
+export function suffixFlag(fl: FlagView): string | null {
+  const value = fl.asStr('suffix')
+  return value === undefined || value === '' ? null : value
+}
+
 // The raw -b/--backup value, absent shapes reading as undefined. The parser
 // lands both spellings on the canonical `backup` dest, so the key already
 // carries GNU's last-occurrence-wins value.
-export function backupRaw(flags: Flags): string | boolean | undefined {
-  const value: unknown = flags.backup
+export function backupRaw(fl: FlagView): string | boolean | undefined {
+  const value: unknown = fl.raw('backup')
   if (typeof value === 'string' || typeof value === 'boolean') return value
   return undefined
 }
 
-// -t values arrive as PathSpec on the single-mount dispatch path and as
-// resolved virtual-path strings on the cross-mount relay path; accept both.
-export function targetFlags(cmdName: string, flags: Flags): [PathSpec | string | null, boolean] {
-  const raw: unknown = flags.target_directory
+// -t arrives as a resolved virtual-path string. PathSpec is accepted for
+// the shape Python's executor promotes PATH flag values into
+// (`workspace/executor/command/flags.py`); the TypeScript executor keeps
+// the string on both the single-mount and the relay path.
+export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | string | null, boolean] {
+  const raw: unknown = fl.raw('target_directory')
   const targetDir: PathSpec | string | null =
     raw instanceof PathSpec || typeof raw === 'string' ? raw : null
-  const noTarget = flags.no_target_directory === true
+  const noTarget = fl.asBool('no_target_directory')
   if (targetDir !== null && noTarget) {
     throw new UsageError(
       `${cmdName}: cannot combine --target-directory (-t) and --no-target-directory (-T)`,
@@ -162,11 +160,11 @@ export function targetFlags(cmdName: string, flags: Flags): [PathSpec | string |
 // no-ops (non-interactive control plane: overwrite always proceeds unless
 // -n/--update say otherwise), and --strip-trailing-slashes is a no-op
 // because PathSpec already normalizes trailing slashes.
-export function parseCpFlags(flags: Flags): CpFlags {
-  const update = updateMode('cp', flags)
-  const suffix = firstStr(flags.suffix)
-  const control = backupControl('cp', backupRaw(flags), suffix)
-  const noClobber = flags.no_clobber === true
+export function parseCpFlags(fl: FlagView): CpFlags {
+  const update = updateMode('cp', fl)
+  const suffix = suffixFlag(fl)
+  const control = backupControl('cp', backupRaw(fl), suffix)
+  const noClobber = fl.asBool('no_clobber')
   if (control !== null && control !== 'none' && (noClobber || update === 'none-fail')) {
     throw new UsageError(
       'cp: --backup is mutually exclusive with -n or --update=none-fail\n' +
@@ -174,11 +172,11 @@ export function parseCpFlags(flags: Flags): CpFlags {
       1,
     )
   }
-  const [targetDir, noTargetDir] = targetFlags('cp', flags)
+  const [targetDir, noTargetDir] = targetFlags('cp', fl)
   return cpFlags({
-    recursive: flags.r === true || flags.recursive === true || flags.archive === true,
+    recursive: fl.asBool('r') || fl.asBool('recursive') || fl.asBool('archive'),
     noClobber,
-    verbose: flags.verbose === true,
+    verbose: fl.asBool('verbose'),
     update,
     backup: control,
     suffix: suffix ?? DEFAULT_BACKUP_SUFFIX,
@@ -504,7 +502,7 @@ async function treeLines(
 ): Promise<string[]> {
   const dirs = await strategy.find(src, { type: 'd' })
   const files = await strategy.find(src, { type: 'f' })
-  const unique = [...new Set([srcBase, ...dirs, ...files])].sort()
+  const unique = [...new Set([srcBase, ...dirs, ...files])].sort(compareCodePoints)
   return unique.map((entryMount) => {
     const entry = mountedPath(src, entryMount)
     const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
@@ -530,7 +528,11 @@ async function mirrorDirs(
 ): Promise<boolean> {
   if (strategy.mkdir === undefined) return true
   const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))]
-  const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length)
+  // Shortest first so a parent is created before its children, then by name:
+  // sorting on length alone leaves equal-length siblings in whatever order
+  // the Set happened to hold, which is insertion order here and hash order in
+  // Python. Same key on both sides, same output.
+  const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length || compareCodePoints(a, b))
   for (const entryMount of unique) {
     const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
     if (lines !== undefined) {

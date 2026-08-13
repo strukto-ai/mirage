@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (CopyStrategy, FileType, NativeCopy, NativeMove,
@@ -139,7 +139,7 @@ def target_flags(cmd_name: str,
         cmd_name (str): Command name for the conflict error.
         fl (FlagView): Parsed flag view.
     """
-    target_dir: object = fl.raw("target_directory")
+    target_dir: FlagValue | None = fl.raw("target_directory")
     if not isinstance(target_dir, (PathSpec, str)):
         target_dir = None
     no_target = fl.as_bool("no_target_directory")
@@ -162,7 +162,9 @@ def parse_cp_flags(fl: FlagView) -> CpFlags:
         fl (FlagView): Flag view constructed with the cp spec.
     """
     update = update_mode("cp", fl)
-    suffix = fl.as_str("suffix")
+    # An empty --suffix reads as absent: GNU 9.7 `cp --backup --suffix= f g`
+    # writes the default `g~`, not a backup whose name is the original's.
+    suffix = fl.as_str("suffix") or None
     control = backup_control("cp", backup_raw(fl), suffix)
     no_clobber = fl.as_bool("no_clobber")
     if control is not None and control != "none" and (no_clobber or update
@@ -541,8 +543,7 @@ def descendant_path(root: PathSpec, virtual: str) -> PathSpec:
 
 
 async def _tree_lines(strategy: NativeCopy, src: PathSpec, target: PathSpec,
-                      src_base: str, dst_base: str,
-                      find_type: str) -> list[str]:
+                      src_base: str, dst_base: str) -> list[str]:
     """GNU ``-v`` lines for a natively copied tree, parents first.
 
     GNU ``cp -rv`` reports directories as well as files, including the
@@ -558,10 +559,9 @@ async def _tree_lines(strategy: NativeCopy, src: PathSpec, target: PathSpec,
         target (PathSpec): Destination root.
         src_base (str): Source root's mount path, no trailing slash.
         dst_base (str): Destination root's mount path, no trailing slash.
-        find_type (str): File-type selector for the file pass.
     """
     dirs = await strategy.find(src, type="d")
-    files = await strategy.find(src, type=find_type)
+    files = await strategy.find(src, type="f")
     lines: list[str] = []
     for entry_mount in sorted({src_base, *dirs, *files}):
         entry = mounted_path(src, entry_mount)
@@ -615,7 +615,12 @@ async def _mirror_dirs(
     if strategy.mkdir is None:
         return True
     mounts = [src_base, *await strategy.find(src, type="d")]
-    for entry_mount in sorted(set(mounts), key=len):
+    # Shortest first so a parent is created before its children. The name is
+    # the tiebreak because `sorted` is stable and set iteration over strings
+    # is PYTHONHASHSEED-dependent, so sibling directories of equal length
+    # used to come out in a different order run to run -- and in a different
+    # order from TypeScript, whose Set keeps insertion order.
+    for entry_mount in sorted(set(mounts), key=lambda p: (len(p), p)):
         entry_dst = mounted_path(target,
                                  dst_base + entry_mount[len(src_base):])
         if lines is not None:
@@ -783,7 +788,6 @@ async def cp(
     stat: StatFn,
     strategy: CopyStrategy,
     flags: CpFlags,
-    find_type: str = "f",
     backend_key: Callable[[PathSpec], str] | None = None,
     readdir: ReaddirFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -802,7 +806,6 @@ async def cp(
         stat (Callable): Stats a path; raises when missing.
         strategy (CopyStrategy): Complete native or primitive copy capability.
         flags (CpFlags): Parsed cp flags.
-        find_type (str): File-type selector passed to ``find``.
         backend_key (Callable | None): Maps a path to its backend storage key
             for the same-file and into-own-subtree guards; defaults to the
             normalized mount-relative path.
@@ -893,14 +896,13 @@ async def cp(
                 if flags.no_clobber and target_exists:
                     continue
                 await strategy.dir_copy(src, target)
-                for entry_mount in await strategy.find(src, type=find_type):
+                for entry_mount in await strategy.find(src, type="f"):
                     entry_dst = mounted_path(
                         target, dst_base + entry_mount[len(src_base):])
                     writes[entry_dst.mount_path] = b""
                 if flags.verbose:
-                    lines.extend(await
-                                 _tree_lines(strategy, src, target, src_base,
-                                             dst_base, find_type))
+                    lines.extend(await _tree_lines(strategy, src, target,
+                                                   src_base, dst_base))
                 continue
             # Per-entry policy forfeits dir_copy, so the tree's directories
             # are recreated here: a files-only pass would drop every
@@ -909,7 +911,7 @@ async def cp(
                                       dst_base, writes, errors,
                                       lines if flags.verbose else None):
                 continue
-            for entry_mount in await strategy.find(src, type=find_type):
+            for entry_mount in await strategy.find(src, type="f"):
                 entry = mounted_path(src, entry_mount)
                 entry_dst = mounted_path(
                     target, dst_base + entry_mount[len(src_base):])

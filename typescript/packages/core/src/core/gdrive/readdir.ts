@@ -20,6 +20,7 @@ import { PathSpec } from '../../types.ts'
 import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
   'gdrive/folder',
@@ -162,7 +163,7 @@ export async function readdir(
   // order, so sort by rendered filename (Drive returns modifiedTime desc).
   // Codepoint compare, not localeCompare: python sorts by codepoint and the
   // two runners must list identically.
-  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  entries.sort((a, b) => compareCodePoints(a.name, b.name))
   if (index !== undefined) {
     if (complete) {
       await index.setDir(

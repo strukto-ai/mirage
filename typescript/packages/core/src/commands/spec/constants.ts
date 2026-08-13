@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Stand-in name for a required operand whose slot declares none, so a
+// refusal that has to name the slot always has a word for it. Bare like
+// every operand name: the brackets are the renderer's.
+export const ARG_PLACEHOLDER = 'ARG'
+
 export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   l: 'args_l',
   O: 'args_O',
@@ -47,6 +52,12 @@ export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 // name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp'])
 
+// An old-style cluster letter left without its argument exits 2, not
+// USAGE_EXIT's 64: tar reads the cluster itself and raises its own fatal
+// error, while 64 (EX_USAGE) is what argp returns for a letter it does
+// not know. Pinned on GNU tar 1.35: `tar xzf` is 2, `tar -Q` is 64.
+export const OLD_OPTION_EXIT = 2
+
 export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   grep: 2,
   egrep: 2,
@@ -60,4 +71,21 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   awk: 2,
   jq: 2,
   tar: 64,
+  python: 2,
+  python3: 2,
 })
+
+// The interpreter commands answer option errors in CPython's words, not
+// GNU's: python3 is not a GNU tool, and its refusal names the
+// source-selecting options a reader needs.
+export const PYTHON_NAMES: ReadonlySet<string> = new Set(['python', 'python3'])
+
+// Pinned on CPython 3.12.13, including two quirks worth keeping: the
+// hint always spells the program `python` (never `python3`, whichever
+// way it was invoked), and it quotes with a backquote/quote pair.
+export function pythonUsage(name: string): string {
+  return (
+    `usage: ${name} [option] ... [-c cmd | -m mod | file | -] [arg] ...\n` +
+    "Try `python -h' for more information.\n"
+  )
+}

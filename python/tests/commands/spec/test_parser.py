@@ -193,7 +193,7 @@ def test_missing_value_reported_short_and_long():
 
 
 def test_text_rest_keeps_unknown_dash_tokens():
-    parsed = parse_command(SPECS["python"], ["-x", "hello"], "/")
+    parsed = parse_command(SPECS["expr"], ["-x", "hello"], "/")
     assert parsed.texts() == ["-x", "hello"]
     assert parsed.warnings == []
 
@@ -606,3 +606,182 @@ def test_operands_stay_paths_without_the_args_flags():
     parsed = parse_command(SPECS["jq"], [".", "/d/a.json"], "/")
     assert parsed.texts() == ["."]
     assert parsed.paths() == ["/d/a.json"]
+
+
+def test_tar_old_style_cluster_parses_as_flags():
+    parsed = parse_command(SPECS["tar"], ["xzf", "/data/a.tgz"], "/")
+    assert parsed.flags["-x"] is True
+    assert parsed.flags["-z"] is True
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.paths() == []
+    assert parsed.path_flag_values == ["/data/a.tgz"]
+
+
+def test_tar_old_style_cluster_word_is_text_not_a_path():
+    # The cluster carries no dash, so without an explicit TEXT kind the
+    # shape heuristic would classify it and dispatch would re-read it as
+    # a resolved path instead of letters.
+    parsed = parse_command(SPECS["tar"], ["xzf", "/data/a.tgz"], "/")
+    assert parsed.word_kinds == ["str", "path"]
+
+
+def test_tar_old_style_operands_keep_their_argv_slots():
+    parsed = parse_command(
+        SPECS["tar"], ["czf", "/data/a.tgz", "/data/one.txt", "/data/two.txt"],
+        "/")
+    assert parsed.paths() == ["/data/one.txt", "/data/two.txt"]
+    assert parsed.word_kinds == ["str", "path", "path", "path"]
+
+
+def test_tar_old_style_two_value_letters_bind_in_letter_order():
+    parsed = parse_command(SPECS["tar"], ["xfC", "/data/a.tgz", "/data/out"],
+                           "/")
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.flags["-C"] == ["/data/out"]
+
+
+def test_tar_old_style_value_letter_before_bool_letter():
+    parsed = parse_command(SPECS["tar"], ["cfz", "/data/a.tgz"], "/")
+    assert parsed.flags["-f"] == "/data/a.tgz"
+    assert parsed.flags["-z"] is True
+
+
+def test_tar_old_style_missing_argument_is_reported_not_raised():
+    parsed = parse_command(SPECS["tar"], ["xzf"], "/")
+    assert parsed.old_option_needs_value == "f"
+
+
+def test_tar_old_style_undeclared_letter_reports_the_char():
+    parsed = parse_command(SPECS["tar"], ["xQz", "/data/a.tgz"], "/")
+    assert parsed.invalid_options == ["Q"]
+    assert parsed.old_option_needs_value is None
+
+
+def test_tar_dashed_line_reports_no_old_option():
+    parsed = parse_command(SPECS["tar"], ["-x", "-z", "-f", "/data/a.tgz"],
+                           "/")
+    assert parsed.old_option_needs_value is None
+    assert parsed.word_kinds == [None, None, None, "path"]
+
+
+def test_tar_old_style_still_accepts_long_options_after_the_cluster():
+    parsed = parse_command(
+        SPECS["tar"],
+        ["xzf", "/data/a.tgz", "--strip-components", "1", "-C", "/data/out"],
+        "/")
+    assert parsed.flags["--strip-components"] == "1"
+    assert parsed.flags["-C"] == ["/data/out"]
+
+
+def test_old_option_style_is_off_for_every_other_command():
+    # A first word with no dash stays an operand everywhere else.
+    parsed = parse_command(SPECS["gzip"], ["dkf"], "/")
+    assert parsed.paths() == ["/dkf"]
+    assert parsed.old_option_needs_value is None
+
+
+def test_required_operand_is_reported_not_raised():
+    # The parser classifies and reports; the dialect that words the
+    # refusal is the caller's choice, which is why this is a list of
+    # names rather than an exception.
+    spec = CommandSpec(
+        positional=(Operand(type="str", name="PAGE_ID", required=True), ))
+    empty = parse_command(spec, [], "/")
+    assert empty.missing_required_operands == ["PAGE_ID"]
+    filled = parse_command(spec, ["abc"], "/")
+    assert filled.missing_required_operands == []
+
+
+def test_a_flag_that_supplies_a_slot_satisfies_required():
+    # provided_by is the declarative form of grep's `if (!pattern_given)`:
+    # the slot is skipped, so it cannot also be missing.
+    spec = CommandSpec(
+        options=(Option(long="--expr", short="-e", type="str"), ),
+        positional=(Operand(type="str",
+                            name="PATTERN",
+                            required=True,
+                            provided_by=("-e", )), ),
+    )
+    assert parse_command(spec, [],
+                         "/").missing_required_operands == ["PATTERN"]
+    supplied = parse_command(spec, ["-e", "x"], "/")
+    assert supplied.missing_required_operands == []
+
+
+def test_typed_dests_exclude_defaults_and_keep_scan_order():
+    spec = CommandSpec(options=(
+        Option(long="--limit", type="int", default="25"),
+        Option(long="--sort", type="str"),
+        Option(long="--json", type="bool"),
+    ))
+    # --limit is present in flags (the default landed) but was never
+    # typed, which is the whole distinction a clap usage line needs.
+    parsed = parse_command(spec, ["--json", "--sort", "x"], "/")
+    assert parsed.flags["--limit"] == "25"
+    assert parsed.typed_dests == ["--json", "--sort"]
+
+
+def test_operand_base_rebases_the_operands_typed_after_it():
+    # GNU tar's -C is a chdir for the operands that follow it, so the
+    # archive (-f) stays relative to the session cwd while the files move.
+    parsed = parse_command(
+        SPECS["tar"], ["-czf", "out.tgz", "-C", "/work/check", "my_paper"],
+        cwd="/home")
+    assert parsed.paths() == ["/work/check/my_paper"]
+    assert parsed.flags["-f"] == "/home/out.tgz"
+    assert parsed.flags["-C"] == ["/work/check"]
+
+
+def test_operand_base_is_cumulative_like_a_real_chdir():
+    parsed = parse_command(
+        SPECS["tar"], ["-cf", "a.tar", "-C", "d1", "x", "-C", "../d2", "y"],
+        cwd="/work")
+    assert parsed.paths() == ["/work/d1/x", "/work/d2/y"]
+    # Every occurrence is kept in order: GNU chdirs at each one.
+    assert parsed.flags["-C"] == ["/work/d1", "/work/d2"]
+
+
+def test_operand_base_only_moves_what_follows_it():
+    parsed = parse_command(
+        SPECS["tar"], ["-cf", "a.tar", "top.txt", "-C", "/work/e", "e.txt"],
+        cwd="/work")
+    assert parsed.paths() == ["/work/top.txt", "/work/e/e.txt"]
+
+
+def test_operand_base_survives_the_old_style_cluster():
+    parsed = parse_command(SPECS["tar"], ["czf", "a.tgz", "-C", "sub", "x"],
+                           cwd="/work")
+    assert parsed.paths() == ["/work/sub/x"]
+    assert parsed.word_bases[-1] == "/work/sub"
+
+
+def test_word_bases_are_empty_without_an_operand_base():
+    parsed = parse_command(SPECS["cat"], ["a.txt"], cwd="/work")
+    assert parsed.word_bases == [None]
+
+
+PYTHON_LIKE = CommandSpec(
+    options=(Option(short="-c", type="str"), Option(short="-u")),
+    rest=Operand(type="str", remainder=True),
+)
+
+
+def test_remainder_rejects_an_unknown_flag_before_the_operand():
+    parsed = parse_command(PYTHON_LIKE, ["-z", "-c", "print(1)"], "/")
+    assert parsed.invalid_options == ["z"]
+
+
+def test_remainder_keeps_dash_words_after_the_operand_verbatim():
+    parsed = parse_command(PYTHON_LIKE, ["s.py", "--foo", "-z"], "/")
+    assert parsed.texts() == ["s.py", "--foo", "-z"]
+    assert parsed.invalid_options == []
+
+
+def test_remainder_consumes_the_marker_that_hands_off_the_line():
+    # The router writes the `--`; the parser eats exactly that one, so
+    # the words after it are the program's argv.
+    parsed = parse_command(PYTHON_LIKE, ["-c", "print(1)", "--", "-u", "x"],
+                           "/")
+    assert parsed.flags["-c"] == "print(1)"
+    assert parsed.flags.get("-u") is not True
+    assert parsed.texts() == ["-u", "x"]

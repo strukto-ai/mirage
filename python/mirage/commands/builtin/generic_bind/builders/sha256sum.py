@@ -14,14 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.sha256sum import \
-    sha256sum as generic_sha256sum
+from mirage.commands.builtin.generic.sha256sum import sha256sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+                                                          dir_aware_stat,
+                                                          dir_aware_stream)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,37 +32,15 @@ async def sha256sum(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    c: bool = False,
-    b: bool = False,
-    t: bool = False,
-    w: bool = False,
-    z: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["sha256sum"])
-    paths, err = await resolve_readable(ops, accessor, paths, index,
-                                        "sha256sum")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_sha256sum(paths,
-                                read_bytes=bound_op(ops.read_bytes, accessor,
-                                                    index),
-                                read_stream=bound_op(ops.read_stream, accessor,
-                                                     index),
-                                stdin=stdin,
-                                check=c or fl.as_bool("check"),
-                                binary=b or fl.as_bool("binary"),
-                                tag=fl.as_bool("tag"),
-                                zero=z or fl.as_bool("zero"),
-                                strict=fl.as_bool("strict"),
-                                ignore_missing=fl.as_bool("ignore_missing"),
-                                status=fl.as_bool("status"),
-                                quiet=fl.as_bool("quiet"),
-                                warn=w or fl.as_bool("warn"),
-                                cwd=cwd), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await sha256sum_generic(
+        resolved, list(texts), CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
+        dir_aware_stat(ops, accessor, index),
+        dir_aware_stream(ops, accessor, index))
 
 
 BUILDER = Builder('sha256sum', sha256sum, None, False, None, read=True)

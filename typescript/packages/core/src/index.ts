@@ -100,9 +100,11 @@ export {
   throwUnsupported,
 } from './resource/base.ts'
 export {
+  type ConfigOf,
   hasRedactedSecret,
   REDACTED_SECRET,
   redactConfigWithSchema,
+  type RedactedConfig,
   resourceStateRequiresOverride,
   secretSchema,
   secretStr,
@@ -136,6 +138,7 @@ export {
   type RegisteredOp,
   registerOp,
 } from './ops/registry.ts'
+export { Ops } from './ops/ops.ts'
 export { RAM_OPS } from './ops/ram/index.ts'
 export { makeGenericOps } from './ops/generic/factory.ts'
 export { extractWriteData } from './ops/write_args.ts'
@@ -176,9 +179,11 @@ export {
   specFlagNames,
   specOf,
   SPECS,
+  UsageStyle,
 } from './commands/spec/index.ts'
 export { type ByteSource, IOResult, type IOResultInit, materialize } from './io/types.ts'
 export { CachableAsyncIterator } from './io/cachable_iterator.ts'
+export { OpReport } from './io/types.ts'
 export {
   asyncChain,
   closeQuietly,
@@ -192,7 +197,7 @@ export {
 export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { type EventDict, Observer } from './observe/observer.ts'
-export { type ObserverStore, RAMObserverStore } from './observe/store.ts'
+export { type ObserverStore, ObserverStoreBase, RAMObserverStore } from './observe/store.ts'
 export { NamespaceStore, type NodeFields } from './workspace/mount/namespace/store.ts'
 export { RAMNamespaceStore } from './workspace/mount/namespace/ram.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
@@ -237,6 +242,7 @@ export {
   metadataProvision,
   overlaidStat,
   pureProvision,
+  rangeOf,
   resolveGlobOf,
   withDefaultProvisions,
   writeMetadataProvision,
@@ -294,7 +300,13 @@ export {
 export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
-export { duGeneric, parseDepth, parseDuFlags, runDu } from './commands/builtin/generic/du.ts'
+export {
+  DEFAULT_MAX_DU_ENTRIES,
+  duGeneric,
+  parseDepth,
+  parseDuFlags,
+  runDu,
+} from './commands/builtin/generic/du.ts'
 export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
@@ -386,7 +398,14 @@ export {
   sortLines,
   splitSortLines,
 } from './commands/builtin/sort_helper.ts'
-export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper.ts'
+export {
+  countNewlines,
+  normalizeCounts,
+  parseCounts,
+  parseN,
+  tailBytes,
+  type TailCounts,
+} from './commands/builtin/tail_helper.ts'
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
@@ -444,6 +463,13 @@ export { Precision, ProvisionResult, type ProvisionResultInit } from './provisio
 export { IndexEntry, type IndexEntryInit, ResourceType } from './cache/index/config.ts'
 export { drainBudget, type FileCache, validateMaxDrainBytes } from './cache/file/mixin.ts'
 export { CacheEntry, type CacheEntryInit } from './cache/file/entry.ts'
+export { CacheType, type CacheConfig, type RedisCacheConfig } from './cache/file/config.ts'
+export {
+  buildFileCache,
+  registerFileCacheStore,
+  type FileCacheFactory,
+  type FileCacheStore,
+} from './workspace/workspace/cache.ts'
 export { defaultFingerprint, globEscape, parseLimit } from './cache/file/utils.ts'
 export { RAMFileCacheStore } from './cache/file/ram.ts'
 export { applyIo, readFingerprint } from './cache/file/io.ts'
@@ -509,8 +535,32 @@ export { Runtime, type RuntimeEntry } from './runtime/base.ts'
 export { LanguageRuntime } from './runtime/language.ts'
 export { PythonRuntime } from './runtime/python/base.ts'
 export { JsRuntime } from './runtime/js/base.ts'
-export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
-export { EvalError } from './runtime/errors.ts'
+export {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  DEFAULT_PYTHON,
+  runtimeBindingsFor,
+  VFSRuntime,
+} from './runtime/table.ts'
+export {
+  coerceRuntimeConfig,
+  HOME_CONFIG_KEYS,
+  type HomeConfig,
+  type RuntimeConfig,
+} from './runtime/config.ts'
+export { CrossMountError, EvalError } from './runtime/errors.ts'
+export { contentSize, DIR_MODE, FILE_MODE, mtimeMs } from './utils/stat_view.ts'
+export {
+  classify,
+  FS_CONDITIONS,
+  type FsCondition,
+  gnuPhrase,
+  POSIX,
+  posixErrno,
+  type PosixErrno,
+} from './errors/index.ts'
+export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
+export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles/index.ts'
 export {
   EVALUATOR,
   isEvaluator,
@@ -567,6 +617,12 @@ export {
   type Policy,
 } from './policy/index.ts'
 export { buildRuntime, candidates, registerRuntime, RUNTIMES } from './runtime/table.ts'
+// The concrete runtime classes stay unexported on purpose: buildRuntime
+// is the one construction door, and a config block reaches it as a plain
+// object. Exporting the config TYPE is what makes that object checkable,
+// so `buildRuntime('pyodide', { config: cfg })` refuses a misspelled key
+// at compile time instead of at first run.
+export type { PyodideConfig } from './runtime/python/pyodide.ts'
 export { RemoteSandbox } from './runtime/sandbox/base.ts'
 export { type NormalizedSandboxConfig, type SandboxConfig } from './runtime/sandbox/config.ts'
 export { stdinPath, stdinRedirect } from './runtime/sandbox/constants.ts'
@@ -656,7 +712,6 @@ export {
   type WalkFlagBag,
   WalkResult,
   type WalkResultInit,
-  UsageStyle,
 } from './commands/cli/types.ts'
 export { cliSpecFor, registerCliSpec, unregisterCliSpec } from './commands/cli/specs.ts'
 export { GWS } from './commands/cli/builtin/gws/index.ts'
@@ -665,6 +720,7 @@ export { DISCORD } from './commands/cli/builtin/discord/index.ts'
 export { NTN } from './commands/cli/builtin/ntn/index.ts'
 export { LINEAR } from './commands/cli/builtin/linear/index.ts'
 export { GIT } from './commands/cli/builtin/git/index.ts'
+export { GH } from './commands/cli/builtin/gh/index.ts'
 export { nodeHelp, walk } from './commands/cli/walk.ts'
 export { CLIRegistry } from './workspace/cli/registry.ts'
 export type { CLIInstall } from './workspace/cli/types.ts'
@@ -713,6 +769,7 @@ export {
   type S3HttpAgents,
 } from './resource/s3/config.ts'
 export { remapCommandsResource, remapOpsResource } from './resource/s3/remap.ts'
+export { s3StorageId } from './resource/s3/storage_id.ts'
 export { S3_PROMPT } from './resource/s3/prompt.ts'
 export { SCOPE_ERROR as S3_SCOPE_ERROR } from './core/s3/constants.ts'
 export { copy } from './core/s3/copy.ts'
@@ -889,6 +946,20 @@ export {
 export { GitHubAccessor, type GitHubResourceLike } from './accessor/github.ts'
 export { GITHUB_COMMANDS } from './commands/builtin/github/index.ts'
 export { GITHUB_OPS } from './ops/github/index.ts'
+export {
+  type GhConfig,
+  type GhConfigRedacted,
+  GhConfigSchema,
+  normalizeGhConfig,
+  redactGhConfig,
+} from './core/github/config.ts'
+export {
+  forkRepo as githubForkRepo,
+  login as githubLogin,
+  parseRepo as githubParseRepo,
+  renameRepo as githubRenameRepo,
+  viewRepo as githubViewRepo,
+} from './core/github/repo.ts'
 export { read as githubRead, stream as githubStream } from './core/github/read.ts'
 export { readdir as githubReaddir } from './core/github/readdir.ts'
 export {
@@ -935,9 +1006,11 @@ export {
 export { listAnnotations as githubCiListAnnotations } from './core/github_ci/annotations.ts'
 export { GITHUB_CI_PROMPT } from './resource/github_ci/prompt.ts'
 export {
+  CALENDAR_API_BASE,
   DOCS_API_BASE,
   DRIVE_API_BASE,
   DRIVE_UPLOAD_BASE,
+  FORMS_API_BASE,
   GMAIL_API_BASE,
   GoogleApiError,
   SHEETS_API_BASE,
@@ -945,9 +1018,11 @@ export {
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
   TokenManager,
+  calendarBase,
   docsBase,
   driveBase,
   driveUploadBase,
+  formsBase,
   gmailBase,
   sheetsBase,
   slidesBase,
@@ -977,6 +1052,33 @@ export {
   listAllFiles as googleDriveListAllFiles,
   listFiles as googleDriveListFiles,
 } from './core/google/drive.ts'
+export { GCalAccessor } from './accessor/gcal.ts'
+export { GCAL_COMMANDS } from './commands/builtin/gcal/index.ts'
+export { GCAL_OPS } from './ops/gcal/index.ts'
+export { read as gcalRead } from './core/gcal/read.ts'
+export { readdir as gcalReaddir } from './core/gcal/readdir.ts'
+export { stat as gcalStat } from './core/gcal/stat.ts'
+export { unlink as gcalUnlink } from './core/gcal/unlink.ts'
+export {
+  deleteEvent as gcalDeleteEvent,
+  listCalendars as gcalListCalendars,
+  listEvents as gcalListEvents,
+} from './core/gcal/client.ts'
+export {
+  clampedHhmm as gcalClampedHhmm,
+  dayBounds as gcalDayBounds,
+  daysCovered as gcalDaysCovered,
+  eventSpan as gcalEventSpan,
+  validDay as gcalValidDay,
+  windowBounds as gcalWindowBounds,
+} from './core/gcal/day.ts'
+export { GCAL_PROMPT, GCAL_WRITE_PROMPT } from './resource/gcal/prompt.ts'
+export {
+  makeCalendarDirname as gcalMakeCalendarDirname,
+  makeEventFilename as gcalMakeEventFilename,
+  parseCalendarDirname as gcalParseCalendarDirname,
+  parseEventFilename as gcalParseEventFilename,
+} from './resource/gcal/event_entry.ts'
 export { GDocsAccessor } from './accessor/gdocs.ts'
 export { GDOCS_COMMANDS } from './commands/builtin/gdocs/index.ts'
 export { GDOCS_OPS } from './ops/gdocs/index.ts'
@@ -1219,6 +1321,9 @@ export {
   snakeToCamel,
   type ValueTransform,
 } from './utils/normalize.ts'
+export { compareCodePoints, sortedByCodePoints } from './utils/sort.ts'
+export { advanceColumn, charWidth, isSpace, TAB_WIDTH } from './utils/width.ts'
+export { WHITESPACE, WIDE, ZERO_WIDTH } from './utils/generated/width_data.ts'
 export type { PgDriver, PgQueryResult } from './core/postgres/_driver.ts'
 export { PostgresAccessor } from './accessor/postgres.ts'
 export {

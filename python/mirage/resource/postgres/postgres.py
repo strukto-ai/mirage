@@ -44,8 +44,8 @@ class PostgresResource(BaseResource):
 
         for fn in COMMANDS:
             self.register(fn)
-        for fn in POSTGRES_VFS_OPS:
-            self.register_op(fn)
+        for op in POSTGRES_VFS_OPS:
+            self.register_op(op)
 
     async def resolve_glob(self, paths, prefix: str = ""):
         return await _resolve_glob(self.accessor, paths, index=self._index)

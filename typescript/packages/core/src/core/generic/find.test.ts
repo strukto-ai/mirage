@@ -15,7 +15,8 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { isEnoent, modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
+import { modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
+import { isEnoent } from '../../utils/errors.ts'
 
 function enoent(p: string): Error {
   const e = new Error(`ENOENT: ${p}`) as Error & { code: string }

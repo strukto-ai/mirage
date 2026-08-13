@@ -21,6 +21,7 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import RunArgs, RunResult
 
 
@@ -34,7 +35,7 @@ class EchoRuntime(PythonRuntime):
 
 def test_attach_defaults_to_noop():
     rt = EchoRuntime()
-    rt.attach(lambda *a: None, lambda: [])
+    rt.attach(lambda *a: None, PrefixResolver(lambda: []))
     result = asyncio.run(rt.run(RunArgs(code="hi")))
     assert result.stdout == b"hi"
     assert result.exit_code == 0

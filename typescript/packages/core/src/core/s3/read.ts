@@ -19,6 +19,7 @@ import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key, streamToBuffer } from './_client.ts'
 import { enoent } from '../../utils/errors.ts'
+import { rangeHeader } from '../../utils/ranges.ts'
 
 export interface S3ReadOptions {
   offset?: number
@@ -63,11 +64,8 @@ export async function read(
   if (pinnedRevision !== null) {
     input.VersionId = pinnedRevision
   }
-  if (options.offset !== undefined || options.size !== undefined) {
-    const start = options.offset ?? 0
-    const end = options.size !== undefined ? start + options.size - 1 : ''
-    input.Range = `bytes=${String(start)}-${String(end)}`
-  }
+  const range = rangeHeader(options.offset ?? 0, options.size ?? null)
+  if (range !== null) input.Range = range
   const startMs = performance.now()
   try {
     const resp = (await (

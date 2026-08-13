@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Module } from '../../core/s3/_client.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 class NoSuchKeyError extends Error {
   override readonly name = 'NoSuchKey'
@@ -120,7 +121,7 @@ export class FakeConditionalS3Client {
     const prefix = (input.Prefix as string | undefined) ?? ''
     const contents: { Key: string }[] = []
     const marker = FakeConditionalS3Client.objectKey(bucket, prefix)
-    for (const stored of [...this.objects.keys()].sort()) {
+    for (const stored of [...this.objects.keys()].sort(compareCodePoints)) {
       if (stored.startsWith(marker)) {
         contents.push({ Key: stored.slice(bucket.length + 1) })
       }

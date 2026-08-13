@@ -19,10 +19,11 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.policy import PolicyDecision, parsed_commands
+from mirage.runtime.resolver import MountResolver
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VFSRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
-from mirage.runtime.types import DispatchFn, PrefixSource
+from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.workspace.guard import reject_config_script
 
@@ -40,15 +41,15 @@ class Runtimes:
             unavailable-runtime hints the dispatcher reports.
         dispatch (DispatchFn): the workspace op dispatch each language
             entry is attached to.
-        mount_prefixes (PrefixSource): pull-model provider read per
-            run, so mounts added after construction are picked up.
+        resolver (MountResolver): pull-model mount routing table read
+            per run, so mounts added after construction are picked up.
     """
 
     def __init__(self, registry: MountRegistry, dispatch: DispatchFn,
-                 mount_prefixes: PrefixSource) -> None:
+                 resolver: MountResolver) -> None:
         self._registry = registry
         self._dispatch = dispatch
-        self._mount_prefixes = mount_prefixes
+        self._resolver = resolver
         self._entries: list[Runtime] = []
 
     @property
@@ -62,10 +63,11 @@ class Runtimes:
         the workspace dispatch attached. The vfs runtime is required:
         when the list omits it, an unconditional one is appended, so
         there is always an executor for unclaimed commands. An explicit
-        list fails loud per entry. The default set (monty, quickjs,
-        vfs) builds gracefully: a missing extra skips the entry so its
-        commands report the install hint per invocation, never a silent
-        escalation to another runtime.
+        list fails loud per entry. The default set (DEFAULT_ENTRIES,
+        whose python engine is DEFAULT_PYTHON) builds gracefully: a
+        missing extra skips the entry so its commands report the
+        install hint per invocation, never a silent escalation to
+        another runtime.
 
         Args:
             runtimes (list[Runtime | str] | None): user entries, or
@@ -94,7 +96,7 @@ class Runtimes:
             reject_config_script(f"runtime {entry.name!r} script",
                                  entry.script)
             if isinstance(entry, LanguageRuntime):
-                entry.attach(self._dispatch, self._mount_prefixes)
+                entry.attach(self._dispatch, self._resolver)
         self._entries = entries
         return entries
 
@@ -119,7 +121,7 @@ class Runtimes:
         candidate = [*self._entries, entry]
         bindings = bind_commands(candidate)
         if isinstance(entry, LanguageRuntime):
-            entry.attach(self._dispatch, self._mount_prefixes)
+            entry.attach(self._dispatch, self._resolver)
         self._entries = candidate
         self._registry.runtime_bindings = bindings
         self._registry.runtime_entries = candidate

@@ -1,0 +1,51 @@
+{
+  "suite": "defaults",
+  "cases": [
+    {
+      "id": "default_python_is_monty",
+      "hosts": [
+        "python"
+      ],
+      "world": {},
+      "steps": [
+        {
+          "command": "python3 -m nosuchmodule",
+          "expect": {
+            "exit": 1,
+            "stderr": "python3: -m is not supported by the 'monty' runtime\n"
+          }
+        },
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "default_python_is_pyodide",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {},
+      "steps": [
+        {
+          "command": "python3 -m nosuchmodule",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "No module named"
+          }
+        },
+        {
+          "command": "python3 -c \"print(6 * 7)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "42\n"
+          }
+        }
+      ]
+    }
+  ]
+}

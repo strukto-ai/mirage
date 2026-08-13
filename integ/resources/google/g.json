@@ -402,7 +402,7 @@
       "command": "gws --help | grep -c 'API commands'",
       "expect": {
         "exit": 0,
-        "stdout": "6\n",
+        "stdout": "8\n",
         "stderr": ""
       }
     },

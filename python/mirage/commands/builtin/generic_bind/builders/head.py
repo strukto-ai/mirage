@@ -15,12 +15,14 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi, parse_flags
+from mirage.commands.builtin.generic.head import head_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import split_readable
-from mirage.commands.builtin.utils.stream import _resolve_source
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,30 +34,13 @@ async def head(
     *texts: str,
     stdin: ByteSource | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    try:
-        parsed = parse_flags(flags)
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
-    if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, index)
-        show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
-        paths, err = await split_readable(ops, accessor, paths, index, "head")
-        io = IOResult(exit_code=1 if err else 0, stderr=err or None)
-        if not paths:
-            return None, io
-        return head_multi(paths,
-                          read=bound_op(ops.read_stream, accessor, index),
-                          n=parsed.lines,
-                          c=parsed.bytes_,
-                          show_headers=show_headers,
-                          zero_terminated=parsed.zero_terminated), io
-    source = _resolve_source(stdin, "head: missing operand")
-    return generic_head(source,
-                        n=parsed.lines,
-                        c=parsed.bytes_,
-                        zero_terminated=parsed.zero_terminated), IOResult()
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await head_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              dir_aware_stat(ops, accessor, index),
+                              bound_op(ops.read_stream, accessor, index))
 
 
 BUILDER = Builder('head', head, None, False, header_aggregate, read=True)

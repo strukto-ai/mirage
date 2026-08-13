@@ -21,7 +21,8 @@
 // simplifications, all deterministic so both language runners see
 // byte-identical responses:
 //   - ids and timestamps are counters over a fixed clock, not random
-//   - `fields` masks are ignored (full resources are returned)
+//   - `fields` masks are ignored (full resources are returned), except on
+//     updateCells, where the mask decides whether values are touched at all
 //   - sheets store literal values; formulas are not evaluated
 //   - files.list paginates on pageSize/pageToken; the token is the next
 //     item's index, so pages are stable for a fixed query
@@ -45,8 +46,9 @@
 //     no threads or drafts resources at all
 //   - drive changes.list / changes.getStartPageToken (needs a change feed)
 //   - Sheets requests that need a cell format or style model
-//     (updateCells, repeatCell, copyPaste, conditional formats) and
-//     spreadsheets.getByDataFilter
+//     (repeatCell, copyPaste, conditional formats) and
+//     spreadsheets.getByDataFilter; updateCells is served, but only for
+//     userEnteredValue, so a format-only request is a no-op
 //   - Docs requests that need document structure beyond a text body
 //     (insertTable, insertInlineImage, updateTextStyle, bullets)
 //   - Slides presentations.pages.getThumbnail, and the shape/table/image
@@ -60,6 +62,7 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const SLIDE_MIME = 'application/vnd.google-apps.presentation'
+const FORM_MIME = 'application/vnd.google-apps.form'
 const OWNER = { displayName: 'Integ User', emailAddress: 'integ@example.com', me: true }
 
 // The grid a new spreadsheet gets, and the pixel sizes the live API
@@ -150,6 +153,79 @@ interface GmailLabel {
 
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'UNREAD', 'TRASH']
 
+// A timed event carries dateTime (RFC3339, offset mandatory) and may name its
+// own IANA zone; an all-day event carries a floating `date` and no zone at all.
+interface EventTime {
+  date?: string
+  dateTime?: string
+  timeZone?: string
+}
+
+interface CalendarEvent {
+  id: string
+  status: string
+  summary?: string
+  description?: string
+  location?: string
+  start: EventTime
+  end: EventTime
+  attendees?: Record<string, unknown>[]
+  created: string
+  updated: string
+}
+
+interface CalendarEntry {
+  id: string
+  summary: string
+  timeZone: string
+  accessRole: string
+  primary?: boolean
+  hidden?: boolean
+}
+
+interface FormItem {
+  itemId: string
+  title?: string
+  questionItem?: Record<string, unknown>
+}
+
+interface FormDoc {
+  formId: string
+  title: string
+  documentTitle: string
+  description?: string
+  items: FormItem[]
+  responses: Record<string, unknown>[]
+  revision: number
+}
+
+// A secondary calendar and a form carrying responses are both harness state
+// rather than anything the API can mint: you own every calendar you create,
+// so a reader one is by definition shared with you, and the Forms API has no
+// method that submits a response at all. Both therefore ride /reset, the same
+// out-of-band channel the pinned epoch already uses.
+interface SeedCalendar {
+  id: string
+  summary: string
+  timeZone?: string
+  accessRole?: string
+  hidden?: boolean
+  events?: Record<string, unknown>[]
+}
+
+interface SeedForm {
+  title: string
+  documentTitle?: string
+  description?: string
+  items?: Record<string, unknown>[]
+  responses?: Record<string, unknown>[]
+}
+
+// Non-UTC on purpose: a UTC default would hide exactly the day-bucketing
+// bugs this mock exists to catch. /reset can pin a different one.
+const DEFAULT_CALENDAR_TZ = 'Asia/Hong_Kong'
+const PRIMARY_CALENDAR_ID = 'integ@example.com'
+
 class GwsState {
   files = new Map<string, DriveItem>()
   drives = new Map<string, { id: string; name: string }>()
@@ -158,6 +234,9 @@ class GwsState {
   presentations = new Map<string, Presentation>()
   messages = new Map<string, GmailMessage>()
   labels = new Map<string, GmailLabel>()
+  calendars = new Map<string, CalendarEntry>()
+  events = new Map<string, Map<string, CalendarEvent>>()
+  forms = new Map<string, FormDoc>()
   private counters = new Map<string, number>()
   private ticks = 0
   // Frozen at construction (i.e. per /reset) so find -mtime windows
@@ -167,15 +246,32 @@ class GwsState {
   // gslides date prefixes, gmail date dirs) need fully baked-in listings.
   private readonly baseMs: number
 
-  constructor(epoch?: string) {
+  constructor(epoch?: string, calendarTz?: string) {
     this.baseMs = epoch === undefined ? Date.now() : Date.parse(epoch)
     for (const id of SYSTEM_LABELS) this.labels.set(id, { id, name: id, type: 'system' })
+    this.calendars.set(PRIMARY_CALENDAR_ID, {
+      id: PRIMARY_CALENDAR_ID,
+      summary: 'Integ User',
+      timeZone: calendarTz ?? DEFAULT_CALENDAR_TZ,
+      accessRole: 'owner',
+      primary: true,
+    })
+    this.events.set(PRIMARY_CALENDAR_ID, new Map())
   }
 
   nextId(kind: string): string {
     const n = (this.counters.get(kind) ?? 0) + 1
     this.counters.set(kind, n)
     return `${kind}${String(n).padStart(4, '0')}`
+  }
+
+  // Real Google event ids are 26 chars of base32hex (0-9a-v); filenames on a
+  // gcal mount embed them, so the mock must produce the real shape, not a
+  // short counter. Deterministic so integ truth files stay stable.
+  nextEventId(): string {
+    const n = (this.counters.get('event') ?? 0) + 1
+    this.counters.set('event', n)
+    return `evt${String(n).padStart(23, '0')}`
   }
 
   nowMs(): number {
@@ -633,20 +729,55 @@ function parseCell(ref: string): { row: number | null; col: number | null } {
   return { row, col }
 }
 
+// What an unquoted range with no `!` has to look like before it is read as
+// cells rather than as a tab name. Every A1 form the real API takes with a
+// half open side is here: `A1`, `A1:G9`, a whole column span `A:Z`, and a
+// whole row span `1:5`. gspread asks for `A:Z` to mean "every row of the
+// first sheet", which `^[A-Z]+\d` used to reject for want of a digit.
+const A1_ONLY = /^([A-Z]+\d*|\d+)(:([A-Z]+\d*|\d+))?$/i
+
+// A quoted tab name is quoted whether or not a !cells part follows it, and
+// an apostrophe inside it is doubled: gspread sends 'Jun-Jul_2025' for a
+// whole worksheet, which lastIndexOf('!') alone cannot see.
+function splitRange(range: string): { tabName: string; cells: string } | null {
+  if (range.startsWith("'")) {
+    let at = 1
+    let name = ''
+    while (at < range.length && range[at] !== "'") {
+      name += range[at]
+      at += 1
+    }
+    while (range[at] === "'" && range[at + 1] === "'") {
+      name += "'"
+      at += 2
+      while (at < range.length && range[at] !== "'") {
+        name += range[at]
+        at += 1
+      }
+    }
+    if (at >= range.length) return null
+    const rest = range.slice(at + 1)
+    if (rest === '') return { tabName: name, cells: '' }
+    if (!rest.startsWith('!')) return null
+    return { tabName: name, cells: rest.slice(1) }
+  }
+  const bang = range.lastIndexOf('!')
+  if (bang === -1) return null
+  return { tabName: range.slice(0, bang), cells: range.slice(bang + 1) }
+}
+
 function parseA1(sheet: Spreadsheet, range: string): A1Range | null {
   let tabName = ''
   let cells = range
-  const bang = range.lastIndexOf('!')
-  if (bang !== -1) {
-    tabName = range.slice(0, bang)
-    cells = range.slice(bang + 1)
-    if (tabName.startsWith("'") && tabName.endsWith("'")) tabName = tabName.slice(1, -1)
+  const split = splitRange(range)
+  if (split !== null) {
+    tabName = split.tabName
+    cells = split.cells
   } else if (
     // A bare range names a sheet tab first ("Sheet1" is a tab, not the
     // cell SHEET1), matching the real API's resolution order.
     sheet.tabs.some((t) => t.title === range) ||
-    !/^[A-Z]+\d/.test(range.toUpperCase()) ||
-    range.includes(' ')
+    !A1_ONLY.test(range)
   ) {
     tabName = range
     cells = ''
@@ -865,6 +996,34 @@ interface RawDimensionRange {
   endIndex?: number
 }
 
+interface RawGridRange {
+  sheetId?: number
+  startRowIndex?: number
+  endRowIndex?: number
+  startColumnIndex?: number
+  endColumnIndex?: number
+}
+
+interface RawCellData {
+  userEnteredValue?: {
+    stringValue?: string
+    numberValue?: number
+    boolValue?: boolean
+    formulaValue?: string
+  }
+}
+
+interface RawRowData {
+  values?: RawCellData[]
+}
+
+interface RawUpdateCells {
+  range?: RawGridRange
+  start?: { sheetId?: number; rowIndex?: number; columnIndex?: number }
+  rows?: RawRowData[]
+  fields?: string
+}
+
 // A DimensionRange with no endIndex is unbounded to the end of the grid,
 // and no startIndex means index 0, matching the real API's optional fields.
 function resolveDimensionRange(
@@ -900,6 +1059,64 @@ function remapCells(
     )
   }
   tab.cells = next
+}
+
+// One cell of an UpdateCellsRequest, rendered the way values.update would
+// have stored it. Only userEnteredValue is kept: the fake stores strings,
+// so formatting has nowhere to go.
+function cellText(cell: RawCellData | undefined): string | null {
+  const value = cell?.userEnteredValue
+  if (value === undefined) return null
+  if (value.stringValue !== undefined) return value.stringValue
+  if (value.numberValue !== undefined) return String(value.numberValue)
+  if (value.boolValue !== undefined) return value.boolValue ? 'TRUE' : 'FALSE'
+  if (value.formulaValue !== undefined) return value.formulaValue
+  return null
+}
+
+// The field mask scopes an updateCells request on both sides: the real API
+// writes and clears only the fields it names, so a request masking a format
+// (`userEnteredFormat.numberFormat`) must leave cell contents alone rather
+// than blanking the range. A mask entry may be dotted or use the parenthesised
+// sub-selector form, so only its head segment decides. An absent mask is read
+// as "*", the way every other request here ignores `fields`, even though the
+// real API rejects it.
+function fieldsTouchValue(fields: string | undefined): boolean {
+  if (fields === undefined || fields.trim() === '') return true
+  return fields.split(',').some((entry) => {
+    const head = entry.trim().split(/[.(]/)[0]
+    return head === '*' || head === 'userEnteredValue'
+  })
+}
+
+// updateCells writes a rectangle by grid index rather than by A1 range, and
+// clears whatever the supplied rows do not cover -- which is how a caller
+// shortens a sheet it previously wrote longer.
+function updateCells(sheet: Spreadsheet, request: RawUpdateCells): [number, object] | null {
+  const grid = request.range ?? request.start
+  const tab = sheet.tabs.find((t) => t.sheetId === (grid?.sheetId ?? 0))
+  if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+  if (!fieldsTouchValue(request.fields)) return null
+  const rows = request.rows ?? []
+  const startRow = request.range?.startRowIndex ?? request.start?.rowIndex ?? 0
+  const startCol = request.range?.startColumnIndex ?? request.start?.columnIndex ?? 0
+  if (request.range !== undefined) {
+    const endRow = Math.min(request.range.endRowIndex ?? tab.rows, tab.rows)
+    const endCol = Math.min(request.range.endColumnIndex ?? tab.cols, tab.cols)
+    for (let r = startRow; r < endRow; r += 1) {
+      for (let c = startCol; c < endCol; c += 1) tab.cells.delete(`${String(r)},${String(c)}`)
+    }
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const values = (rows[i] as RawRowData).values ?? []
+    for (let j = 0; j < values.length; j += 1) {
+      const text = cellText(values[j])
+      const key = `${String(startRow + i)},${String(startCol + j)}`
+      if (text === null) tab.cells.delete(key)
+      else tab.cells.set(key, text)
+    }
+  }
+  return null
 }
 
 function growGrid(tab: SheetTab, dimension: Dimension, by: number): void {
@@ -1020,6 +1237,10 @@ function sheetsBatchUpdate(id: string, requests: Record<string, unknown>[]): [nu
       const range = resolveDimensionRange(sheet, r.source)
       if (range === null) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
       moveDimension(range, r.destinationIndex ?? 0)
+      replies.push({})
+    } else if ('updateCells' in request) {
+      const failed = updateCells(sheet, request.updateCells as RawUpdateCells)
+      if (failed !== null) return failed
       replies.push({})
     } else if ('updateSpreadsheetProperties' in request) {
       const r = request.updateSpreadsheetProperties as { properties?: { title?: string } }
@@ -1709,13 +1930,33 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
     return [200, { access_token: 'gws-integ-token', expires_in: 3600, token_type: 'Bearer' }]
   }
   if (method === 'POST' && path === '/reset') {
-    const body = ctx.body.length > 0 ? (json(ctx) as { epoch?: string }) : {}
-    state = new GwsState(body.epoch)
+    const body =
+      ctx.body.length > 0
+        ? (json(ctx) as {
+            epoch?: string
+            calendarTimeZone?: string
+            calendars?: SeedCalendar[]
+            forms?: SeedForm[]
+          })
+        : {}
+    state = new GwsState(body.epoch, body.calendarTimeZone)
+    if (body.calendars !== undefined) seedCalendars(body.calendars)
+    if (body.forms !== undefined) seedForms(body.forms)
     return [200, { ok: true }]
   }
 
   if (path.startsWith('/gmail/v1/')) {
     const handled = routeGmail(ctx)
+    if (handled !== null) return handled
+  }
+
+  if (path.startsWith('/calendar/v3/')) {
+    const handled = routeCalendar(ctx)
+    if (handled !== null) return handled
+  }
+
+  if (path.startsWith('/v1/forms')) {
+    const handled = routeForms(ctx)
     if (handled !== null) return handled
   }
 
@@ -2171,6 +2412,449 @@ function route(ctx: Ctx): [number, object | Buffer | null, string?] {
   }
 
   return googleError(404, `Unknown route: ${method} ${path}`, 'NOT_FOUND')
+}
+
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instant))
+  const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? '0')
+  const asUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour') % 24,
+    get('minute'),
+    get('second'),
+  )
+  return asUtc - instant
+}
+
+// A wall-clock reading resolved in `timeZone`, as an absolute instant.
+// Two passes because the offset itself depends on the instant: on a DST
+// boundary the first guess lands in the wrong offset and corrects on retry.
+function wallClockMs(naive: string, timeZone: string): number {
+  const guess = Date.parse(`${naive}Z`)
+  const once = guess - zoneOffsetMs(guess, timeZone)
+  return guess - zoneOffsetMs(once, timeZone)
+}
+
+function zonedMidnight(date: string, timeZone: string): number {
+  return wallClockMs(`${date}T00:00:00`, timeZone)
+}
+
+// An offset is mandatory on dateTime UNLESS the slot names its own zone, so
+// a bare wall clock here is a zoned event rather than an error. Date.parse
+// would read it in the SERVER's local zone, which is neither.
+const HAS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/
+
+function slotMs(slot: EventTime, fallbackTz: string): number | null {
+  if (slot.dateTime !== undefined) {
+    if (HAS_OFFSET.test(slot.dateTime)) return Date.parse(slot.dateTime)
+    return wallClockMs(slot.dateTime, slot.timeZone ?? fallbackTz)
+  }
+  if (slot.date !== undefined) return zonedMidnight(slot.date, fallbackTz)
+  return null
+}
+
+function eventStartMs(ev: CalendarEvent, tz: string): number {
+  return slotMs(ev.start, tz) ?? 0
+}
+
+// An all-day event's end.date is EXCLUSIVE, so a single-day event spans
+// start=D, end=D+1 and its instant end is midnight opening the next day.
+function eventEndMs(ev: CalendarEvent, tz: string): number {
+  return slotMs(ev.end, tz) ?? eventStartMs(ev, tz)
+}
+
+function calendarOr404(id: string): CalendarEntry | null {
+  const decoded = decodeURIComponent(id)
+  const key = decoded === 'primary' ? PRIMARY_CALENDAR_ID : decoded
+  return state.calendars.get(key) ?? null
+}
+
+function eventsOf(calendarId: string): Map<string, CalendarEvent> {
+  let bucket = state.events.get(calendarId)
+  if (bucket === undefined) {
+    bucket = new Map()
+    state.events.set(calendarId, bucket)
+  }
+  return bucket
+}
+
+function fmtEvent(cal: CalendarEntry, ev: CalendarEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    kind: 'calendar#event',
+    id: ev.id,
+    status: ev.status,
+    start: ev.start,
+    end: ev.end,
+    created: ev.created,
+    updated: ev.updated,
+    iCalUID: `${ev.id}@google.com`,
+    htmlLink: `https://www.google.com/calendar/event?eid=${ev.id}`,
+  }
+  // freeBusyReader sees availability only: no summary, description or
+  // location ever reaches the caller, which is what makes a day directory
+  // on such a calendar render opaque busy blocks.
+  if (cal.accessRole !== 'freeBusyReader') {
+    if (ev.summary !== undefined) out.summary = ev.summary
+    if (ev.description !== undefined) out.description = ev.description
+    if (ev.location !== undefined) out.location = ev.location
+    if (ev.attendees !== undefined) out.attendees = ev.attendees
+  }
+  return out
+}
+
+function matchesQ(ev: CalendarEvent, q: string): boolean {
+  const needle = q.toLowerCase()
+  const hay = [ev.summary, ev.description, ev.location].filter((v) => v !== undefined)
+  return hay.some((v) => (v as string).toLowerCase().includes(needle))
+}
+
+function listCalendarEvents(cal: CalendarEntry, query: URLSearchParams): [number, object] {
+  const tz = query.get('timeZone') ?? cal.timeZone
+  const showDeleted = query.get('showDeleted') === 'true'
+  const q = query.get('q')
+  const timeMin = query.get('timeMin')
+  const timeMax = query.get('timeMax')
+  let rows = [...eventsOf(cal.id).values()]
+  if (!showDeleted) rows = rows.filter((ev) => ev.status !== 'cancelled')
+  // timeMin is a lower bound on the event's END and timeMax an upper bound on
+  // its START, both exclusive: the pair is an OVERLAP query, not containment,
+  // so a multi-day or midnight-crossing event is returned by every day window
+  // it touches.
+  if (timeMin !== null) {
+    const bound = Date.parse(timeMin)
+    rows = rows.filter((ev) => eventEndMs(ev, cal.timeZone) > bound)
+  }
+  if (timeMax !== null) {
+    const bound = Date.parse(timeMax)
+    rows = rows.filter((ev) => eventStartMs(ev, cal.timeZone) < bound)
+  }
+  if (q !== null) rows = rows.filter((ev) => matchesQ(ev, q))
+  if (query.get('orderBy') === 'startTime') {
+    rows.sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
+  }
+  const max = Number(query.get('maxResults') ?? '250')
+  const start = Number(query.get('pageToken') ?? '0')
+  const page = rows.slice(start, start + max)
+  const out: Record<string, unknown> = {
+    kind: 'calendar#events',
+    summary: cal.summary,
+    timeZone: tz,
+    accessRole: cal.accessRole,
+    items: page.map((ev) => fmtEvent(cal, ev)),
+  }
+  if (start + max < rows.length) out.nextPageToken = String(start + max)
+  return [200, out]
+}
+
+function readEventTimes(
+  body: Record<string, unknown>,
+  fallback?: CalendarEvent,
+): { start: EventTime; end: EventTime } | null {
+  const start = (body.start as EventTime | undefined) ?? fallback?.start
+  const end = (body.end as EventTime | undefined) ?? fallback?.end
+  if (start === undefined || end === undefined) return null
+  for (const t of [start, end]) {
+    if (t.date === undefined && t.dateTime === undefined) return null
+  }
+  return { start, end }
+}
+
+function makeEvent(body: Record<string, unknown>): CalendarEvent | null {
+  const times = readEventTimes(body)
+  if (times === null) return null
+  const now = state.now()
+  return {
+    id: state.nextEventId(),
+    status: 'confirmed',
+    summary: body.summary as string | undefined,
+    description: body.description as string | undefined,
+    location: body.location as string | undefined,
+    attendees: body.attendees as Record<string, unknown>[] | undefined,
+    start: times.start,
+    end: times.end,
+    created: now,
+    updated: now,
+  }
+}
+
+function seedCalendars(entries: SeedCalendar[]): void {
+  for (const entry of entries) {
+    state.calendars.set(entry.id, {
+      id: entry.id,
+      summary: entry.summary,
+      timeZone: entry.timeZone ?? DEFAULT_CALENDAR_TZ,
+      accessRole: entry.accessRole ?? 'owner',
+      ...(entry.hidden === true ? { hidden: true } : {}),
+    })
+    const bucket = eventsOf(entry.id)
+    for (const raw of entry.events ?? []) {
+      const ev = makeEvent(raw)
+      if (ev === null) throw new Error(`seed event needs a start and an end: ${JSON.stringify(raw)}`)
+      bucket.set(ev.id, ev)
+    }
+  }
+}
+
+function seedForms(entries: SeedForm[]): void {
+  for (const entry of entries) {
+    // Through the Drive table for the same reason forms.create is: the
+    // formId IS the Drive file id, and a seeded form has to be findable
+    // the one way an agent can find one.
+    const item = createDriveItem(
+      entry.documentTitle ?? entry.title,
+      FORM_MIME,
+      [],
+      Buffer.alloc(0),
+      state.nextId('form'),
+    )
+    state.forms.set(item.id, {
+      formId: item.id,
+      title: entry.title,
+      documentTitle: entry.documentTitle ?? entry.title,
+      ...(entry.description === undefined ? {} : { description: entry.description }),
+      items: (entry.items ?? []).map((raw) => ({
+        itemId: state.nextId('item'),
+        ...(raw as Omit<FormItem, 'itemId'>),
+      })),
+      responses: entry.responses ?? [],
+      revision: 1,
+    })
+  }
+}
+
+function routeCalendar(ctx: Ctx): [number, object | Buffer | null, string?] | null {
+  const { method, path, query } = ctx
+  const base = '/calendar/v3'
+
+  if (path === `${base}/users/me/calendarList` && method === 'GET') {
+    const showHidden = query.get('showHidden') === 'true'
+    const items = [...state.calendars.values()].filter((c) => showHidden || c.hidden !== true)
+    return [
+      200,
+      {
+        kind: 'calendar#calendarList',
+        items: items.map((c) => ({
+          kind: 'calendar#calendarListEntry',
+          id: c.id,
+          summary: c.summary,
+          timeZone: c.timeZone,
+          accessRole: c.accessRole,
+          ...(c.primary === true ? { primary: true } : {}),
+        })),
+      },
+    ]
+  }
+
+  let m = new RegExp(`^${base}/calendars/([^/]+)$`).exec(path)
+  if (m !== null && method === 'GET') {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    return [
+      200,
+      { kind: 'calendar#calendar', id: cal.id, summary: cal.summary, timeZone: cal.timeZone },
+    ]
+  }
+
+  m = new RegExp(`^${base}/calendars/([^/]+)/events$`).exec(path)
+  if (m !== null) {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    if (method === 'GET') return listCalendarEvents(cal, query)
+    if (method === 'POST') {
+      if (cal.accessRole !== 'owner' && cal.accessRole !== 'writer') {
+        return googleError(403, 'You need to have writer access.', 'PERMISSION_DENIED')
+      }
+      const ev = makeEvent(json(ctx))
+      if (ev === null) {
+        return googleError(400, 'Missing end time.', 'INVALID_ARGUMENT')
+      }
+      eventsOf(cal.id).set(ev.id, ev)
+      return [200, fmtEvent(cal, ev)]
+    }
+  }
+
+  m = new RegExp(`^${base}/calendars/([^/]+)/events/([^/]+)$`).exec(path)
+  if (m !== null) {
+    const cal = calendarOr404(m[1] as string)
+    if (cal === null) return NOT_FOUND
+    const eventId = decodeURIComponent(m[2] as string)
+    const bucket = eventsOf(cal.id)
+    const ev = bucket.get(eventId)
+    if (ev === undefined) {
+      return googleError(404, 'Not Found', 'NOT_FOUND')
+    }
+    if (method === 'GET') return [200, fmtEvent(cal, ev)]
+    if (cal.accessRole !== 'owner' && cal.accessRole !== 'writer') {
+      return googleError(403, 'You need to have writer access.', 'PERMISSION_DENIED')
+    }
+    if (method === 'PATCH') {
+      const body = json(ctx)
+      const times = readEventTimes(body, ev)
+      if (times === null) return googleError(400, 'Missing end time.', 'INVALID_ARGUMENT')
+      const next: CalendarEvent = {
+        ...ev,
+        summary: (body.summary as string | undefined) ?? ev.summary,
+        description: (body.description as string | undefined) ?? ev.description,
+        location: (body.location as string | undefined) ?? ev.location,
+        start: times.start,
+        end: times.end,
+        updated: state.now(),
+      }
+      bucket.set(eventId, next)
+      return [200, fmtEvent(cal, next)]
+    }
+    if (method === 'DELETE') {
+      bucket.delete(eventId)
+      return [204, null]
+    }
+  }
+
+  if (path === `${base}/freeBusy` && method === 'POST') {
+    const body = json(ctx)
+    const timeMin = String(body.timeMin ?? '')
+    const timeMax = String(body.timeMax ?? '')
+    const lo = Date.parse(timeMin)
+    const hi = Date.parse(timeMax)
+    const items = (body.items as { id?: string }[] | undefined) ?? []
+    const calendars: Record<string, unknown> = {}
+    for (const item of items) {
+      const cal = calendarOr404(String(item.id ?? ''))
+      if (cal === null) {
+        calendars[String(item.id ?? '')] = {
+          errors: [{ domain: 'global', reason: 'notFound' }],
+        }
+        continue
+      }
+      const busy = [...eventsOf(cal.id).values()]
+        .filter((ev) => ev.status !== 'cancelled')
+        .filter(
+          (ev) =>
+            eventEndMs(ev, cal.timeZone) > lo && eventStartMs(ev, cal.timeZone) < hi,
+        )
+        .sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
+        .map((ev) => ({
+          start: new Date(eventStartMs(ev, cal.timeZone)).toISOString(),
+          end: new Date(eventEndMs(ev, cal.timeZone)).toISOString(),
+        }))
+      calendars[String(item.id ?? '')] = { busy }
+    }
+    return [200, { kind: 'calendar#freeBusy', timeMin, timeMax, calendars }]
+  }
+
+  return null
+}
+
+function fmtForm(form: FormDoc): Record<string, unknown> {
+  return {
+    formId: form.formId,
+    info: {
+      title: form.title,
+      documentTitle: form.documentTitle,
+      ...(form.description === undefined ? {} : { description: form.description }),
+    },
+    items: form.items,
+    revisionId: String(form.revision),
+    responderUri: `https://docs.google.com/forms/d/e/${form.formId}/viewform`,
+  }
+}
+
+function applyFormRequest(form: FormDoc, req: Record<string, unknown>): void {
+  const createItem = req.createItem as
+    | { item?: Record<string, unknown>; location?: { index?: number } }
+    | undefined
+  if (createItem?.item !== undefined) {
+    const item: FormItem = {
+      itemId: state.nextId('item'),
+      ...(createItem.item as Omit<FormItem, 'itemId'>),
+    }
+    const at = createItem.location?.index ?? form.items.length
+    form.items.splice(at, 0, item)
+    return
+  }
+  const updateInfo = req.updateFormInfo as
+    | { info?: { title?: string; description?: string } }
+    | undefined
+  if (updateInfo?.info !== undefined) {
+    if (updateInfo.info.title !== undefined) form.title = updateInfo.info.title
+    if (updateInfo.info.description !== undefined) form.description = updateInfo.info.description
+  }
+}
+
+function routeForms(ctx: Ctx): [number, object | Buffer | null, string?] | null {
+  const { method, path } = ctx
+
+  if (path === '/v1/forms' && method === 'POST') {
+    const body = json(ctx)
+    const info = (body.info as { title?: string; documentTitle?: string } | undefined) ?? {}
+    const title = info.title ?? 'Untitled form'
+    // Created through the Drive table on purpose: a form's formId IS its
+    // Drive file id (verified against real Google), which is the only way an
+    // agent can find an existing form, since the Forms API has no list method.
+    const item = createDriveItem(
+      info.documentTitle ?? title,
+      FORM_MIME,
+      [],
+      Buffer.alloc(0),
+      state.nextId('form'),
+    )
+    const form: FormDoc = {
+      formId: item.id,
+      title,
+      documentTitle: info.documentTitle ?? title,
+      items: [],
+      responses: [],
+      revision: 1,
+    }
+    state.forms.set(form.formId, form)
+    return [200, fmtForm(form)]
+  }
+
+  let m = /^\/v1\/forms\/([^/:]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    return [200, fmtForm(form)]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+):batchUpdate$/.exec(path)
+  if (m !== null && method === 'POST') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    const body = json(ctx)
+    const requests = (body.requests as Record<string, unknown>[] | undefined) ?? []
+    for (const req of requests) applyFormRequest(form, req)
+    form.revision += 1
+    touchNative(form.formId)
+    return [200, { form: fmtForm(form), replies: requests.map(() => ({})) }]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+)\/responses$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    if (form === undefined) return NOT_FOUND
+    return [200, { responses: form.responses }]
+  }
+
+  m = /^\/v1\/forms\/([^/:]+)\/responses\/([^/:]+)$/.exec(path)
+  if (m !== null && method === 'GET') {
+    const form = state.forms.get(m[1] as string)
+    const found = form?.responses.find((r) => r.responseId === m?.[2])
+    if (found === undefined) return NOT_FOUND
+    return [200, found]
+  }
+
+  return null
 }
 
 function rangeLabelFor(range: A1Range, requested: string): string {

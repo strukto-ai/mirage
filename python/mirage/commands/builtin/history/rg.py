@@ -16,10 +16,9 @@ from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.generic_bind.provision import \
-    make_search_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.history.read import read as history_read
 from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
@@ -27,10 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rg",
-         resource="history",
-         spec=SPECS["rg"],
-         provision=make_search_provision(_stat))
+@command("rg", resource="history", spec=SPECS["rg"])
 async def rg(
     accessor: HistoryAccessor,
     paths: list[PathSpec],
@@ -38,7 +34,7 @@ async def rg(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_rg(
         list(paths),

@@ -43,7 +43,7 @@ async function runDate(
 describe('date', () => {
   it('-I returns ISO date', async () => {
     const fixed = '2026-04-21T12:00:00Z'
-    const out = await runDate([], { d: fixed, I: true })
+    const out = await runDate([], { d: fixed, args_I: true })
     expect(out).toBe('2026-04-21\n')
   })
 

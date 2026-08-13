@@ -8,10 +8,13 @@
 # command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
-# read_op) or a runner-local test runtime (echobox) or runner-local
-# code policies (world.policies) or non-ram mounts are skipped as
-# sdk-only. Expect semantics: exit and stdout are exact, stderr is a
-# containment check (the CLI owns its stderr framing).
+# read_op, facade — the last calls ws.ops directly) or a runner-local
+# test runtime (echobox) or runner-local code policies (world.policies)
+# or non-ram mounts are skipped as sdk-only. Expect semantics: exit and
+# stdout are exact, stderr is a containment check (the CLI owns its
+# stderr framing), and the SDK-side expectations (ops_contain,
+# ops_absent, value) are not checked because the op ledger has no CLI
+# door.
 #
 # A yaml file is any JSON document here: YAML is a superset of JSON,
 # so the driver emits the case world as JSON with jq and both loaders
@@ -52,7 +55,7 @@ cli_expressible() {
       | to_entries | all(.value.resource == "ram"))
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select(type == "object" and .name == "echobox")) | length) == 0)
-    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op"))) | length) == 0)
+    and (((.steps // []) | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 
@@ -128,10 +131,19 @@ run_case() {
   fi
 
   # Seed declared mount files through the shell (cat reads the piped
-  # stdin, the redirect writes the mount).
+  # stdin, the redirect writes the mount). A nested seed name needs its
+  # parent first: the redirect refuses a missing directory, and it
+  # refuses silently here, which reads as a file that was never
+  # declared (run.py and run.ts mkdir the parent the same way).
   local prefix name ok=0
   while IFS=$'\t' read -r prefix name; do
     [ -n "$prefix" ] || continue
+    case "$name" in
+      */*)
+        $cli execute -w "$wsid" -c "mkdir -p $prefix/${name%/*}" \
+          >/dev/null 2>&1 </dev/null
+        ;;
+    esac
     jq -j --arg p "$prefix" --arg n "$name" \
       '.world.mounts[$p].files[$n]' <<<"$case_json" \
       | $cli execute -w "$wsid" -c "cat > $prefix/$name" >/dev/null 2>&1

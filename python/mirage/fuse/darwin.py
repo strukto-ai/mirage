@@ -19,6 +19,8 @@ import sys
 from ctypes import CFUNCTYPE, POINTER, c_char_p, c_int, c_uint
 from typing import Any
 
+from mirage.types import JsonValue
+
 try:
     import mfusepy
 except ImportError:
@@ -104,7 +106,7 @@ def timespec_to_float(ts: Timespec) -> float:
     return ts.tv_sec + ts.tv_nsec / 1e9
 
 
-def changes_from_setattr(attr: SetattrX) -> dict[str, object]:
+def changes_from_setattr(attr: SetattrX) -> dict[str, JsonValue]:
     """Decompose a setattr_x payload into named changes.
 
     Only the attributes mirage models are surfaced; crtime, chgtime,
@@ -115,10 +117,10 @@ def changes_from_setattr(attr: SetattrX) -> dict[str, object]:
         attr (SetattrX): the C payload from libfuse.
 
     Returns:
-        dict[str, object]: present attributes keyed by name.
+        dict[str, JsonValue]: present attributes keyed by name.
     """
     valid = attr.valid
-    changes: dict[str, object] = {}
+    changes: dict[str, JsonValue] = {}
     if valid & SETATTR_MODE:
         changes["mode"] = attr.mode
     if valid & SETATTR_UID:

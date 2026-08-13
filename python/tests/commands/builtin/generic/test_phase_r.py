@@ -37,7 +37,9 @@ async def _collect(src) -> bytes:
 @pytest.mark.asyncio
 async def test_cut_fields_default_delim():
     rs, _ = _make_cut_backend({"f.tsv": b"a\tb\tc\nd\te\tf\n"})
-    src, _ = await cut([_spec("f.tsv")], read_stream=rs, fields="1,3")
+    src, _ = await cut([_spec("f.tsv")],
+                       read_stream=rs,
+                       flags={"fields": "1,3"})
     out = await _collect(src)
     assert out == b"a\tc\nd\tf\n"
 
@@ -47,8 +49,10 @@ async def test_cut_fields_custom_delim():
     rs, _ = _make_cut_backend({"f.csv": b"a,b,c\nd,e,f\n"})
     src, _ = await cut([_spec("f.csv")],
                        read_stream=rs,
-                       fields="2",
-                       delimiter=",")
+                       flags={
+                           "fields": "2",
+                           "delimiter": ","
+                       })
     out = await _collect(src)
     assert out == b"b\ne\n"
 
@@ -56,7 +60,9 @@ async def test_cut_fields_custom_delim():
 @pytest.mark.asyncio
 async def test_cut_chars_range():
     rs, _ = _make_cut_backend({"f.txt": b"hello\nworld\n"})
-    src, _ = await cut([_spec("f.txt")], read_stream=rs, characters="1-3")
+    src, _ = await cut([_spec("f.txt")],
+                       read_stream=rs,
+                       flags={"characters": "1-3"})
     out = await _collect(src)
     assert out == b"hel\nwor\n"
 
@@ -66,8 +72,10 @@ async def test_cut_complement_fields():
     rs, _ = _make_cut_backend({"f.tsv": b"a\tb\tc\n"})
     src, _ = await cut([_spec("f.tsv")],
                        read_stream=rs,
-                       fields="2",
-                       complement=True)
+                       flags={
+                           "fields": "2",
+                           "complement": True
+                       })
     out = await _collect(src)
     assert out == b"a\tc\n"
 
@@ -77,8 +85,10 @@ async def test_cut_zero_terminated():
     rs, _ = _make_cut_backend({"f.bin": b"a\tb\x00c\td\x00"})
     src, _ = await cut([_spec("f.bin")],
                        read_stream=rs,
-                       fields="1",
-                       zero_terminated=True)
+                       flags={
+                           "fields": "1",
+                           "zero_terminated": True
+                       })
     out = await _collect(src)
     assert out == b"a\x00c\x00"
 
@@ -86,7 +96,10 @@ async def test_cut_zero_terminated():
 @pytest.mark.asyncio
 async def test_cut_stdin():
     rs, _ = _make_cut_backend({})
-    src, _ = await cut([], read_stream=rs, stdin=b"x\ty\tz\n", fields="2")
+    src, _ = await cut([],
+                       read_stream=rs,
+                       stdin=b"x\ty\tz\n",
+                       flags={"fields": "2"})
     out = await _collect(src)
     assert out == b"y\n"
 
@@ -95,7 +108,7 @@ async def test_cut_stdin():
 async def test_cut_missing_operand():
     rs, _ = _make_cut_backend({})
     with pytest.raises(ValueError, match="missing operand"):
-        await cut([], read_stream=rs, fields="1")
+        await cut([], read_stream=rs, flags={"fields": "1"})
 
 
 @pytest.mark.asyncio

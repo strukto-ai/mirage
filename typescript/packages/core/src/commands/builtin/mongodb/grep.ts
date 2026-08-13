@@ -35,7 +35,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { hasSearchShapingFlags, patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
-import { searchProvision } from './_provision.ts'
 
 const resolveGlob = resolveGlobOf(MONGODB_IO)
 
@@ -114,5 +113,4 @@ export const MONGODB_GREP = command({
   resource: ResourceName.MONGODB,
   spec: specOf('grep'),
   fn: grepCommand,
-  provision: searchProvision,
 })

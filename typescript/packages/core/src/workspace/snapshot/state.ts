@@ -20,6 +20,7 @@ import type { EventDict } from '../../observe/observer.ts'
 import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
 import { z } from 'zod'
 
+import { setCwd } from '../session/shell_dirs.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { CLISpec } from '../../commands/cli/types.ts'
 import { ScriptSource } from '../../runtime/policy/types.ts'
@@ -324,7 +325,7 @@ async function restoreSessions(ws: Workspace, state: WorkspaceStateDict): Promis
       ? ws.sessionManager.get(s.session_id)
       : ws.sessionManager.create(s.session_id)
     const fields = Session.fromJSON(s)
-    session.cwd = fields.cwd
+    setCwd(session, fields.cwd)
     session.env = fields.env
     session.mountModes = fields.mountModes
     restored.push(session)

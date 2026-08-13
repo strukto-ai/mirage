@@ -16,10 +16,11 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.gzip import extract_level
-from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
+from mirage.commands.builtin.generic.gzip import gzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,29 +31,15 @@ async def gzip(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    d: bool = False,
-    k: bool = False,
-    f: bool = False,
-    c: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    level = extract_level(flags)
-    if paths:
-        paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_gzip(paths,
-                              read_bytes=bound_op(ops.read_bytes, accessor,
-                                                  index),
-                              write_bytes=partial(ops.require(Operation.WRITE),
-                                                  accessor),
-                              unlink=partial(ops.require(Operation.UNLINK),
-                                             accessor),
-                              stdin=stdin,
-                              decompress=d,
-                              keep=k,
-                              force=f,
-                              to_stdout=c,
-                              level=level)
+    resolved = await ops.resolve_glob(accessor, paths, index) if paths else []
+    return await gzip_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              bound_op(ops.read_bytes, accessor, index),
+                              partial(ops.require(Operation.WRITE), accessor),
+                              partial(ops.require(Operation.UNLINK), accessor))
 
 
 BUILDER = Builder('gzip',

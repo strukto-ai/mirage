@@ -885,6 +885,88 @@
         "stdout": "From: integ@example.com\r\nTo: integ@example.com\r\nSubject: =?utf-8?b?UsOpc3Vtw6kgZMOpdGFpbGzDqQ==?=\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: 8bit\r\nMIME-Version: 1.0\r\n\r\nnaïve résumé body\r\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "hm_send_files_the_senders_own_copy",
+      "seq": 562118,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'sent from the cli facet' /mail/Sent | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_save_without_send_files_a_draft",
+      "seq": 562119,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'Draft probe' --body 'never sent' --save Archive | jq -r .status",
+      "expect": {
+        "exit": 0,
+        "stdout": "saved\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_save_without_send_lands_in_the_named_mailbox",
+      "seq": 562120,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'never sent' /mail/Archive | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_save_without_send_reached_no_recipient",
+      "seq": 562121,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'never sent' /mail/INBOX | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_save_names_the_mailbox_for_a_sent_copy",
+      "seq": 562122,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "command": "himalaya message compose --to integ@example.com --subject 'Filed probe' --body 'filed elsewhere' --send --save Archive | jq -r .status",
+      "expect": {
+        "exit": 0,
+        "stdout": "sent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hm_save_beat_the_default_sent_mailbox",
+      "seq": 562123,
+      "targets": [
+        "cli-himalaya"
+      ],
+      "clear_cache": true,
+      "command": "grep -rl 'filed elsewhere' /mail/Archive | wc -l | tr -d ' '",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
     }
   ]
 }

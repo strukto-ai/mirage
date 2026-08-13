@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/policy/types.ts'
-import { Option } from '../spec/types.ts'
+import { Option, UsageStyle } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 import { findChild, findNode, nodeHelp, ownsArgv, walk } from './walk.ts'
 
@@ -154,6 +154,33 @@ describe('walk', () => {
     expect(text(result.output).startsWith('unknown option: --zzz\n\ngws: Google Workspace')).toBe(
       true,
     )
+  })
+
+  it("answers a clap group refusal in clap's words and exit", () => {
+    // Probed against ntn 0.21.9: `ntn --bogus` is exit 2, one usage line
+    // rather than git's whole help page, and a footer. The dialect is the
+    // root's at every level, so a group cannot answer 129 while its own
+    // leaves answer 2.
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+    const clap = new CLISpec({ ...tree(), usageStyle: UsageStyle.CLAP })
+    const result = walk('gws', clap, ['--zzz', 'gmail'])
+    expect(result.stream).toBe('stderr')
+    expect(result.exitCode).toBe(2)
+    expect(text(result.output)).toBe(
+      "error: unexpected argument '--zzz' found\n\n" +
+        'Usage: gws [OPTIONS] <COMMAND>\n\n' +
+        "For more information, try '--help'.\n",
+    )
+  })
+
+  it('names a short token the same way under clap', () => {
+    // clap has one wording for long and short alike, unlike git's
+    // option/switch split.
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+    const clap = new CLISpec({ ...tree(), usageStyle: UsageStyle.CLAP })
+    const result = walk('gws', clap, ['-Z'])
+    expect(result.exitCode).toBe(2)
+    expect(text(result.output).split('\n')[0]).toBe("error: unexpected argument '-Z' found")
   })
 
   it('exits 129 for a starved group value', () => {

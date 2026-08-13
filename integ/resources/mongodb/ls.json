@@ -74,7 +74,7 @@
       "command": "tree -L 3 /mongodb/mirage_integ/",
       "expect": {
         "exit": 0,
-        "stdout": "/mongodb/mirage_integ\n|-- collections\n|   |-- authors\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   |-- books\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   `-- system.views\n|       |-- documents.jsonl\n|       `-- schema.json\n|-- database.json\n`-- views\n    `-- recent_books\n        |-- documents.jsonl\n        `-- schema.json\n\n7 directories, 9 files\n",
+        "stdout": "/mongodb/mirage_integ/\n|-- collections\n|   |-- authors\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   |-- books\n|   |   |-- documents.jsonl\n|   |   `-- schema.json\n|   `-- system.views\n|       |-- documents.jsonl\n|       `-- schema.json\n|-- database.json\n`-- views\n    `-- recent_books\n        |-- documents.jsonl\n        `-- schema.json\n\n7 directories, 9 files\n",
         "stderr": ""
       }
     }

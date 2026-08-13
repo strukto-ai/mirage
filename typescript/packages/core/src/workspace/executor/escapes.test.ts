@@ -13,94 +13,92 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { interpretEscapes } from '../../commands/builtin/utils/escapes.ts'
+import { interpretEchoEscapes } from './builtins/text.ts'
 
-// Direct port of tests/workspace/executor/test_escapes.py.
-// interpretEscapes mirrors Python's _interpret_escapes in
-// mirage/workspace/executor/builtins.py.
-
-describe('interpretEscapes (port of tests/workspace/executor/test_escapes.py)', () => {
+// Direct port of tests/workspace/executor/test_escapes.py, which covers
+// Python's _interpret_escapes in mirage/workspace/executor/builtins/text.py.
+// This file used to import tr's reader instead, which is how tr ended up
+// with echo's grammar: every echo-only rule below (\xHH, \c, \z passing
+// through) was asserted against the wrong command. tr's own rules are
+// pinned in commands/builtin/utils/escapes.test.ts.
+describe('interpretEchoEscapes (port of tests/workspace/executor/test_escapes.py)', () => {
   it('newline', () => {
-    expect(interpretEscapes('a\\nb')).toBe('a\nb')
+    expect(interpretEchoEscapes('a\\nb')).toBe('a\nb')
   })
 
   it('tab', () => {
-    expect(interpretEscapes('a\\tb')).toBe('a\tb')
+    expect(interpretEchoEscapes('a\\tb')).toBe('a\tb')
   })
 
   it('carriage return', () => {
-    expect(interpretEscapes('\\r')).toBe('\r')
+    expect(interpretEchoEscapes('\\r')).toBe('\r')
   })
 
   it('bell', () => {
-    expect(interpretEscapes('\\a')).toBe('\x07')
+    expect(interpretEchoEscapes('\\a')).toBe('\x07')
   })
 
   it('backspace', () => {
-    expect(interpretEscapes('\\b')).toBe('\b')
+    expect(interpretEchoEscapes('\\b')).toBe('\b')
   })
 
   it('form feed', () => {
-    expect(interpretEscapes('\\f')).toBe('\f')
+    expect(interpretEchoEscapes('\\f')).toBe('\f')
   })
 
   it('vertical tab', () => {
-    expect(interpretEscapes('\\v')).toBe('\v')
+    expect(interpretEchoEscapes('\\v')).toBe('\v')
   })
 
-  it('literal backslash', () => {
-    expect(interpretEscapes('a\\\\b')).toBe('a\\b')
+  it('backslash', () => {
+    expect(interpretEchoEscapes('a\\\\b')).toBe('a\\b')
   })
 
-  it('double backslash before n → literal \\n', () => {
-    expect(interpretEscapes('\\\\n')).toBe('\\n')
+  it('escaped backslash does not re-escape the next character', () => {
+    expect(interpretEchoEscapes('\\\\n')).toBe('\\n')
   })
 
-  it('double backslash before b → literal \\b (one-pass)', () => {
-    expect(interpretEscapes('a\\\\b')).toBe('a\\b')
+  it('hex escape', () => {
+    expect(interpretEchoEscapes('\\x41')).toBe('A')
   })
 
-  it('hex escape \\x41 → A', () => {
-    expect(interpretEscapes('\\x41')).toBe('A')
+  it('short hex escape', () => {
+    expect(interpretEchoEscapes('\\x9')).toBe('\t')
   })
 
-  it('hex single digit \\x9 → tab', () => {
-    expect(interpretEscapes('\\x9')).toBe('\t')
+  it('bare \\x is literal', () => {
+    expect(interpretEchoEscapes('\\x')).toBe('\\x')
   })
 
-  it('hex no digits \\x → literal \\x', () => {
-    expect(interpretEscapes('\\x')).toBe('\\x')
+  it('octal escape', () => {
+    expect(interpretEchoEscapes('\\0101')).toBe('A')
   })
 
-  it('octal escape \\0101 → A', () => {
-    expect(interpretEscapes('\\0101')).toBe('A')
+  it('bare \\0 is NUL', () => {
+    expect(interpretEchoEscapes('\\0')).toBe('\0')
   })
 
-  it('octal null \\0 → NUL', () => {
-    expect(interpretEscapes('\\0')).toBe('\0')
+  it('\\c stops output', () => {
+    expect(interpretEchoEscapes('hello\\cworld')).toBe('hello')
   })
 
-  it('stop output \\c truncates', () => {
-    expect(interpretEscapes('hello\\cworld')).toBe('hello')
+  it('unknown escape passes through with its backslash', () => {
+    expect(interpretEchoEscapes('\\z')).toBe('\\z')
   })
 
-  it('unknown escape passthrough', () => {
-    expect(interpretEscapes('\\z')).toBe('\\z')
-  })
-
-  it('no escapes', () => {
-    expect(interpretEscapes('hello world')).toBe('hello world')
+  it('plain text', () => {
+    expect(interpretEchoEscapes('hello world')).toBe('hello world')
   })
 
   it('empty', () => {
-    expect(interpretEscapes('')).toBe('')
+    expect(interpretEchoEscapes('')).toBe('')
   })
 
   it('trailing backslash', () => {
-    expect(interpretEscapes('end\\')).toBe('end\\')
+    expect(interpretEchoEscapes('end\\')).toBe('end\\')
   })
 
   it('mixed', () => {
-    expect(interpretEscapes('a\\tb\\nc\\\\d')).toBe('a\tb\nc\\d')
+    expect(interpretEchoEscapes('a\\tb\\nc\\\\d')).toBe('a\tb\nc\\d')
   })
 })

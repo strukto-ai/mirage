@@ -45,7 +45,9 @@
         "disk",
         "redis",
         "opfs",
-        "ssh"
+        "ssh",
+        "box",
+        "dropbox"
       ],
       "command": "printf hi > /data/mtprobe.txt; find /data -name mtprobe.txt -mtime -1",
       "expect": {
@@ -62,7 +64,9 @@
         "disk",
         "redis",
         "opfs",
-        "ssh"
+        "ssh",
+        "box",
+        "dropbox"
       ],
       "command": "find /data -name mtprobe.txt -mtime +5; echo code=$?",
       "expect": {
@@ -79,7 +83,9 @@
         "disk",
         "redis",
         "opfs",
-        "ssh"
+        "ssh",
+        "box",
+        "dropbox"
       ],
       "command": "touch -d 2020-01-01 /data/mtprobe.txt; find /data -name mtprobe.txt -mtime +5",
       "expect": {
@@ -96,7 +102,9 @@
         "disk",
         "redis",
         "opfs",
-        "ssh"
+        "ssh",
+        "box",
+        "dropbox"
       ],
       "command": "rm /data/mtprobe.txt; echo done",
       "expect": {

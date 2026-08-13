@@ -16,20 +16,19 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.split import (parse_bytes_value,
-                                                   parse_chunks_value,
-                                                   parse_lines_value,
-                                                   parse_suffix_length,
-                                                   parse_suffix_start)
 from mirage.commands.builtin.generic.split import split as generic_split
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+from mirage.commands.builtin.generic.split import (  # isort: skip
+    parse_bytes_value, parse_chunks_value, parse_lines_value, parse_separator,
+    parse_suffix_length, parse_suffix_start)
 
 
 async def split(
@@ -38,26 +37,20 @@ async def split(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    args_l: str | None = None,
-    b: str | None = None,
-    n: str | None = None,
-    d: bool = False,
-    x: bool = False,
-    a: str | None = None,
-    t: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["split"])
     paths = await resolve_or_empty(ops, accessor, paths, index)
-    # `x or y` would swallow an explicitly empty value, which GNU rejects
-    # loudly (`split -b ''` is an invalid number, not an absent flag).
-    lines_value = args_l if args_l is not None else fl.as_str("lines")
-    bytes_value = b if b is not None else fl.as_str("bytes")
-    number_value = n if n is not None else fl.as_str("number")
+    # as_str, not `x or y`: the latter would swallow an explicitly empty
+    # value, which GNU rejects loudly (`split -b ''` is an invalid number,
+    # not an absent flag).
+    lines_value = fl.as_str("lines")
+    bytes_value = fl.as_str("bytes")
+    number_value = fl.as_str("number")
     numeric_value = fl.raw("numeric_suffixes")
     hex_value = fl.raw("hex_suffixes")
-    length_value = a if a is not None else fl.as_str("suffix_length")
+    length_value = fl.as_str("suffix_length")
     # GNU reads an explicit `-a 0` as "revert to auto width": names start
     # at the default length of 2 and keep auto-lengthening. An explicit
     # width or an explicit start value pins the width instead.
@@ -83,11 +76,11 @@ async def split(
                   if number_value is not None else 0),
         suffix_len=suffix_len,
         suffix_auto=suffix_auto,
-        numeric_suffix=d or numeric_value is not None,
-        hex_suffix=x or hex_value is not None,
+        numeric_suffix=numeric_value is not None,
+        hex_suffix=hex_value is not None,
         suffix_start=suffix_start,
         additional_suffix=fl.as_str("additional_suffix") or "",
-        separator=(t or fl.as_str("separator") or "\n").encode())
+        separator=parse_separator(fl.as_str("separator")))
 
 
 BUILDER = Builder('split',

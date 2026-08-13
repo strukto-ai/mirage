@@ -35,6 +35,7 @@ import { report } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
 import { fatal } from './util.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -109,7 +110,7 @@ async function buildCommit(
     return fresh
   }
   ensure('')
-  for (const [path, entry] of [...state.entries].sort(([a], [b]) => (a < b ? -1 : 1))) {
+  for (const [path, entry] of [...state.entries].sort(([a], [b]) => compareCodePoints(a, b))) {
     const cut = path.lastIndexOf('/')
     const dir = cut === -1 ? '' : path.slice(0, cut)
     for (let at = dir; at !== ''; ) {
@@ -141,7 +142,7 @@ async function buildCommit(
         type: 'tree',
       })
     }
-    entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    entries.sort((a, b) => compareCodePoints(a.path, b.path))
     written.set(dir, await git.writeTree({ ...repoArgs(repo), tree: entries as never }))
   }
   const tree = written.get('')

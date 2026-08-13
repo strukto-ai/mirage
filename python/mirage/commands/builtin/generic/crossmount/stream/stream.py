@@ -14,13 +14,14 @@
 
 from mirage.commands.builtin.generic.crossmount.types import (Cmd, CrossResult,
                                                               RunSingle)
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 
 
-def _has_active_flags(flag_kwargs: dict[str, object]) -> bool:
+def _has_active_flags(flag_kwargs: dict[str, FlagValue]) -> bool:
     return any(v not in (None, False) for v in flag_kwargs.values())
 
 
@@ -37,7 +38,7 @@ def _respell_fetch_stderr(stderr: bytes, cmd_name: str) -> bytes:
 
 
 async def run_stream(cmd_name: str, scopes: list[PathSpec],
-                     text_args: list[str], flag_kwargs: dict[str, object],
+                     text_args: list[str], flag_kwargs: dict[str, FlagValue],
                      run_single: RunSingle) -> CrossResult:
     """Run a stream command (``cmd files...`` == ``cat files... | cmd``).
 

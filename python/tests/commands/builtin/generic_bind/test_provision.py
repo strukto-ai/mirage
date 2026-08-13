@@ -20,8 +20,10 @@ from mirage.commands.builtin.generic_bind.provision import (
     default_provision, exact_zero_provision, index_hit_read_provision,
     make_copy_provision, make_file_read_provision, make_head_tail_provision,
     make_search_provision, make_transform_provision, metadata_provision,
-    pure_provision, write_metadata_provision)
+    pure_provision, with_default_provisions, write_metadata_provision)
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
+from mirage.commands.registry import command
+from mirage.commands.spec import SPECS
 from mirage.provision import Precision
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -181,8 +183,24 @@ async def test_write_metadata_zero_bytes_recursive_floors():
     recursive = await write_metadata_provision(None,
                                                [_spec("/data/known.txt")],
                                                command="rm",
+                                               spec=SPECS["rm"],
                                                r=True)
     assert recursive.precision == Precision.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_write_metadata_reference_flag_is_not_recursion():
+    """`touch -r REF` shares rm's spelling but walks nothing.
+
+    The shared estimator resolves -r through the invoked command's spec,
+    so a value-typed option under the same letter never degrades the
+    estimate to a floor.
+    """
+    result = await write_metadata_provision(None, [_spec("/data/known.txt")],
+                                            command="touch -r /data/ref",
+                                            spec=SPECS["touch"],
+                                            r=_spec("/data/ref"))
+    assert result.precision == Precision.EXACT
 
 
 @pytest.mark.asyncio
@@ -224,6 +242,7 @@ async def test_search_recursive_walks_tree_exact():
     result = await provision(None, [_spec("/data/tree")],
                              "x",
                              command="grep",
+                             spec=SPECS["grep"],
                              r=True)
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 18
@@ -295,3 +314,58 @@ async def test_index_hit_read_provision_counts_cached_operands():
 async def test_index_hit_read_provision_without_paths_is_unknown():
     result = await index_hit_read_provision(None, [], "grep x", None)
     assert result.precision == Precision.UNKNOWN
+
+
+async def _noop_stat(*args, **kwargs):
+    return FileStat(name="x", size=0, type=FileType.FILE)
+
+
+def _make_command(name: str, provision=None, filetype: str | None = None):
+
+    @command(name,
+             resource="ram",
+             spec=SPECS[name],
+             provision=provision,
+             filetype=filetype)
+    async def fn(accessor, paths, *texts, **flags):
+        return None, None
+
+    return fn
+
+
+def _provision_of(fn):
+    return fn._registered_commands[0].provision_fn
+
+
+def test_with_default_provisions_fills_in_the_family_default():
+    cat = _make_command("cat")
+    assert _provision_of(cat) is None
+    with_default_provisions([cat], _noop_stat)
+    family = _provision_of(cat).__qualname__.split(".")[0]
+    assert family == "make_file_read_provision"
+
+
+def test_with_default_provisions_keeps_a_declared_provision():
+    declared = metadata_provision
+    cat = _make_command("cat", provision=declared)
+    with_default_provisions([cat], _noop_stat)
+    assert _provision_of(cat) is declared
+
+
+def test_with_default_provisions_skips_a_filetype_command():
+    cat = _make_command("cat", filetype="parquet")
+    with_default_provisions([cat], _noop_stat)
+    assert _provision_of(cat) is None
+
+
+def test_with_default_provisions_leaves_families_without_a_default_alone():
+    # mv may be a free rename or a full cross-mount copy, so the catalog
+    # deliberately has no estimate for it.
+    mv = _make_command("mv")
+    with_default_provisions([mv], _noop_stat)
+    assert _provision_of(mv) is None
+
+
+def test_with_default_provisions_returns_the_same_commands():
+    cat = _make_command("cat")
+    assert with_default_provisions([cat], _noop_stat) == [cat]

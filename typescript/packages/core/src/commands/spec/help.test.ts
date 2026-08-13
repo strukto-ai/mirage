@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { renderHelp } from './help.ts'
-import { CommandSpec, Option } from './types.ts'
+import { optionMetavar, renderHelp } from './help.ts'
+import { CommandSpec, Operand, Option, UsageStyle } from './types.ts'
 
 describe('renderHelp', () => {
   it('renders name, description, usage, and flag table', () => {
@@ -96,5 +96,85 @@ describe('renderHelp with subcommands', () => {
     expect(renderHelp('tool', new CommandSpec({}), [['run', '']])).toBe(
       'tool\n' + '\n' + 'Usage: tool <command> [<args>]\n' + '\n' + 'Commands:\n' + '  run\n',
     )
+  })
+})
+
+// Pinned against the real ntn 0.21.9's own --help.
+describe('renderHelp in clap style', () => {
+  it('heads the page with a bare description', () => {
+    const spec = new CommandSpec({ description: 'Manage pages' })
+    expect(renderHelp('ntn pages', spec).split('\n')[0]).toBe('ntn pages: Manage pages')
+    expect(renderHelp('ntn pages', spec, [], UsageStyle.CLAP).split('\n')[0]).toBe('Manage pages')
+  })
+
+  it('spells options and command its own way', () => {
+    const spec = new CommandSpec({
+      description: 'Manage pages',
+      options: [new Option({ long: '--json', type: 'bool' })],
+    })
+    const rows: [string, string][] = [['get', 'Retrieve a page']]
+    expect(renderHelp('ntn pages', spec, rows, UsageStyle.CLAP)).toContain(
+      'Usage: ntn pages [OPTIONS] <COMMAND>',
+    )
+    expect(renderHelp('ntn pages', spec, rows)).toContain(
+      'Usage: ntn pages [flags] <command> [<args>]',
+    )
+  })
+
+  it('names operand slots and marks optional ones', () => {
+    const spec = new CommandSpec({
+      description: 'Retrieve a page',
+      positional: [new Operand({ type: 'str', name: 'PAGE_ID', required: true })],
+    })
+    expect(renderHelp('ntn pages get', spec, [], UsageStyle.CLAP)).toContain(
+      'Usage: ntn pages get <PAGE_ID>',
+    )
+    const loose = new CommandSpec({
+      description: 'Call the API',
+      rest: new Operand({ type: 'str', name: 'PATH' }),
+    })
+    expect(renderHelp('ntn api', loose, [], UsageStyle.CLAP)).toContain('Usage: ntn api [PATH]...')
+  })
+
+  it('keeps subcommands in declaration order', () => {
+    // An author's ordering carries information an alphabet loses, and clap
+    // preserves it; every other style sorts.
+    const spec = new CommandSpec({ description: 'Manage pages' })
+    const rows: [string, string][] = [
+      ['get', 'one'],
+      ['create', 'two'],
+      ['edit', 'three'],
+    ]
+    const listed = (text: string): string[] =>
+      text
+        .split('\n')
+        .filter((line) => line.startsWith('  '))
+        .map((line) => line.trim().split(' ')[0] ?? '')
+    expect(listed(renderHelp('ntn pages', spec, rows, UsageStyle.CLAP))).toEqual([
+      'get',
+      'create',
+      'edit',
+    ])
+    expect(listed(renderHelp('ntn pages', spec, rows))).toEqual(['create', 'edit', 'get'])
+  })
+
+  it('heads the option list Options: not Flags:', () => {
+    const spec = new CommandSpec({
+      description: 'x',
+      options: [new Option({ long: '--json', type: 'bool' })],
+    })
+    expect(renderHelp('ntn whoami', spec, [], UsageStyle.CLAP)).toContain('Options:')
+    expect(renderHelp('ntn whoami', spec)).toContain('Flags:')
+  })
+})
+
+describe('optionMetavar', () => {
+  it('derives from the long spelling', () => {
+    expect(optionMetavar(new Option({ long: '--start-cursor', type: 'str' }))).toBe('START_CURSOR')
+  })
+
+  it('prefers a declared name, which is the only reason the field exists', () => {
+    const declared = new Option({ long: '--notion-version', type: 'str', metavar: 'VERSION' })
+    expect(optionMetavar(declared)).toBe('VERSION')
   })
 })

@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.route.constants import (JOB_BUILTINS, NAMESPACE_COMMANDS,
-                                              NO_FOLLOW_COMMANDS,
-                                              UNSUPPORTED_BUILTINS,
-                                              dereferences, reports_link)
+from mirage.workspace.route.constants import (  # isort: skip
+    JOB_BUILTINS, NAMESPACE_COMMANDS, NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
+    dereferences, end_options_after_program, reports_link)
 from mirage.workspace.route.route import route, route_all
 from mirage.workspace.route.types import (SHELL_CONSUMERS, Consumer,
                                           WordPolicy, word_policy)
 
 __all__ = [
+    "end_options_after_program",
     "Consumer",
     "JOB_BUILTINS",
     "NAMESPACE_COMMANDS",

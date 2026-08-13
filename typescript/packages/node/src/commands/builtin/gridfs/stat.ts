@@ -15,7 +15,6 @@
 import {
   ResourceName,
   command,
-  metadataProvision,
   overlaidStat,
   resolveGlobOf,
   specOf,
@@ -50,5 +49,4 @@ export const GRIDFS_STAT = command({
   resource: ResourceName.GRIDFS,
   spec: specOf('stat'),
   fn: statCommand,
-  provision: metadataProvision,
 })

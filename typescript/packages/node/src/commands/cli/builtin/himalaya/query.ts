@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FetchedMessage } from '../../../../core/email/_client.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 // himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
 // (date, before, after, from, to, subject, body, flag), optionally
@@ -218,7 +219,7 @@ class Parser {
       const key = FLAGS[value.toLowerCase()]
       if (key === undefined) {
         throw new QueryError(
-          `unknown flag '${value}', expected one of ${Object.keys(FLAGS).sort().join(', ')}`,
+          `unknown flag '${value}', expected one of ${Object.keys(FLAGS).sort(compareCodePoints).join(', ')}`,
         )
       }
       return key

@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
+import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { gridfsKey, rawPathOf } from './_client.ts'
 import { uploadBytes } from './write.ts'
 
 export async function create(accessor: GridFSAccessor, path: PathSpec): Promise<void> {
   const raw = rawPathOf(path)
+  const startMs = performance.now()
   await uploadBytes(accessor, gridfsKey(raw, accessor.config), new Uint8Array(0))
+  record('create', path.virtual, ResourceName.GRIDFS, 0, startMs)
   await invalidateAfterWrite(path)
 }

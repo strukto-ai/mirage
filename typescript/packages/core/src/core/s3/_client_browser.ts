@@ -158,13 +158,22 @@ async function bodyFromResponse(resp: Response): Promise<AsyncIterable<Uint8Arra
   }
   const reader = stream.getReader()
   return (async function* () {
+    let drained = false
     try {
       for (;;) {
         const { value, done } = await reader.read()
-        if (done) return
+        if (done) {
+          drained = true
+          return
+        }
         yield value
       }
     } finally {
+      // A consumer that stops early — a ranged read served by streaming — wants
+      // the transfer to stop with it. Releasing the lock alone leaves the body
+      // downloading, so the bytes it went out of its way not to ask for arrive
+      // anyway; cancel() is what actually aborts it.
+      if (!drained) await reader.cancel()
       reader.releaseLock()
     }
   })()
@@ -198,8 +207,19 @@ async function sendBrowserCommand(
   const tag = browserCmd.__mirageTag
   switch (tag) {
     case 'Get': {
-      const input = browserCmd.input as { Key?: unknown }
+      const input = browserCmd.input as { Key?: unknown; Range?: unknown }
       const key = typeof input.Key === 'string' ? input.Key : ''
+      // A presigned GET carries no Range: the header would make the request
+      // non-simple and trip a CORS preflight presigned deployments generally
+      // do not allow. Serving it anyway would return the whole object as if it
+      // were the requested window, so refuse instead of answering wrongly —
+      // core/s3/stream.ts streams the window on this path.
+      if (input.Range !== undefined) {
+        throw new Error(
+          `S3 GET ${key}: the presigned-fetch client cannot serve a ranged ` +
+            'read; use core/s3/stream.ts readRange, which streams the window',
+        )
+      }
       const url = await provider(`/${key}`, 'GET')
       const resp = await fetch(url)
       if (resp.status === 404) throw makeNotFound(key)

@@ -14,14 +14,13 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.base64_cmd import \
-    base64_cmd as generic_base64
+from mirage.commands.builtin.generic.base64_cmd import base64_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,23 +31,13 @@ async def base64(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    d: bool = False,
-    D: bool = False,
-    i: bool = False,
-    w: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["base64"])
-    wrap_value = w or fl.as_str("wrap")
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_base64(
-        paths,
-        read_stream=bound_op(ops.read_stream, accessor, index),
-        stdin=stdin,
-        decode=d or D or fl.as_bool("decode"),
-        wrap=int(wrap_value) if wrap_value is not None else None,
-        ignore_garbage=(i or fl.as_bool("ignore_garbage")))
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await base64_generic(resolved, list(texts),
+                                CommandOpts(stdin=stdin, flags=flags),
+                                bound_op(ops.read_stream, accessor, index))
 
 
 BUILDER = Builder('base64', base64, None, False, None, read=True)

@@ -20,6 +20,7 @@ import {
   stripSlash,
   type IndexCacheStore,
   type PathSpec,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { SCOPE_ERROR } from './constants.ts'
@@ -82,13 +83,15 @@ export async function readdir(
     const md = await op.stat(stripSlash(base))
     sizes.set(base, md.contentLength !== null ? Number(md.contentLength) : null)
   }
-  names.sort()
+  names.sort(compareCodePoints)
   if (names.length > SCOPE_ERROR) {
     console.warn(
       `hf readdir: ${virtualKey} returned ${String(names.length)} entries (limit ${String(SCOPE_ERROR)})`,
     )
   }
-  const virtualEntries = names.map((e) => (prefix !== '' ? `${prefix}${e}` : e)).sort()
+  const virtualEntries = names
+    .map((e) => (prefix !== '' ? `${prefix}${e}` : e))
+    .sort(compareCodePoints)
   if (index !== undefined) {
     const indexEntries: [string, IndexEntry][] = names.map((e) => {
       const name = e.split('/').pop() ?? e

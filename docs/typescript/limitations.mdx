@@ -138,15 +138,13 @@ Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls f
 - **Pre-signed URLs.** For S3/R2/GCS, generate pre-signed URLs server-side and pass them in. The Mirage browser examples include a Vite dev-server `presigner` plugin as reference.
 - **Same-origin proxy.** Stand up a tiny proxy on your own domain that forwards to the upstream API with the right auth headers.
 
-### 4. Python writes need JSPI
+### 4. Python sees the mount as of the start of the run
 
-The Python FS shim (`open()` against mounted paths) flushes writes back through an async bridge. That requires [JSPI](https://github.com/WebAssembly/js-promise-integration). Reads of preloaded files still work without it, but `close()` on a write throws `RuntimeError: Cannot stack switch`.
+`open()` against a mounted path is served by a filesystem Mirage registers inside the interpreter. Its callbacks are synchronous, so the tree is collected before the script starts and writes are replayed after it ends: an edit made to the resource from elsewhere mid-run is not visible until the next run.
 
-- **Chrome / Edge 137+** (May 2025): works out of the box.
-- **Firefox**: behind `javascript.options.wasm_js_promise_integration`.
-- **Safari**: not yet shipped.
+This needs no [JSPI](https://github.com/WebAssembly/js-promise-integration) and no V8 flag, so it works the same in Chrome, Firefox, Safari and Node.
 
-See [Python FS shim](/typescript/python-fs#runtime-requirements) for the full matrix.
+See [Python filesystem](/typescript/python-fs) for the details.
 
 ### 5. Some resource drivers remain Node-only
 
@@ -175,7 +173,7 @@ Those HTTP drivers still need a browser-reachable endpoint with the correct CORS
 | OPFS reads/writes within quota | Browser | ✅ works |
 | OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
 | HTTP-backed resources without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
-| Python `open()` writes back through mount | Browser | ✅ with JSPI (Chrome 137+); ❌ otherwise |
+| Python `open()` writes back through mount | Browser | ✅ on any engine |
 | Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
 | MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
 | Node-only resources (SSH, LanceDB, Email, Disk, Redis, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |

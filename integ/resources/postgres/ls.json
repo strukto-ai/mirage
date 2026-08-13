@@ -74,7 +74,7 @@
       "command": "tree -L 3 /pg/public/",
       "expect": {
         "exit": 0,
-        "stdout": "/pg/public\n|-- tables\n|   |-- authors\n|   |   |-- rows.jsonl\n|   |   |-- schema.json\n|   |   `-- semantic.json\n|   `-- books\n|       |-- rows.jsonl\n|       |-- schema.json\n|       `-- semantic.json\n`-- views\n    `-- recent_books\n        |-- rows.jsonl\n        |-- schema.json\n        `-- semantic.json\n\n6 directories, 9 files\n",
+        "stdout": "/pg/public/\n|-- tables\n|   |-- authors\n|   |   |-- rows.jsonl\n|   |   |-- schema.json\n|   |   `-- semantic.json\n|   `-- books\n|       |-- rows.jsonl\n|       |-- schema.json\n|       `-- semantic.json\n`-- views\n    `-- recent_books\n        |-- rows.jsonl\n        |-- schema.json\n        `-- semantic.json\n\n6 directories, 9 files\n",
         "stderr": ""
       }
     }

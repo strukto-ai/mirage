@@ -41,6 +41,20 @@
         "stdout": "net=0 write=0 cache=0 ops=1 hits=0 precision=exact\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "df_prov_find",
+      "seq": 580093,
+      "targets": [
+        "dify"
+      ],
+      "provision": true,
+      "command": "find /knowledge -name '*auth*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "net=0 write=0 cache=0 ops=2 hits=0 precision=exact\n",
+        "stderr": ""
+      }
     }
   ]
 }

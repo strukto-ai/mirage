@@ -23,7 +23,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-import { headTailProvision } from './_provision.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -54,9 +54,10 @@ async function headCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const nRaw = typeof opts.flags.lines === 'string' ? opts.flags.lines : null
+  const fl = new FlagView(opts.flags, specOf('head'))
+  const nRaw = fl.asStr('lines') ?? null
   const lines = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
-  const pushdown = typeof opts.flags.bytes !== 'string' && lines > 0
+  const pushdown = fl.asStr('bytes') === undefined && lines > 0
   return headGeneric(
     resolved,
     texts,
@@ -71,5 +72,4 @@ export const POSTGRES_HEAD = command({
   resource: ResourceName.POSTGRES,
   spec: specOf('head'),
   fn: headCommand,
-  provision: headTailProvision,
 })

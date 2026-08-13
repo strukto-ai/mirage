@@ -19,7 +19,9 @@ import {
   isFsError,
   operandSpelling,
 } from '../../../../utils/errors.ts'
-import { DEFAULT_DIR_MODE, parseMode } from '../../../../utils/mode.ts'
+import { DEFAULT_DIR_MODE, parseChmod } from '../../../../utils/mode.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const MKDIR_BUILDER: Builder = {
@@ -27,10 +29,10 @@ export const MKDIR_BUILDER: Builder = {
   write: true,
   requirements: ['mkdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
-    const parents = opts.flags.parents === true
-    const verbose = opts.flags.verbose === true
-    const modeFlag = opts.flags.mode
-    const modeText = typeof modeFlag === 'string' ? modeFlag : null
+    const fl = new FlagView(opts.flags, specOf('mkdir'))
+    const parents = fl.asBool('parents')
+    const verbose = fl.asBool('verbose')
+    const modeText = fl.asStr('mode') ?? null
     if (paths.length === 0) {
       return [
         null,
@@ -49,7 +51,7 @@ export const MKDIR_BUILDER: Builder = {
     if (modeText !== null) {
       // Symbolic clauses build on what mirage renders for a new directory,
       // since there is no umask to subtract from.
-      mode = parseMode(modeText, DEFAULT_DIR_MODE)
+      mode = parseChmod(modeText, DEFAULT_DIR_MODE)
       if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
       if (setAttrs === undefined) {
         throw new Error('mkdir: --mode is not supported on this backend')

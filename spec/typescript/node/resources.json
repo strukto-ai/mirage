@@ -1,4 +1,1051 @@
 {
+  "capabilities": {
+    "aliyun": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "backblaze": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "box": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "ceph": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "chroma": {
+      "caches_reads": false,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "databricks_volume": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "dify": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "digitalocean": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "discord": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "disk": {
+      "caches_reads": false,
+      "index_ttl": 60,
+      "sizes_always_known": true,
+      "statfs": true,
+      "storage_id": true,
+      "supports_snapshot": false
+    },
+    "dropbox": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "email": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gcal": {
+      "caches_reads": true,
+      "index_ttl": 300,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gcs": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "gdocs": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gdrive": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "github": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "github_ci": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gmail": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gridfs": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "gsheets": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "gslides": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "hf_buckets": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "hf_datasets": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "hf_models": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "hf_spaces": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "jaeger": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "lancedb": {
+      "caches_reads": "<declared, no initializer>",
+      "index_ttl": 0,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "langfuse": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "linear": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "mem0": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "minio": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "mongodb": {
+      "caches_reads": false,
+      "index_ttl": 0,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "nextcloud": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "notion": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "oci": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "onedrive": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "postgres": {
+      "caches_reads": false,
+      "index_ttl": 0,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "qdrant": {
+      "caches_reads": false,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "qingstor": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "r2": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "ram": {
+      "caches_reads": false,
+      "index_ttl": 0,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "redis": {
+      "caches_reads": false,
+      "index_ttl": 0,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": false
+    },
+    "s3": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "scaleway": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "seaweedfs": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "sharepoint": {
+      "caches_reads": true,
+      "index_ttl": 86400,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": true
+    },
+    "slack": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "ssh": {
+      "caches_reads": true,
+      "index_ttl": 60,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "supabase": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "tencent": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    },
+    "trello": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": false,
+      "statfs": false,
+      "storage_id": false,
+      "supports_snapshot": false
+    },
+    "wasabi": {
+      "caches_reads": true,
+      "index_ttl": 600,
+      "sizes_always_known": true,
+      "statfs": false,
+      "storage_id": true,
+      "supports_snapshot": true
+    }
+  },
+  "command_io": {
+    "box": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "dir_copy",
+        "du",
+        "exists",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "chroma": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "databricks_volume": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "exists",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "unlink",
+        "write"
+      ]
+    },
+    "dify": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "discord": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "disk": {
+      "local": true,
+      "max_du_entries": 10000,
+      "max_glob_matches": 50000,
+      "slots": [
+        "append",
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "set_attrs",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "dropbox": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "unlink",
+        "write"
+      ]
+    },
+    "email": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gcal": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gdocs": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gdrive": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "dir_copy",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "github": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 5000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "github_ci": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gmail": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gridfs": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 5000,
+      "slots": [
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "gsheets": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "gslides": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "hf": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "create",
+        "du",
+        "exists",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rm_r",
+        "stat",
+        "unlink",
+        "write"
+      ]
+    },
+    "history": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "jaeger": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "lancedb": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "langfuse": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "linear": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "mem0": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "mongodb": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "nextcloud": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 5000,
+      "slots": [
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "notion": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "onedrive": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "dir_copy",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "postgres": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "qdrant": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "ram": {
+      "local": true,
+      "max_du_entries": 10000,
+      "max_glob_matches": 50000,
+      "slots": [
+        "append",
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "set_attrs",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "redis": {
+      "local": true,
+      "max_du_entries": 10000,
+      "max_glob_matches": 50000,
+      "slots": [
+        "append",
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "set_attrs",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "s3": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 5000,
+      "slots": [
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_range",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "sharepoint": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "copy",
+        "create",
+        "dir_copy",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "slack": {
+      "local": false,
+      "max_du_entries": 500,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    },
+    "ssh": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 5000,
+      "slots": [
+        "append",
+        "copy",
+        "create",
+        "du",
+        "exists",
+        "find",
+        "is_mounted",
+        "mkdir",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "rename",
+        "rm_r",
+        "rmdir",
+        "set_attrs",
+        "stat",
+        "truncate",
+        "unlink",
+        "write"
+      ]
+    },
+    "trello": {
+      "local": false,
+      "max_du_entries": 10000,
+      "max_glob_matches": 10000,
+      "slots": [
+        "is_mounted",
+        "read_bytes",
+        "read_stream",
+        "readdir",
+        "stat"
+      ]
+    }
+  },
   "command_resources": [
     "box",
     "chroma",
@@ -8,6 +1055,7 @@
     "disk",
     "dropbox",
     "email",
+    "gcal",
     "gdocs",
     "gdrive",
     "github",
@@ -53,6 +1101,7 @@
     "disk",
     "dropbox",
     "email",
+    "gcal",
     "gcs",
     "gdocs",
     "gdrive",

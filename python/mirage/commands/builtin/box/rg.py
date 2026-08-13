@@ -16,15 +16,13 @@ from collections.abc import Mapping
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.box.io import IO as _IO
 from mirage.commands.builtin.box.narrow import narrow_scope
 from mirage.commands.builtin.generic.rg import rg as generic_rg
-from mirage.commands.builtin.generic_bind import default_provision
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.box.read import read as _read
 from mirage.core.box.read import stream as _stream
 from mirage.core.box.readdir import readdir as _readdir
@@ -68,13 +66,7 @@ def _keep_visible(
     return kept
 
 
-@command("rg",
-         resource="box",
-         spec=SPECS["rg"],
-         provision=default_provision("rg",
-                                     _IO.stat,
-                                     resolve_glob=_IO.resolve_glob,
-                                     readdir=_IO.readdir))
+@command("rg", resource="box", spec=SPECS["rg"])
 async def rg(
     accessor: BoxAccessor,
     paths: list[PathSpec],
@@ -82,12 +74,12 @@ async def rg(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
 
-    run_flags: Mapping[str, object] = flags
+    run_flags: Mapping[str, FlagValue] = flags
     if paths:
         # -v needs the walk (a narrowed superset hides fully non-matching
         # files whose every line matches inverted); --type/--glob keep the

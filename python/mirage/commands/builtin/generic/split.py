@@ -100,6 +100,35 @@ def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
     return start
 
 
+def parse_separator(value: str | None) -> bytes:
+    """GNU ``split -t`` record separator: exactly one byte, or ``\\0``.
+
+    GNU reads the value as one byte and refuses every other length rather
+    than truncating to the first: an empty value is an empty record
+    separator and anything longer is a multi-character one, with the
+    two-character spelling ``\\0`` carved out as the only way to write a
+    NUL on a command line. The length is counted in bytes, so a lone
+    non-ASCII character is multi-character too (pinned against coreutils
+    9.7). Deliberate divergence, matching truncate: GNU's quotearg escapes
+    control characters in the message and mirage quotes the raw value. Not
+    covered: GNU also refuses two ``-t`` flags naming different characters,
+    which needs a list-valued flag the spec does not have.
+
+    Args:
+        value (str | None): the raw flag value, or None when unset.
+    """
+    if value is None:
+        return b"\n"
+    if value == "\\0":
+        return b"\0"
+    encoded = value.encode()
+    if not encoded:
+        raise UsageError("split: empty record separator", 1)
+    if len(encoded) > 1:
+        raise UsageError(f"split: multi-character separator '{value}'", 1)
+    return encoded
+
+
 _ALPHA_SUFFIXES = "abcdefghijklmnopqrstuvwxyz"
 _NUMERIC_SUFFIXES = "0123456789"
 _HEX_SUFFIXES = "0123456789abcdef"

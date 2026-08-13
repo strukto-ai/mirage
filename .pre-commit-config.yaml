@@ -80,12 +80,25 @@ repos:
       - id: yapf
         name: Format code
         additional_dependencies: [toml]
+        # Generated tables are laid out by their generator, which packs
+        # ranges several to a line so 349 of them stay reviewable.
+        # Reformatting them here would fight scripts/gen_width_table.py on
+        # every run, the same way typescript/.prettierignore already exempts
+        # `**/generated/**`.
+        exclude: |
+          (?x)^(
+              python/mirage/utils/generated/.*
+          )$
 
   - repo: https://github.com/pycqa/isort
     rev: 7.0.0
     hooks:
       - id: isort
         name: Sort imports
+        exclude: |
+          (?x)^(
+              python/mirage/utils/generated/.*
+          )$
 
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0

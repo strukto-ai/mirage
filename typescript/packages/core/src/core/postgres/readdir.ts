@@ -20,6 +20,7 @@ import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './_client.ts'
 import { detectScope, ENTITY_FILES } from './scope.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export async function readdir(
   accessor: PostgresAccessor,
@@ -114,7 +115,7 @@ async function listEntities(
   } else {
     const views = await listViews(accessor, schema)
     const mviews = await listMatviews(accessor, schema)
-    names = [...new Set([...views, ...mviews])].sort()
+    names = [...new Set([...views, ...mviews])].sort(compareCodePoints)
   }
   const entries: [string, IndexEntry][] = names.map((n) => [
     n,

@@ -12,54 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 import pytest
 
-from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage import Workspace
+from mirage.context import reset_current_session, set_current_session
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
+from mirage.policy import (Action, Deny, OpsContext, OpsResultContext, Policy,
+                           PolicyDenied)
 from mirage.resource.ram import RAMResource
-from mirage.resource.ram.store import RAMStore
 from mirage.types import FileType, MountMode
+from mirage.workspace.session import Session
 
-from .conftest import _ram_registered_ops, make_ops, run
+from .conftest import make_ops, run
 
 
 class TestMountPrefixes:
 
     def test_mount_prefixes_returns_prefixes(self):
         ops, _ = make_ops()
-        assert ops.mount_prefixes() == ["/data/"]
+        assert "/data/" in ops.mount_prefixes()
 
     def test_mount_prefixes_reflects_unmount(self):
         ops, _ = make_ops()
         ops.unmount("/data/")
-        assert ops.mount_prefixes() == []
-
-
-class TestResolve:
-
-    def test_resolve_basic(self):
-        ops, _ = make_ops()
-        resource_type, rel_path, _, _, mode = ops._resolve("/data/file.txt")
-        assert resource_type == "ram"
-        assert rel_path == "/file.txt"
-        assert mode == MountMode.WRITE
-
-    def test_resolve_nested(self):
-        ops, _ = make_ops()
-        _, rel_path, _, _, _ = ops._resolve("/data/a/b/c.txt")
-        assert rel_path == "/a/b/c.txt"
-
-    def test_resolve_no_match(self):
-        ops, _ = make_ops()
-        with pytest.raises(ValueError, match="no mount matches"):
-            ops._resolve("/other/file.txt")
-
-    def test_resolve_prefix_root(self):
-        ops, _ = make_ops()
-        _, rel_path, _, _, _ = ops._resolve("/data/")
-        assert rel_path == "/"
+        assert "/data/" not in ops.mount_prefixes()
 
 
 class TestReadWrite:
@@ -144,6 +122,14 @@ class TestUnlink:
             run(ops.read("/data/dir/f.txt"))
 
 
+def _two_mount_ops() -> Ops:
+    return Workspace({
+        "/a/": RAMResource(),
+        "/b/": RAMResource()
+    },
+                     mode=MountMode.WRITE).ops
+
+
 class TestRename:
 
     def test_rename(self):
@@ -154,6 +140,92 @@ class TestRename:
         assert run(ops.read("/data/dir/new.txt")) == b"content"
         with pytest.raises(FileNotFoundError):
             run(ops.read("/data/dir/old.txt"))
+
+    def test_rename_across_mounts_refuses_exdev(self):
+        # A mount is a filesystem boundary; the facade refuses before
+        # any backend is touched, so a kernel-facing caller (a
+        # whole-workspace FUSE mount) falls back to copy+unlink instead
+        # of writing one backend's path into another's key space.
+        ops = _two_mount_ops()
+        run(ops.write("/a/x.txt", b"body"))
+        with pytest.raises(OSError) as exc:
+            run(ops.rename("/a/x.txt", "/b/x.txt"))
+        assert exc.value.errno == errno.EXDEV
+        assert run(ops.read("/a/x.txt")) == b"body"
+
+    def test_rename_to_an_unmounted_path_refuses_exdev(self):
+        ops = _two_mount_ops()
+        run(ops.write("/a/x.txt", b"body"))
+        with pytest.raises(OSError) as exc:
+            run(ops.rename("/a/x.txt", "/elsewhere/x.txt"))
+        assert exc.value.errno == errno.EXDEV
+
+
+class UngrantedRemote(RAMResource):
+    caches_reads = True
+    name = "s3"
+
+
+@pytest.fixture
+def deep_only_session():
+    """Bind a session granted only /m/inner/deep."""
+    session = Session(session_id="agent",
+                      mount_modes={"/m/inner/deep": MountMode.EXEC})
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+@pytest.mark.asyncio
+async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
+    # /m/inner is served by no backend: the parent mount is ungranted
+    # and the answer exists only because a granted mount sits below it.
+    # Attributing it to the lexical owner invents a network op against
+    # that backend for every such lookup.
+    ws = Workspace({
+        "/m/": UngrantedRemote(),
+        "/m/inner/deep/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    try:
+        ws.ops.records.clear()
+        assert await ws.ops.readdir("/m/inner") == ["/m/inner/deep"]
+        assert [(r.source, r.is_cache)
+                for r in ws.ops.records] == [("ram", True)]
+        assert ws.ops.network_records == []
+    finally:
+        await ws.close()
+
+
+class DenyInner(Policy):
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.path.virtual == "/m/inner":
+            return Deny(message="no")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_denied_namespace_answer_is_not_a_backend_op(
+        deep_only_session):
+    # Refusing the synthetic answer does not make the parent backend
+    # have served it: a deny suppresses a result nothing was contacted
+    # to produce.
+    ws = Workspace({
+        "/m/": UngrantedRemote(),
+        "/m/inner/deep/": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    try:
+        ws.policies.add(DenyInner())
+        ws.ops.records.clear()
+        with pytest.raises(PermissionError):
+            await ws.ops.readdir("/m/inner")
+        assert [(r.source, r.is_cache)
+                for r in ws.ops.records] == [("ram", True)]
+        assert ws.ops.network_records == []
+    finally:
+        await ws.close()
 
 
 class TestCreateTruncate:
@@ -186,16 +258,14 @@ class TestIsMounted:
 class TestMultiMount:
 
     def test_two_mounts(self):
-        store1 = RAMStore()
-        store2 = RAMStore()
-        ram_ops = _ram_registered_ops()
-        mounts = [
-            OpsMount("/mem1/", "ram", RAMAccessor(store1),
-                     RAMIndexCacheStore(), MountMode.WRITE, ram_ops),
-            OpsMount("/mem2/", "ram", RAMAccessor(store2),
-                     RAMIndexCacheStore(), MountMode.WRITE, ram_ops),
-        ]
-        ops = Ops(mounts)
+        one = RAMResource()
+        two = RAMResource()
+        store1 = one._store
+        store2 = two._store
+        ops = Workspace({
+            "/mem1/": one,
+            "/mem2/": two
+        }, mode=MountMode.WRITE).ops
         run(ops.mkdir("/mem1/dir"))
         run(ops.mkdir("/mem2/dir"))
         run(ops.write("/mem1/dir/a.txt", b"from store1"))
@@ -206,7 +276,7 @@ class TestMultiMount:
         assert store2.files.get("/dir/b.txt") == b"from store2"
 
 
-class TestOpsViaRegistry:
+class TestOpsAgainstSeededStore:
 
     @pytest.fixture
     def memory_ops(self):
@@ -215,32 +285,222 @@ class TestOpsViaRegistry:
         store.dirs.add("/")
         store.files["/test.txt"] = b"hello"
         store.modified["/test.txt"] = "2024-01-01T00:00:00"
-        mount = OpsMount(
-            prefix="/data/",
-            resource_type="ram",
-            accessor=resource.accessor,
-            index=RAMIndexCacheStore(),
-            mode=MountMode.WRITE,
-            ops=resource.ops_list(),
-        )
-        return Ops([mount]), store
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        return ws.ops, store
 
-    def test_read_via_registry(self, memory_ops):
+    def test_read(self, memory_ops):
         ops, _ = memory_ops
         assert run(ops.read("/data/test.txt")) == b"hello"
 
-    def test_write_via_registry(self, memory_ops):
+    def test_write(self, memory_ops):
         ops, store = memory_ops
         run(ops.write("/data/test.txt", b"world"))
         assert store.files["/test.txt"] == b"world"
 
-    def test_stat_via_registry(self, memory_ops):
+    def test_stat(self, memory_ops):
         ops, _ = memory_ops
         st = run(ops.stat("/data/test.txt"))
         assert st.name == "test.txt"
 
-    def test_registry_accessible(self, memory_ops):
-        ops, _ = memory_ops
-        assert ops._registry is not None
-        fn = ops._registry.resolve("read", "ram")
-        assert fn is not None
+
+class _SealInner(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        if ctx.path.virtual == "/data/inner":
+            return Deny("sealed\n")
+        return None
+
+
+def _structure_only_ops(policies: list[Policy]) -> Ops:
+    """Ops whose only mount sits below the probed path, so no mount
+    serves /data/inner and the answer is namespace structure."""
+    return Workspace({
+        "/data/inner/deep/": RAMResource()
+    },
+                     mode=MountMode.WRITE,
+                     policies=policies).ops
+
+
+class TestStructureFallbackGates:
+
+    def test_the_synthetic_answer_still_clears_admission(self):
+        # Mirrors the dispatcher door: a policy that bounds readdir or
+        # stat by path must cover a structure-only directory too.
+        ops = _structure_only_ops([_SealInner()])
+        with pytest.raises(PolicyDenied):
+            run(ops.readdir("/data/inner"))
+        with pytest.raises(PolicyDenied):
+            run(ops.stat("/data/inner"))
+
+    def test_the_synthetic_answer_serves_when_no_policy_objects(self):
+        ops = _structure_only_ops([])
+        assert run(ops.readdir("/data/inner")) == ["/data/inner/deep"]
+
+
+def _granted_child_ops() -> Ops:
+    """Ops with a real mount at /data and a nested one at
+    /data/inner/deep, for sessions granted only the deep one."""
+    return Workspace(
+        {
+            "/data/": RAMResource(),
+            "/data/inner/deep/": RAMResource()
+        },
+        mode=MountMode.WRITE).ops
+
+
+@pytest.fixture
+def deep_scoped_session():
+    """Bind a session granted only /data/inner/deep."""
+    session = Session(session_id="agent",
+                      mount_modes={"/data/inner/deep": MountMode.EXEC})
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+class TestUngrantedParentStructure:
+
+    def test_walking_down_to_the_grant_answers(self, deep_scoped_session):
+        # /data is real but ungranted; the granted mount below it
+        # already put "data" in the root listing, so readdir and stat
+        # must answer with the granted structure and nothing else.
+        ops = _granted_child_ops()
+        assert run(ops.readdir("/data")) == ["/data/inner"]
+        st = run(ops.stat("/data"))
+        assert st.type is FileType.DIRECTORY
+
+    def test_paths_the_structure_does_not_owe_still_deny(
+            self, deep_scoped_session):
+        ops = _granted_child_ops()
+        with pytest.raises(PermissionError):
+            run(ops.readdir("/data/other"))
+        with pytest.raises(PermissionError):
+            run(ops.write("/data/f.txt", b"x"))
+
+
+class _CountingPre(Policy):
+
+    def __init__(self):
+        self.calls = []
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        self.calls.append((ctx.op, ctx.path.virtual))
+        return None
+
+
+class _DenyEverything(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        return Deny("sealed\n")
+
+
+class TestAttachedOpsOneDoor:
+    """Workspace-attached Ops delegates every op to the dispatcher."""
+
+    @pytest.mark.asyncio
+    async def test_gates_fire_exactly_once_per_op(self):
+        counter = _CountingPre()
+        ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+        try:
+            ws.policies.add(counter)
+            await ws.ops.write("/data/x.txt", b"body")
+            assert counter.calls.count(("write", "/data/x.txt")) == 1
+            counter.calls.clear()
+            assert await ws.ops.read("/data/x.txt") == b"body"
+            assert counter.calls.count(("read", "/data/x.txt")) == 1
+        finally:
+            await ws.close()
+
+    @pytest.mark.asyncio
+    async def test_records_survive_the_delegation(self):
+        ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+        try:
+            await ws.ops.write("/data/x.txt", b"12345")
+            assert await ws.ops.read("/data/x.txt") == b"12345"
+            recorded = {(r.op, r.path, r.bytes) for r in ws.ops.records}
+            assert ("write", "/data/x.txt", 5) in recorded
+            assert ("read", "/data/x.txt", 5) in recorded
+        finally:
+            await ws.close()
+
+    @pytest.mark.asyncio
+    async def test_a_pre_ops_deny_records_nothing(self):
+        # The mirror of "a post deny still records the completed op"
+        # (pinned in tests/workspace/workspace/test_policies.py): a pre
+        # deny means the backend never ran, so nothing is recorded.
+        ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+        try:
+            ws.policies.add(_DenyEverything())
+            with pytest.raises(PolicyDenied):
+                await ws.ops.write("/data/x.txt", b"body")
+            assert ws.ops.records == []
+        finally:
+            await ws.close()
+
+    @pytest.mark.asyncio
+    async def test_read_only_mount_refuses_writes_at_the_door(self):
+        ws = Workspace({"/data/": RAMResource()}, mode=MountMode.READ)
+        try:
+            with pytest.raises(PermissionError):
+                await ws.ops.write("/data/x.txt", b"body")
+        finally:
+            await ws.close()
+
+    @pytest.mark.asyncio
+    async def test_attached_rename_stays_inside_a_mount(self):
+        ws = Workspace({
+            "/a/": RAMResource(),
+            "/b/": RAMResource()
+        },
+                       mode=MountMode.WRITE)
+        try:
+            await ws.ops.write("/a/x.txt", b"body")
+            await ws.ops.rename("/a/x.txt", "/a/y.txt")
+            assert await ws.ops.read("/a/y.txt") == b"body"
+            with pytest.raises(OSError) as exc:
+                await ws.ops.rename("/a/y.txt", "/b/x.txt")
+            assert exc.value.errno == errno.EXDEV
+            assert await ws.ops.read("/a/y.txt") == b"body"
+        finally:
+            await ws.close()
+
+
+class TestProbesAndConveniences:
+    """The surface union with the TS facade (R7b).
+
+    Only a genuine missing path reads back False from the probes; an
+    auth failure or a backend bug propagates, since acting on a false
+    "missing" means overwriting or recreating data that is there.
+    """
+
+    def test_exists_answers_the_three_cases(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", b"x"))
+        run(ops.mkdir("/data/dir"))
+        assert run(ops.exists("/data/a.txt")) is True
+        assert run(ops.exists("/data/dir")) is True
+        assert run(ops.exists("/data/nope.txt")) is False
+        assert run(ops.exists("/nowhere/x.txt")) is False
+
+    def test_is_dir_and_is_file_split_on_the_stat_type(self):
+        ops, _ = make_ops()
+        run(ops.mkdir("/data/dir"))
+        run(ops.write("/data/dir/f.txt", b"x"))
+        assert run(ops.is_dir("/data/dir")) is True
+        assert run(ops.is_file("/data/dir")) is False
+        assert run(ops.is_file("/data/dir/f.txt")) is True
+        assert run(ops.is_dir("/data/dir/f.txt")) is False
+        assert run(ops.is_dir("/data/nope")) is False
+        assert run(ops.is_file("/data/nope")) is False
+
+    def test_cat_decodes_utf8(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", "héllo".encode()))
+        assert run(ops.cat("/data/a.txt")) == "héllo"
+
+    def test_list_files_keeps_files_only_as_basenames(self):
+        ops, _ = make_ops()
+        run(ops.mkdir("/data/dir"))
+        run(ops.write("/data/dir/a.txt", b"1"))
+        run(ops.mkdir("/data/dir/sub"))
+        assert run(ops.list_files("/data/dir")) == ["a.txt"]

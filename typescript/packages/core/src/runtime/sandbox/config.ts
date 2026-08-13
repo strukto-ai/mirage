@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RuntimeConfig } from '../config.ts'
+
 /**
  * How the sandbox machine is built: the fields every provider has.
  *
@@ -21,7 +23,7 @@
  * honor fails loud at construction. In yaml this is the runtime
  * entry's `config` block, mirroring a mount's.
  */
-export interface SandboxConfig {
+export interface SandboxConfig extends RuntimeConfig {
   /** Environment set in the sandbox. */
   env?: Record<string, string>
 }

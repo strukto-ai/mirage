@@ -15,6 +15,7 @@
 import type { ByteSource } from '../../../../../io/types.ts'
 import { formatCountRows, parseFlags, type WcRow } from '../../wc.ts'
 import type { OperandRun } from '../types.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
@@ -34,7 +35,7 @@ function parseWcRow(line: string, columns: number): WcRow {
 // one the report can carry.
 export function combineWc(
   results: OperandRun[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
 ): ByteSource | null {
   const parsed = parseFlags(flagKwargs)
   if (typeof parsed === 'string') return null

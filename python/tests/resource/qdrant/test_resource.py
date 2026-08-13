@@ -1,3 +1,5 @@
+import pytest
+
 from mirage.resource.qdrant import QdrantConfig, QdrantResource
 from mirage.resource.registry import REGISTRY, build_resource
 
@@ -29,9 +31,10 @@ def test_resource_registers_commands():
     assert expected <= {c.name for c in res.commands()}
 
 
-def test_resource_in_registry():
+@pytest.mark.asyncio
+async def test_resource_in_registry():
     assert "qdrant" in REGISTRY
-    res = build_resource("qdrant", {"collection": "docs"})
+    res = await build_resource("qdrant", {"collection": "docs"})
     assert res.name == "qdrant"
 
 

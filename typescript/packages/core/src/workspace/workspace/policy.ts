@@ -21,6 +21,7 @@ import {
   type PolicyFn,
 } from '../../runtime/policy/index.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import type { MountResolver } from '../../runtime/resolver.ts'
 import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -42,7 +43,7 @@ export class PolicyRouter {
   private readonly policy: PolicyFn | null
   private readonly sessions: SessionManager
   private readonly agentId: string | null
-  private readonly visibleMounts: () => string[]
+  private readonly resolver: MountResolver
 
   constructor(
     registry: MountRegistry,
@@ -50,14 +51,14 @@ export class PolicyRouter {
     policy: PolicyFn | null,
     sessions: SessionManager,
     agentId: string | null,
-    visibleMounts: () => string[],
+    resolver: MountResolver,
   ) {
     this.registry = registry
     this.runtimes = runtimes
     this.policy = policy
     this.sessions = sessions
     this.agentId = agentId
-    this.visibleMounts = visibleMounts
+    this.resolver = resolver
   }
 
   async decide(
@@ -98,7 +99,7 @@ export class PolicyRouter {
       env: { ...session.env, ...(options.env ?? {}) },
       sessionId,
       agentId: options.agentId ?? this.agentId ?? '',
-      mounts: this.visibleMounts(),
+      mounts: this.resolver.prefixes(),
     }
     return decideLine(this.runtimes.entries, this.policy, ctx, this.runtimes.bindings)
   }

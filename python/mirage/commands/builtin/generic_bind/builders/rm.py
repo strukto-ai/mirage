@@ -21,6 +21,8 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.verbose import removal_lines
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
@@ -31,18 +33,17 @@ async def rm(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    f: bool = False,
-    v: bool = False,
-    d: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(flags, spec=SPECS["rm"])
+    f = fl.as_bool("f")
+    v = fl.as_bool("v")
+    d = fl.as_bool("d")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("rm: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
-    recursive = r or R
+    recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}

@@ -21,12 +21,51 @@ export type StatOverlay = (path: string, stat: FileStat) => FileStat
 // What a traversal command asks about its own start point, which decides
 // whether a walk is possible at all.
 export type StatPath = (path: string) => Promise<FileStat | null>
+// readdir one virtual path through the workspace rather than one backend.
+// What a walker whose output is a single document (tree) reads once it
+// reaches a mount boundary, since the subtree below it lives in another
+// resource that the walker's own accessor cannot open.
+export type ReaddirPath = (path: string) => Promise<string[]>
 
 // The mount prefix serving a virtual path. A mount boundary is a filesystem
 // boundary, which is where git stops looking for a repository
 // (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an unrelated
 // backend.
 export type MountRoot = (path: string) => string
+
+// Child names the namespace owes a directory (mounts and links, mount
+// names session-filtered). The other half of namespace structure beside
+// link rows: a nested mount is invisible to the parent mount's backend,
+// so a listing command is handed the names from above, the same names
+// the door merges into its own readdir.
+export type ChildMounts = (parent: string) => string[]
+
+// Where the mount boundaries are, as one injected object.
+//
+// A command runs bound to one backend, and that backend cannot see a
+// mount nested inside its own tree: the child's keys live in another
+// resource entirely, so the parent's `readdir` never lists it. A walker
+// that must account for the whole subtree therefore has to be told, the
+// same way `LinkView` tells it about symlinks.
+//
+// Traversal commands that render independent lines (find, grep -r) get
+// this for free from the executor's fan-out, which reruns them per mount
+// and concatenates the output. A command whose output is one binary
+// object (tar, zip) cannot be merged that way, so it reads the
+// boundaries here and says what it did with them. du is in between: its
+// lines concatenate, but its per-directory totals are sums that already
+// counted the parent backend's shadowed keys by the time any line filter
+// runs, so it reads the boundaries here too and excludes a descendant's
+// subtree while accounting.
+export interface MountView {
+  // Mount roots strictly under a path (a walker: tar, zip).
+  descendants(path: string): string[]
+  // Whether a path is a mount root itself.
+  isRoot(path: string): boolean
+  // The mount serving a path, so a walker can tell "still mine" from
+  // "another backend" before it tries to read something it cannot.
+  rootOf(path: string): string
+}
 
 // The symlink facts a command may consult, as one injected object.
 //

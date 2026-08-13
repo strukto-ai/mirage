@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RS, type JqOptions } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const NON_ASCII = /[\u0080-\uFFFF]/g
@@ -25,7 +26,7 @@ function sortDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortDeep)
   if (value === null || typeof value !== 'object') return value
   const entries = Object.entries(value as Record<string, unknown>)
-  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  entries.sort(([a], [b]) => compareCodePoints(a, b))
   const out: Record<string, unknown> = {}
   for (const [key, inner] of entries) out[key] = sortDeep(inner)
   return out

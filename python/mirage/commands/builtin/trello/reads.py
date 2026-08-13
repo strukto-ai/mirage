@@ -15,10 +15,12 @@
 import functools
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, FlagView, Operand
+from mirage.commands.spec.types import (CommandSpec, FlagValue, FlagView,
+                                        Operand)
 from mirage.core.trello._client import (get_board, get_card, list_board_labels,
                                         list_board_lists, list_board_members,
                                         list_card_comments, list_list_cards,
@@ -29,7 +31,7 @@ from mirage.core.trello.normalize import (normalize_board, normalize_card,
                                           to_json_bytes)
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 Runner = Callable[[TrelloAccessor, list[str], FlagView], Awaitable[bytes]]
 
@@ -54,7 +56,7 @@ def _first(texts: list[str], label: str) -> str:
 async def _run_board_list(accessor: TrelloAccessor, texts: list[str],
                           fl: FlagView) -> bytes:
     config = accessor.config
-    boards: list[dict[str, object]] = []
+    boards: list[dict[str, JsonValue]] = []
     for workspace in await list_workspaces(config):
         for board in await list_workspace_boards(config, workspace["id"]):
             boards.append(normalize_board(board))
@@ -127,15 +129,15 @@ async def _dispatch(
     accessor: TrelloAccessor,
     paths: list[PathSpec],
     *texts: str,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=entry.spec)
     data = await entry.runner(accessor, list(texts), fl)
     return yield_bytes(data), IOResult()
 
 
-def make_trello_read_commands() -> list[Callable[..., object]]:
-    commands: list[Callable[..., object]] = []
+def make_trello_read_commands() -> list[Callable[..., Any]]:
+    commands: list[Callable[..., Any]] = []
     for entry in TRELLO_READS:
         commands.append(
             command(entry.name, resource="trello",

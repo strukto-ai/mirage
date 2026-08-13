@@ -139,7 +139,7 @@ async def test_yaml_clis_section_installs_through_load_config():
                 }
             },
         })
-        ws = Workspace(**cfg.to_workspace_kwargs())
+        ws = Workspace(**await cfg.to_workspace_kwargs())
         code, out, _ = await run(ws, "sl message send -t x hi")
         assert (code, out) == (0, b"sent[yaml] to=x: hi\n")
         await ws.close()
@@ -177,7 +177,7 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
             }
         },
     })
-    ws = Workspace(**cfg.to_workspace_kwargs())
+    ws = Workspace(**await cfg.to_workspace_kwargs())
     code, out, _ = await run(ws, "sl send")
     assert (code, out) == (0, b"sent[ref]\n")
     await ws.close()
@@ -198,7 +198,7 @@ async def test_yaml_unknown_cli_key_fails_loud():
         },
     })
     with pytest.raises(ValueError, match="unknown cli 'nope'"):
-        Workspace(**cfg.to_workspace_kwargs())
+        Workspace(**await cfg.to_workspace_kwargs())
 
 
 @pytest.mark.asyncio
@@ -374,7 +374,7 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
             }
         },
     })
-    ws = Workspace(**cfg.to_workspace_kwargs())
+    ws = Workspace(**await cfg.to_workspace_kwargs())
     code, out, _ = await run(ws, "pager report.txt")
     assert (code, out) == (0, b'yaml report.txt {"width": 80}\n')
     await ws.close()

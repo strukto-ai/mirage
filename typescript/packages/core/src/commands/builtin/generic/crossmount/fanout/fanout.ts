@@ -20,6 +20,7 @@ import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
 import { Cmd, type CrossResult, type OperandRun, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands } from '../utils.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -63,7 +64,7 @@ export async function runFanout(
   cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   runSingle: RunSingle,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {

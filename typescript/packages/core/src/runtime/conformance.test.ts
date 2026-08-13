@@ -12,16 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { MontyRuntime } from './python/monty.ts'
+import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 import type { BridgeDispatchFn, RunArgs } from './types.ts'
+import { PrefixResolver } from './resolver.ts'
 
 // The runtime conformance suite: one capability table, executed against
 // every runtime in that runtime's own idiom, with the outcome verified
@@ -48,9 +49,8 @@ const MONTY_OPEN_UNSUPPORTED =
 // has not seen starts from empty and the close-flush overwrites the
 // mount content the run never read.
 
-// The workspace bridge has no APPEND op, so every append close
+// The workspace bridge has no append op, so every append close
 // re-flushes the whole file: n appends ship O(n^2) bytes.
-const APPEND_AMPLIFIED = 'the bridge has no append op: each close re-flushes the whole file'
 
 interface Row {
   capability: string
@@ -454,6 +454,56 @@ conformance('monty conformance', 'monty', 'python3 -c "pass"', MONTY_ROWS)
 conformance('pyodide conformance', 'pyodide', 'python3 -c "pass"', PYODIDE_ROWS)
 conformance('quickjs conformance', 'quickjs', 'node -e "1"', QUICKJS_ROWS)
 
+async function rootWorld(runtime: string): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const root = new RAMResource()
+  ops.registerResource(root)
+  return new Workspace(
+    { '/': [root, MountMode.EXEC] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'vfs'] },
+  )
+}
+
+// `/` is the one prefix a runtime could plausibly claim as its own, so
+// it is the one worth pinning. The write is verified through the shell,
+// never through the runtime that made it: a runtime that mutated only
+// its own private tree and reported success is exactly the bug here.
+describe('a root mount', () => {
+  for (const [runtime, line] of [
+    ['monty', `python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`],
+    ['quickjs', `node -e "const w = std.open('/mine.txt', 'w'); w.puts('R'); w.close()"`],
+  ] as const) {
+    it(`is served like any other by ${runtime}`, async () => {
+      const ws = await rootWorld(runtime)
+      const io = await ws.execute(line)
+      expect(io.exitCode, `${line} -> ${stderrStr(io)}`).toBe(0)
+      const check = await ws.execute('cat /mine.txt')
+      expect(check.exitCode, `cat failed: ${stderrStr(check)}`).toBe(0)
+      expect(stdoutStr(check)).toContain('R')
+      await ws.close()
+    }, 120_000)
+  }
+
+  it('is refused out loud by pyodide, which cannot serve one', async () => {
+    // Emscripten already owns `/`, so mounting there answers EBUSY.
+    // The guest write lands in MEMFS and is then dropped, which is
+    // silent loss: the warning is the only thing that makes it
+    // visible, so it is the assertion.
+    const seen: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      seen.push(args.join(' '))
+    })
+    const ws = await rootWorld('pyodide')
+    await ws.execute(`python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`)
+    const check = await ws.execute('cat /mine.txt')
+    expect(check.exitCode, 'the mount should not have the file').not.toBe(0)
+    expect(seen.join(' ')).toContain("cannot serve a mount at '/'")
+    warn.mockRestore()
+    await ws.close()
+  }, 240_000)
+})
+
 interface CountingBridge {
   dispatch: BridgeDispatchFn
   files: Map<string, Uint8Array>
@@ -469,16 +519,25 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
   const ops: [op: string, path: string, bytes: number][] = []
   const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
     ops.push([op, path, bytes?.length ?? 0])
-    if (op === 'READ') {
+    if (op === 'read') {
       const hit = files.get(path)
       if (hit === undefined) return Promise.reject(new Error(`ENOENT ${path}`))
       return Promise.resolve(new Uint8Array(hit))
     }
-    if (op === 'WRITE') {
+    if (op === 'write') {
       files.set(path, bytes === undefined ? new Uint8Array() : new Uint8Array(bytes))
       return Promise.resolve(undefined)
     }
-    if (op === 'STAT') {
+    if (op === 'append') {
+      const base = files.get(path) ?? new Uint8Array()
+      const tail = bytes ?? new Uint8Array()
+      const next = new Uint8Array(base.length + tail.length)
+      next.set(base)
+      next.set(tail, base.length)
+      files.set(path, next)
+      return Promise.resolve(undefined)
+    }
+    if (op === 'stat') {
       const hit = files.get(path)
       if (hit !== undefined) return Promise.resolve({ size: hit.length, isDir: false, mtimeMs: 0 })
       const dir = path.replace(/\/$/, '')
@@ -486,7 +545,7 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       if (isDir) return Promise.resolve({ size: 0, isDir: true, mtimeMs: 0 })
       return Promise.reject(new Error(`ENOENT ${path}`))
     }
-    if (op === 'LIST') {
+    if (op === 'readdir') {
       const prefix = path.replace(/\/$/, '') + '/'
       const entries: { path: string; size: number; isDir: boolean }[] = []
       for (const [p, content] of files) {
@@ -496,15 +555,15 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
       }
       return Promise.resolve(entries)
     }
-    if (op === 'UNLINK') {
+    if (op === 'unlink') {
       files.delete(path)
       return Promise.resolve(undefined)
     }
-    if (op === 'MKDIR') {
+    if (op === 'mkdir') {
       dirs.add(path)
       return Promise.resolve(undefined)
     }
-    if (op === 'RMDIR') {
+    if (op === 'rmdir') {
       dirs.delete(path)
       return Promise.resolve(undefined)
     }
@@ -515,10 +574,14 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
     }
     return Promise.resolve(undefined)
   }
+  // Both spellings count: the question is how many bytes crossed the
+  // transport, and a runtime that ships tails is exactly the one being
+  // measured. Counting WRITE alone would score a working append as 0.
+  const isMutation = (op: string): boolean => op === 'write' || op === 'append'
   const mutationBytes = () =>
-    ops.filter(([op]) => op === 'WRITE').reduce((total, [, , size]) => total + size, 0)
+    ops.filter(([op]) => isMutation(op)).reduce((total, [, , size]) => total + size, 0)
   const mutationOps = () =>
-    ops.filter(([op]) => op === 'WRITE').map(([op, path]) => `${op} ${path}`)
+    ops.filter(([op]) => isMutation(op)).map(([op, path]) => `${op} ${path}`)
   return { dispatch, files, mutationBytes, mutationOps }
 }
 
@@ -541,7 +604,7 @@ describe('append ships only the deltas', () => {
     async () => {
       const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
       const rt = new MontyRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
+      rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
       const result = await rt.run(runArgs(APPEND_LOOP_PY))
       await rt.close()
       expect(result.exitCode).toBe(0)
@@ -550,35 +613,27 @@ describe('append ships only the deltas', () => {
     120_000,
   )
 
-  it.fails(
-    `pyodide [${APPEND_AMPLIFIED}]`,
-    async () => {
-      const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-      const rt = new PyodideRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
-      const result = await rt.run(runArgs(APPEND_LOOP_PY))
-      await rt.close()
-      expect(result.exitCode).toBe(0)
-      const dec = new TextDecoder()
-      expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-      expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-    },
-    120_000,
-  )
+  it('pyodide', async () => {
+    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
+    const rt = new PyodideRuntime()
+    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    const result = await rt.run(runArgs(APPEND_LOOP_PY))
+    await rt.close()
+    expect(result.exitCode).toBe(0)
+    const dec = new TextDecoder()
+    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
+    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
+  }, 120_000)
 
-  it.fails(
-    `quickjs [${APPEND_AMPLIFIED}]`,
-    async () => {
-      const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
-      const rt = new QuickJsRuntime()
-      rt.attach(counting.dispatch, () => ['/data/'])
-      const result = await rt.run(runArgs(APPEND_LOOP_JS))
-      await rt.close()
-      expect(result.exitCode).toBe(0)
-      const dec = new TextDecoder()
-      expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
-      expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
-    },
-    120_000,
-  )
+  it('quickjs', async () => {
+    const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
+    const rt = new QuickJsRuntime()
+    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    const result = await rt.run(runArgs(APPEND_LOOP_JS))
+    await rt.close()
+    expect(result.exitCode).toBe(0)
+    const dec = new TextDecoder()
+    expect(dec.decode(counting.files.get('/data/log.txt'))).toBe('S'.repeat(64) + 'xyz'.repeat(8))
+    expect(counting.mutationBytes(), counting.mutationOps().join(', ')).toBe(24)
+  }, 120_000)
 })

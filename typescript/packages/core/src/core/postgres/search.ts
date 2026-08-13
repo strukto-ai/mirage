@@ -16,6 +16,7 @@ import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { listMatviews, listSchemas, listTables, listViews, quoteIdent } from './_client.ts'
 import { buildEntitySchemaJson } from './_schema_json.ts'
 import { buildEntitySemanticJson } from './semantic.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const TEXT_TYPES = [
   'text',
@@ -84,7 +85,7 @@ async function entityNames(
   if (kind === 'tables') return listTables(accessor, schema)
   const views = await listViews(accessor, schema)
   const mviews = await listMatviews(accessor, schema)
-  return [...new Set([...views, ...mviews])].sort()
+  return [...new Set([...views, ...mviews])].sort(compareCodePoints)
 }
 
 // Grep an entity's rendered metadata files. The LIKE push-down only ever

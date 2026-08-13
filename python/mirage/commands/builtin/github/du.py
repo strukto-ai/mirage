@@ -16,13 +16,15 @@ from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import run_du
+from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, MountView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -53,10 +55,20 @@ async def du_provision(
     paths: list[PathSpec],
     *texts: str,
     index: IndexCacheStore,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> ProvisionResult:
     return await metadata_provision("du " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
+
+
+async def _resolve(accessor: GitHubAccessor, index: IndexCacheStore,
+                   targets: list[PathSpec]) -> list[PathSpec]:
+    return await resolve_glob(accessor, targets, index)
+
+
+async def _stat(accessor: GitHubAccessor, index: IndexCacheStore,
+                path: PathSpec):
+    return await IO.stat(accessor, path, index)
 
 
 @command("du", resource="github", spec=SPECS["du"], provision=du_provision)
@@ -65,33 +77,18 @@ async def du(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    h: bool = False,
-    s: bool = False,
-    a: bool = False,
-    max_depth: str | None = None,
-    d: str | None = None,
-    c: bool = False,
-    separate_dirs: bool = False,
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
-    L: bool = False,
     links: LinkView | None = None,
-    **_extra: object,
+    mounts: MountView | None = None,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    out = await run_du(
-        paths,
-        cwd,
-        lambda targets: resolve_glob(accessor, targets, index),
-        lambda path: IO.stat(accessor, path, index),
-        partial(_du_size, index),
-        partial(_du_entries, index),
-        s=s,
-        a=a,
-        h=h,
-        c=c,
-        max_depth=max_depth,
-        d=d,
-        separate_dirs=separate_dirs,
-        links=None if L else links,
-    )
-    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
+    return await du_generic(paths,
+                            list(texts),
+                            CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
+                            partial(_resolve, accessor, index),
+                            partial(_stat, accessor, index),
+                            partial(_du_size, index),
+                            partial(_du_entries, index),
+                            links=links,
+                            mounts=mounts)

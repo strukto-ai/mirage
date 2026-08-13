@@ -19,6 +19,7 @@ import { DiffOpTag } from '../../../builtin/diff_types.ts'
 import { short } from './format.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import type { TreeEntry } from './tree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ROOT_COMMIT = '(root-commit) '
 const CREATE = 'create'
@@ -99,7 +100,7 @@ export async function diffstat(
   after: ReadonlyMap<string, TreeEntry>,
 ): Promise<FileStat[]> {
   const stats: FileStat[] = []
-  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort(compareCodePoints)) {
     const old = before.get(path) ?? null
     const now = after.get(path) ?? null
     if (old?.oid === now?.oid && old?.mode === now?.mode) continue
@@ -231,10 +232,10 @@ function modeLines(
   after: ReadonlyMap<string, TreeEntry>,
 ): string[] {
   const lines: string[] = []
-  for (const path of [...after.keys()].filter((p) => !before.has(p)).sort()) {
+  for (const path of [...after.keys()].filter((p) => !before.has(p)).sort(compareCodePoints)) {
     lines.push(` ${CREATE} mode ${after.get(path)?.mode ?? ''} ${path}`)
   }
-  for (const path of [...before.keys()].filter((p) => !after.has(p)).sort()) {
+  for (const path of [...before.keys()].filter((p) => !after.has(p)).sort(compareCodePoints)) {
     lines.push(` ${DELETE} mode ${before.get(path)?.mode ?? ''} ${path}`)
   }
   return lines

@@ -12,9 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { MountMode } from '../../types.ts'
+
+/**
+ * What a child shell gets its own copy of, and the parent gets back
+ * afterwards. A `( … )` subshell and a nested `bash`/`sh` are both child
+ * shells and both read this shape, so neither can drift into isolating a
+ * field the other leaks, and adding a field here is a compile error
+ * until `snapshot` and `restore` both carry it. `lastExitCode` is
+ * deliberately absent: `$?` after a child shell is the child's status,
+ * which is the one thing it reports back. `sourceDepth` is here because a
+ * child shell starts outside any `source` its caller is inside.
+ */
+export interface ChildShellState {
+  cwd: string
+  logicalCwd: string | undefined
+  sourceDepth: number
+  env: Record<string, string>
+  functions: Record<string, unknown>
+  shellOptions: Record<string, boolean>
+  readonlyVars: Set<string>
+  arrays: Record<string, ShellArray>
+  positionalArgs: string[]
+  scriptName: string | null
+  lastBgJobId: number | null
+  getoptsPos: number
+  getoptsOptind: number | null
+}
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -58,11 +85,13 @@ export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
 export interface SessionInit {
   sessionId: string
   cwd?: string
+  logicalCwd?: string | undefined
   env?: Record<string, string>
   createdAt?: number
   functions?: Record<string, unknown>
   lastExitCode?: number
   positionalArgs?: string[]
+  scriptName?: string | null
   shellOptions?: Record<string, boolean>
   readonlyVars?: Set<string>
   arrays?: Record<string, ShellArray>
@@ -84,11 +113,21 @@ export interface SessionInit {
 export class Session {
   sessionId: string
   cwd: string
+  // The spelling `cd` arrived at: `..` simplified textually, symlinks
+  // left alone. bash reports it as $PWD and `pwd -L`, and applies the
+  // next `cd`'s `..` to it. Undefined whenever it would equal `cwd`,
+  // which is every session that has not walked through a symlink. `cwd`
+  // stays physical because it is what every operand resolves against.
+  logicalCwd: string | undefined
   env: Record<string, string>
   createdAt: number
   functions: Record<string, unknown>
   lastExitCode: number
   positionalArgs: string[]
+  // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+  // sets it to the script file it is running, or to the name given after
+  // `-c`, and restores it afterwards.
+  scriptName: string | null
   shellOptions: Record<string, boolean>
   readonlyVars: Set<string>
   arrays: Record<string, ShellArray>
@@ -135,11 +174,13 @@ export class Session {
     this.sessionId = init.sessionId
     this.errexitImmune = false
     this.cwd = init.cwd ?? '/'
+    this.logicalCwd = init.logicalCwd
     this.env = ownRecord(init.env)
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = ownRecord(init.functions)
     this.lastExitCode = init.lastExitCode ?? 0
     this.positionalArgs = init.positionalArgs ?? []
+    this.scriptName = init.scriptName ?? null
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = ownRecord(init.arrays)
@@ -147,6 +188,11 @@ export class Session {
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
     this.lastBgJobId = init.lastBgJobId ?? null
+    // bash exports $PWD from startup, so a session that has never run
+    // `cd` still has one. Seeding here rather than at lookup time is what
+    // makes it an ordinary variable: assignable, unsettable, and listed
+    // by `env`.
+    if (!('PWD' in this.env)) this.env.PWD = this.cwd
   }
 
   /**
@@ -156,16 +202,31 @@ export class Session {
    * the source. Every field — including capability fields like
    * `mountModes` — is propagated, so callers cannot accidentally
    * forget one when adding new fields.
+   *
+   * A caller that moves the fork with `cwd` supplies a physical path
+   * with no typed spelling behind it, so the source's logical name is
+   * dropped rather than left describing where the fork is not — the same
+   * reasoning as `shell_dirs.setCwd`. Deciding it here rather than at
+   * each call site is what keeps `execute({cwd})` from reporting the
+   * persistent session's old directory from `pwd`. `??` cannot express
+   * this, since the value being chosen is `undefined`.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
+    const movedTo = 'logicalCwd' in overrides ? undefined : overrides.cwd
+    const env = overrides.env ?? { ...this.env }
+    // $PWD names where the session is, so it follows the move even when
+    // the caller also supplied an env to layer on.
+    if (movedTo !== undefined) env.PWD = movedTo
     const forked = new Session({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
-      env: overrides.env ?? { ...this.env },
+      logicalCwd: movedTo !== undefined ? undefined : (overrides.logicalCwd ?? this.logicalCwd),
+      env,
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
       positionalArgs: overrides.positionalArgs ?? [...this.positionalArgs],
+      scriptName: overrides.scriptName ?? this.scriptName,
       shellOptions: overrides.shellOptions ?? { ...this.shellOptions },
       readonlyVars: overrides.readonlyVars ?? new Set(this.readonlyVars),
       arrays:
@@ -182,6 +243,58 @@ export class Session {
     forked.cmdsubSeq = this.cmdsubSeq
     forked.cmdsubStatus = this.cmdsubStatus
     return forked
+  }
+
+  /**
+   * What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+   * sets it to the script it is running, or to the name given after
+   * `-c`. An empty name is a name, so it is not folded into the default:
+   * GNU `bash -c 'echo "[$0]"' ""` prints `[]`.
+   */
+  get argv0(): string {
+    return this.scriptName ?? SHELL_ARGV0
+  }
+
+  /**
+   * Copy the state a child shell runs on top of. The records go through
+   * `ownRecord` because they hold script-controlled names and must keep
+   * their null prototype across the round trip.
+   */
+  snapshot(): ChildShellState {
+    const arrays: Record<string, ShellArray> = ownRecord()
+    for (const [name, value] of Object.entries(this.arrays)) arrays[name] = [...value]
+    return {
+      cwd: this.cwd,
+      logicalCwd: this.logicalCwd,
+      sourceDepth: this.sourceDepth,
+      env: ownRecord(this.env),
+      functions: ownRecord(this.functions),
+      shellOptions: { ...this.shellOptions },
+      readonlyVars: new Set(this.readonlyVars),
+      arrays,
+      positionalArgs: [...this.positionalArgs],
+      scriptName: this.scriptName,
+      lastBgJobId: this.lastBgJobId,
+      getoptsPos: this.getoptsPos,
+      getoptsOptind: this.getoptsOptind,
+    }
+  }
+
+  /** Put back a snapshot, ending a child shell. */
+  restore(state: ChildShellState): void {
+    this.cwd = state.cwd
+    this.logicalCwd = state.logicalCwd
+    this.sourceDepth = state.sourceDepth
+    this.env = state.env
+    this.functions = state.functions
+    this.shellOptions = state.shellOptions
+    this.readonlyVars = state.readonlyVars
+    this.arrays = state.arrays
+    this.positionalArgs = state.positionalArgs
+    this.scriptName = state.scriptName
+    this.lastBgJobId = state.lastBgJobId
+    this.getoptsPos = state.getoptsPos
+    this.getoptsOptind = state.getoptsOptind
   }
 
   /**

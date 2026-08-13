@@ -19,14 +19,16 @@ from pydantic import BaseModel
 
 from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.cli.types import CLIInvocation, CLISpec
-from mirage.commands.spec.types import Operand, Option
+from mirage.commands.spec.parser import parse_command
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
-from mirage.types import Limit
+from mirage.types import Limit, PathSpec
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import handle_cli
+from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.session import Session
 
 
@@ -77,7 +79,8 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     assert inv.flags["verbose"] == 2
     assert inv.argv == ("-vv", "message", "send", "-t", "#eng", "hello",
                         "world")
-    assert inv.env == {"EDITOR": "vi"}
+    # `$PWD` is exported, so a CLI subprocess inherits it as bash's would.
+    assert inv.env == {"EDITOR": "vi", "PWD": "/"}
     assert node.command == "prog -vv message send -t #eng hello world"
 
 
@@ -294,6 +297,7 @@ async def test_script_env_carries_mirage_config_json():
     run = py.seen.pop()
     assert run.env == {
         "EDITOR": "vi",
+        "PWD": "/",
         "MIRAGE_CLI_CONFIG": '{"api_key": "k1"}'
     }
 
@@ -479,3 +483,95 @@ async def test_script_limit_bounds_the_run():
     install = CLIInstall(name="pager", spec=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="pager"):
         await handle_cli(install, ["pager"], Session("t"), entries=[sleepy])
+
+
+def test_env_fills_an_option_the_line_omitted():
+    spec = CommandSpec(
+        options=(Option(long="--version", type="str", env="X_VERSION"), ))
+    parsed = parse_flags([], spec, "x", "/", env={"X_VERSION": "9"})
+    assert parsed.flag_kwargs == {"version": "9"}
+
+
+def test_the_typed_value_wins_over_the_environment():
+    spec = CommandSpec(
+        options=(Option(long="--version", type="str", env="X_VERSION"), ))
+    parsed = parse_flags(["--version", "typed"],
+                         spec,
+                         "x",
+                         "/",
+                         env={"X_VERSION": "9"})
+    assert parsed.flag_kwargs == {"version": "typed"}
+
+
+def test_the_environment_wins_over_a_declared_default():
+    spec = CommandSpec(options=(Option(
+        long="--version", type="str", default="fallback", env="X_VERSION"), ))
+    assert parse_flags([], spec, "x", "/", env={
+        "X_VERSION": "9"
+    }).flag_kwargs == {
+        "version": "9"
+    }
+    assert parse_flags([], spec, "x", "/", env={}).flag_kwargs == {
+        "version": "fallback"
+    }
+
+
+def test_env_satisfies_a_required_option_before_it_is_refused():
+    # The whole point of filling inside the parse: the option is
+    # credited against required, so the line is not refused.
+    spec = CommandSpec(options=(Option(
+        long="--version", type="str", env="X_VERSION", required=True), ))
+    filled = parse_flags([], spec, "x", "/", env={"X_VERSION": "9"})
+    assert filled.missing_required_options == []
+    assert option_error("x", filled) is None
+
+
+def test_an_unset_variable_leaves_the_refusal_standing():
+    spec = CommandSpec(options=(Option(
+        long="--version", type="str", env="X_VERSION", required=True), ))
+    same = parse_flags([], spec, "x", "/", env={})
+    assert same.missing_required_options == ["--version"]
+    assert option_error("x", same) is not None
+
+
+def test_an_env_value_is_coerced_and_checked_like_a_typed_one():
+    # Filling after the parse left these unchecked: an int stayed a
+    # string nobody validated and a choice was never tested.
+    ints = CommandSpec(
+        options=(Option(long="--count", type="int", env="X_COUNT"), ))
+    assert option_error(
+        "x", parse_flags([], ints, "x", "/", env={"X_COUNT":
+                                                  "nope"})) is not None
+    assert option_error("x",
+                        parse_flags([], ints, "x", "/", env={"X_COUNT":
+                                                             "4"})) is None
+    picks = CommandSpec(options=(
+        Option(long="--mode", type="str", choices=("a", "b"), env="X_MODE"), ))
+    assert option_error(
+        "x", parse_flags([], picks, "x", "/", env={"X_MODE":
+                                                   "zzz"})) is not None
+    assert option_error("x",
+                        parse_flags([], picks, "x", "/", env={"X_MODE":
+                                                              "a"})) is None
+
+
+def test_an_env_path_becomes_a_pathspec_like_a_typed_one():
+    # A raw string here vanished from FlagView.as_paths() and was never
+    # routed to a mount.
+    spec = CommandSpec(
+        options=(Option(long="--conf", type="path", env="X_CONF"), ))
+    parsed = parse_flags([], spec, "x", "/work", env={"X_CONF": "rel.json"})
+    value = parsed.flag_kwargs["conf"]
+    assert isinstance(value, PathSpec)
+    assert value.virtual == "/work/rel.json"
+
+
+def test_an_env_value_does_not_count_as_typed():
+    # clap's usage line echoes what the line carried; an env-supplied
+    # option is supplied but not typed, and clap_supplied reads the
+    # environment itself for that distinction.
+    spec = CommandSpec(
+        options=(Option(long="--version", type="str", env="X_VERSION"), ))
+    parsed = parse_command(spec, [], "/", env={"X_VERSION": "9"})
+    assert parsed.flags["--version"] == "9"
+    assert parsed.typed_dests == []

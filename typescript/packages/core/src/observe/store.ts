@@ -35,6 +35,29 @@ export interface ObserverStore {
   close(): Promise<void>
 }
 
+/**
+ * Shared ObserverStore behavior.
+ *
+ * Implementations only provide `append`/`write`/`readMatching`/`clear`;
+ * `readAll` is reading with the empty suffix (every key matches), and
+ * `close` defaults to a no-op for stores that hold no connections.
+ * Mirrors Python `ObserverStoreBase`.
+ */
+export abstract class ObserverStoreBase implements ObserverStore {
+  abstract append(path: string, data: Uint8Array): Promise<void>
+  abstract write(path: string, data: Uint8Array): Promise<void>
+  abstract readMatching(suffix: string): Promise<Map<string, Uint8Array>>
+  abstract clear(): Promise<void>
+
+  readAll(): Promise<Map<string, Uint8Array>> {
+    return this.readMatching('')
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const merged = new Uint8Array(a.length + b.length)
   merged.set(a, 0)
@@ -43,7 +66,7 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 /** In-memory ObserverStore backed by a Map (the default). */
-export class RAMObserverStore implements ObserverStore {
+export class RAMObserverStore extends ObserverStoreBase {
   readonly files = new Map<string, Uint8Array>()
 
   append(path: string, data: Uint8Array): Promise<void> {
@@ -57,10 +80,6 @@ export class RAMObserverStore implements ObserverStore {
     return Promise.resolve()
   }
 
-  readAll(): Promise<Map<string, Uint8Array>> {
-    return this.readMatching('')
-  }
-
   readMatching(suffix: string): Promise<Map<string, Uint8Array>> {
     const out = new Map<string, Uint8Array>()
     for (const [k, v] of this.files) {
@@ -71,10 +90,6 @@ export class RAMObserverStore implements ObserverStore {
 
   clear(): Promise<void> {
     this.files.clear()
-    return Promise.resolve()
-  }
-
-  close(): Promise<void> {
     return Promise.resolve()
   }
 }

@@ -12,17 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.ops.types import ChildMounts, StatPath
 from mirage.types import PathSpec
 from mirage.workspace.mount import MountRegistry
 
 
 async def _apply_find_actions(
     stdout: ByteSource | None,
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     registry: MountRegistry,
     cwd: str,
+    child_mounts: ChildMounts | None = None,
+    stat_path: StatPath | None = None,
 ) -> tuple[ByteSource | None, bytes]:
     """Apply find action flags (-delete / -print0 / -ls) to find output.
 
@@ -36,6 +40,9 @@ async def _apply_find_actions(
         flag_kwargs (dict): parsed flag dict; action flags read here.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
+        child_mounts (ChildMounts | None): namespace child fact, threaded
+            into the -ls sub-dispatch so a namespace-only row renders.
+        stat_path (StatPath | None): dispatcher stat, threaded with it.
     """
     has_delete = flag_kwargs.get("delete") is True
     has_print0 = flag_kwargs.get("print0") is True
@@ -53,9 +60,15 @@ async def _apply_find_actions(
 
     if has_delete:
         # Deepest-first so children are removed before parents.
-        # Skip mount roots: mount points are structural, not
-        # unlinkable entries — refusing matches Unix semantics.
-        deletable = [p for p in matches if not registry.is_mount_root(p)]
+        # Skip structural rows: mount points, and the namespace-only
+        # ancestors above a nested mount, are not unlinkable entries;
+        # refusing matches Unix semantics. Ancestors use the raw mount
+        # table like is_mount_root: an ungranted mount still pins its
+        # ancestors in the namespace.
+        deletable = [
+            p for p in matches if not registry.is_mount_root(p)
+            and not registry.descendant_mounts(p)
+        ]
         ordered = sorted(deletable, key=lambda p: p.count("/"), reverse=True)
         for path in ordered:
             try:
@@ -108,7 +121,9 @@ async def _apply_find_actions(
                     "d": True
                 },
                                                     stdin=None,
-                                                    cwd=cwd)
+                                                    cwd=cwd,
+                                                    child_mounts=child_mounts,
+                                                    stat_path=stat_path)
             except (FileNotFoundError, NotADirectoryError, PermissionError,
                     ValueError) as exc:
                 errors.append(f"find: cannot ls '{path}': {exc}\n".encode())

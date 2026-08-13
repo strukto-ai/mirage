@@ -24,6 +24,7 @@ import {
   type PredNode,
   startBasename,
 } from '../../commands/builtin/findEval.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface FindOptions {
   name?: string | null
@@ -125,6 +126,6 @@ export function find(
       maxSize: options.maxSize,
     })
   }
-  results.sort()
+  results.sort(compareCodePoints)
   return Promise.resolve(results)
 }

@@ -19,20 +19,17 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
 from mirage.commands.builtin.generic_bind.adapter import (bound_op,
                                                           overlaid_stat)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.core.gridfs.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 
 
-@command("stat",
-         resource="gridfs",
-         spec=SPECS["stat"],
-         provision=metadata_provision)
+@command("stat", resource="gridfs", spec=SPECS["stat"])
 async def stat(
     accessor: GridFSAccessor,
     paths: list[PathSpec],
@@ -44,7 +41,7 @@ async def stat(
     index: IndexCacheStore,
     stat_overlay: StatOverlay | None = None,
     links: LinkView | None = None,
-    **_extra: object,
+    **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")

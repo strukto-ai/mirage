@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import { runOutput, skipFirstLine } from '../../../commands/builtin/general/interpreter.ts'
+import type { SourceMode } from '../../../commands/builtin/general/interpreter.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
+import type { InitFlags } from '../../../runtime/python/flags.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
 import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -21,7 +24,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { ExecutionNode } from '../../types.ts'
-import { MontyUnavailableError } from '../../../runtime/python/monty.ts'
+import { MontyUnavailableError } from '../../../runtime/python/monty/index.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -54,6 +57,15 @@ export async function handlePython(
     stdin: ByteSource | null
     env: Record<string, string>
     code: string | null
+    // argv[0], derived from which door the source came through; '' is
+    // CPython's own answer for a program piped in with no operand, so a
+    // runtime must not treat it as absent.
+    prog?: string
+    mode?: SourceMode
+    // CPython's -x. File mode only, which is CPython's own scope: -c,
+    // -m and stdin are unaffected.
+    skipFirstLine?: boolean
+    initFlags?: InitFlags
     signal?: AbortSignal
     timeoutSeconds?: number
   },
@@ -75,6 +87,7 @@ export async function handlePython(
       const [data] = await dispatch('read', toPathSpec(pathScope))
       const bytes = await readAllBytes(data)
       code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+      if (opts.skipFirstLine === true) code = skipFirstLine(code)
     } catch {
       const err = new TextEncoder().encode(`python3: ${pathScope.virtual}: No such file\n`)
       return [
@@ -91,11 +104,30 @@ export async function handlePython(
   }
 
   try {
+    if (
+      opts.mode === 'module' &&
+      deps.runtime instanceof PythonRuntime &&
+      !deps.runtime.runsModules
+    ) {
+      // Exit 1, CPython's code for a `-m` that could not run, but not
+      // its "No module named" wording: nothing was searched for, so
+      // naming the runtime is the honest report.
+      const err = new TextEncoder().encode(
+        `python3: -m is not supported by the '${deps.runtime.name}' runtime\n`,
+      )
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: cmdStr, exitCode: 1 }),
+      ]
+    }
     const result = await deps.runtime.run({
       code,
       args,
       env: opts.env,
       stdin: stdinBytes,
+      ...(opts.prog !== undefined ? { prog: opts.prog } : {}),
+      ...(opts.initFlags !== undefined ? { flags: opts.initFlags as Record<string, unknown> } : {}),
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
       ...(opts.timeoutSeconds !== undefined ? { timeoutSeconds: opts.timeoutSeconds } : {}),
     })

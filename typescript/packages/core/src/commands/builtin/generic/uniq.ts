@@ -16,7 +16,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -46,7 +46,7 @@ function parseCount(value: string | boolean | number | string[] | undefined): nu
 }
 
 function stringAlias(
-  flags: Record<string, string | boolean | number | string[]>,
+  flags: Record<string, FlagValue>,
   short: string,
   long: string,
 ): string | boolean | number | string[] | undefined {
@@ -67,7 +67,7 @@ function optionalMethod(
   return normalized
 }
 
-function parseFlags(flags: Record<string, string | boolean | number | string[]>): UniqFlags {
+function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
   const count = flags.count === true
   const duplicatesOnly = flags.repeated === true
   const uniqueOnly = flags.unique === true

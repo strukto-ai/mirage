@@ -173,6 +173,42 @@
         "gdrive-folder",
         "box"
       ]
+    },
+    {
+      "id": "mv_suffix_empty_falls_back_to_tilde",
+      "seq": 613095,
+      "command": "mkdir -p /data/mvb6 && printf 'S\\n' > /data/mvb6/s.txt && printf 'D\\n' > /data/mvb6/d.txt && mv --backup --suffix= /data/mvb6/s.txt /data/mvb6/d.txt && cat '/data/mvb6/d.txt~' && ls /data/mvb6",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nd.txt\nd.txt~\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup",
+        "suffix"
+      ],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

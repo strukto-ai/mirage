@@ -30,6 +30,14 @@ def normalize_page(page: dict[str, Any],
         b for b in blocks
         if b.get("type") not in ("child_page", "child_database")
     ]
+    properties = page.get("properties", {})
+    if not isinstance(properties, dict):
+        properties = {}
+    # A database row's cells are its `properties`, and they are the reason
+    # the row exists, so they belong in the file rather than only in a
+    # `datasources query`. Kept as Notion's own property objects for the
+    # same reason `blocks` is: the schema they answer to is rendered one
+    # level up, in data_source.json's `properties`.
     return {
         "page_id": page.get("id", ""),
         "title": extract_title(page),
@@ -41,6 +49,7 @@ def normalize_page(page: dict[str, Any],
         "archived": page.get("archived", False),
         "created_by": page.get("created_by", {}).get("id", ""),
         "last_edited_by": page.get("last_edited_by", {}).get("id", ""),
+        "properties": properties,
         "markdown": blocks_to_markdown(content_blocks),
         "blocks": content_blocks,
     }
@@ -58,7 +67,24 @@ def normalize_database(database: dict[str, Any]) -> dict[str, Any]:
         "parent": database.get("parent", {}),
         "archived": database.get("archived", database.get("in_trash", False)),
         "is_inline": database.get("is_inline", False),
-        "properties": database.get("properties", {}),
+        "data_sources": database.get("data_sources", []),
+    }
+
+
+def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
+    title_items = data_source.get("title", [])
+    title = "".join(item.get("plain_text", "") for item in title_items)
+    parent = data_source.get("parent", {})
+    return {
+        "data_source_id": data_source.get("id", ""),
+        "database_id": parent.get("database_id", ""),
+        "title": title,
+        "created_time": data_source.get("created_time", ""),
+        "last_edited_time": data_source.get("last_edited_time", ""),
+        "database_parent": data_source.get("database_parent", {}),
+        "archived": data_source.get("archived",
+                                    data_source.get("in_trash", False)),
+        "properties": data_source.get("properties", {}),
     }
 
 

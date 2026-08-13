@@ -13,29 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+} from '../../resource/secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
-
-export interface LinearConfig {
-  apiKey: string
-  workspace?: string
-  teamIds?: readonly string[]
-  baseUrl?: string
-}
-
-export interface LinearConfigRedacted {
-  apiKey: '<REDACTED>'
-  workspace?: string
-  teamIds?: readonly string[]
-  baseUrl?: string
-}
 
 export const LinearConfigSchema = z.object({
   apiKey: secretStr(),
   workspace: z.string().optional(),
-  teamIds: z.array(z.string()).optional(),
+  teamIds: z.array(z.string()).readonly().optional(),
   baseUrl: z.string().optional(),
 })
+
+export type LinearConfig = ConfigOf<typeof LinearConfigSchema>
+
+export type LinearConfigRedacted = RedactedConfig<LinearConfig, 'apiKey'>
 
 export function redactLinearConfig(config: LinearConfig): LinearConfigRedacted {
   return redactConfigWithSchema(LinearConfigSchema, config) as unknown as LinearConfigRedacted

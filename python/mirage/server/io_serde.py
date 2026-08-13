@@ -15,9 +15,11 @@
 from typing import Any
 
 from mirage.io.types import IOResult
+from mirage.provision.types import ProvisionResult
 
 
-async def io_result_to_dict(result: IOResult | object) -> dict[str, Any]:
+async def io_result_to_dict(
+        result: IOResult | ProvisionResult | None) -> dict[str, Any]:
     """Materialize an IOResult into a JSON-friendly dict.
 
     Falls back to ``result.model_dump()`` for ``ProvisionResult`` (which
@@ -25,7 +27,8 @@ async def io_result_to_dict(result: IOResult | object) -> dict[str, Any]:
     and normal execute outputs.
 
     Args:
-        result (IOResult | object): the workspace.execute return value.
+        result (IOResult | ProvisionResult | None): the
+            workspace.execute return value.
 
     Returns:
         dict[str, Any]: serializable response payload.
@@ -39,6 +42,6 @@ async def io_result_to_dict(result: IOResult | object) -> dict[str, Any]:
             "stdout": stdout.decode(errors="replace"),
             "stderr": stderr.decode(errors="replace"),
         }
-    if hasattr(result, "model_dump"):
+    if isinstance(result, ProvisionResult):
         return {"kind": "provision", **result.model_dump()}
     return {"kind": "raw", "value": str(result)}

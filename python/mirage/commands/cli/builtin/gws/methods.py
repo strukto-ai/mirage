@@ -15,8 +15,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from mirage.core.google._client import (TokenManager, docs_base, drive_base,
-                                        gmail_base, sheets_base, slides_base)
+from mirage.core.google._client import (TokenManager, calendar_base, docs_base,
+                                        drive_base, forms_base, gmail_base,
+                                        sheets_base, slides_base)
 
 # The official gws CLI generates one command per Discovery method and
 # speaks raw API resources: `--params` carries path/query parameters,
@@ -147,6 +148,53 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
               "/users/{userId}/messages/{id}/trash"),
     GwsMethod("gmail", "users messages attachments", "get", "GET",
               "/users/{userId}/messages/{messageId}/attachments/{id}"),
+    GwsMethod("calendar", "calendarList", "list", "GET",
+              "/users/me/calendarList"),
+    GwsMethod("calendar", "calendars", "get", "GET",
+              "/calendars/{calendarId}"),
+    GwsMethod("calendar", "events", "list", "GET",
+              "/calendars/{calendarId}/events"),
+    GwsMethod("calendar", "events", "get", "GET",
+              "/calendars/{calendarId}/events/{eventId}"),
+    GwsMethod("calendar",
+              "events",
+              "insert",
+              "POST",
+              "/calendars/{calendarId}/events",
+              needs_body=True),
+    GwsMethod("calendar",
+              "events",
+              "patch",
+              "PATCH",
+              "/calendars/{calendarId}/events/{eventId}",
+              needs_body=True),
+    GwsMethod("calendar", "events", "delete", "DELETE",
+              "/calendars/{calendarId}/events/{eventId}"),
+    GwsMethod("calendar",
+              "freebusy",
+              "query",
+              "POST",
+              "/freeBusy",
+              needs_body=True),
+    GwsMethod("forms",
+              "forms",
+              "create",
+              "POST",
+              "/forms",
+              needs_body=True,
+              placement="relocate",
+              id_field="formId"),
+    GwsMethod("forms", "forms", "get", "GET", "/forms/{formId}"),
+    GwsMethod("forms",
+              "forms",
+              "batchUpdate",
+              "POST",
+              "/forms/{formId}:batchUpdate",
+              needs_body=True),
+    GwsMethod("forms", "forms responses", "list", "GET",
+              "/forms/{formId}/responses"),
+    GwsMethod("forms", "forms responses", "get", "GET",
+              "/forms/{formId}/responses/{responseId}"),
 )
 
 
@@ -166,4 +214,6 @@ SERVICE_BASES: dict[str, Callable[[TokenManager], str]] = {
     "sheets": sheets_base,
     "slides": slides_base,
     "gmail": gmail_base,
+    "calendar": calendar_base,
+    "forms": forms_base,
 }

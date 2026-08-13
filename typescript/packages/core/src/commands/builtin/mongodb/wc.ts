@@ -25,7 +25,6 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
 import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
-import { fileReadProvision } from './_provision.ts'
 
 const resolveGlob = resolveGlobOf(MONGODB_IO)
 
@@ -73,5 +72,4 @@ export const MONGODB_WC = command({
   resource: ResourceName.MONGODB,
   spec: specOf('wc'),
   fn: wcCommand,
-  provision: fileReadProvision,
 })

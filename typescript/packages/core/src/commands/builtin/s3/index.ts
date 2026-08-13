@@ -22,6 +22,8 @@ import { S3_STAT } from './stat.ts'
 import { S3_TEE } from './tee.ts'
 import { S3_TOUCH } from './touch.ts'
 import { S3_IO } from './io.ts'
+import { withDefaultProvisions } from '../generic_bind/provision.ts'
+import { resolveGlobOf } from '../generic_bind/adapter.ts'
 
 const S3_OVERRIDES = new Set(['stat', 'rm', 'mkdir', 'tee', 'touch'])
 
@@ -29,9 +31,10 @@ export const S3_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<S3Accessor>(ResourceName.S3, S3_IO, {
     overrides: S3_OVERRIDES,
   }),
-  ...S3_STAT,
-  ...S3_RM,
-  ...S3_MKDIR,
-  ...S3_TEE,
-  ...S3_TOUCH,
+  ...withDefaultProvisions(
+    [...S3_STAT, ...S3_RM, ...S3_MKDIR, ...S3_TEE, ...S3_TOUCH],
+    S3_IO.stat,
+    resolveGlobOf(S3_IO),
+    S3_IO.readdir,
+  ),
 ]

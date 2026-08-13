@@ -19,16 +19,23 @@ import { assertMountAllowed, MountNotAllowedError } from '../../../context/sessi
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { LinkView, StatOverlay, StatPath } from '../../../ops/types.ts'
+import type {
+  ChildMounts,
+  LinkView,
+  MountView,
+  ReaddirPath,
+  StatOverlay,
+  StatPath,
+} from '../../../ops/types.ts'
+import { namespaceNames } from '../../../ops/namespace_view.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { linkTargetStat, pathExists, pathStat } from '../builtins/links.ts'
+import { linkTargetStat, pathExists, pathReaddir, pathStat } from '../builtins/links.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { VFSRuntime } from '../../../runtime/table.ts'
 import type { PolicyDecision } from '../../../runtime/policy/index.ts'
 import type { Session } from '../../session/session.ts'
-import { LS_FAILURE } from '../../../commands/builtin/generic/ls.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { CommandTimeoutError } from '../../../commands/builtin/utils/limit.ts'
@@ -128,6 +135,21 @@ export function mountRootOf(registry: MountRegistry, virtual: string): string {
 }
 
 /**
+ * The mount-boundary facts on offer to every command.
+ *
+ * A command that does not read `mounts` off its context simply ignores it, so
+ * there is no list of boundary-aware commands to keep in step.
+ */
+export function mountView(registry: MountRegistry): MountView {
+  return {
+    descendants: (path: string) =>
+      registry.descendantMounts(path).map((m) => rstripSlash(m.prefix) || '/'),
+    isRoot: (path: string) => registry.isMountRoot(path),
+    rootOf: (path: string) => mountRootOf(registry, path),
+  }
+}
+
+/**
  * Drop cached listings and bodies for the mounts a CLI's service backs.
  *
  * An account CLI mutates its service by id, so no vfs path can be derived from
@@ -152,7 +174,11 @@ export async function dropServiceCaches(
   const wanted = new Set<string>(serves)
   for (const mount of registry.allMounts()) {
     if (!wanted.has(mount.resource.kind)) continue
-    await mount.resource.index?.clear()
+    // Invalidate rather than clear: a cleared index reads exactly like one
+    // that was never filled, so a backend whose index *is* its listing
+    // (github seeds the whole tree once) cannot tell the drop from an empty
+    // repository. Expiring keeps that distinction and the next read refetches.
+    await mount.resource.index?.invalidate()
     await mount.cacheManager?.dropPrefix()
   }
 }
@@ -235,11 +261,20 @@ export async function runOnMount(
   // Symlinks are namespace state no backend readdir or stat can see. A
   // command that does not read `links` off its context ignores it, so
   // there is no list of symlink-aware commands to keep in step.
-  const links = linkView(namespace ?? null, dispatch, statOverlay)
+  const links = linkViewFor(namespace ?? null, dispatch)
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
   const statPath: StatPath = (path: string) => pathStat(dispatch, path, statOverlay)
+  // The same door for a listing: a walker whose output is one document
+  // (tree) reads the subtree under a nested mount through here, because
+  // that subtree lives in a resource its own accessor cannot open.
+  const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
+  // Child mounts are the other half of namespace structure beside
+  // links: the same session-filtered names the door merges into its own
+  // readdir, offered to listing commands as rows.
+  const childMounts: ChildMounts = (parent: string) =>
+    namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -261,18 +296,22 @@ export async function runOnMount(
       ...(statOverlay !== null ? { statOverlay } : {}),
       ...(links !== null ? { links } : {}),
       statPath,
+      readdirPath,
+      childMounts,
+      mounts: mountView(registry),
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })
     let stdout = initialStdout
-    // A minor problem (exit 1: an entry below the operand could not be
-    // stat'd) still lists the directory, so the mount and link rows belong in
-    // that output; only a failed operand (exit 2) has nothing to augment.
-    if (cmdName === 'ls' && io.exitCode !== LS_FAILURE) {
-      stdout = await injectChildMounts(stdout, registry, paths, flags, session.cwd)
-    }
     if (cmdName === 'find') {
-      const [newStdout, actionErr] = await applyFindActions(stdout, flags, registry, session.cwd)
+      const [newStdout, actionErr] = await applyFindActions(
+        stdout,
+        flags,
+        registry,
+        session.cwd,
+        childMounts,
+        statPath,
+      )
       stdout = newStdout
       if (actionErr.length > 0) {
         const existing = await materialize(io.stderr)
@@ -327,6 +366,18 @@ function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<str
 // Which commands actually receive this is decided by whether the
 // handler reads `links` off its context, so there is no list of
 // symlink-aware commands to keep in step here or anywhere else.
+// The symlink facts on offer, built with the namespace's own attr overlay so
+// a link's target stat carries the same rows `ls -l` renders. Exported for the
+// mount fan-out, which reaches `executeCmd` without going through
+// `runOnMount` and would otherwise run every sub-command link-blind.
+export function linkViewFor(namespace: Namespace | null, dispatch: DispatchFn): LinkView | null {
+  const overlay =
+    namespace !== null
+      ? (virtual: string, stat: FileStat) => namespaceStatOverlay(namespace, virtual, stat)
+      : null
+  return linkView(namespace, dispatch, overlay)
+}
+
 function linkView(
   namespace: Namespace | null,
   dispatch: DispatchFn,
@@ -341,59 +392,4 @@ function linkView(
     exists: (path: string) => pathExists(dispatch, path),
     targetStat: (path: string) => linkTargetStat(namespace, dispatch, path, overlay),
   }
-}
-
-// Names already rendered in an ls listing, for injection dedup.
-//
-// Long rows come in two shapes: the degraded `mode\t-\t-\tname` form
-// used for entries with neither size nor mtime, and the full GNU row
-// whose name is the ninth whitespace-separated field. Splitting on tabs
-// alone reads a full row as a single field, so a name would never match
-// and an injected row could duplicate an entry the backend already
-// listed.
-function listedNames(existing: string, longForm: boolean): Set<string> {
-  const names = new Set<string>()
-  for (const line of existing.split('\n')) {
-    if (line === '') continue
-    if (!longForm) {
-      names.add(line.replace(/[/*@|=]$/, ''))
-    } else if (line.includes('\t')) {
-      names.add(line.split('\t').pop() ?? '')
-    } else {
-      const parts = line.split(/\s+/)
-      if (parts.length >= 9) names.add(parts.slice(8).join(' '))
-    }
-  }
-  names.delete('')
-  return names
-}
-
-async function injectChildMounts(
-  stdout: ByteSource | null,
-  registry: MountRegistry,
-  paths: readonly PathSpec[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
-  cwd: string,
-): Promise<ByteSource | null> {
-  if (flagKwargs.d === true || flagKwargs.R === true) return stdout
-  if (paths.length > 1) return stdout
-  const listed = paths.length === 1 && paths[0] !== undefined ? paths[0].virtual : cwd
-  const includeHidden = flagKwargs.a === true || flagKwargs.A === true
-  const childNames = registry.childMountNames(listed, includeHidden)
-  if (childNames.length === 0) return stdout
-
-  const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
-  const long = flagKwargs.args_l === true
-  const classify = flagKwargs.F === true
-  const present = listedNames(existing, long)
-  const extras: string[] = []
-  for (const n of childNames) {
-    if (present.has(n)) continue
-    if (long) extras.push(`d\t-\t-\t${n}`)
-    else extras.push(classify ? `${n}/` : n)
-  }
-  if (extras.length === 0) return stdout
-  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-  const combined = existing + sep + extras.join('\n')
-  return new TextEncoder().encode(combined)
 }

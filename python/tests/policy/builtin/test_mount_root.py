@@ -38,12 +38,15 @@ def _path(virtual: str, raw: str | None = None) -> PathSpec:
 def _ctx(command: str,
          paths: list[PathSpec],
          argv: list[str] | None = None,
-         registry: MountRegistry | None = None) -> CommandContext:
-    return CommandContext(command=command,
-                          paths=tuple(paths),
-                          argv=tuple(argv or []),
-                          cwd="/",
-                          registry=registry or _registry())
+         registry: MountRegistry | None = None,
+         operands: list[PathSpec] | None = None) -> CommandContext:
+    return CommandContext(
+        command=command,
+        paths=tuple(paths),
+        operands=tuple(paths if operands is None else operands),
+        argv=tuple(argv or []),
+        cwd="/",
+        registry=registry or _registry())
 
 
 @pytest.mark.parametrize("cmd,needle", [
@@ -114,3 +117,80 @@ def test_has_parents_flag_spots_the_shorthand_cluster():
     assert has_parents_flag(("-pv", ))
     assert not has_parents_flag(("--print", ))
     assert not has_parents_flag(("x", "-r"))
+
+
+@pytest.mark.parametrize("cmd,needle", [
+    ("tar", "tar: /data: Cannot open: Device or resource busy"),
+    ("zip", "zip: cannot read '/data': Device or resource busy"),
+    ("cp", "cp: cannot copy '/data': Device or resource busy"),
+])
+@pytest.mark.asyncio
+async def test_whole_mount_archivers_refused(cmd, needle):
+    # zip's first operand is the archive it writes, cp's last is the
+    # destination, so each line puts the mount root in a source slot.
+    operands = {
+        "tar": [_path("/data")],
+        "zip": [_path("/out.zip"), _path("/data")],
+        "cp": [_path("/data"), _path("/dst")],
+    }[cmd]
+    argv = ["-cf", "/out.tar"] if cmd == "tar" else []
+    deny = await MountRootPolicy().pre_command(_ctx(cmd, operands, argv=argv))
+    assert deny is not None
+    assert needle in deny.message
+
+
+@pytest.mark.asyncio
+async def test_tar_refusal_names_the_operand_as_typed_and_exits_two():
+    deny = await MountRootPolicy().pre_command(
+        _ctx("tar", [_path("/data", raw=".")], argv=["-cf", "/out.tar"]))
+    assert deny is not None
+    assert "tar: .: Cannot open" in deny.message
+    assert "Error is not recoverable" in deny.message
+    assert deny.exit_code == 2
+
+
+@pytest.mark.asyncio
+async def test_extracting_into_a_mount_root_is_allowed():
+    # `-C /data` is a path-valued flag, so it reaches paths but never
+    # operands; refusing it would block the safe direction.
+    deny = await MountRootPolicy().pre_command(
+        _ctx("tar",
+             [_path("/archive.tar"), _path("/data")],
+             operands=[_path("/archive.tar")]))
+    assert deny is None
+
+
+@pytest.mark.asyncio
+async def test_copying_into_a_mount_root_is_allowed():
+    deny = await MountRootPolicy().pre_command(
+        _ctx("cp", [_path("/src/a.txt"), _path("/data")]))
+    assert deny is None
+
+
+@pytest.mark.asyncio
+async def test_zip_archive_slot_is_not_a_source():
+    deny = await MountRootPolicy().pre_command(
+        _ctx("zip", [_path("/data"), _path("/src/a.txt")]))
+    assert deny is None
+
+
+@pytest.mark.parametrize("argv,denied", [
+    (["-cf", "/a.tar"], True),
+    (["--create", "-f", "/a.tar"], True),
+    (["cf", "/a.tar"], True),
+    (["-tf", "/a.tar"], False),
+    (["-xf", "/a.tar"], False),
+    (["xzf", "/a.tar"], False),
+    (["-xf", "/a.tar", "-C", "/cache"], False),
+])
+@pytest.mark.asyncio
+async def test_only_tar_create_reads_its_operands_from_the_filesystem(
+        argv, denied):
+    """Under -t and -x an operand names a member, not a path.
+
+    A selector that happens to spell a mount root is not a mount, so
+    refusing it would deny an ordinary listing or extraction.
+    """
+    deny = await MountRootPolicy().pre_command(
+        _ctx("tar", [_path("/data")], argv=argv))
+    assert (deny is not None) is denied

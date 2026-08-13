@@ -16,11 +16,12 @@ import { asyncChain } from '../../../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
+import type { FlagValue } from '../../../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function hasActiveFlags(flagKwargs: Record<string, string | boolean | number | string[]>): boolean {
+function hasActiveFlags(flagKwargs: Record<string, FlagValue>): boolean {
   return Object.values(flagKwargs).some((v) => v !== false)
 }
 
@@ -48,7 +49,7 @@ export async function runStream(
   cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
-  flagKwargs: Record<string, string | boolean | number | string[]>,
+  flagKwargs: Record<string, FlagValue>,
   runSingle: RunSingle,
 ): Promise<CrossResult> {
   let mergedIo = new IOResult()

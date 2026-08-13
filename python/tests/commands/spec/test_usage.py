@@ -1,7 +1,8 @@
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, extra_operand_error, invalid_argument_error,
     invalid_float_error, invalid_int_error, missing_required_error,
-    missing_value_error, unknown_option_error, usage_exit_code)
+    missing_value_error, old_option_error, unknown_option_error,
+    usage_exit_code)
 
 
 def test_exit_codes_match_gnu():
@@ -101,3 +102,11 @@ def test_invalid_float_mirrors_argparse_wording():
     assert out == (b"mycli: invalid float value: '5x' for '--ratio'\n"
                    b"Try 'mycli --help' for more information.\n")
     assert code == 1
+
+
+def test_old_option_error_matches_gnu_tar_wording():
+    out, code = old_option_error("tar", "f")
+    assert out == (b"tar: Old option 'f' requires an argument.\n"
+                   b"Try 'tar --help' for more information.\n")
+    # tar's own fatal error, not argp's 64.
+    assert code == 2

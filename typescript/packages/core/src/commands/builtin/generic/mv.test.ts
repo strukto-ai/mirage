@@ -19,6 +19,8 @@ import { FileStat, FileType, PathSpec, type PrimitiveMove, type ReaddirFn } from
 import { eacces, enoent, enotdir, enotsup } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mvFlags, mvGeneric, parseMvFlags, type MvFlags } from './mv.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const DEC = new TextDecoder()
 
@@ -710,24 +712,33 @@ describe('mvGeneric -t/-T', () => {
   })
 })
 
+// Flag bags reach parseMvFlags through a spec-bound view, the way the
+// builder and the crossmount relay build it.
+function view(bag: Record<string, FlagValue>): FlagView {
+  return new FlagView(bag, specOf('mv'))
+}
+
 describe('parseMvFlags', () => {
   it('rejects conflicting combinations', () => {
-    expect(() => parseMvFlags({ backup: true, exchange: true })).toThrow(
+    expect(() => parseMvFlags(view({ backup: true, exchange: true }))).toThrow(
       'mv: cannot combine --backup with --exchange, -n, or --update=none-fail',
     )
-    expect(() => parseMvFlags({ backup: true, no_clobber: true })).toThrow(
+    expect(() => parseMvFlags(view({ backup: true, no_clobber: true }))).toThrow(
       'cannot combine --backup',
     )
-    expect(() => parseMvFlags({ target_directory: '/d', no_target_directory: true })).toThrow(
+    expect(() => parseMvFlags(view({ target_directory: '/d', no_target_directory: true }))).toThrow(
       'cannot combine --target-directory',
     )
   })
 
   it('resolves the update and exchange grammars', () => {
-    const parsed = parseMvFlags({ update: true, exchange: true })
+    const parsed = parseMvFlags(view({ update: true, exchange: true }))
     expect(parsed.update).toBe('older')
     expect(parsed.exchange).toBe(true)
-    expect(parseMvFlags({ no_copy: true }).noCopy).toBe(true)
+    expect(parseMvFlags(view({ no_copy: true })).noCopy).toBe(true)
+    // GNU 9.7: `mv --backup --suffix= f g` writes g~, so an empty suffix
+    // reads as absent rather than naming the original as its own backup.
+    expect(parseMvFlags(view({ backup: true, suffix: '' })).suffix).toBe('~')
   })
 })
 

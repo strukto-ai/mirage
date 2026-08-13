@@ -20,7 +20,8 @@ import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../shell/errors.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
+import { parseOptionWord } from '../../../shell/options.ts'
+import { SET_OPTION_NAMES } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
@@ -30,6 +31,7 @@ import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../control.ts'
 import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
 const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
@@ -118,7 +120,7 @@ function exportLines(session: Session, flags: Set<string>): string[] {
   // functions, so that form lists nothing, as bash does with none exported.
   if (flags.has('f')) return []
   return Object.keys(session.env)
-    .sort()
+    .sort(compareCodePoints)
     .map((name) => `declare -x ${name}=${bashDeclareQuote(session.env[name] ?? '')}`)
 }
 
@@ -129,7 +131,7 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
   if (flags.has('f') || flags.has('A')) return []
   const arraysOnly = flags.has('a')
   const lines: string[] = []
-  for (const name of [...session.readonlyVars].sort()) {
+  for (const name of [...session.readonlyVars].sort(compareCodePoints)) {
     const arr = session.arrays[name]
     if (arr !== undefined) {
       const parts: string[] = []
@@ -378,7 +380,7 @@ export function handlePrintenv(name: string | null, session: Session): Result {
     return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
   }
   const lines = Object.entries(session.env).map(([k, v]) => `${k}=${v}`)
-  lines.sort()
+  lines.sort(compareCodePoints)
   const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
 }
@@ -615,7 +617,7 @@ export function handleSet(
 ): Result {
   if (args.length === 0) {
     const lines = Object.entries(session.env).map(([k, v]) => `${k}=${v}`)
-    lines.sort()
+    lines.sort(compareCodePoints)
     const out = new TextEncoder().encode(`${lines.join('\n')}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
   }
@@ -626,27 +628,33 @@ export function handleSet(
       session.positionalArgs = args.slice(i + 1)
       return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
     }
-    if (tok === '-o' || tok === '+o') {
-      if (i + 1 < args.length) {
-        const optName = args[i + 1] ?? ''
-        session.shellOptions[optName] = tok === '-o'
-        i += 2
-        continue
-      }
-      i += 1
-      continue
+    const word = parseOptionWord(tok, args[i + 1] ?? null)
+    if (word === null) {
+      session.positionalArgs = args.slice(i)
+      break
     }
-    if ((tok.startsWith('-') || tok.startsWith('+')) && tok.length > 1) {
-      const enable = tok.startsWith('-')
-      for (const ch of tok.slice(1)) {
-        const opt = SET_FLAG_TO_OPTION[ch]
-        if (opt !== undefined) session.shellOptions[opt] = enable
+    for (const [option, enable] of word.settings) {
+      // `-o` takes a name rather than a letter, and a name bash does not
+      // have is the one thing it refuses: exit 2, and the settings already
+      // applied stay applied while the rest of the line is dropped.
+      // Without this a typo — or an option mirage has yet to wire, as
+      // `physical` once was — reads as success.
+      if (!SET_OPTION_NAMES.has(option)) {
+        const err = new TextEncoder().encode(`set: ${option}: invalid option name\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 2, stderr: err }),
+          new ExecutionNode({ command: 'set', exitCode: 2, stderr: err }),
+        ]
       }
-      i += 1
-      continue
+      session.shellOptions[option] = enable
     }
-    session.positionalArgs = args.slice(i)
-    break
+    // A letter naming no option is ignored rather than refused: bash has
+    // options mirage does not implement (`-a`, `-B`, `-H`), and `set` is
+    // where a script turns those on without wanting to fail. A nested shell
+    // answers the same leftovers differently, which is why the grammar hands
+    // them back instead of deciding here.
+    i += word.consumed
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
 }

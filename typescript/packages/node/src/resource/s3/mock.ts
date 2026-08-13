@@ -24,7 +24,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3'
 import { createHash } from 'node:crypto'
-import { lstripSlash } from '@struktoai/mirage-core'
+import { compareCodePoints, lstripSlash } from '@struktoai/mirage-core'
 
 const LAST_MODIFIED = new Date('2026-03-31T00:00:00Z')
 
@@ -75,11 +75,30 @@ function notFound(): Error {
   return err
 }
 
+function invalidRange(): Error {
+  const err: Error & { name: string; $metadata?: { httpStatusCode: number } } = new Error(
+    'InvalidRange',
+  )
+  err.name = 'InvalidRange'
+  err.$metadata = { httpStatusCode: 416 }
+  return err
+}
+
+/**
+ * The slice a real ranged GET would return, refusals included.
+ *
+ * S3 answers 416 for a window starting at or past the end of a non-empty
+ * object. The mock used to slice regardless and hand back an empty array —
+ * which is the answer the ops layer produces only *after* normalizing that
+ * refusal, so agreeing with the fixed code for free left the normalization
+ * untested.
+ */
 function sliceRange(data: Uint8Array, rangeSpec: string | undefined): Uint8Array {
   if (!rangeSpec?.startsWith('bytes=')) return data
   const bounds = rangeSpec.slice(6).split('-', 2)
   const start = bounds[0] ? Number.parseInt(bounds[0], 10) : 0
   const end = bounds[1] ? Number.parseInt(bounds[1], 10) : data.byteLength - 1
+  if (data.byteLength > 0 && start >= data.byteLength) throw invalidRange()
   return data.slice(start, end + 1)
 }
 
@@ -91,7 +110,7 @@ interface PaginateResult {
 function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const commonPrefixes = new Set<string>()
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const sorted = [...objects.entries()].sort(([a], [b]) => compareCodePoints(a, b))
   for (const [key, data] of sorted) {
     if (!key.startsWith(prefix)) continue
     const relative = key.slice(prefix.length)
@@ -107,14 +126,14 @@ function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): Pa
     contents.push({ Key: key, Size: data.byteLength })
   }
   return {
-    CommonPrefixes: [...commonPrefixes].sort().map((p) => ({ Prefix: p })),
+    CommonPrefixes: [...commonPrefixes].sort(compareCodePoints).map((p) => ({ Prefix: p })),
     Contents: contents,
   }
 }
 
 function paginateFlat(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const sorted = [...objects.entries()].sort(([a], [b]) => compareCodePoints(a, b))
   for (const [key, data] of sorted) {
     if (key.startsWith(prefix)) contents.push({ Key: key, Size: data.byteLength })
   }

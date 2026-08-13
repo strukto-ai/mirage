@@ -14,29 +14,23 @@
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.provision import \
-    write_metadata_provision
 from mirage.commands.builtin.gridfs.io import resolve_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.gridfs.mkdir import mkdir as mkdir_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("mkdir",
-         resource="gridfs",
-         spec=SPECS["mkdir"],
-         write=True,
-         provision=write_metadata_provision)
+@command("mkdir", resource="gridfs", spec=SPECS["mkdir"], write=True)
 async def mkdir(
     accessor: GridFSAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["mkdir"])
     parents = fl.as_bool("parents")

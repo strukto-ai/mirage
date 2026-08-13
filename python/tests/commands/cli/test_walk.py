@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.commands.cli import CLISpec, walk
 from mirage.commands.cli.walk import (find_child, find_node, node_help,
                                       owns_argv)
-from mirage.commands.spec.types import Option
+from mirage.commands.spec.types import Option, UsageStyle
 from mirage.runtime.types import ScriptSource
 
 
@@ -132,6 +134,31 @@ def test_unknown_group_option_exits_129_with_usage():
     assert result.exit_code == 129
     assert result.output.startswith(
         b"unknown option: --zzz\n\ngws: Google Workspace")
+
+
+def test_a_clap_group_refusal_uses_claps_words_and_exit():
+    # Probed against ntn 0.21.9: `ntn --bogus` is exit 2, one usage line
+    # rather than git's whole help page, and a footer. The dialect is the
+    # root's at every level, so a group cannot answer 129 while its own
+    # leaves answer 2.
+    tree = replace(_tree(), usage_style=UsageStyle.CLAP)
+    result = walk("gws", tree, ["--zzz", "gmail"])
+    assert result.stream == "stderr"
+    assert result.exit_code == 2
+    assert result.output.decode() == (
+        "error: unexpected argument '--zzz' found\n\n"
+        "Usage: gws [OPTIONS] <COMMAND>\n\n"
+        "For more information, try '--help'.\n")
+
+
+def test_a_clap_group_refusal_names_a_short_token_the_same_way():
+    # clap has one wording for long and short alike, unlike git's
+    # option/switch split.
+    tree = replace(_tree(), usage_style=UsageStyle.CLAP)
+    result = walk("gws", tree, ["-Z"])
+    assert result.exit_code == 2
+    assert result.output.decode().splitlines()[0] == (
+        "error: unexpected argument '-Z' found")
 
 
 def test_starved_group_value_exits_129():

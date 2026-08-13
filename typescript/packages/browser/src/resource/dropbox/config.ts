@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 export interface DropboxConfig {
   clientId: string
@@ -24,15 +31,6 @@ export interface DropboxConfig {
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
-export interface DropboxConfigRedacted {
-  clientId: string
-  clientSecret?: '<REDACTED>'
-  refreshToken: '<REDACTED>'
-  rootPath?: string
-  contentSearch?: boolean
-  endpoint?: string
-}
-
 const DropboxConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr().optional(),
@@ -41,6 +39,13 @@ const DropboxConfigSchema = z.object({
   contentSearch: z.boolean().optional(),
   endpoint: z.string().optional(),
 })
+
+// Only the redacted twin derives: the schema deliberately omits
+// `refreshFn`, which no snapshot can carry.
+export type DropboxConfigRedacted = RedactedConfig<
+  ConfigOf<typeof DropboxConfigSchema>,
+  'clientSecret' | 'refreshToken'
+>
 
 export function redactDropboxConfig(config: DropboxConfig): DropboxConfigRedacted {
   return redactConfigWithSchema(DropboxConfigSchema, config) as unknown as DropboxConfigRedacted

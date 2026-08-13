@@ -20,9 +20,12 @@ from typing import Any, Callable, ClassVar
 
 from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import (DispatchFn, PrefixSource, RunArgs, RunResult,
-                                  ScriptSource)
-from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
+from mirage.runtime.python.bootstrap import bootstrap
+from mirage.runtime.python.flags import init_argv
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import DispatchFn, RunArgs, RunResult, ScriptSource
+from mirage.runtime.vfs import RuntimeVFS
+from mirage.runtime.wasm import WasmFsConfig, WasmRuntime, WasmVFS
 
 wasmtime: Any
 try:
@@ -95,27 +98,28 @@ class WasiRuntime(PythonRuntime):
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
         self._dispatch: DispatchFn | None = None
-        self._mount_prefixes: PrefixSource | None = None
+        self._resolver: MountResolver | None = None
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
-    def attach(self, dispatch: DispatchFn,
-               mount_prefixes: PrefixSource) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         if self._dispatch is None:
             self._dispatch = dispatch
-            self._mount_prefixes = mount_prefixes
+            self._resolver = resolver
 
     async def run(self, args: RunArgs) -> RunResult:
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
-        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
-                  if self._dispatch is not None else None)
-        fs = GuestFs(host_root=self._root,
-                     bridge=bridge,
-                     mount_prefixes=self._mount_prefixes)
-        # sys.argv becomes ['-c', *args.args], matching the local runtime.
+        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
+                           self._resolver)
+                if self._dispatch is not None else None)
+        fs = WasmVFS(WasmFsConfig(host_root=str(self._root)), core)
+        # sys.argv becomes [prog, *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._runtime.run(
-            argv=["python", "-c", args.code, *args.args],
+            argv=[
+                "python", *init_argv(args.flags), "-c",
+                bootstrap(args.code, args.prog), *args.args
+            ],
             stdin=args.stdin,
             env=[
                 *args.env.items(),

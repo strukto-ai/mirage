@@ -86,6 +86,39 @@ def path_flag_scopes(cmd_name: str, argv: list[str],
     ]
 
 
+def positional_scopes(cmd_name: str, argv: list[str], cwd: str,
+                      words: list[str | PathSpec]) -> list[PathSpec]:
+    """The path operands a line names positionally, flag values left out.
+
+    Classification turns every path-shaped word into a PathSpec,
+    including the value of a path-valued flag, so the classified word
+    list cannot tell ``tar -xf a.tar -C /mnt`` (extract INTO a mount)
+    from ``tar -cf a.tar /mnt`` (archive a whole mount). Only the spec
+    knows which slot a word filled, so this asks it and keeps the
+    classified spec for each surviving operand, whose ``raw_path`` is
+    what a message should name.
+
+    Args:
+        cmd_name (str): command name.
+        argv (list[str]): the words after the command name, as typed.
+        cwd (str): working directory the line was typed under.
+        words (list[str | PathSpec]): the same words, classified.
+    """
+    spec = SPECS.get(cmd_name)
+    if spec is None:
+        return [p for p in words if isinstance(p, PathSpec)]
+    parsed = parse_command(spec, argv, cwd)
+    by_virtual = {p.virtual: p for p in words if isinstance(p, PathSpec)}
+    return [
+        by_virtual.get(
+            value,
+            PathSpec(virtual=value,
+                     directory=value,
+                     resource_path="",
+                     raw_path=value)) for value in parsed.paths()
+    ]
+
+
 def merge_scopes(positional: list[PathSpec],
                  flag_scopes: list[PathSpec]) -> list[PathSpec]:
     """Combine positional and path-flag scopes, keeping operand order.

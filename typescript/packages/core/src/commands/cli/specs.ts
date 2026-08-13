@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CLISpec } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // Named CLISpec trees the YAML `clis:` section resolves against
 // (`cli: slack` looks up "slack" here). Bundled programs register at
@@ -40,7 +41,7 @@ export function unregisterCliSpec(name: string): void {
 export function cliSpecFor(name: string): CLISpec {
   const spec = CLI_SPECS.get(name)
   if (spec === undefined) {
-    const known = [...CLI_SPECS.keys()].sort().join(', ') || 'none registered'
+    const known = [...CLI_SPECS.keys()].sort(compareCodePoints).join(', ') || 'none registered'
     throw new Error(`unknown cli '${name}' (known: ${known})`)
   }
   return spec

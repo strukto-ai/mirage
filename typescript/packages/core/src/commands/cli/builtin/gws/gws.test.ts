@@ -69,6 +69,8 @@ describe('gws tree', () => {
       'sheets',
       'docs',
       'slides',
+      'calendar',
+      'forms',
       'gmail',
     ])
     expect(cliSpecFor('gws')).toBe(GWS)
@@ -110,6 +112,44 @@ describe('gws tree', () => {
     expect(leaf('drive', 'files', 'delete').write).toBe(true)
   })
 
+  it('nests calendar passthroughs by discovery resource', () => {
+    expect(leaf('calendar').subcommands.map((v) => v.name)).toEqual([
+      'calendarList',
+      'calendars',
+      'events',
+      'freebusy',
+    ])
+    expect(leaf('calendar', 'events').subcommands.map((v) => v.name)).toEqual([
+      'list',
+      'get',
+      'insert',
+      'patch',
+      'delete',
+    ])
+    expect(leaf('calendar', 'events', 'list').write).toBe(false)
+    expect(leaf('calendar', 'events', 'insert').write).toBe(true)
+    expect(leaf('calendar', 'events', 'delete').write).toBe(true)
+    // freebusy.query is a POST that mutates nothing, but write follows the
+    // HTTP verb everywhere else in the tree and a second rule would be worse.
+    expect(leaf('calendar', 'freebusy', 'query').write).toBe(true)
+  })
+
+  it('nests forms passthroughs by discovery resource', () => {
+    expect(leaf('forms').subcommands.map((v) => v.name)).toEqual(['forms'])
+    expect(leaf('forms', 'forms').subcommands.map((v) => v.name)).toEqual([
+      'create',
+      'get',
+      'batchUpdate',
+      'responses',
+    ])
+    expect(leaf('forms', 'forms', 'responses').subcommands.map((v) => v.name)).toEqual([
+      'list',
+      'get',
+    ])
+    expect(leaf('forms', 'forms', 'get').write).toBe(false)
+    expect(leaf('forms', 'forms', 'create').write).toBe(true)
+  })
+
   it('accepts and preserves a refreshFn callback at install time', () => {
     const refreshFn = () => Promise.resolve({ accessToken: 'a', expiresIn: 60 })
     const install = new CLIRegistry().install('gws', GWS, {
@@ -122,6 +162,17 @@ describe('gws tree', () => {
 })
 
 describe('gws api passthrough', () => {
+  it('fillPath percent-encodes a reserved character', () => {
+    // A Google holiday calendar id carries '#', which opens a URL fragment:
+    // unencoded, the request reached /calendars/en.usa and 404'd.
+    const [path, query] = fillPath('/calendars/{calendarId}/events', {
+      calendarId: 'en.usa#holiday@group.v.calendar.google.com',
+    })
+    expect(path).toBe('/calendars/en.usa%23holiday%40group.v.calendar.google.com/events')
+    expect(query).toEqual({})
+    expect(fillPath('/files/{fileId}', { fileId: '1AbC-_dEf' })[0]).toBe('/files/1AbC-_dEf')
+  })
+
   it('fillPath substitutes and leaves query params', () => {
     const [path, query] = fillPath('/files/{fileId}/permissions', { fileId: 'f1', pageSize: 5 })
     expect(path).toBe('/files/f1/permissions')

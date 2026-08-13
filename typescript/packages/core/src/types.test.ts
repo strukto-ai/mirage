@@ -106,6 +106,7 @@ describe('ResourceName', () => {
       'disk',
       'dropbox',
       'email',
+      'gcal',
       'gcs',
       'gdocs',
       'gdrive',

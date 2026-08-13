@@ -21,6 +21,7 @@ import {
   keep,
   type PredNode,
   startBasename,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 
 export interface FindOptions {
@@ -192,6 +193,6 @@ export async function find(
     })
   }
   await walk({ options, tree, results }, dir, virtual, 0)
-  results.sort()
+  results.sort(compareCodePoints)
   return results
 }

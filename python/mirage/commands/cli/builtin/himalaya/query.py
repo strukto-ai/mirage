@@ -17,6 +17,8 @@ from datetime import date, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from mirage.types import JsonValue
+
 # himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
 # (date, before, after, from, to, subject, body, flag), optionally
 # followed by `order by <kind> [asc|desc]` sorters. Date conditions
@@ -273,7 +275,7 @@ def _sent_at(header: dict[str, Any]) -> float:
         return 0.0
 
 
-def _first_email(entries: object) -> str:
+def _first_email(entries: JsonValue) -> str:
     if isinstance(entries, list) and entries:
         first = entries[0]
         if isinstance(first, dict):

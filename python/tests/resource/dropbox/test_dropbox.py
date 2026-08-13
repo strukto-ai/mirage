@@ -56,8 +56,9 @@ def test_state_does_not_leak_secrets():
     assert "sekret" not in dumped
 
 
-def test_registry_builds_dropbox():
-    resource = build_resource(
+@pytest.mark.asyncio
+async def test_registry_builds_dropbox():
+    resource = await build_resource(
         "dropbox", {
             "client_id": "c",
             "client_secret": "s",

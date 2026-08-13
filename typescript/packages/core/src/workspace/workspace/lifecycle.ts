@@ -54,7 +54,15 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   if (deps.ownsStateStore) {
     await deps.stateStore.close()
   }
-  await deps.cache.clear()
+  try {
+    await deps.cache.clear()
+  } finally {
+    // The workspace builds its own cache, so it always closes it: a
+    // `cache: {type: redis}` config leaves it holding a client that
+    // nothing else would release, and clear() above connects to it.
+    // Mirrors the try/finally pairing in Python's `close_async`.
+    await deps.cache.close()
+  }
   for (const fn of deps.closers.splice(0)) {
     try {
       await fn()

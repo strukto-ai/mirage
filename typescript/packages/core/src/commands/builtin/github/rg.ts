@@ -24,6 +24,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
 import { narrowScope } from './narrow.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -38,14 +39,15 @@ async function rgCommand(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     const pattern = patternArg(texts, opts.flags)
-    const fixedString = opts.flags.F === true
+    const fl = new FlagView(opts.flags, specOf('rg'))
+    const fixedString = fl.asBool('F')
     const narrowed = await narrowScope(
       accessor,
       paths,
       pattern,
       fixedString,
       true,
-      opts.flags.w === true,
+      fl.asBool('w'),
       opts.index ?? undefined,
     )
     resolved = narrowed.resolved

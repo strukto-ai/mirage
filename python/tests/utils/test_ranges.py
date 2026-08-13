@@ -14,7 +14,8 @@
 
 import pytest
 
-from mirage.utils.ranges import range_header, slice_window
+from mirage.utils.ranges import (is_unsatisfiable_range, range_header,
+                                 slice_window)
 
 DATA = b"0123456789"
 
@@ -76,3 +77,46 @@ def test_slicing_past_the_end_stops_there():
 
 def test_slicing_from_past_the_end_is_empty():
     assert slice_window(DATA, 99, 4) == b""
+
+
+class _BotoError(Exception):
+
+    def __init__(self, code: str, status: int) -> None:
+        super().__init__(code)
+        self.response = {
+            "Error": {
+                "Code": code
+            },
+            "ResponseMetadata": {
+                "HTTPStatusCode": status
+            },
+        }
+
+
+class _AiohttpError(Exception):
+
+    def __init__(self, status: int) -> None:
+        super().__init__("boom")
+        self.status = status
+
+
+def test_the_botocore_shape_is_unsatisfiable():
+    # A POSIX read at or past EOF is empty, an HTTP store answers 416,
+    # and no two clients spell the refusal the same way.
+    assert is_unsatisfiable_range(_BotoError("InvalidRange", 416))
+
+
+def test_a_bare_status_is_enough():
+    assert is_unsatisfiable_range(_AiohttpError(416))
+
+
+def test_the_status_line_is_the_last_resort():
+    assert is_unsatisfiable_range(RuntimeError("416 Range Not Satisfiable"))
+
+
+def test_a_real_failure_is_not_swallowed():
+    # Anything broader here would turn a missing object or a denied
+    # request into a silent empty read, the bug this guards against.
+    assert not is_unsatisfiable_range(_BotoError("NoSuchKey", 404))
+    assert not is_unsatisfiable_range(_AiohttpError(500))
+    assert not is_unsatisfiable_range(RuntimeError("AccessDenied"))

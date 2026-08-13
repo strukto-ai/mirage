@@ -16,8 +16,8 @@ from abc import abstractmethod
 from typing import ClassVar
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.types import (DispatchFn, Language, PrefixSource, RunArgs,
-                                  RunResult)
+from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import DispatchFn, Language, RunArgs, RunResult
 
 
 class LanguageRuntime(Runtime):
@@ -44,8 +44,7 @@ class LanguageRuntime(Runtime):
 
     language: ClassVar[Language]
 
-    def attach(self, dispatch: DispatchFn,
-               mount_prefixes: PrefixSource) -> None:
+    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
         """Late-wire workspace I/O into a user-constructed instance.
 
         Config-built and user-passed runtimes exist before the
@@ -56,8 +55,8 @@ class LanguageRuntime(Runtime):
         Args:
             dispatch (DispatchFn): workspace op dispatch the sandboxed
                 runtime bridges file I/O through.
-            mount_prefixes (PrefixSource): live list of workspace
-                mount prefixes, read per run.
+            resolver (MountResolver): the workspace mount routing
+                table, read per run.
         """
 
     @abstractmethod

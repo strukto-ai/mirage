@@ -144,6 +144,26 @@ async def path_stat(dispatch: Callable[..., Any],
     return await resolve_path_stat(dispatch, spec)
 
 
+async def path_readdir(dispatch: Callable[..., Any],
+                       virtual: str) -> list[str]:
+    """List one virtual path through the workspace, as virtual paths.
+
+    Resolves through the op dispatcher rather than one backend, so a
+    directory served by another mount answers. This is what a walker
+    reads once it crosses a mount boundary: the subtree under a nested
+    mount lives in a resource the walker's own accessor cannot open.
+
+    Args:
+        dispatch (Callable): op dispatcher.
+        virtual (str): absolute virtual path of the directory.
+    """
+    spec = PathSpec(virtual=virtual,
+                    directory=virtual[:virtual.rfind("/") + 1] or "/",
+                    resource_path="")
+    entries, _ = await dispatch("readdir", spec)
+    return list(entries)
+
+
 async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
     """Whether a resolved virtual path names something that exists.
 
@@ -390,6 +410,7 @@ __all__ = [
     "handle_readlink",
     "link_target_stat",
     "path_exists",
+    "path_readdir",
     "link_flags",
     "prepare_mv",
     "resolve_path_stat",

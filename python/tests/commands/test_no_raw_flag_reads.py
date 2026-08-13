@@ -20,10 +20,20 @@ from pathlib import Path
 # walk is spec-layer too: it builds the group-flag bag the way parser.py
 # builds the command's.
 COMMANDS = Path(__file__).resolve().parents[2] / "mirage" / "commands"
-EXEMPT = {"spec/parser.py", "spec/shell.py", "spec/types.py", "cli/walk.py"}
+# `config.py` is spec-layer too: the @command wrapper answers --help and
+# --version off the bag before the command it wraps ever sees it.
+EXEMPT = {
+    "spec/parser.py", "spec/shell.py", "spec/types.py", "cli/walk.py",
+    "config.py"
+}
 # Assignment is fine: crossmount fanout builds a bag to hand to the
 # sub-commands it dispatches. Only reads have to go through the view.
-RAW_READ = re.compile(r"\bflags\.get\(|\bflags\[[^\]]*\](?!\s*=[^=])")
+# The bag reaches a command under three names -- `flags`, and the
+# `**kwargs`/`**_extra` a wrapper collects it into -- and a raw read is
+# equally blind under all three. `(?<![\w.])` keeps an attribute of the
+# same name out (FileStat.extra is not a flag bag).
+RAW_READ = re.compile(r"(?<![\w.])(?:flags|kwargs|_extra)"
+                      r"(?:\.get\(|\[[^\]]*\](?!\s*=[^=]))")
 
 
 def test_commands_never_read_the_flag_bag_directly():

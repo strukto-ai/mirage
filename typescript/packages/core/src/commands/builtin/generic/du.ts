@@ -23,7 +23,8 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
-import type { LinkView } from '../../../ops/types.ts'
+import type { LinkView, MountView } from '../../../ops/types.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeSize = (p: PathSpec) => Promise<number>
@@ -275,7 +276,15 @@ export function separateTotal(entries: [string, number][], root: string): number
 export function rollup(
   entries: [string, number][],
   root: string,
-  opts: { all: boolean; maxDepth: number | null; separateDirs?: boolean },
+  // `dirs`: paths that are directories even though no leaf points at
+  // them. mirage cannot otherwise see an empty directory, so this is the
+  // one case it can: an empty mount still gets GNU's `0` row.
+  opts: {
+    all: boolean
+    maxDepth: number | null
+    dirs?: readonly string[]
+    separateDirs?: boolean
+  },
 ): [string, number][] {
   const rootKey = norm(root)
   const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`
@@ -287,19 +296,28 @@ export function rollup(
     if (node === rootKey || !node.startsWith(prefix)) continue
     files.set(node, size)
     let parent = parentOf(node)
-    let first = true
+    let immediate = true
     while (parent !== rootKey && parent.startsWith(prefix)) {
-      if (separateDirs) {
-        if (first) {
-          sizes.set(parent, (sizes.get(parent) ?? 0) + size)
-          first = false
-        } else if (!sizes.has(parent)) {
-          sizes.set(parent, 0)
-        }
+      if (separateDirs && !immediate) {
+        // -S: only the directory a file sits in counts its bytes. The
+        // ancestors still print, at 0 when they hold nothing but
+        // directories.
+        if (!sizes.has(parent)) sizes.set(parent, 0)
       } else {
         sizes.set(parent, (sizes.get(parent) ?? 0) + size)
       }
+      immediate = false
       parent = parentOf(parent)
+    }
+  }
+
+  // Set only when absent: a hinted directory that does hold leaves
+  // already carries their total.
+  for (const hinted of opts.dirs ?? []) {
+    let node = norm(hinted)
+    while (node !== rootKey && node.startsWith(prefix)) {
+      if (!sizes.has(node)) sizes.set(node, 0)
+      node = parentOf(node)
     }
   }
 
@@ -315,7 +333,7 @@ export function rollup(
     if (group === undefined) kids.set(parent, [node])
     else group.push(node)
   }
-  for (const group of kids.values()) group.sort()
+  for (const group of kids.values()) group.sort(compareCodePoints)
 
   const order: [string, number][] = []
   const stack: [string, boolean][] = [[rootKey, false]]
@@ -333,6 +351,24 @@ export function rollup(
     for (let i = group.length - 1; i >= 0; i--) stack.push([group[i] ?? '', false])
   }
   return order
+}
+
+/**
+ * Drop leaves that fall under a descendant mount's root.
+ *
+ * The parent backend's keys under a nested mount are shadowed: no read can
+ * reach them, so no size may count them. GNU agrees (coreutils 9.7,
+ * `du --apparent-size -B1` over a tmpfs mounted inside the operand): a file
+ * covered by a mount appears nowhere and is in no total. What GNU
+ * additionally folds into the parent's rows, the mounted filesystem's own
+ * content, arrives here as the descendant's separately appended block
+ * instead, so the parent's own report is GNU's `du -x`.
+ */
+function dropShadowed(entries: [string, number][], roots: string[]): [string, number][] {
+  return entries.filter(([leaf]) => {
+    const node = norm(leaf)
+    return !roots.some((root) => node === root || node.startsWith(root + '/'))
+  })
 }
 
 // Symlinks under an operand as du leaf entries.
@@ -358,6 +394,7 @@ async function duOne(
   fmt: (size: number) => string,
   flags: DuFlags,
   links: LinkView | null,
+  mounts: MountView | null,
 ): Promise<[string[], number]> {
   const label = path.rawPath
 
@@ -369,10 +406,12 @@ async function duOne(
     return [[`${fmt(size)}\t${label}`], size]
   }
 
-  const leaves = linkLeaves(links, path.virtual)
+  const roots = mounts?.descendants(path.virtual) ?? []
+  let leaves = linkLeaves(links, path.virtual)
+  if (roots.length > 0) leaves = dropShadowed(leaves, roots)
   const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
-  if (flags.s && !flags.S) {
+  if (flags.s && !flags.S && roots.length === 0) {
     const total = (await computeSize(path)) + linkTotal
     return [[`${fmt(total)}\t${label}`], total]
   }
@@ -380,22 +419,33 @@ async function duOne(
   const [raw, rawTotal] = await computeEntries(path)
   let total = rawTotal + linkTotal
   if (raw.length === 0 && leaves.length === 0) {
+    // A backend that can only produce a size degrades to one total; it
+    // cannot enumerate, so shadowed keys cannot be excluded either.
     const fallback = await computeSize(path)
     return [[`${fmt(fallback)}\t${label}`], fallback]
   }
 
-  const entries = toVirtual(raw, path).concat(leaves)
+  let entries = toVirtual(raw, path).concat(leaves)
+  if (roots.length > 0) {
+    // The backend's own total counted the shadowed leaves, so the
+    // honest number is the sum of what survived.
+    entries = dropShadowed(entries, roots)
+    total = entries.reduce((acc, [, size]) => acc + size, 0)
+  }
   const rootKey = norm(path.virtual)
-  if (flags.S) total = separateTotal(entries, path.virtual)
   // A file operand walks to itself. GNU prints it once, with or without -a,
-  // never as a leaf line plus a roll-up line.
+  // never as a leaf line plus a roll-up line. GNU scopes -S to directories, so
+  // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
     return [[`${fmt(first[1])}\t${label}`], total]
   }
-
+  // -S changes what the operand's own row counts, not what the operand
+  // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
+  // `du -bSc dir` prints `3 dir` then `6 total`).
+  const own = flags.S ? separateTotal(entries, path.virtual) : total
   if (flags.s) {
-    return [[`${fmt(total)}\t${label}`], total]
+    return [[`${fmt(own)}\t${label}`], total]
   }
 
   const rows = rollup(entries, path.virtual, {
@@ -409,7 +459,7 @@ async function duOne(
     label,
   )
   const lines = rows.map(([, size], i) => `${fmt(size)}\t${shown[i] ?? ''}`)
-  lines.push(`${fmt(total)}\t${label}`)
+  lines.push(`${fmt(own)}\t${label}`)
   return [lines, total]
 }
 
@@ -447,7 +497,16 @@ export async function runDu(
     opts.mountPrefix,
     links,
   )
-  return duGeneric(present, flags, computeSize, computeEntries, missing, truncated, links)
+  return duGeneric(
+    present,
+    flags,
+    computeSize,
+    computeEntries,
+    missing,
+    truncated,
+    links,
+    opts.mounts ?? null,
+  )
 }
 
 /**
@@ -458,7 +517,9 @@ export async function runDu(
  * `-a` and the per-directory lines degrade to one total. `missing` names the
  * operands that could not be read: GNU reports each and exits 1 but still
  * prints the rest. `truncated` is read after the walks to ask whether any of
- * them hit its entry cap.
+ * them hit its entry cap. `mounts` marks the descendant boundaries: leaves
+ * under one are shadowed and dropped from every row and total (see
+ * `dropShadowed`).
  */
 export async function duGeneric(
   paths: PathSpec[],
@@ -468,13 +529,14 @@ export async function duGeneric(
   missing: string[] = [],
   truncated?: () => boolean,
   links: LinkView | null = null,
+  mounts: MountView | null = null,
 ): Promise<DuOutput> {
   const fmt = (size: number): string => (flags.h ? humanSize(size) : String(size))
 
   const lines: string[] = []
   let grand = 0
   for (const root of paths) {
-    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags, links)
+    const [block, total] = await duOne(root, computeSize, computeEntries, fmt, flags, links, mounts)
     lines.push(...block)
     grand += total
   }

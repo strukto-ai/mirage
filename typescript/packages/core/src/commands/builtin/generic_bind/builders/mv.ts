@@ -16,6 +16,8 @@ import type { PathSpec } from '../../../../types.ts'
 import { mvGeneric, parseMvFlags } from '../../generic/mv.ts'
 import type { Builder } from '../adapter.ts'
 import { overlayableStat } from './cp.ts'
+import { FlagView } from '../../../spec/types.ts'
+import { specOf } from '../../../spec/builtins.ts'
 
 export const MV_BUILDER: Builder = {
   name: 'mv',
@@ -27,7 +29,7 @@ export const MV_BUILDER: Builder = {
       throw new Error('mv: backend provides no rename op')
     }
     const idx = opts.index ?? undefined
-    const parsed = parseMvFlags(opts.flags)
+    const parsed = parseMvFlags(new FlagView(opts.flags, specOf('mv')))
     return mvGeneric(
       paths,
       overlayableStat(ops, accessor, idx, opts.statOverlay),

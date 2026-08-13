@@ -70,3 +70,22 @@ def test_option_error_reports_numeric_conversion_before_choices():
     refusal = option_error("cmd", parsed)
     assert refusal is not None
     assert b"invalid float value: '5x'" in refusal[0]
+
+
+def test_old_option_missing_argument_outranks_an_undeclared_letter():
+    # GNU tar counts the cluster's argument needs before argp validates a
+    # letter, so `tar Qf` and `tar fQ` both name f.
+    for argv in (["Qf"], ["fQ"]):
+        parsed = parse_flags(argv, SPECS["tar"], "tar", "/")
+        refusal = option_error("tar", parsed)
+        assert refusal is not None
+        assert refusal[0] == (b"tar: Old option 'f' requires an argument.\n"
+                              b"Try 'tar --help' for more information.\n")
+        assert refusal[1] == 2
+
+
+def test_old_style_cluster_with_its_argument_is_no_refusal():
+    parsed = parse_flags(["xzf", "/data/a.tgz"], SPECS["tar"], "tar", "/")
+    assert option_error("tar", parsed) is None
+    assert parsed.flag_kwargs["x"] is True
+    assert parsed.flag_kwargs["z"] is True

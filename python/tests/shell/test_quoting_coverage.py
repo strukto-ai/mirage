@@ -549,3 +549,68 @@ def test_bare_dollar_is_a_literal_word(line, expected):
     ws = _ws_with_paths()
     io = _exec(ws, line)
     assert _stdout(io) == expected
+
+
+# ── a quoted "$@" splices into the word around it ──────────
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # The prefix joins the first parameter and the suffix joins the
+        # last; the ones between stand alone. Pinned on bash 5.2.37 in
+        # debian:stable-slim, NOT on macOS bash 3.2, which diverges on
+        # the slice below.
+        ('set -- a b; printf "[%s]\\n" "pre $@ post"', b"[pre a]\n[b post]\n"),
+        ('set -- a b; printf "[%s]\\n" "pre $@"', b"[pre a]\n[b]\n"),
+        ('set -- a b; printf "[%s]\\n" "$@ post"', b"[a]\n[b post]\n"),
+        # One parameter merges both literals into a single word.
+        ('set -- a; printf "[%s]\\n" "pre $@ post"', b"[pre a post]\n"),
+        # No parameters leaves the literals as one word...
+        ('set --; printf "[%s]\\n" "pre $@ post"', b"[pre  post]\n"),
+        # ...but an empty splat alone is no word at all.
+        ('set --; printf "[%s]\\n" x "$@" y', b"[x]\n[y]\n"),
+        ('arr=(); printf "[%s]\\n" x "${arr[@]}" y', b"[x]\n[y]\n"),
+        # A parameter's own spaces survive; only the splat splits.
+        ('set -- "x y" b; printf "[%s]\\n" "pre $@ post"',
+         b"[pre x y]\n[b post]\n"),
+        # The braced spelling splits identically; "$*" joins instead.
+        ('set -- a b; printf "[%s]\\n" "pre ${@} post"', b"[pre a]\n[b post]\n"
+         ),
+        ('set -- a b; printf "[%s]\\n" "pre ${*} post"', b"[pre a b post]\n"),
+        # A slice numbers the parameters from 1, so index 0 is $0.
+        ('set -- a b c d; printf "[%s]\\n" "${@:2}"', b"[b]\n[c]\n[d]\n"),
+        ('set -- a b c d; printf "[%s]\\n" "${@:0}"',
+         b"[mirage]\n[a]\n[b]\n[c]\n[d]\n"),
+        # Every other op applies per element.
+        ('set -- ax bx; printf "[%s]\\n" "${@/x/y}"', b"[ay]\n[by]\n"),
+    ])
+def test_at_splat_splices_into_its_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # One EMPTY element is still an element, so the word survives and
+        # is empty. Zero elements is what drops the word, and the two
+        # render the same text, so only the count can tell them apart.
+        ('set -- ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "${@}" B', b"[A]\n[]\n[B]\n"),
+        ('arr=(""); printf "[%s]\\n" A "${arr[@]}" B', b"[A]\n[]\n[B]\n"),
+        ('set -- "" ""; printf "[%s]\\n" A "$@" B', b"[A]\n[]\n[]\n[B]\n"),
+        ('set -- ""; printf "[%s]\\n" A "$@$@" B', b"[A]\n[]\n[B]\n"),
+        # An expansion that renders empty does NOT rescue the word: with
+        # no parameters, "$u$@" is nothing at all, either way round.
+        ('set --; printf "[%s]\\n" A "$u$@" B', b"[A]\n[B]\n"),
+        ('set --; printf "[%s]\\n" A "$@$u" B', b"[A]\n[B]\n"),
+        ('arr=(); printf "[%s]\\n" A "$u${arr[@]}" B', b"[A]\n[B]\n"),
+        # A literal does rescue it, even one space.
+        ('set --; printf "[%s]\\n" A "$@ $@" B', b"[A]\n[ ]\n[B]\n"),
+    ])
+def test_empty_element_splat_is_still_a_word(line, expected):
+    ws = _ws_with_paths()
+    io = _exec(ws, line)
+    assert _stdout(io) == expected

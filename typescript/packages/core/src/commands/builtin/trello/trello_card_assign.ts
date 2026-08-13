@@ -19,6 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { CommandSpec, Option } from '../../spec/types.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,10 +36,11 @@ async function trelloCardAssignCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const cardId = opts.flags.card_id
-  if (typeof cardId !== 'string' || cardId === '') throw new Error('--card_id is required')
-  const memberId = opts.flags.member_id
-  if (typeof memberId !== 'string' || memberId === '') throw new Error('--member_id is required')
+  const fl = new FlagView(opts.flags, SPEC)
+  const cardId = fl.asStr('card_id')
+  if (cardId === undefined || cardId === '') throw new Error('--card_id is required')
+  const memberId = fl.asStr('member_id')
+  if (memberId === undefined || memberId === '') throw new Error('--member_id is required')
   const card = await cardAssign(accessor.transport, cardId, memberId)
   return [ENC.encode(JSON.stringify(normalizeCard(card))), new IOResult()]
 }

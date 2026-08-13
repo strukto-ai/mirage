@@ -93,6 +93,36 @@ describe('tail', () => {
     expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '0' })).toBe('')
   })
 
+  it('-c -N counts back from the end, like -c N', async () => {
+    // This used to drop the FIRST N bytes: the raw signed value went into
+    // raw.slice(-bytesMode), so a leading '-' flipped the slice around.
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '-3' })).toBe('hij')
+  })
+
+  it('-c +N counts forward from byte N', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+3' })).toBe(
+      'cdefghij',
+    )
+  })
+
+  it('-c +1 and -c +0 are the whole file', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    const path = [PathSpec.fromStrPath('/tmp/f.txt')]
+    expect(await runTail(resource, path, { c: '+1' })).toBe('abcdefghij')
+    expect(await runTail(resource, path, { c: '+0' })).toBe('abcdefghij')
+  })
+
+  it('-c +N past the end returns empty', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+99' })).toBe('')
+  })
+
   it('empty file', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', new Uint8Array())

@@ -134,7 +134,7 @@ async def execute_line(
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
     if ws._drift.pending:
-        await ws._drift.drain(ws)
+        await ws._drift.drain(ws._registry.mount_for)
 
     if session_id is None:
         session_id = ws._session_mgr.default_id

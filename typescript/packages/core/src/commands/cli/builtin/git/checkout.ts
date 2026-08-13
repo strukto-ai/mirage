@@ -40,6 +40,7 @@ import { commitEntries, type TreeEntry } from './tree.ts'
 import type { Dispatch, IndexEntry } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -92,7 +93,7 @@ function conflicts(
       const now = after.get(path)
       return old?.oid !== now?.oid || old?.mode !== now?.mode
     })
-    .sort()
+    .sort(compareCodePoints)
 }
 
 /**
@@ -108,7 +109,7 @@ function overwritten(
   after: ReadonlyMap<string, TreeEntry>,
   untracked: readonly string[],
 ): string[] {
-  return untracked.filter((path) => after.has(path)).sort()
+  return untracked.filter((path) => after.has(path)).sort(compareCodePoints)
 }
 
 /**
@@ -253,7 +254,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
       `checkout: moving from ${where} to ${target}`,
     )
     carried = [...dirty]
-      .sort()
+      .sort(compareCodePoints)
       .map((path) => `M\t${path}\n`)
       .join('')
     if (attached) {

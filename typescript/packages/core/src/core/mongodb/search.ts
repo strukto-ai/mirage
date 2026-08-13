@@ -16,6 +16,7 @@ import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { findDocuments, listCollections } from './_client.ts'
 import { stringifyDoc } from './stream.ts'
 import { EntityKind, PRIMARY_KEY } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface CollectionMatches {
   database: string
@@ -51,7 +52,7 @@ async function sampledStringPaths(
     n++
     if (n >= sampleSize) break
   }
-  return [...paths].sort()
+  return [...paths].sort(compareCodePoints)
 }
 
 export async function searchCollection(

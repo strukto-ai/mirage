@@ -197,6 +197,39 @@
         "stdout": "4\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sl_sent_messages_persist",
+      "seq": 564018,
+      "targets": ["cli-slack"],
+      "command": "slack read-messages --channel C1 --limit 2 | jq -r '.[].text'",
+      "expect": {
+        "exit": 0,
+        "stdout": "shipping\nacknowledged\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_reaction_persists",
+      "seq": 564019,
+      "targets": ["cli-slack"],
+      "command": "slack reactions --channel C1 --ts 1766165985.000426 | jq -c '[.reactions[].name]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"pray\",\"heart\",\"eyes\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sl_sent_message_searchable",
+      "seq": 564020,
+      "targets": ["cli-slack"],
+      "command": "slack search --query acknowledged | jq -r '.messages.total'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
     }
   ]
 }

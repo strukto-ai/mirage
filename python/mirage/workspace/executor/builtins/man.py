@@ -151,7 +151,9 @@ def _render_cli_entry(head: str, verbs: Sequence[str],
     if found is None:
         return None
     node, path = found
-    return node_help(" ".join((head, ) + path), node)
+    # The root's dialect, so a manual page reads exactly like the
+    # --help it renders from.
+    return node_help(" ".join((head, ) + path), node, spec.usage_style)
 
 
 def _render_cli_index(registry: MountRegistry) -> list[str]:

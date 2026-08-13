@@ -43,13 +43,15 @@ describe('bare invocations default to the cwd', () => {
     const io = await ws.execute('find')
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
-    expect(out.startsWith('.\n./a.txt\n./sub\n./sub/b.txt\n')).toBe(true)
-    expect(
-      out
-        .trim()
-        .split('\n')
-        .every((line) => line.startsWith('.')),
-    ).toBe(true)
+    // The implicit dev/history mounts ride along dot-spelled,
+    // interleaved at their path-sorted position (the fan-out merge
+    // sorts so a mount root prints before its contents).
+    const lines = out.trim().split('\n')
+    expect(lines).toEqual([...lines].sort())
+    expect(lines.every((line) => line.startsWith('.'))).toBe(true)
+    for (const expected of ['.', './a.txt', './sub', './sub/b.txt']) {
+      expect(lines).toContain(expected)
+    }
   })
 
   it('find with only an expression implies the leading dot', async () => {
@@ -89,6 +91,8 @@ describe('bare invocations default to the cwd', () => {
     const ws = await makeWs()
     const io = await ws.execute('ls')
     expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io).startsWith('a.txt\nsub')).toBe(true)
+    // The dev mount is a row like any other now, so it sorts into the
+    // listing instead of trailing it the way the old stdout patch did.
+    expect(stdoutStr(io).startsWith('a.txt\ndev\nsub')).toBe(true)
   })
 })

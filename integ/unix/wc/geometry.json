@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "wc_L_tab_advances_to_the_next_stop",
+      "seq": 960060,
+      "note": "GNU 9.7: -L is terminal columns, not characters. A tab jumps to the next multiple of 8, so 'a<TAB>b' is 9 and not 3. Both trees counted characters.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a\\tb\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "9\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_tab_at_column_zero",
+      "seq": 960061,
+      "note": "A tab in column 0 still lands on 8, so the line measures 9.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '\\tb\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "9\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_carriage_return_rewinds",
+      "seq": 960062,
+      "note": "CR returns the cursor to column 0 without ending the line, so 'a<CR>b' measures 1. Python counted CR as a column (3); TypeScript split on /\\r?\\n/ and got 1 for the wrong reason.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a\\rb\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_wide_characters_are_two_columns",
+      "seq": 960063,
+      "note": "East Asian wide characters occupy two columns each, so U+4E2D U+6587 measures 4.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '中文\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_L_combining_mark_is_zero_columns",
+      "seq": 960064,
+      "note": "A combining acute accent occupies no column, so 'e' plus U+0301 measures 1. Spelled decomposed on purpose: precomposed U+00E9 would measure 1 without exercising the zero-width table.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'é\\n' | wc -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L"
+      ]
+    },
+    {
+      "id": "wc_w_file_separator_is_not_whitespace",
+      "seq": 960065,
+      "note": "GNU splits words on glibc iswspace, which excludes U+001C-U+001F. Python's str.isspace() includes them, so this counted 2 words.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a\u001cb\\n' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "wc_w_byte_order_mark_is_not_whitespace",
+      "seq": 960066,
+      "note": "U+FEFF is in JavaScript's \\s but not in glibc iswspace, so TypeScript counted 2 words here.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a﻿b\\n' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "wc_w_unicode_spaces_are_whitespace",
+      "seq": 960067,
+      "note": "The other direction: U+00A0 and U+3000 are separators in GNU, so this is 3 words.",
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf 'a b　c\\n' | wc -w",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    }
+  ]
+}

@@ -22,14 +22,15 @@ from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
                                                  maybe_with_timeout,
                                                  run_with_timeout)
 from mirage.commands.cli.constants import CLI_CONFIG_ENV
-from mirage.commands.cli.refusal import leaf_refusal
+from mirage.commands.cli.refusal import (CLAP_EXIT, clap_missing_operands,
+                                         leaf_refusal)
 from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIVerbOpts
 from mirage.commands.cli.walk import owns_argv, walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import flag_kwarg_name
 from mirage.commands.spec.help import render_help
-from mirage.commands.spec.types import Operand
+from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
@@ -230,17 +231,36 @@ async def handle_cli(
     # convention, not an argparse one.
     parse_spec, mirage_help = parse_spec_for(leaf)
 
-    parsed = parse_flags(list(result.argv), parse_spec, prog, session.cwd)
+    # The dialect is the root's, not the leaf's: a program answers in
+    # one voice at every level.
+    style = install.spec.usage_style
+    # The environment goes into the parse, not on top of it: an option
+    # declaring one is coerced, choice-checked, path-resolved and
+    # credited against required exactly as a typed value is.
+    parsed = parse_flags(list(result.argv),
+                         parse_spec,
+                         prog,
+                         session.cwd,
+                         env=session.env)
     if mirage_help and parsed.flag_kwargs.get("help") is True:
-        help_text = render_help(prog, parse_spec).encode()
+        help_text = render_help(prog, parse_spec, style=style).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,
                                                     exit_code=0)
 
     refusal = option_error(prog, parsed)
+    msg: bytes | None = None
+    code = 0
     if refusal is not None:
-        # The dialect is the root's, not the leaf's: a program answers
-        # in one voice at every level.
-        msg, code = leaf_refusal(install.spec.usage_style, refusal[0], parsed)
+        msg, code = leaf_refusal(style, refusal[0], parsed)
+    elif parsed.missing_required_operands and style is UsageStyle.CLAP:
+        # Only clap names the empty slots. Under every other style a
+        # required operand stays the leaf's own business, worded by the
+        # command, which is what every mirage CLI did before this.
+        msg = clap_missing_operands(prog, parse_spec,
+                                    parsed.missing_required_operands,
+                                    parsed.typed_dests, session.env)
+        code = CLAP_EXIT
+    if msg is not None:
         refusal_io = IOResult(exit_code=code, stderr=msg)
         refusal_node = ExecutionNode(command=cmd_str,
                                      exit_code=code,
@@ -250,7 +270,7 @@ async def handle_cli(
     # Group flags merge into the one bag: ancestor/descendant collisions
     # are a build-time CLISpec error, so a group flag can never shadow a
     # leaf flag.
-    kw: dict[str, object] = {
+    kw: dict[str, FlagValue] = {
         flag_kwarg_name(spelling): value
         for spelling, value in result.group_flags.items()
     }
@@ -326,12 +346,16 @@ async def handle_cli(
         return None, err_io, ExecutionNode(command=cmd_str,
                                            exit_code=1,
                                            stderr=err_stderr)
-    if leaf.write and drop_caches is not None:
-        await drop_caches()
     if out is None:
         stdout, io = None, IOResult()
     else:
         stdout, io = out
+    # The spec's `write` is the static answer, which is the only one most
+    # verbs have; a handler that knows better says so on its result, so a
+    # read-only `gh api` does not expire every github mount.
+    mutated = leaf.write if io.mutated is None else io.mutated
+    if mutated and drop_caches is not None:
+        await drop_caches()
     io.producer = Producer(command=prog, declared=leaf.limit)
 
     if parsed.warnings:

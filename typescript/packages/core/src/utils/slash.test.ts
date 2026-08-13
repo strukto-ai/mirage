@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { lstripSlash, rstripSlash, stripSlash } from './slash.ts'
+import { lstripSlash, normDir, ownerPrefix, rstripSlash, stripSlash } from './slash.ts'
 
 const SAMPLES = ['', '/', '//', '///', 'a', '/a', 'a/', '/a/', '//a//', 'a/b/c', '/a/b/c/', 'a//b']
 
@@ -35,5 +35,29 @@ describe('slash helpers match Python str strip and the prior regex', () => {
     expect(lstripSlash('///a')).toBe('a')
     expect(stripSlash('///a///')).toBe('a')
     expect(stripSlash('///')).toBe('')
+  })
+
+  it('normDir yields the trailing-slash directory form', () => {
+    expect(normDir('a/b')).toBe('/a/b/')
+    expect(normDir('/a/b/')).toBe('/a/b/')
+    expect(normDir('///a///')).toBe('/a/')
+    expect(normDir('')).toBe('/')
+    expect(normDir('/')).toBe('/')
+  })
+
+  it('ownerPrefix takes the longest boundary match', () => {
+    const prefixes = ['/', '/data/', '/data/inner/']
+    expect(ownerPrefix(prefixes, '/data/inner/x')).toBe('/data/inner/')
+    expect(ownerPrefix(prefixes, '/data/x')).toBe('/data/')
+    expect(ownerPrefix(prefixes, '/data')).toBe('/data/')
+    expect(ownerPrefix(prefixes, '/other')).toBe('/')
+    expect(ownerPrefix(prefixes, '/')).toBe('/')
+  })
+
+  it('ownerPrefix respects path boundaries and keeps the input spelling', () => {
+    expect(ownerPrefix(['/data/'], '/database')).toBeNull()
+    expect(ownerPrefix(['/data'], '/data/x')).toBe('/data')
+    expect(ownerPrefix(['data/'], '/data/x')).toBe('data/')
+    expect(ownerPrefix([], '/data')).toBeNull()
   })
 })

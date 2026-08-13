@@ -18,11 +18,13 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import (ComputeEntries, ComputeSize,
-                                                DuEntries, run_du)
+                                                DuEntries, du_generic)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import LinkView, MountView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 
@@ -136,24 +138,31 @@ async def _op_entries(
     return await op(accessor, path, index)
 
 
+async def _resolve(ops: CommandIO, accessor: Accessor, index: IndexCacheStore,
+                   targets: list[PathSpec]) -> list[PathSpec]:
+    return await ops.resolve_glob(accessor, targets, index)
+
+
+async def _stat(ops: CommandIO, accessor: Accessor, index: IndexCacheStore,
+                path: PathSpec):
+    return await ops.stat(accessor, path, index)
+
+
+def _budget_hit(budget: WalkBudget) -> bool:
+    return budget.hit
+
+
 async def du(
     ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    h: bool = False,
-    s: bool = False,
-    a: bool = False,
-    max_depth: str | None = None,
-    d: str | None = None,
-    c: bool = False,
-    L: bool = False,
-    separate_dirs: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
     links: LinkView | None = None,
-    **kwargs,
+    mounts: MountView | None = None,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
@@ -167,31 +176,16 @@ async def du(
     else:
         compute_size = partial(_op_size, native.size, accessor, index)
         compute_entries = partial(_op_entries, native.entries, accessor, index)
-
-    out = await run_du(
-        paths,
-        cwd,
-        lambda targets: ops.resolve_glob(accessor, targets, index),
-        lambda path: ops.stat(accessor, path, index),
-        compute_size,
-        compute_entries,
-        s=s,
-        a=a,
-        h=h,
-        c=c,
-        max_depth=max_depth,
-        d=d,
-        separate_dirs=separate_dirs,
-        truncated=lambda: budget.hit,
-        # -L dereferences: the operand was already rewritten at
-        # dispatch, and withholding the link table stops the links below
-        # it from being counted as entries in their own right, which is
-        # what GNU does (it follows each one and finds the target
-        # already accounted for). A link pointing outside the operand's
-        # own subtree is undercounted; GNU would traverse into it.
-        links=None if L else links,
-    )
-    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
+    return await du_generic(paths,
+                            list(texts),
+                            CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
+                            partial(_resolve, ops, accessor, index),
+                            partial(_stat, ops, accessor, index),
+                            compute_size,
+                            compute_entries,
+                            truncated=partial(_budget_hit, budget),
+                            links=links,
+                            mounts=mounts)
 
 
 BUILDER = Builder('du', du, None, False, None)

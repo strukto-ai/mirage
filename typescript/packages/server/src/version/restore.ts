@@ -18,6 +18,7 @@ import {
   toStateDict,
   type Workspace as CoreWorkspace,
   type WorkspaceStateDict,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { readVersion, resolveRef } from './api.ts'
 import { CATEGORIES, toState, type AnyDict, type Category } from './stateTree.ts'
@@ -124,7 +125,7 @@ export async function restore(
   await applyStateDict(ws, merged as unknown as WorkspaceStateDict)
   return {
     version,
-    categories: [...selected].sort(),
+    categories: [...selected].sort(compareCodePoints),
     paths: paths ?? null,
   }
 }

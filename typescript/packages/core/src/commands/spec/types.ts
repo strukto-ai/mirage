@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { flagKwargName } from './constants.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // Command names the spec layer references by value. Not a registry of
 // every command: only names that appear away from their own module
@@ -46,6 +47,37 @@ export enum CommandName {
 // === 'bool' (or their negations) only, so new validator types never
 // touch classification sites.
 export type ValueType = 'bool' | 'str' | 'int' | 'float' | 'path'
+
+/**
+ * Which program's voice a CLI answers usage questions in.
+ *
+ * An installed CLI is not a GNU tool, so a leaf that refuses an option it does
+ * not declare answers in argparse's shape and exit code by default. A CLI that
+ * mimics an existing program has to answer in that program's shape instead:
+ * mirage implements a subset of git, so most of git's real options arrive
+ * undeclared, and an agent that reads the refusal should see what git would
+ * have said rather than learn that it is talking to a reimplementation.
+ *
+ * GIT covers the unknown-option refusal and the exit code, which is what an
+ * undeclared flag produces; every other usage error (a missing value, an
+ * unparseable int) stays in argparse's shape, because those only happen for
+ * options a CLI does declare.
+ *
+ * CLAP additionally governs how help is laid out and how a missing operand is
+ * refused, because a clap program prints a bare description line, spells the
+ * option placeholder `[OPTIONS]`, heads the option list `Options:`, lists
+ * subcommands in declaration order, and names the empty slots rather than
+ * leaving each leaf to word its own complaint. Those are one decision (whose
+ * voice this is), so they read off this knob rather than a second one.
+ *
+ * It lives in the spec layer, not beside the CLI tree, because the help
+ * renderer is the spec's and cannot import upward to reach it.
+ */
+export enum UsageStyle {
+  ARGPARSE = 'argparse',
+  GIT = 'git',
+  CLAP = 'clap',
+}
 
 export interface OptionInit {
   /** Short form, e.g. "-e". */
@@ -120,6 +152,23 @@ export interface OptionInit {
    * choices). Presence of a default always satisfies `required`.
    */
   default?: string | null
+  /**
+   * The value's name in a usage line, bare (`VERSION`, rendered
+   * `--notion-version <VERSION>`); the brackets belong to the renderer, which
+   * is the only thing that knows the dialect. Only a program whose usage lines
+   * are rendered in someone else's needs one, since otherwise the name is
+   * derived from the long spelling.
+   */
+  metavar?: string
+  /**
+   * Environment variable that supplies this option when the line omits it.
+   * Distinct from `default`, and not a synonym for it: an env-sourced value
+   * counts as *supplied* (clap echoes it in a usage line, where a defaulted one
+   * is invisible), and it is read from the session rather than frozen into the
+   * spec. Declaring it here is what keeps one fact in one place, since both the
+   * leaf that sends the value and the renderer that reports the line need it.
+   */
+  env?: string
   description?: string
 }
 
@@ -136,6 +185,8 @@ export class Option {
   readonly choices: readonly string[]
   readonly required: boolean
   readonly default: string | null
+  readonly metavar: string | null
+  readonly env: string | null
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -151,6 +202,8 @@ export class Option {
     this.choices = init.choices ?? []
     this.required = init.required ?? false
     this.default = init.default ?? null
+    this.metavar = init.metavar ?? null
+    this.env = init.env ?? null
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -168,6 +221,18 @@ export interface OperandInit {
    */
   textWhen?: readonly string[]
   /**
+   * Every word from this slot on is gathered verbatim, options included.
+   * This is argparse's `nargs=argparse.REMAINDER` and POSIX's own option
+   * order: the first operand ends option parsing, where GNU's default
+   * permutes instead (`ls a -1` reads -1 as a flag, `POSIXLY_CORRECT=1
+   * ls a -1` reads it as a filename). Set it for a command that
+   * dispatches to another program, which is the case argparse documents
+   * it for: python3's script and the words after it are the script's
+   * argv, so `python3 s.py --foo` must hand --foo over untouched while
+   * `python3 -zz s.py` must still refuse -zz as python3's own.
+   */
+  remainder?: boolean
+  /**
    * Flags that supply this operand's value. When any is present the slot is
    * skipped and remaining args classify as rest (e.g. grep's pattern with
    * -e/-f). This is the declarative form of the conditional real tools write
@@ -177,17 +242,36 @@ export interface OperandInit {
    * Mirage classifies args before a backend is chosen.
    */
   providedBy?: readonly string[]
+  /**
+   * The slot's name in a usage line, bare (`PAGE_ID`, rendered `<PAGE_ID>`
+   * when required and `[PAGE_ID]` when not); the brackets belong to the
+   * renderer, which is the only thing that knows the dialect. Empty renders
+   * the generic `<path>`/`<text>` placeholder the ordinary help uses.
+   */
+  name?: string
+  /**
+   * The line must supply this slot; one that does not is a usage error the
+   * parser reports, rather than something each leaf re-discovers and words
+   * its own way.
+   */
+  required?: boolean
 }
 
 export class Operand {
   readonly type: ValueType
   readonly providedBy: readonly string[]
   readonly textWhen: readonly string[]
+  readonly name: string
+  readonly required: boolean
+  readonly remainder: boolean
 
   constructor(init: OperandInit = {}) {
     this.type = init.type ?? 'path'
     this.providedBy = init.providedBy ?? []
     this.textWhen = init.textWhen ?? []
+    this.name = init.name ?? ''
+    this.required = init.required ?? false
+    this.remainder = init.remainder ?? false
     Object.freeze(this)
   }
 }
@@ -206,6 +290,8 @@ export interface CommandSpecInit {
   ignoreTokens?: Iterable<string>
   description?: string | null
   epilog?: string | null
+  oldOptionStyle?: boolean
+  operandBase?: string | null
 }
 
 export class CommandSpec {
@@ -215,6 +301,24 @@ export class CommandSpec {
   readonly ignoreTokens: ReadonlySet<string>
   readonly description: string | null
   readonly epilog: string | null
+  // tar's old option style: a first word with no leading dash is a
+  // cluster of option letters whose arguments follow as separate words
+  // (`tar xzf a.tgz`). Expanded by expandOldStyle before any other
+  // scanning; see oldstyle.ts for the rules and why only tar has it.
+  readonly oldOptionStyle: boolean
+  // The spelling of an option that changes directory for the path
+  // operands typed AFTER it (tar's -C). Positional and cumulative, the
+  // way a real chdir is: `tar -cf a.tar -C d1 x -C ../d2 y` reads d1/x
+  // and d1/../d2/y. Only path operands and the option's own value move;
+  // every other path-valued flag keeps resolving against the session
+  // cwd, which is what GNU does with -f.
+  readonly operandBase: string | null
+  // python3's rule: parse options strictly until the first operand,
+  // then take every remaining word verbatim. An interpreter needs both
+  // halves at once -- an unknown flag before the script is a usage
+  // error, while `python3 s.py --foo` must hand `--foo` to the script
+  // -- and the free-text leniency that serves echo/bash can only
+  // express the second.
 
   constructor(init: CommandSpecInit = {}) {
     this.options = init.options ?? []
@@ -223,6 +327,8 @@ export class CommandSpec {
     this.ignoreTokens = new Set(init.ignoreTokens ?? [])
     this.description = init.description ?? null
     this.epilog = init.epilog ?? null
+    this.oldOptionStyle = init.oldOptionStyle ?? false
+    this.operandBase = init.operandBase ?? null
     // A subclass (CLISpec) still has its own fields to assign, so only
     // freeze here when constructed directly; subclasses freeze themselves.
     if (new.target === CommandSpec) Object.freeze(this)
@@ -230,7 +336,7 @@ export class CommandSpec {
 }
 
 export interface ParsedArgsInit {
-  flags: Record<string, string | boolean | number | string[]>
+  flags: Record<string, FlagValue>
   args: [string, ValueType][]
   cachePaths?: string[]
   pathFlagValues?: string[]
@@ -238,6 +344,7 @@ export interface ParsedArgsInit {
   textFlagValues?: string[]
   warnings?: string[]
   wordKinds?: (ValueType | null)[]
+  wordBases?: (string | null)[]
   invalidOptions?: string[]
   ambiguousOptions?: [string, readonly string[]][]
   optionErrorKinds?: string[]
@@ -246,10 +353,24 @@ export interface ParsedArgsInit {
   invalidIntOptions?: [string, string][]
   invalidFloatOptions?: [string, string][]
   missingRequiredOptions?: string[]
+  /**
+   * Display names of required operand slots the line left empty, in
+   * declaration order. Reported rather than thrown, like every other entry
+   * here, so the dialect that words it is the caller's choice.
+   */
+  missingRequiredOperands?: string[]
+  /**
+   * Dests the line actually carried, in scan order, excluding the ones a
+   * declared default filled in afterwards. A usage line that echoes what was
+   * supplied (clap's) needs exactly this distinction: a defaulted option is
+   * invisible there, a typed one is not.
+   */
+  typedDests?: string[]
+  oldOptionNeedsValue?: string | null
 }
 
 export class ParsedArgs {
-  readonly flags: Record<string, string | boolean | number | string[]>
+  readonly flags: Record<string, FlagValue>
   readonly args: [string, ValueType][]
   readonly cachePaths: string[]
   readonly pathFlagValues: string[]
@@ -257,6 +378,11 @@ export class ParsedArgs {
   readonly textFlagValues: string[]
   readonly warnings: string[]
   readonly wordKinds: (ValueType | null)[]
+  // Per-position base directory, aligned with wordKinds: the absolute
+  // path a word resolves against when an operandBase option (tar's -C)
+  // moved it, and null when the session cwd still applies. Only a spec
+  // declaring operandBase ever fills this.
+  readonly wordBases: (string | null)[]
   // GNU-shaped option errors, reported (never thrown) by the parser:
   // undeclared options ('--bogus' or the offending cluster char 'Y'),
   // abbreviated longs matching several options (typed prefix, matched
@@ -278,6 +404,15 @@ export class ParsedArgs {
   readonly invalidIntOptions: [string, string][]
   readonly invalidFloatOptions: [string, string][]
   readonly missingRequiredOptions: string[]
+  readonly missingRequiredOperands: string[]
+  readonly typedDests: string[]
+  // The old-style cluster letter whose argument ran off the end of the
+  // line (`tar xzf` with no archive). Its own report because GNU tar
+  // words it differently and exits differently from every getopt refusal
+  // above, and because it outranks all of them: tar counts the cluster's
+  // argument needs before argp ever validates a letter, so `tar Qf` and
+  // `tar fQ` both name f, not Q.
+  readonly oldOptionNeedsValue: string | null
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -288,6 +423,7 @@ export class ParsedArgs {
     this.textFlagValues = init.textFlagValues ?? []
     this.warnings = init.warnings ?? []
     this.wordKinds = init.wordKinds ?? []
+    this.wordBases = init.wordBases ?? []
     this.invalidOptions = init.invalidOptions ?? []
     this.ambiguousOptions = init.ambiguousOptions ?? []
     this.optionErrorKinds = init.optionErrorKinds ?? []
@@ -296,6 +432,9 @@ export class ParsedArgs {
     this.invalidIntOptions = init.invalidIntOptions ?? []
     this.invalidFloatOptions = init.invalidFloatOptions ?? []
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
+    this.missingRequiredOperands = init.missingRequiredOperands ?? []
+    this.typedDests = init.typedDests ?? []
+    this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
   }
 
   paths(): string[] {
@@ -363,7 +502,7 @@ export class FlagView {
     if (this.allowed !== null && !this.allowed.has(name)) {
       throw new Error(
         `flag '${name}' is not declared by the command spec ` +
-          `(known: ${[...this.allowed].sort().join(', ')})`,
+          `(known: ${[...this.allowed].sort(compareCodePoints).join(', ')})`,
       )
     }
     return name

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { SPECS } from '../../../commands/spec/index.ts'
+import { SPECS, specOf } from '../../../commands/spec/index.ts'
 import { PathSpec } from '../../../types.ts'
 import { CommandSpec, Option } from '../../../commands/spec/types.ts'
 import { optionError, parseFlags } from './flags.ts'
@@ -111,5 +111,55 @@ describe('optionError scan order', () => {
     )
     expect(refusal).not.toBeNull()
     expect(new TextDecoder().decode(refusal?.[0])).toContain("invalid float value: '5x'")
+  })
+})
+
+describe("optionError — tar's old option style", () => {
+  it('reports a missing cluster argument ahead of an undeclared letter', () => {
+    // GNU tar counts the cluster's argument needs before argp validates a
+    // letter, so `tar Qf` and `tar fQ` both name f.
+    for (const argv of [['Qf'], ['fQ']]) {
+      const parsed = parseFlags(argv, specOf('tar'), 'tar', '/')
+      const refusal = optionError(
+        'tar',
+        ...([
+          parsed[4],
+          parsed[5],
+          parsed[6],
+          parsed[7],
+          parsed[8],
+          parsed[9],
+          parsed[10],
+          parsed[11],
+          parsed[12],
+        ] as const),
+      )
+      expect(refusal).not.toBeNull()
+      expect(new TextDecoder().decode(refusal?.[0])).toBe(
+        "tar: Old option 'f' requires an argument.\n" + "Try 'tar --help' for more information.\n",
+      )
+      expect(refusal?.[1]).toBe(2)
+    }
+  })
+
+  it('is no refusal when the cluster has its argument', () => {
+    const parsed = parseFlags(['xzf', '/data/a.tgz'], specOf('tar'), 'tar', '/')
+    const refusal = optionError(
+      'tar',
+      ...([
+        parsed[4],
+        parsed[5],
+        parsed[6],
+        parsed[7],
+        parsed[8],
+        parsed[9],
+        parsed[10],
+        parsed[11],
+        parsed[12],
+      ] as const),
+    )
+    expect(refusal).toBeNull()
+    expect(parsed[2].x).toBe(true)
+    expect(parsed[2].z).toBe(true)
   })
 })

@@ -24,6 +24,7 @@ Run Python commands from `python/`, TypeScript commands from `typescript/`.
 - Keep Python and TypeScript layout, architecture, and semantics mirrored as much as practical.
 - When changing one implementation, check the other for the matching pattern or feature. If one side is more correct, use it to improve the weaker side instead of copying a bad design.
 - For major Python or TypeScript changes, consider adding or updating integration coverage under `integ/`.
+- **The layout half of that rule is gated.** `scripts/check_layout_parity.py` diffs the module-name sets of every `mirage/<pkg>/` against its TypeScript counterpart (core/node/browser unioned onto one namespace, plus cli/server/agents by prefix), folding camelCase, hyphens and a leading underscore so a rename reads as a rename rather than a missing module; `__init__.py` and `index.ts` are skipped because only Python needs one per directory. Intentional differences live in `spec/layout_exceptions.json` with a reason, and a stale entry fails as loudly as a new gap. `--strict` (what CI runs) does not demand zero: it fails when the count moves off the committed `baseline` in *either* direction, so new drift is blocked and closing a divergence has to be locked in by lowering the number. Run it without `--strict` for the full advisory report; that report is how layout work gets scoped.
 - **mirage ships no filetype renderers, and no factory for them.** Parquet, ORC, feather/arrow/ipc and hdf5/h5 rendering are gone, along with the `parquet`/`hdf5`/`pdf` extras, the `hyparquet`/`apache-arrow`/`h5wasm` dependencies, and the whole `commands/builtin/filetype_factory/` package in both languages (with its `filetype_read` / `filetypeRead` op knobs). A file with an unregistered extension is read as raw bytes. The one surviving extension point is registration on a mount: a command or op carrying a `filetype` resolves as `(name, filetype)` before `(name, resource)` before `(name,)`. `examples/{python,typescript}/filetype/` register a `.tally` renderer end to end and are gated in CI against `integ/truth/*/filetype.txt`; `tests/commands/custom/test_filetype_fns.py` and `test_unregister_removes_all_filetypes` cover the unit path.
 
 ## Module Layout
@@ -89,6 +90,82 @@ agent discovers state, the CLI is how it acts.
   is what `type -a` prints). The generator is lazy so the winner still costs one
   probe. Do not add a second precedence list.
 
+- **A CLI that mimics a real program is gated against that program.**
+  `ntn` is the worked example: every case in `integ/cli/ntn.json` is asserted
+  twice, once by the shared battery inside a mirage workspace and once by
+  `integ/ntn_conformance.ts`, which runs the *same shell line* with the real
+  npm `ntn` binary pointed at the same fake through `NOTION_API_BASE_URL`. A
+  golden both agree on is by construction what the official CLI prints, so the
+  grammar cannot drift from upstream without a red build. Four rules keep it
+  honest. The binary's version is pinned (the script refuses any other).
+  **Both runs share one environment**, declared as `env` on the target in
+  `integ/targets.json` and read from there by both hosts and by the
+  conformance runner: an option that reads a variable renders differently
+  with and without it, so two environments would mean two different lines
+  were being compared. That map must carry `NOTION_API_VERSION`, and the
+  runner fails loudly if it does not, because unset `ntn` resolves the newest
+  version by fetching developers.notion.com at startup and every case starts
+  depending on the network. A case the upstream binary cannot answer carries a
+  `conformance_skip` string saying why, never a silent omission; **there are
+  none today**, and the only two cases the runner passes over are the ones
+  whose line reads a `/notion` mount path, which no bare binary can have. And
+  the harness spawns **asynchronously**: the fake is served by the same event
+  loop, so a synchronous spawn deadlocks the loop that has to answer the
+  child's request, which is the FUSE self-touch trap in another costume.
+
+- **`UsageStyle` is how a mimicking CLI answers in its original's voice**, and
+  it is read off the ROOT spec at every level, never off the node, because a
+  program answers in one voice throughout. It lives in `commands/spec/types.py`
+  (`types.ts`), not beside the CLI tree, because the help renderer is the
+  spec's and cannot import upward. `ARGPARSE` is the default; `GIT` rewords the
+  unknown-option refusal and its exit code; `CLAP` additionally governs help
+  layout (bare description line, `[OPTIONS]`/`<COMMAND>`, `Options:` not
+  `Flags:`, subcommands in declaration order rather than sorted) and the
+  missing-operand refusal. `ntn` is the CLAP one. Adding a dialect means adding
+  a member here, not a second knob: help layout, refusal wording and exit code
+  are one decision about whose program this imitates.
+
+  Three spec fields exist only to serve those foreign usage lines, and all
+  three hold **bare names with no brackets**, because only the renderer knows
+  the dialect that wraps them: `Operand.name` (`PAGE_ID`, rendered `<PAGE_ID>`
+  required and `[PAGE_ID]` not), `Operand.required` (the parser reports the
+  empty slot rather than each leaf re-discovering and rewording it), and
+  `Option.metavar` (`VERSION`, rendered `--notion-version <VERSION>`; derived
+  from the long spelling when absent, which covers most options and is why only
+  the four upstream overrides declare one). `Option.env` is a fourth and is
+  **not** a synonym for `default`: an env-sourced value counts as *supplied*,
+  so clap echoes it in a usage line where a defaulted one is invisible, and it
+  is read from the session rather than frozen into the spec. The executor fills
+  it, so a leaf reads one flag instead of a flag and a fallback.
+
+- **Imitating a Rust CLI means imitating serde_json, so the engine parser does
+  not get to decide.** `ntn api` echoes its JSON parse failures verbatim, and
+  those words are serde_json's (`EOF while parsing an object at line 1 column 1`), which neither `json.loads` nor `JSON.parse` can produce and which the
+  two of them word differently from each other anyway. So
+  `commands/cli/builtin/ntn/serde.py` (`serde.ts`) is a scanner whose only job
+  is that message, and it is the **authority on validity too**: the engine
+  parser runs only on input the scanner already accepted, because the two
+  disagree about what JSON is (python accepts `NaN`, serde refuses it, and
+  silently sending `NaN` is worse than either). Three rules that are easy to
+  get wrong and are pinned by a probed table in `test_serde.py` /
+  `serde.test.ts`: columns count **bytes**, not characters (`["é"x` fails at
+  column 6); a newline advances the line and zeroes the column; and the
+  recursion limit is 128, refused at the opening bracket of the 128th
+  container. Do not "simplify" this to a try/except around the engine parser.
+
+- **`ntn api` has three body sources, and both the order and the exit codes are
+  observable.** stdin, `--data` and inline `path=value` / `path:=json` inputs
+  are each validated in that order, and only then is "more than one source"
+  reported, so a malformed pipe outranks a malformed `--data` and both outrank
+  the conflict. The exit codes are two families, neither of them argparse's 2:
+  a body that arrived malformed is **1** (`error: Invalid JSON from stdin`),
+  while a line the CLI will not interpret at all is **5** (the conflict, an
+  unparseable inline input, an empty `--data`), and those carry a second
+  `  hint:` line. There is **no object check anywhere**: `--data '[]'` posts
+  the array, and any body source at all makes the call a POST even when what
+  it carries is empty, so `--data '{}'` posts rather than falling back to GET
+  on falsiness. `name==value` stays a query parameter whatever the method is.
+
 - **Discoverability is part of shipping a CLI**, and it comes from the spec, so
   it works for a user's own registered CLI exactly as for a builtin one. `man <cli>` and `man <cli> <verb>...` render through `node_help`/`nodeHelp`, the
   same renderer `--help` uses, so a manual cannot drift from the program; bare
@@ -96,6 +173,144 @@ agent discovers state, the CLI is how it acts.
   kind (`type -t` prints `cli`, a sixth word beside bash's five, because reusing
   `file` would promise `type -p` a path that does not exist). `which` prints the
   bare name, never a fabricated path.
+
+## Notion data sources
+
+The notion backend speaks **`Notion-Version: 2025-09-03`**, the generation that
+split a database into a container plus one or more *data sources*. The split is
+not cosmetic and it is not optional:
+
+- **The database object no longer carries `properties`.** The column schema
+  lives only on the data source, so `GET /v1/databases/{id}` answers with
+  `data_sources: [{id, name}]` and nothing to render a schema from. Do not
+  synthesize one back onto the container; the fake deliberately omits it so
+  anything that still reads a column list off a database fails loudly.
+- **The mount nests accordingly**, because that is where the data is:
+  `databases/<Title>__<db-id>/database.json` is the container, and
+  `databases/<Title>__<db-id>/<Name>__<ds-id>/data_source.json` is the schema,
+  with the row pages under the data source. A row page therefore sits at depth
+  4 under `databases/`, not 3; `readdir`/`read`/`stat` all key on that in both
+  languages. The name stutters for a single-source database because Notion
+  names the auto-created data source after its database, which is honest and
+  disappears the moment a database holds two.
+- **A row's parent is its data source**: `{type: "data_source_id", data_source_id, database_id}`. The database id rides along because Notion
+  kept emitting it, and the fake stores rows keyed by database, which is the
+  same fact one derivation away.
+- **`/search` rejects `filter.value = "database"`** at this version; the
+  searchable schema-bearing object is `data_source`. Listing databases is
+  therefore "search data sources, take the distinct parents, retrieve each",
+  which costs one extra call per database and is the only way to get the
+  title and url the directory is named and rendered from.
+- ids are **not interchangeable**: a data source id is not its database id.
+  The fake derives one from the other (`d5000000` + the database's tail) rather
+  than reusing it, precisely so an id mix-up cannot pass.
+
+## Mount boundaries
+
+A mount root is not an ordinary directory, and a mount nested inside
+another mount's tree is invisible to the backend that owns the parent:
+the child's keys live in a different resource, so the parent's `readdir`
+never lists it. Two mechanisms follow from that, and they are separate.
+
+- **`MountView` is how a command sees the boundaries** (`ops/types.py`,
+  `ops/types.ts`), and it is offered the way `LinkView` is: a command
+  opts in by naming a `mounts` parameter, `execute_cmd`/`executeCmd`
+  delivers it only to handlers that do, and there is no list of
+  boundary-aware commands anywhere. It carries `descendants` (mount
+  roots strictly under a path), `is_root`, and `root_of`.
+  A traversal command that renders **lines** does not need it: the
+  executor's fan-out (`workspace/executor/fanout.py`) already reruns
+  find/du/tree/grep -r per mount and concatenates the output. A command
+  whose output is one **binary object** cannot be merged that way, which
+  is why `tar` reads the boundaries itself.
+- **Crossing into a descendant mount is refused, not attempted.** `tar`
+  and `zip` both keep the mountpoint as a directory entry and drop its
+  contents with GNU's own `--one-file-system` wording (`<name>/: file is on a different filesystem; not dumped`; Info-ZIP has no message of
+  its own for this, so zip borrows the wording under its own
+  `zip warning:` prefix). This is deliberate: descending would archive
+  by accident exactly what the mount-root refusal below forbids on
+  purpose.
+- **`MountRootPolicy` refuses a mount root in a source slot** for `tar -c`,
+  `zip` and `cp`, on top of the POSIX EBUSY rules it already enforces
+  for `rm`/`rmdir`/`mv`/`mkdir`/`touch`/`ln`. Real tar and cp allow it;
+  mirage does not, because the mount table is the deployment's
+  configuration and reading a whole backend into one object is neither
+  what the operand looks like it costs nor something an agent should be
+  able to do to data it was given a view of. Only **positional** operands
+  are tested, which is why `CommandContext` carries `operands` beside
+  `paths`: `tar -xf a.tar -C /mnt` extracts INTO a mount and must stay
+  legal, while `tar -cf a.tar /mnt` must not. `positional_scopes` /
+  `positionalScopes` (`executor/command/routing`) is what tells the two
+  apart, since classification turns every path-shaped word into a
+  PathSpec whether it filled an operand slot or a flag's value. Mode
+  matters too: only `tar -c` reads its operands from the filesystem, so
+  `is_create_mode` / `isCreateMode` gates the refusal. Under `-t` and
+  `-x` an operand is a member selector matched inside the archive, and
+  refusing one that happens to spell a mount root would deny an
+  ordinary listing.
+
+## `CommandSpec` and `Operand` are not a scratchpad
+
+Both dataclasses are shared by every command in the repo, so a field
+added for one command is a field every other command's author has to
+read past, and a fourth one turns the grammar into a pile of per-command
+dialects. **Do not add a field to `CommandSpec`, `Operand` or `Option`
+unless POSIX *and* argparse both already have the concept, and then name
+it after theirs, not after the mechanism it trips inside the parser.**
+
+Both, not either. The test is literal, not a judgement call: write the
+equivalent line in argparse and run it. If argparse parses it, the
+concept is borrowed and the field is allowed. If argparse cannot express
+it, the behavior belongs to the one command that needs it and must be
+handled in that command, not in the shared grammar.
+
+POSIX alone is not enough, and python3 is exactly why: POSIX specifies
+an option whose argument is a program (`sh -c command_string [command_name [argument...]]`, and python3's own synopsis
+`python [option] ... [-c cmd | -m mod | file | -] [arg] ...`), so an
+either-or rule would license the `Option` field this section exists to
+refuse. argparse is the narrower gate because it is the parser this
+spec layer is modelled on, so a concept it cannot express is one the
+grammar has no shape for.
+
+Both halves of python3's command line are the worked example, and they
+come out on opposite sides:
+
+- **Allowed: `Operand.remainder`.** It is `nargs=argparse.REMAINDER`,
+  which is POSIX's own option order (the first operand ends option
+  parsing; GNU's permuting default is the extension, and `POSIXLY_CORRECT=1 ls a -1` shows the difference). argparse spells
+  it on the positional slot, so mirage spells it on `Operand` too, and
+  `CommandSpec` does not change at all.
+- **Not allowed: an option whose argument is a program.** `python3 -c 'code' -u x` must hand `-u` to the code, but
+  `add_argument("-c"); add_argument("rest", nargs=REMAINDER)` answers
+  `unrecognized arguments: -u`. CPython's own command line is parsed in C
+  for exactly this reason. There is no concept to borrow, so this does
+  not become an `Option` field.
+
+A `CLISpec` **is** a `CommandSpec` (python: subclass; TypeScript:
+`extends`), and every level of a CLI tree parses with the ordinary spec
+machinery. Moving a command to the CLI tier therefore does not exempt it
+from this rule, because it still parses with the same `Option` and
+`Operand`. The CLI tier is for a program *tree* (a verb the line selects,
+like `git status` or `ntn api`), not for a program with an unusual
+option grammar.
+
+## An option that chdirs: `operand_base`
+
+`tar -C` is not a flag the command reads once, it is a chdir for the path
+operands typed **after** it, and it is cumulative (`-C d1 x -C ../d2 y`
+reads `d1/x` and `d1/../d2/y`). That is a property of the line, so it is
+declared in the spec (`CommandSpec.operand_base` / `operandBase`, tar's
+only) and resolved by the one component that walks the line
+positionally: `parse_command` / `parseCommand` tracks the base as it
+scans and reports it per word as `word_bases` / `wordBases`, which
+`classify_parts` then resolves each operand against. Doing it anywhere
+later is too late: the classifier has already produced absolute
+PathSpecs, and an operand resolved against the wrong base makes the
+router see a phantom cross-mount span (which is what
+`tar -czf /work/out.tgz -C /work/check my_paper` used to fail as).
+Only path operands and the option's own value move; every other
+path-valued flag keeps resolving against the session cwd, which is what
+GNU does with `-f`.
 
 ## Symlinks
 
@@ -148,8 +363,15 @@ they bite:
 Follow policy is two symmetric tables in `workspace/route/constants.py`, both
 read off the raw command line (operand rewriting happens before flag parsing):
 `NO_FOLLOW_COMMANDS` lists commands that lstat (`rm`, `mv`, `ln`, `readlink`,
-`rmdir`, `unlink`, `stat`, `file`, `du`, `find`), with `DEREFERENCE_FLAGS`
-naming the flag that turns following back on (`-L`). `find` states its policy as
+`rmdir`, `unlink`, `stat`, `file`, `du`, `find`, `tar`, `zip`), with
+`DEREFERENCE_FLAGS` naming the flag that turns following back on (`-L`).
+`tar` and `zip` are in that list for a different reason and deliberately carry
+no `DEREFERENCE_FLAGS` entry: they dereference too, but their planner has to be
+the one doing it. Rewriting the operand in the router hands the planner a
+target it can no longer tell was reached through a link, so `tar` stored a
+regular file where GNU stores a symlink member, and neither archiver could
+apply its own cross-mount refusal or ELOOP wording. `tar -h` and `zip -y` are
+read by `scan_operand` instead. `find` states its policy as
 a leading `-P`/`-H`/`-L` option instead, last one wins, so it lives in
 `LAST_WINS_LINK_OPTIONS`;
 `NO_FOLLOW_FLAGS` is the mirror, for a following command that a flag makes lstat
@@ -301,6 +523,95 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   were reported as directories, so `find -type f` missed them). Do not
   reintroduce name-based classification in a backend; if stat misclassifies an
   entry, fix that backend's stat.
+- **An archiver walks a directory operand; it does not read it.** `tar`
+  and `zip` decide every member first (`plan_create` / `planCreate` in
+  `generic/tar/create.*`, `plan_zip` / `planZip` in
+  `generic/zip_cmd.*`) and only then write, which is what lets an
+  exclusion prune a whole subtree and keeps the ordering stable. Both
+  plans are built on **one traversal**, `scan_operand` / `scanOperand`
+  (`generic/archive/walk.*`), which merges three sources no single one
+  can see: the backend walk (reusing find's `walk_find` / `walkFind`, so
+  an archiver classifies an entry through `stat` exactly as find does,
+  never by name), the namespace's symlinks, and the mount table. It
+  reports paths, never names, because naming is exactly where the two
+  formats disagree; the two things they disagree about in the traversal
+  itself are parameters (`dereference`, `recurse`), so **a third
+  archiver adds a caller, not a second walk**. Members are named from
+  `PathSpec.raw_path`, so `tar -C d x` stores `x`, not `d/x`.
+  **A directory is its own member**, with GNU's trailing slash and no
+  content, which is the only record an empty directory leaves and the
+  reason extraction has to `mkdir` for one. **A symlink is a symlink
+  member** (`SYMTYPE`, target in `linkname`), never a file of its
+  target's bytes, unless `-h` says to follow it.
+  **Two links to one target are not a loop**, and both are archived; the
+  only loop is one `resolve` refuses to resolve, since the namespace
+  already walks the chain under a hop limit and raises `CycleError` at
+  the end of it. That arrives as a fatal `Problem` carrying GNU's
+  `Too many levels of symbolic links`, reported per member with the
+  directory entry kept, rather than as an exception that aborts the
+  plan. **Every `-C` is checked, not just the last**: GNU chdirs at each
+  one and fails at the first it cannot enter, so the option accumulates
+  (`multiple=True`) and the planner walks the list.
+  Two deliberate divergences from GNU, both documented in place:
+  siblings are sorted rather than emitted in readdir order (the same
+  choice `du` makes, for the same reason), and a descendant mount is
+  never crossed (see "Mount boundaries"). Everything else is pinned
+  against GNU tar 1.35 on `debian:stable-slim`: the leading-slash
+  warning, `Cowardly refusing to create an empty archive` (exit 2), a
+  per-operand `Cannot stat` plus one trailer (exit 2, and the other
+  operands still archive), a `-C` it cannot enter (exit 2, no archive
+  written), and `archive cannot contain itself; not dumped` (exit 0).
+  A backend error must never reach the user as itself: an unreadable
+  operand is reported in virtual path space with tar's wording, because
+  the raw `IsADirectoryError` leaked the host path behind a disk mount.
+- **`zip` is Info-ZIP, which inverts tar's two defaults.** A directory
+  operand contributes only its own entry unless `-r` says to descend,
+  and a symlink is *followed* unless `-y` says to store the link, where
+  tar always descends and always stores unless `-h`. Both are just the
+  `recurse` / `dereference` arguments to the shared scan. The rest is
+  pinned against Info-ZIP 3.0 on `debian:stable-slim`: a leading slash
+  is stripped **in silence** (tar warns, zip does not), `-j` junks to
+  the basename and drops directory entries entirely, `-x` is
+  **anchored** on the whole stored name (`d/sub/*` matches, `sub/*` does
+  not) where tar's `--exclude` is unanchored, an unreachable operand is
+  `\tzip warning: name not matched: <name>` and does not stop the run,
+  and a run that matched nothing prints `zip error: Nothing to do!`,
+  exits **12**, and writes no archive. `-q` silences the warnings but
+  never that error. Two deliberate divergences: `-x` takes one pattern
+  per occurrence (mirage's spec has no variadic option value, and
+  `-x a -x b` says the same thing), and the `adding:` line carries no
+  `(deflated N%)` suffix, since the ratio depends on the compressor and
+  would differ between the two languages.
+- **Tar formats come from a library, not from hand-rolled block code, and
+  bzip2 is read-only in TypeScript.** Python builds archives with stdlib
+  `tarfile`; TypeScript uses `modern-tar` behind `tar_helper.ts`, which
+  keeps the `TarEntry` shape (`name`/`data`/`isFile`/`isDir`/`linkname`)
+  the two call sites already speak and is the only place the dependency
+  is named. Do not go back to writing ustar blocks by hand: the version
+  that did truncated any name past 100 bytes instead of using the ustar
+  `prefix` field or a PAX header (so a deep member extracted to the wrong
+  path), and read a PAX/GNU extension block as if it were a member (so
+  `tar -t` on any archive GNU or Python wrote listed a phantom
+  `././@PaxHeader` row). `writeTar`/`readTar` are async for this reason.
+  Compression is a registry (`registerCompressionCodec`): gzip is built
+  in via `CompressionStream`, and a codec may be **decompress-only**,
+  which is the one deliberate py/ts divergence here. Python reads and
+  writes `.tar.bz2` because `bz2` is stdlib; TypeScript only reads one,
+  because every JavaScript bzip2 *compressor* is GPL (`compressjs`,
+  `archive-wasm`) and an Apache-2.0 package cannot ship that, while
+  `seek-bzip` (MIT) decodes. `tar -cj` therefore exits 1 with
+  `tar: bzip2 not supported`, the same answer browser core already gives
+  for an unregistered codec. If a permissively licensed bzip2 compressor
+  appears, adding `compress` to that one codec closes the gap with no
+  other change.
+- **The TypeScript `walkFind` answers in mount-relative keys; the Python
+  `walk_find` answers in virtual paths.** TS's stands in for a backend's
+  native find op, so a caller that needs virtual paths (tar does, to
+  name members and compare against mount prefixes) lifts them with
+  `mountPrefixOf` the way `findGeneric` does. That lift lives once, in
+  `generic_bind/archive_io.*`, which is where both archivers get their
+  walk. This asymmetry is real and has bitten once: a unit test on an
+  unprefixed mount cannot see it, so cover a prefixed mount too.
 - **`du` has one backend contract: `size` and `entries`.** Each backend exposes `core/<backend>/du/size.py` (recursive byte total for one path) and `core/<backend>/du/entries.py` (per-file breakdown), wired as `du_size` / `du_entries` on the adapter. `entries` returns `(entries, total)` where entries are **leaf files only, in mount-relative path space, with no summary row**; the generic lifts them onto virtual paths (`to_virtual`, via `mount_prefix_of`) and re-spells them as the operand was typed (`respell_raw`). A backend that returns backend-key paths, or appends its own roll-up row, makes two mounts holding the same filename render identical lines. Do not reintroduce a second shape; the old flat-list `du_multi` contract is gone.
 - **`du` prints a line per directory, derived not walked.** GNU prints one line per directory with its recursive total, post-order (children before parents), plus one per file under `-a`. Backends only ever report leaf files, so the generic derives the directory rows by summing each leaf into every ancestor (`rollup`, same name both languages), then emits post-order with siblings sorted. Two deliberate divergences: GNU orders siblings by `readdir` (filesystem-dependent), mirage sorts them; and an empty directory is invisible to mirage because no leaf points at it. Sizes are bytes, not GNU's 1 KiB blocks, since an object store has no block size. `--max-depth` prunes only what is printed, never the walk, because every printed total still covers the whole subtree. Verify changes with the differential harness against `debian:stable-slim`: paths, exit codes and stderr must match GNU exactly.
 - **`du` usage errors exit 1, not 2.** `du` is absent from `USAGE_EXIT`, which is correct: GNU du exits 1 for `-s` with `-a` ("cannot both summarize and show all entries"), `-s` with `--max-depth` ("warning: summarizing conflicts with --max-depth=N"), and a bad depth ("invalid maximum depth 'x'"). All three are raised by `parse_flags` / `parseDuFlags` *before* any I/O, mirroring GNU's option-parse order: the depth is parsed as the option is read, so a bad depth wins over the conflict checks. An unreadable operand is not a usage error: GNU names it (`du: cannot access 'x': No such file or directory`), prints every other operand, and exits 1, and still prints `0 total` under `-c` when every operand failed. With no operand at all, du measures the working directory; it never says "missing operand".
@@ -321,7 +632,12 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
 - Don't add too many printings or comments in the code.
 - Don't add README.md unless I ask you to do so.
 - Use uv add to install new dependencies.
-- **Command wrappers and flags.** The dispatcher passes parsed command-line flags as keyword arguments. Wrappers must declare dispatcher-injected parameters (`stdin`, `index`, `prefix`) explicitly in their signature — never fish them out of `**flags` with `.get()`. Treat `**flags: object` as an opaque bag of true command-line flags and forward it wholesale to the generic command. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through `FlagView` (`fl = FlagView(flags)` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains.
+- **Command wrappers and flags.** The dispatcher passes parsed command-line flags as keyword arguments. Wrappers must declare dispatcher-injected parameters (`stdin`, `index`, `prefix`) explicitly in their signature — never fish them out of `**flags` with `.get()`. Treat `**flags: FlagValue` as an opaque bag of true command-line flags and forward it wholesale to the generic command. A wrapper must not name a flag it cannot receive: the parser maps every spelling onto one canonical dest (the long form whenever an option declares one), so a parameter named after a short spelling with a long twin is permanently unfilled — `tests/commands/test_no_dead_flag_params.py` fails on one. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through `FlagView` (`fl = FlagView(flags)` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains, and never a raw `kwargs`/`_extra` read either (`tests/commands/test_no_raw_flag_reads.py` matches all three bag names). **A PATH-typed flag reaches a python command as a `PathSpec`, not a string** — the executor promotes it (`workspace/executor/command/flags.py`), so read it with `fl.as_paths(name)`; `as_str` reads it as absent and the operand is silently never used. TypeScript's bag carries the resolved virtual-path string instead, so its twin is `fl.asStr(name)`.
 - **Generic commands own flag interpretation.** Backend wrappers are wiring only (glob resolution, backend I/O injection, pass-through of `texts` and `flags`); all flag semantics live in the generic command for that family, mirroring the TS generics. Adding or changing a flag should touch the spec and the generic, not N wrappers.
 - **Generics parse flags once into a frozen struct.** Each generic defines a `@dataclass(frozen=True, slots=True)` flag struct plus a module-level `parse_flags(fl, ...)` (mirroring the TS `parseFlags` struct); the function body reads only struct attributes, never string keys. Construct the FlagView with the command's spec (`FlagView(flags, spec=SPECS["grep"])`) so a typo in a flag name raises KeyError instead of silently reading as False/None.
-- **Never annotate a parameter as `object`.** Use the real type: a backend handle is `accessor: Accessor` (`mirage.accessor.base`), an index is `index: IndexCacheStore | None` (`mirage.cache.index`). Ignored variadics are still typed (`*texts: str`). `object` is only acceptable as the value type of an opaque flag bag (`**flags: object`).
+- **Never annotate anything as `object`** — not a parameter, not a return, not a type argument (`dict[str, object]`, `Callable[..., object]`). `object` reads as "we did not decide": it accepts bytes where JSON was meant and a PathSpec where a flag value was meant, so every use site pays for it with an isinstance chain back to the set the author had in mind. Name the real type instead:
+  - a parsed command-line flag is `FlagValue` (`mirage.commands.spec.types`) — `**flags: FlagValue`, `Mapping[str, FlagValue]`, `FlagValue | None` for a single raw read. The TypeScript side has always called it `FlagValue` too (`commands/spec/types.ts`); keep the two spellings identical.
+  - a decoded JSON payload or an API field is `JsonValue` (`mirage.types`). It is recursive, so it is spelled as a forward-reference string until the floor is 3.12 — a union with it must be quoted: `Awaitable["JsonValue | X"]`.
+  - a path is `str | PathSpec`, a backend handle is `accessor: Accessor` (`mirage.accessor.base`), an index is `index: IndexCacheStore | None` (`mirage.cache.index`), a stat function is `StatFn` (`mirage.types`). Ignored variadics are still typed (`*texts: str`).
+  - a sentinel is a one-member `Enum`, never `object()`; that keeps it distinguishable from the real values sharing the variable.
+    `tests/commands/test_no_object_annotations.py` enforces this and carries the only exemptions: four Python protocol methods (`__setattr__`, `__contains__`, `Mapping.pop`) whose signatures the language fixes, and one guard whose whole job is to catch a value the annotations already claim cannot arrive. Adding to that allowlist needs the same kind of reason.

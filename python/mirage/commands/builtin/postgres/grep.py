@@ -17,13 +17,12 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import pattern_arg, search_pushdown_ok
-from mirage.commands.builtin.postgres._provision import search_provision
 from mirage.commands.builtin.postgres.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.scope import detect_scope
@@ -37,10 +36,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep",
-         resource="postgres",
-         spec=SPECS["grep"],
-         provision=search_provision)
+@command("grep", resource="postgres", spec=SPECS["grep"])
 async def grep(
     accessor: PostgresAccessor,
     paths: list[PathSpec],
@@ -48,7 +44,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)

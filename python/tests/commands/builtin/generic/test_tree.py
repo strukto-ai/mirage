@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from mirage.commands.builtin.generic.tree import tree
@@ -313,3 +315,107 @@ async def test_tree_unstattable_operand_still_walks():
     assert io.exit_code == 2
     assert output == (b"/r/nope  [error opening dir]\n\n"
                       b"0 directories, 0 files\n")
+
+
+def _dispatch_pair(parent: dict, child: dict, root: str):
+    """The dispatcher's view: each path answered by its OWNING mount.
+
+    A key the parent holds under the mount root is shadowed and cannot be
+    reached through it, which is the whole point of crossing.
+    """
+    parent_readdir, _ = _make_backend(parent)
+    child_readdir, _ = _make_backend(child)
+
+    def owner(virtual: str) -> tuple[dict, object]:
+        under = virtual == root or virtual.startswith(root + "/")
+        return (child, child_readdir) if under else (parent, parent_readdir)
+
+    async def readdir_path(virtual: str) -> list[str]:
+        _, readdir = owner(virtual)
+        return await readdir(_spec(virtual))
+
+    async def stat_path(virtual: str):
+        rows, _ = owner(virtual)
+        return rows.get(virtual)
+
+    return readdir_path, stat_path
+
+
+def _mounts_view(roots: list[str]):
+    return SimpleNamespace(descendants=lambda path: [
+        r for r in roots
+        if r.startswith(path.rstrip("/") + "/") and r != path.rstrip("/")
+    ],
+                           is_root=lambda path: path.rstrip("/") in roots,
+                           root_of=lambda path: "/")
+
+
+@pytest.mark.asyncio
+async def test_tree_crosses_into_a_nested_mount():
+    """Real ``tree`` draws the mounted filesystem's entries under the mount
+    point, never the ones it covers, and counts the whole thing once
+    (pinned on tree 2.2.1 over a tmpfs at the same spot). Concatenating a
+    per-mount run cannot do that: it would print two roots and two
+    summaries.
+    """
+    parent = {
+        "/base": _dir("base"),
+        "/base/top.txt": _file("top.txt"),
+        "/base/inner": _dir("inner"),
+        "/base/inner/leftover.txt": _file("leftover.txt"),
+    }
+    child = {
+        "/base/inner": _dir("inner"),
+        "/base/inner/real.txt": _file("real.txt"),
+        "/base/inner/deep": _dir("deep"),
+        "/base/inner/deep/d.txt": _file("d.txt"),
+    }
+    readdir, stat = _make_backend(parent)
+    readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
+    output, io = await tree(
+        _spec("/base"),
+        readdir=readdir,
+        stat=stat,
+        mounts=_mounts_view(["/base/inner"]),
+        readdir_path=readdir_path,
+        stat_path=stat_path,
+    )
+    assert output.decode().splitlines() == [
+        "/base",
+        "|-- inner",
+        "|   |-- deep",
+        "|   |   `-- d.txt",
+        "|   `-- real.txt",
+        "`-- top.txt",
+        "",
+        "3 directories, 3 files",
+    ]
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_tree_draws_a_mount_point_the_parent_never_listed():
+    """A mount point need not exist in the parent backend at all, and the
+    mount table says it is a directory, so neither the name nor the type
+    is asked of a backend that cannot answer.
+    """
+    parent = {"/base": _dir("base"), "/base/top.txt": _file("top.txt")}
+    child = {"/base/inner": _dir("inner")}
+    readdir, stat = _make_backend(parent)
+    readdir_path, stat_path = _dispatch_pair(parent, child, "/base/inner")
+    output, io = await tree(
+        _spec("/base"),
+        readdir=readdir,
+        stat=stat,
+        mounts=_mounts_view(["/base/inner"]),
+        readdir_path=readdir_path,
+        stat_path=stat_path,
+    )
+    assert output.decode().splitlines() == [
+        "/base",
+        "|-- inner",
+        "`-- top.txt",
+        "",
+        "2 directories, 1 file",
+    ]
+    assert io.exit_code == 0

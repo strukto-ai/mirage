@@ -42,7 +42,8 @@ def test_manager_default_cwd():
 
 def test_manager_default_env():
     mgr = SessionManager("default")
-    assert mgr.env == {}
+    # A fresh session carries the seeded `$PWD` and nothing else.
+    assert mgr.env == {"PWD": "/"}
     mgr.env = {"A": "1"}
     assert mgr.env == {"A": "1"}
     assert mgr.get("default").env == {"A": "1"}
@@ -159,7 +160,7 @@ async def test_manager_hydrates_from_store():
     await mgr.ensure_loaded()
     s = mgr.get("restored")
     assert s.cwd == "/w"
-    assert s.env == {"K": "v"}
+    assert s.env == {"K": "v", "PWD": "/w"}
     assert s.mount_modes == {"/data": MountMode.READ}
 
 
@@ -187,7 +188,7 @@ async def test_manager_default_adopts_stored_fields():
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     assert mgr.cwd == "/w"
-    assert mgr.env == {"A": "1"}
+    assert mgr.env == {"A": "1", "PWD": "/w"}
 
 
 @pytest.mark.asyncio

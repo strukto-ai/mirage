@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.resource.postgres import PostgresConfig, PostgresResource
 
 
@@ -37,11 +39,13 @@ def test_resource_registers_commands():
     assert expected <= cmd_names
 
 
-def test_resource_in_registry():
+@pytest.mark.asyncio
+async def test_resource_in_registry():
     from mirage.resource.registry import REGISTRY, build_resource
 
     assert "postgres" in REGISTRY
-    res = build_resource("postgres", config={"dsn": "postgres://localhost/db"})
+    res = await build_resource("postgres",
+                               config={"dsn": "postgres://localhost/db"})
     assert res.name == "postgres"
 
 

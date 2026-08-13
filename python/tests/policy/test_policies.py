@@ -190,6 +190,9 @@ async def test_post_ops_gate_suppresses_the_result():
     with pytest.raises(PermissionError) as excinfo:
         await post_ops_gate(policies, "read", _path("/data/x"), False,
                             "/data/", b"a long secret payload")
+    # A post deny suppresses the result of an op that already ran; the
+    # door's OpReport, stamped before this gate fires, is what keeps
+    # the accounting of the completed op.
     assert excinfo.value.errno == errno.EACCES
 
 

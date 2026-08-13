@@ -17,6 +17,5 @@ import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
 import { DISK_IO } from '../../commands/builtin/disk/io.ts'
 
 export const DISK_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.DISK, DISK_IO, {
-  forwardIndex: false,
   mkdirParents: true,
 })

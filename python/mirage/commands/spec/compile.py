@@ -79,6 +79,12 @@ class CompiledSpec:
         numeric_dest (str | None): canonical spelling fed by the
             ``-<digits>`` shorthand, when one option declares it.
         rest_kind (ValueType | None): kind of the rest operand.
+        remainder (bool): the rest operand gathers every word from the
+            first operand on, options included (``Operand.remainder``,
+            argparse's ``nargs=REMAINDER``).
+        base_dest (str | None): canonical spelling of the option that
+            re-bases the path operands after it (``CommandSpec.
+            operand_base``, tar's -C).
     """
 
     bool_spellings: frozenset[str] = frozenset()
@@ -100,8 +106,11 @@ class CompiledSpec:
     choices_by_dest: dict[str, tuple[str, ...]] = field(default_factory=dict)
     required_dests: tuple[str, ...] = ()
     defaults: dict[str, str] = field(default_factory=dict)
+    env_by_dest: dict[str, str] = field(default_factory=dict)
     numeric_dest: str | None = None
     rest_kind: ValueType | None = None
+    base_dest: str | None = None
+    remainder: bool = False
 
     def dest_of(self, spelling: str) -> str:
         """Canonical spelling for a typed spelling.
@@ -170,6 +179,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     choices_by_dest: dict[str, tuple[str, ...]] = {}
     required_dests: list[str] = []
     defaults: dict[str, str] = {}
+    env_by_dest: dict[str, str] = {}
     numeric_dest: str | None = None
 
     for opt in spec.options:
@@ -226,6 +236,8 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
             required_dests.append(canonical)
         if opt.default is not None:
             defaults[canonical] = opt.default
+        if opt.env is not None:
+            env_by_dest[canonical] = opt.env
 
         if opt.short:
             if opt.type == "bool":
@@ -262,6 +274,16 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
                 long_value_spellings.add(opt.long)
                 kind_of[opt.long] = opt.type
 
+    base_dest: str | None = None
+    if spec.operand_base is not None:
+        base_dest = dest.get(spec.operand_base)
+        if base_dest is None:
+            raise ValueError(f"operand_base {spec.operand_base!r} is not a "
+                             "declared option")
+        if kind_by_dest.get(base_dest) != "path" or base_dest in pair_dests:
+            raise ValueError(f"operand_base {spec.operand_base!r} must be a "
+                             "single-token path option")
+
     # Longest first so an attached match can never be stolen by a
     # shorter spelling that happens to prefix it (-name vs -n).
     value_spellings.sort(key=len, reverse=True)
@@ -287,6 +309,9 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         choices_by_dest=choices_by_dest,
         required_dests=tuple(required_dests),
         defaults=defaults,
+        env_by_dest=env_by_dest,
         numeric_dest=numeric_dest,
         rest_kind=spec.rest.type if spec.rest is not None else None,
+        base_dest=base_dest,
+        remainder=spec.rest is not None and spec.rest.remainder,
     )

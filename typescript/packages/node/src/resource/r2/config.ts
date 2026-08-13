@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface R2Config {
@@ -23,21 +30,6 @@ export interface R2Config {
   accountId?: string
   endpoint?: string
   region?: string
-  profile?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
-
-export interface R2ConfigRedacted {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  accountId?: string
-  endpoint: string
-  region: string
   profile?: string
   forcePathStyle?: boolean
   keyPrefix?: string
@@ -59,6 +51,13 @@ const R2ConfigSchema = z.object({
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint the redactor fills in.
+export type R2ConfigRedacted = RedactedConfig<
+  ConfigOf<typeof R2ConfigSchema>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 function resolvedR2Endpoint(config: R2Config): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

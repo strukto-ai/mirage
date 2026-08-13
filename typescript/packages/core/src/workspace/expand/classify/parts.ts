@@ -22,12 +22,15 @@ import { classifyBarePath } from './path.ts'
 // is never classified as a path. wordKinds (from CommandSpec, aligned
 // with parts[1:]) decides per position: TEXT skips classification,
 // PATH classifies even bare filenames, null falls back to the shape
-// heuristics.
+// heuristics. wordBases, also aligned with parts[1:], names the
+// directory a word resolves against when a chdir option (tar's -C)
+// moved it; null there means the cwd.
 export function classifyParts(
   parts: string[],
   registry: MountRegistry,
   cwd: string,
   wordKinds: readonly (ValueType | null)[] | null = null,
+  wordBases: readonly (string | null)[] | null = null,
 ): (string | PathSpec)[] {
   if (parts.length === 0) return []
   const result: (string | PathSpec)[] = [parts[0] ?? '']
@@ -35,12 +38,14 @@ export function classifyParts(
     const w = parts[i]
     if (w === undefined) continue
     const kind = wordKinds !== null ? (wordKinds[i - 1] ?? null) : null
+    const base = wordBases !== null ? (wordBases[i - 1] ?? null) : null
+    const here = base ?? cwd
     if (kind !== null && kind !== 'path') {
       result.push(w)
     } else if (kind === 'path') {
-      result.push(classifyBarePath(w, registry, cwd))
+      result.push(classifyBarePath(w, registry, here))
     } else {
-      result.push(classifyWord(w, registry, cwd))
+      result.push(classifyWord(w, registry, here))
     }
   }
   return result

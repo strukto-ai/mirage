@@ -20,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -52,7 +53,7 @@ def make_rm(
         f: bool = False,
         v: bool = False,
         index: IndexCacheStore = NULL_INDEX,
-        **_extra: object,
+        **_extra: FlagValue,
     ) -> tuple[ByteSource | None, IOResult]:
         if not paths:
             raise ValueError("rm: missing operand")

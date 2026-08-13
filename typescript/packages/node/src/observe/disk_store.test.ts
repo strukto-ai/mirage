@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Observer } from '@struktoai/mirage-core'
@@ -83,5 +83,23 @@ describe('DiskObserverStore', () => {
     const last = events[events.length - 1]
     expect(last?.type).toBe('clear')
     expect(last?.session).toBe('s1')
+  })
+  it('an unwritten root reads as no history', async () => {
+    const store = new DiskObserverStore(join(root, 'never-written'))
+    expect((await store.readAll()).size).toBe(0)
+  })
+
+  it('an unreadable directory raises instead of reading empty', async () => {
+    // A partial recording that reports success is worse than a failure:
+    // /.bash_history and the history builtin would show a truncated
+    // recording with nothing to say it was truncated.
+    const dir = join(root, 'obs')
+    await new DiskObserverStore(dir).append('/d/s.jsonl', ENC.encode('a\n'))
+    chmodSync(dir, 0o000)
+    try {
+      await expect(new DiskObserverStore(dir).readAll()).rejects.toThrow(/EACCES|EPERM/)
+    } finally {
+      chmodSync(dir, 0o755)
+    }
   })
 })

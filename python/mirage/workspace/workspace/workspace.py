@@ -35,17 +35,17 @@ from mirage.provision import ProvisionResult
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision, PolicyFn
+from mirage.runtime.resolver import PrefixResolver
 from mirage.shell.job_table import JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
-                          MountBackend, MountMode, PathSpec, StateKey,
-                          parse_mount_mode)
+                          JsonValue, MountBackend, MountMode, PathSpec,
+                          StateKey, parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import Session, SessionManager, SessionStore
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
@@ -154,8 +154,10 @@ class Workspace:
         self._namespace = Namespace(self._registry,
                                     store=stores.namespace,
                                     user=agent_id)
-        self._dispatcher = Dispatcher(self._namespace, self._cache,
-                                      consistency)
+        self._dispatcher = Dispatcher(self._namespace,
+                                      self._cache,
+                                      consistency,
+                                      drift=self._drift)
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
 
@@ -167,18 +169,20 @@ class Workspace:
         self._registry.mount(HISTORY_PREFIX,
                              HistoryViewResource(self.observer),
                              MountMode.READ)
+        # The facade delegates every op to the dispatcher, so FUSE and
+        # programmatic ws.ops walk the same pipeline as a shell command
+        # and the policy gates fire exactly once, at that door.
         self._ops = Ops(self._registry.ops_mounts(),
-                        on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
                         agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
-                        stat_overlay=self._merge_overlay,
-                        policies=self._registry.policies)
+                        dispatch=self._dispatcher.dispatch)
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(
-            self._registry, self.dispatch, self._ops.mount_prefixes, runtimes)
+            self._registry, self.dispatch,
+            PrefixResolver(self._ops.mount_prefixes), runtimes)
         reject_config_script("policy", policy)
         self._policy = policy
 
@@ -293,7 +297,7 @@ class Workspace:
     def register_cli(self,
                      name: str,
                      spec: CLISpec,
-                     config: dict[str, object] | None = None) -> CLIInstall:
+                     config: dict[str, JsonValue] | None = None) -> CLIInstall:
         """Install a CLI under a head word, fully separate from mounts.
 
         Args:
@@ -301,7 +305,7 @@ class Workspace:
                 two installs of one spec under different names are two
                 accounts).
             spec (CLISpec): the program tree.
-            config (dict[str, object] | None): installation config,
+            config (dict[str, JsonValue] | None): installation config,
                 validated through the spec's ``config_model`` (fail
                 loud at install time).
         """
@@ -671,23 +675,10 @@ class Workspace:
 
     # ── mount management ────────────────────────────────────────────────────
 
-    def _merge_overlay(self, path: str, stat: FileStat) -> FileStat:
-        """Overlay namespace attrs onto an ops-facade stat.
-
-        Injected into Ops so FUSE and the os patch report chmod/chown/touch
-        results identically to dispatch("stat").
-
-        Args:
-            path (str): virtual path (already link-resolved).
-            stat (FileStat): the backend-reported stat.
-        """
-        return merge_overlay_stat(self._namespace.meta_for(path), stat)
-
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
-        await self._namespace.ensure_loaded()
-        if self._drift.pending:
-            await self._drift.drain(self)
+        # The door owns pre-dispatch initialization (namespace load,
+        # pending drift checks), so FUSE and the ops facade get it too.
         return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def stat(self, path: str) -> FileStat:
@@ -712,13 +703,6 @@ class Workspace:
                        io: IOResult,
                        records: list[OpRecord] | None = None) -> None:
         await self._dispatcher.apply_io(io, records=records)
-
-    async def _invalidate_after_write_by_path(self,
-                                              path: str,
-                                              observed: float | None = None
-                                              ) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(
-            path, observed=observed)
 
     @overload
     async def execute(

@@ -22,6 +22,8 @@ import { MONGODB_IO } from './io.ts'
 import { MONGODB_RG } from './rg.ts'
 import { MONGODB_TAIL } from './tail.ts'
 import { MONGODB_WC } from './wc.ts'
+import { withDefaultProvisions } from '../generic_bind/provision.ts'
+import { resolveGlobOf } from '../generic_bind/adapter.ts'
 
 const MONGODB_OVERRIDES = new Set(['cat', 'grep', 'rg', 'tail', 'wc'])
 
@@ -29,9 +31,10 @@ export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<MongoDBAccessor>(ResourceName.MONGODB, MONGODB_IO, {
     overrides: MONGODB_OVERRIDES,
   }),
-  ...MONGODB_CAT,
-  ...MONGODB_GREP,
-  ...MONGODB_RG,
-  ...MONGODB_TAIL,
-  ...MONGODB_WC,
+  ...withDefaultProvisions(
+    [...MONGODB_CAT, ...MONGODB_GREP, ...MONGODB_RG, ...MONGODB_TAIL, ...MONGODB_WC],
+    MONGODB_IO.stat,
+    resolveGlobOf(MONGODB_IO),
+    MONGODB_IO.readdir,
+  ),
 ]

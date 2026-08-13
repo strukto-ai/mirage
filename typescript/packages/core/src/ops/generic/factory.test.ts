@@ -167,21 +167,13 @@ describe('makeGenericOps', () => {
     expect(ops.filter((o) => o.name === 'truncate')).toHaveLength(1)
   })
 
-  it('forwards the index into reads by default', async () => {
+  it('forwards the index into reads, for every backend', async () => {
     const table = makeTable()
     const ops = makeGenericOps('x', table)
     const index = {} as never
     const readdir = ops.find((o) => o.name === 'readdir')
     await readdir?.fn(ACCESSOR, PATH, [], { index })
     expect(table.readdir).toHaveBeenCalledWith(ACCESSOR, PATH, index)
-  })
-
-  it('forwardIndex false keeps reads index-less', async () => {
-    const table = makeTable()
-    const ops = makeGenericOps('x', table, { forwardIndex: false })
-    const readdir = ops.find((o) => o.name === 'readdir')
-    await readdir?.fn(ACCESSOR, PATH, [], { index: {} as never })
-    expect(table.readdir).toHaveBeenCalledWith(ACCESSOR, PATH, undefined)
   })
 
   it('emulateTruncate without write throws', () => {
@@ -238,6 +230,33 @@ describe('the read op and byte ranges', () => {
     const table = bytes(makeTable({ readRange: native }))
     expect(await readOp(table).fn(ACCESSOR, PATH, [], {})).toEqual(DATA)
     expect(native).not.toHaveBeenCalled()
+  })
+
+  it('reads a window past the end as empty, not as a 416', async () => {
+    // A POSIX read at or past EOF is short, not an error, and that is what the
+    // slice fallback gives. An HTTP store refuses instead, so wiring a native
+    // range used to change the answer for the same call; normalizing here keeps
+    // the op meaning one thing whichever path served it.
+    const refused = Object.assign(new Error('InvalidRange'), {
+      name: 'InvalidRange',
+      $metadata: { httpStatusCode: 416 },
+    })
+    const native = vi.fn(() => Promise.reject(refused))
+    const table = bytes(makeTable({ readRange: native }))
+    expect(await readOp(table).fn(ACCESSOR, PATH, [], { offset: 99, size: 2 })).toEqual(
+      new Uint8Array(0),
+    )
+    expect(native).toHaveBeenCalledOnce()
+  })
+
+  it('still propagates a range read that failed for a real reason', async () => {
+    const denied = Object.assign(new Error('AccessDenied'), {
+      $metadata: { httpStatusCode: 403 },
+    })
+    const table = bytes(makeTable({ readRange: vi.fn(() => Promise.reject(denied)) }))
+    await expect(readOp(table).fn(ACCESSOR, PATH, [], { offset: 1, size: 2 })).rejects.toThrow(
+      'AccessDenied',
+    )
   })
 
   it('asks the backend nothing for a zero-length read', async () => {

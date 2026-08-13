@@ -20,6 +20,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { HttpConnectError, httpGet, isHttpError } from '../utils/http.ts'
 import { UsageError } from '../../errors.ts'
 import { resolveTarget } from './curl.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -43,14 +44,12 @@ async function wgetCommand(
   if (url === undefined) {
     throw new UsageError(USAGE, EXIT_GENERIC)
   }
-  const argsO =
-    typeof opts.flags.args_O === 'string'
-      ? opts.flags.args_O
-      : typeof opts.flags.O === 'string'
-        ? opts.flags.O
-        : null
-  const q = opts.flags.q === true
-  const spider = opts.flags.spider === true
+  const fl = new FlagView(opts.flags, specOf('wget'))
+  // -O is short-only, so it lands on the disambiguated `args_O` dest
+  // (`AMBIGUOUS_NAMES`); a plain `O` key is one the parser never emits.
+  const argsO = fl.asStr('args_O') ?? null
+  const q = fl.asBool('q')
+  const spider = fl.asBool('spider')
 
   // wget follows redirects unconditionally; it has no -L equivalent.
   let resp

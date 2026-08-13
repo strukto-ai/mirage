@@ -23,11 +23,23 @@ import type { RuntimeLanguage, RuntimeOptions } from '../types.ts'
  * `language` and the default captures are declared once and
  * python-tier behavior has one home. A new Python engine subclasses
  * this, not LanguageRuntime.
+ *
+ * The repl is deliberately not part of this tier: it rides the general
+ * Evaluator capability (`isEvaluator` plus `eval` with a session id),
+ * which nothing about it makes python-shaped.
  */
 export abstract class PythonRuntime extends LanguageRuntime {
   readonly language: RuntimeLanguage = 'python'
   /** The tier's head words: the class-default captures of every python engine. */
   static readonly commands: readonly string[] = ['python3', 'python'] as const
+  /**
+   * Whether `python3 -m mod` can run at all. True for every engine that
+   * is real CPython, since runpy does the work; false for an engine
+   * implementing a subset of the language with no import system to find
+   * a module with. A capability of the tier, declared here rather than
+   * probed, so a refusal can name the runtime.
+   */
+  readonly runsModules: boolean = true
 
   constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
     super(options, PythonRuntime.commands, configKeys)

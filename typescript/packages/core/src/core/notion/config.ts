@@ -13,23 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+} from '../../resource/secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
-
-export interface NotionConfig {
-  apiKey: string
-  baseUrl?: string
-}
-
-export interface NotionConfigRedacted {
-  apiKey: '<REDACTED>'
-  baseUrl?: string
-}
 
 export const NotionConfigSchema = z.object({
   apiKey: secretStr(),
   baseUrl: z.string().optional(),
 })
+
+export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
+
+export type NotionConfigRedacted = RedactedConfig<NotionConfig, 'apiKey'>
 
 export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
   return redactConfigWithSchema(NotionConfigSchema, config) as unknown as NotionConfigRedacted

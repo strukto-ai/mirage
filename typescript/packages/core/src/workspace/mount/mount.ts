@@ -22,13 +22,20 @@ import type {
   RegisteredCommand,
 } from '../../commands/config.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
-import type { LinkView, StatOverlay, StatPath } from '../../ops/types.ts'
+import type {
+  ChildMounts,
+  LinkView,
+  MountView,
+  ReaddirPath,
+  StatOverlay,
+  StatPath,
+} from '../../ops/types.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
 import { resolveLimit } from '../../policy/index.ts'
 import { CommandTimeoutError, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import type { CommandSpec } from '../../commands/spec/types.ts'
+import type { CommandSpec, FlagValue } from '../../commands/spec/types.ts'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -43,6 +50,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import { eaccesReadOnly, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 type CmdKey = string
 type OpKey = string
@@ -328,7 +336,7 @@ export class MountEntry {
     }
     for (const [name, g] of cmdGroups) {
       if (g.toRegister.length === 0) {
-        const list = [...g.attempted].sort()
+        const list = [...g.attempted].sort(compareCodePoints)
         throw new Error(
           `command '${name}' is for resource(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
         )
@@ -336,7 +344,7 @@ export class MountEntry {
     }
     for (const [name, g] of opGroups) {
       if (g.toRegister.length === 0) {
-        const list = [...g.attempted].sort()
+        const list = [...g.attempted].sort(compareCodePoints)
         throw new Error(
           `op '${name}' is for resource(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
         )
@@ -380,7 +388,7 @@ export class MountEntry {
     cmdName: string,
     paths: PathSpec[],
     texts: string[],
-    flags: Record<string, string | boolean | number | string[]>,
+    flags: Record<string, FlagValue>,
     opts: {
       stdin?: ByteSource | null
       cwd?: string
@@ -392,6 +400,9 @@ export class MountEntry {
       statOverlay?: StatOverlay
       links?: LinkView
       statPath?: StatPath
+      readdirPath?: ReaddirPath
+      childMounts?: ChildMounts
+      mounts?: MountView
       signal?: AbortSignal
       limitOverride?: Limit | null
     } = {},
@@ -447,6 +458,9 @@ export class MountEntry {
       ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
       ...(opts.links !== undefined ? { links: opts.links } : {}),
       ...(opts.statPath !== undefined ? { statPath: opts.statPath } : {}),
+      ...(opts.readdirPath !== undefined ? { readdirPath: opts.readdirPath } : {}),
+      ...(opts.childMounts !== undefined ? { childMounts: opts.childMounts } : {}),
+      ...(opts.mounts !== undefined ? { mounts: opts.mounts } : {}),
     }
 
     return runWithMountPrefix(mountPrefix, () =>
@@ -617,7 +631,7 @@ function wrapMountStreams(
 
 function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (string | null)[]> {
   const out: Record<string, (string | null)[]> = {}
-  for (const k of [...m.keys()].sort()) {
+  for (const k of [...m.keys()].sort(compareCodePoints)) {
     const list = m.get(k) ?? []
     list.sort((a, b) => {
       const aKey = a === null ? 0 : 1
@@ -625,7 +639,7 @@ function sortFiletypeMap(m: Map<string, (string | null)[]>): Record<string, (str
       if (aKey !== bKey) return aKey - bKey
       const as = a ?? ''
       const bs = b ?? ''
-      return as < bs ? -1 : as > bs ? 1 : 0
+      return compareCodePoints(as, bs)
     })
     out[k] = list
   }

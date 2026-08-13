@@ -12,18 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { appendFile, mkdir, readdir, readFile, rmdir, unlink, writeFile } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
-import type { ObserverStore } from '@struktoai/mirage-core'
+import { ObserverStoreBase } from '@struktoai/mirage-core'
 
 /**
  * ObserverStore backed by a directory of JSONL files. Created lazily on
  * first append. Mirrors the Python DiskObserverStore.
  */
-export class DiskObserverStore implements ObserverStore {
+export class DiskObserverStore extends ObserverStoreBase {
   private readonly root: string
 
   constructor(root: string) {
+    super()
     this.root = root
   }
 
@@ -43,10 +53,6 @@ export class DiskObserverStore implements ObserverStore {
     await writeFile(absPath, data)
   }
 
-  readAll(): Promise<Map<string, Uint8Array>> {
-    return this.readMatching('')
-  }
-
   async readMatching(suffix: string): Promise<Map<string, Uint8Array>> {
     const out = new Map<string, Uint8Array>()
     const { files } = await this.walk()
@@ -64,23 +70,31 @@ export class DiskObserverStore implements ObserverStore {
     for (const d of [...dirs].reverse()) await rmdir(d)
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
+  private async rootIsDir(): Promise<boolean> {
+    try {
+      return (await stat(this.root)).isDirectory()
+    } catch (err) {
+      // Nothing recorded yet is the normal state before the first
+      // append; anything else (EACCES, EIO) is a real fault and must
+      // not read as an empty history.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw err
+    }
   }
 
   private async walk(): Promise<{ files: string[]; dirs: string[] }> {
     const files: string[] = []
     const dirs: string[] = []
+    if (!(await this.rootIsDir())) return { files, dirs }
     const stack: string[] = [this.root]
     while (stack.length > 0) {
       const d = stack.pop()
       if (d === undefined) break
-      let entries
-      try {
-        entries = await readdir(d, { withFileTypes: true })
-      } catch {
-        continue
-      }
+      // Deliberately unguarded: a readdir that fails mid-tree used to
+      // be swallowed, so readAll/readMatching returned a silently
+      // partial recording and clear() reported success while leaving
+      // files behind.
+      const entries = await readdir(d, { withFileTypes: true })
       dirs.push(d)
       for (const entry of entries) {
         const full = path.join(d, entry.name)

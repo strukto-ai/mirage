@@ -24,6 +24,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { defaultPaths } from '../utils/operands.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(DIFY_IO)
 
@@ -58,9 +59,10 @@ async function searchCommand(
   const resolvedPaths = targetPaths.some(isMountRoot)
     ? []
     : await resolveGlob(accessor, targetPaths, index)
-  const method = typeof opts.flags.method === 'string' ? opts.flags.method : 'semantic'
-  const topK = typeof opts.flags.top_k === 'string' ? Number.parseInt(opts.flags.top_k, 10) : 10
-  const threshold = typeof opts.flags.threshold === 'string' ? Number(opts.flags.threshold) : 0
+  const fl = new FlagView(opts.flags, specOf('search'))
+  const method = fl.asStr('method') ?? 'semantic'
+  const topK = fl.asInt('top_k') ?? 10
+  const threshold = fl.asFloat('threshold') ?? 0
   try {
     const out = await searchSegments(accessor, query, resolvedPaths, index, {
       method,

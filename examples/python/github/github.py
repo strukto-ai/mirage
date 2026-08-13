@@ -34,7 +34,7 @@ async def _timed(ws, cmd):
 
 
 async def main() -> None:
-    resource = GitHubResource(
+    resource = await GitHubResource.build(
         config=config,
         owner="strukto-ai",
         repo="mirage",

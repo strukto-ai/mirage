@@ -16,9 +16,11 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
+from mirage.commands.builtin.generic.unzip import unzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,30 +31,17 @@ async def unzip(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    o: bool = False,
-    args_l: bool = False,
-    d: str | None = None,
-    q: bool = False,
-    p: bool = False,
-    t: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("unzip: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_unzip(
-        paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        write_bytes=partial(ops.require(Operation.WRITE), accessor),
-        mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
-        members=texts,
-        o=o,
-        args_l=args_l,
-        d=d,
-        q=q,
-        p=p,
-        t=t)
+    resolved = await ops.resolve_glob(accessor, paths, index)
+    return await unzip_generic(resolved, list(texts),
+                               CommandOpts(stdin=stdin, flags=flags),
+                               bound_op(ops.read_bytes, accessor, index),
+                               partial(ops.require(Operation.WRITE), accessor),
+                               partial(ops.require(Operation.MKDIR), accessor))
 
 
 BUILDER = Builder('unzip',

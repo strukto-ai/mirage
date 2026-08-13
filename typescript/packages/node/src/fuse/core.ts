@@ -15,13 +15,18 @@
 import { posix } from 'node:path'
 import {
   type FileStat,
+  DIR_MODE,
+  FILE_MODE,
+  FileTable,
   FileType,
   isMissingOp,
+  mergeWrites,
+  mtimeMs,
   type OpRecord,
-  PathSpec,
   rstripSlash,
+  type Ops,
   type Session,
-  type Workspace,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { errnoError } from './errors.ts'
 import { isMacosMetadata } from './platform/macos.ts'
@@ -72,30 +77,31 @@ export interface MountCoreOptions {
  * contains, an adapter decides *how* to say it to a particular kernel
  * interface. Adapters translate the errors thrown here into their own
  * error codes with `classifyErrno`. Mirrors Python's `MountCore`.
+ *
+ * Every op goes through `ws.fs`, which delegates to the dispatcher, so
+ * a mount walks the same door as a shell line (mount modes, policies,
+ * cache, invalidation) and every op it runs lands in `ws.records` for
+ * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
+ * record; reaching a backend directly would skip the door.
  */
 export class MountCore {
-  readonly ws: Workspace
+  readonly ops: Ops
   readonly session: Session | null
   private readonly now: Date
   private readonly root: string
-  private readonly prefixes: string[]
-  readonly handles = new Map<number, Handle>()
+  readonly handles = new FileTable<Handle>()
   // In-memory extended attributes, keyed by path. Backends have no POSIX
   // xattrs, so these are advisory and never persisted; see setxattr.
   readonly xattrs = new Map<string, Map<string, Buffer>>()
   readonly prefetchCache = new Map<string, PrefetchEntry>()
   private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
-  private nextFh = 1
   private readonly uid: number
   private readonly gid: number
 
-  constructor(ws: Workspace, options: MountCoreOptions = {}) {
-    this.ws = ws
+  constructor(ops: Ops, options: MountCoreOptions = {}) {
+    this.ops = ops
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
-    // When scoped to a single mount, the root maps onto that mount and
-    // there are no virtual intermediate directories to synthesize.
-    this.prefixes = this.root === '' ? ws.mounts().map((m) => m.prefix) : []
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
     this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
     this.session = options.session ?? null
@@ -115,7 +121,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 2,
       size: 0,
-      mode: 0o040755,
+      mode: DIR_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -128,7 +134,7 @@ export class MountCore {
       ctime: this.now,
       nlink: 1,
       size,
-      mode: 0o100644,
+      mode: FILE_MODE,
       uid: this.uid,
       gid: this.gid,
     }
@@ -148,10 +154,14 @@ export class MountCore {
     if (typeof s.uid === 'number') entry.uid = s.uid
     if (typeof s.gid === 'number') entry.gid = s.gid
     if (s.modified !== null) {
-      const ts = new Date(s.modified)
-      if (!Number.isNaN(ts.getTime())) {
-        entry.mtime = ts
-        entry.ctime = ts
+      // One translator per language: the naive-stamp-is-UTC rule lives
+      // in core's stat view, never re-parsed here with a bare Date.
+      // Null means the stamp did not parse; epoch zero is a real time
+      // and lands.
+      const ms = mtimeMs(s)
+      if (ms !== null) {
+        entry.mtime = new Date(ms)
+        entry.ctime = new Date(ms)
       }
     }
     return entry
@@ -165,7 +175,7 @@ export class MountCore {
    * resolve them against the host root and escape the mountpoint.
    */
   linkTarget(path: string): string | null {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links === null) return null
     const target = links.readlink(this.resolve(path))
     if (target === null) return null
@@ -191,29 +201,6 @@ export class MountCore {
     const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
     entry.mode = 0o120777
     return entry
-  }
-
-  isVirtualDir(path: string): boolean {
-    const bare = rstripSlash(path)
-    const normalized = bare + '/'
-    for (const p of this.prefixes) {
-      const pBare = rstripSlash(p)
-      if (p.startsWith(normalized) || pBare === bare) return true
-    }
-    return false
-  }
-
-  virtualChildren(path: string): string[] {
-    const normalized = path === '/' ? '/' : rstripSlash(path) + '/'
-    const children = new Set<string>()
-    for (const p of this.prefixes) {
-      if (p.startsWith(normalized) && p !== normalized) {
-        const rest = p.slice(normalized.length)
-        const child = rest.split('/')[0]
-        if (child !== undefined && child !== '') children.add(child)
-      }
-    }
-    return [...children].sort()
   }
 
   cachedSize(path: string): number | null {
@@ -249,7 +236,7 @@ export class MountCore {
     if (inflight !== undefined) return inflight
     const promise = (async (): Promise<Uint8Array | null> => {
       try {
-        const data = await this.ws.fs.readFile(this.resolve(path))
+        const data = await this.ops.readFile(this.resolve(path))
         this.prefetchCache.set(path, { data, expires: Date.now() + PREFETCH_TTL_MS })
         return data
       } catch {
@@ -264,18 +251,28 @@ export class MountCore {
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */
   drainOps(): OpRecord[] {
-    const records = [...this.ws.records]
-    this.ws.records.length = 0
+    const records = [...this.ops.records]
+    this.ops.records.length = 0
     return records
   }
 
   private async writeFile(path: string, data: Uint8Array): Promise<void> {
-    // Keep writes on Workspace.dispatch rather than Workspace.fs.writeFile:
-    // dispatch is where Mirage enforces mount modes, revision tracking, and
-    // post-write invalidation. The lower-level fs helper is useful internally,
-    // but using it from a mount made READ-mode mounts reject create while
-    // still allowing buffered overwrite on flush.
-    await this.ws.dispatch('write', this.resolve(path), [data])
+    await this.ops.writeFile(this.resolve(path), data)
+  }
+
+  /**
+   * Merge buffered writes over the raw base and persist the result.
+   * The base is read raw so a flush never stores a rendered view back
+   * into the mount.
+   */
+  private async applyWrites(path: string, writes: [number, Uint8Array][]): Promise<void> {
+    let existing: Uint8Array = new Uint8Array(0)
+    try {
+      existing = await this.ops.readFile(this.resolve(path), { raw: true })
+    } catch {
+      // missing file: start from empty; the write creates it
+    }
+    await this.writeFile(path, mergeWrites(existing, writes))
   }
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
@@ -292,8 +289,7 @@ export class MountCore {
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target)
-    if (this.isVirtualDir(path)) return this.dirStat()
-    const s = await this.ws.fs.stat(this.resolve(path))
+    const s = await this.ops.stat(this.resolve(path))
     if (s.type === FileType.DIRECTORY) {
       return this.applyStatAttrs(this.dirStat(), s)
     }
@@ -318,23 +314,17 @@ export class MountCore {
   }
 
   async readdir(path: string): Promise<string[]> {
-    const names = new Set(this.virtualChildren(path))
-    const links = this.ws.fs.links
-    if (links !== null) {
-      for (const linkName of links.linksUnder(this.resolve(path)).keys()) {
-        if (linkName !== '' && !isMacosMetadata(linkName)) names.add(linkName)
-      }
+    // The workspace dispatcher merges namespace structure (child mounts
+    // and symlinks) into readdir and answers structure-only directories
+    // itself, so the core only normalizes entry shapes and drops macOS
+    // metadata names.
+    const names = new Set<string>()
+    const entries = await this.ops.readdir(this.resolve(path))
+    for (const e of entries) {
+      const part = rstripSlash(e).split('/').pop() ?? ''
+      if (part !== '' && !isMacosMetadata(part)) names.add(part)
     }
-    try {
-      const entries = await this.ws.fs.readdir(this.resolve(path))
-      for (const e of entries) {
-        const part = rstripSlash(e).split('/').pop() ?? ''
-        if (part !== '' && !isMacosMetadata(part)) names.add(part)
-      }
-    } catch (err) {
-      if (names.size === 0) throw err
-    }
-    return ['.', '..', ...[...names].sort()]
+    return ['.', '..', ...[...names].sort(compareCodePoints)]
   }
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
@@ -345,10 +335,9 @@ export class MountCore {
     // Matches Python's `self._ops.read(path)`, which also dispatches.
     if (ctx !== undefined && ctx.data === undefined) {
       const cached = this.cachedData(path)
-      ctx.data = cached ?? (await this.ws.fs.readFile(this.resolve(path)))
+      ctx.data = cached ?? (await this.ops.readFile(this.resolve(path)))
     }
-    const data =
-      ctx?.data ?? this.cachedData(path) ?? (await this.ws.fs.readFile(this.resolve(path)))
+    const data = ctx?.data ?? this.cachedData(path) ?? (await this.ops.readFile(this.resolve(path)))
     return data.subarray(pos, pos + len)
   }
 
@@ -360,30 +349,7 @@ export class MountCore {
       ctx.writeBuf.push([pos, data])
       return
     }
-    let existing: Uint8Array = new Uint8Array(0)
-    try {
-      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
-    } catch {
-      // file may not exist yet
-    }
-    let merged = existing
-    if (pos > merged.byteLength) {
-      // zero-pad from end-of-file up to the write offset (sparse write).
-      const padded = new Uint8Array(pos + data.byteLength)
-      padded.set(merged, 0)
-      padded.set(data, pos)
-      merged = padded
-    } else {
-      const size = Math.max(merged.byteLength, pos + data.byteLength)
-      const out = new Uint8Array(size)
-      out.set(merged.subarray(0, pos), 0)
-      out.set(data, pos)
-      if (pos + data.byteLength < merged.byteLength) {
-        out.set(merged.subarray(pos + data.byteLength), pos + data.byteLength)
-      }
-      merged = out
-    }
-    await this.writeFile(path, merged)
+    await this.applyWrites(path, [[pos, data]])
   }
 
   async create(path: string): Promise<number> {
@@ -391,18 +357,16 @@ export class MountCore {
     // "create empty" from "write bytes" get the right code path. Falls back
     // to writeFile(empty) when the resource doesn't expose `create`.
     try {
-      await this.ws.dispatch('create', this.resolve(path))
+      await this.ops.create(this.resolve(path))
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
       await this.writeFile(path, new Uint8Array(0))
     }
-    return this.track({ path })
+    return this.handles.add({ path })
   }
 
   async mkdir(path: string): Promise<void> {
-    // Metadata ops route through dispatch (not ws.fs) so the file cache and
-    // readdir index are invalidated like any other write.
-    await this.ws.dispatch('mkdir', this.resolve(path))
+    await this.ops.mkdir(this.resolve(path))
   }
 
   readlink(path: string): string {
@@ -419,26 +383,30 @@ export class MountCore {
    * will later follow.
    */
   async symlink(src: string, dest: string): Promise<void> {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links === null) throw errnoError('EROFS', 'workspace has no namespace links')
     const stored = src.startsWith('/') ? this.resolve(src) : src
     await links.symlink(this.resolve(dest), stored, Date.now() / 1000)
   }
 
   async unlink(path: string): Promise<void> {
-    const links = this.ws.fs.links
+    const links = this.ops.links
     if (links?.isLink(this.resolve(path)) === true) {
       await links.unlink(this.resolve(path))
       this.xattrs.delete(path)
       this.prefetchCache.delete(path)
       return
     }
-    await this.ws.dispatch('unlink', this.resolve(path))
+    await this.ops.unlink(this.resolve(path))
     this.xattrs.delete(path)
   }
 
   async rename(src: string, dst: string): Promise<void> {
-    await this.ws.dispatch('rename', this.resolve(src), [PathSpec.fromStrPath(this.resolve(dst))])
+    // The facade is where a cross-mount pair is refused with EXDEV,
+    // which is what makes `mv` between two backends fall back to
+    // copy+unlink instead of addressing the destination against the
+    // source's backend.
+    await this.ops.rename(this.resolve(src), this.resolve(dst))
     const moved = this.xattrs.get(src)
     if (moved !== undefined) {
       this.xattrs.delete(src)
@@ -451,7 +419,7 @@ export class MountCore {
     // cleanly. Message-string sniffing alone is unreliable across backends;
     // check contents first.
     try {
-      const entries = await this.ws.fs.readdir(this.resolve(path))
+      const entries = await this.ops.readdir(this.resolve(path))
       if (entries.length > 0) {
         throw errnoError('ENOTEMPTY', `directory not empty: ${path}`)
       }
@@ -460,7 +428,7 @@ export class MountCore {
       // readdir failure — fall through to rmdir and let it raise the real
       // error (e.g. ENOENT for missing path).
     }
-    await this.ws.dispatch('rmdir', this.resolve(path))
+    await this.ops.rmdir(this.resolve(path))
     this.xattrs.delete(path)
   }
 
@@ -469,10 +437,10 @@ export class MountCore {
     // backends). Fall back to read/resize/write for resources that don't
     // expose one.
     try {
-      await this.ws.dispatch('truncate', this.resolve(path), [size])
+      await this.ops.truncate(this.resolve(path), size)
     } catch (dispatchErr) {
       if (!isMissingOp(dispatchErr, 'truncate')) throw dispatchErr
-      const data = await this.ws.fs
+      const data = await this.ops
         .readFile(this.resolve(path), { raw: true })
         .catch(() => new Uint8Array(0))
       const out = new Uint8Array(size)
@@ -518,13 +486,13 @@ export class MountCore {
   }
 
   async open(path: string): Promise<number> {
-    const s = await this.ws.fs.stat(this.resolve(path))
+    const s = await this.ops.stat(this.resolve(path))
     const ctx: Handle = { path }
     if (s.size === null && s.type !== FileType.DIRECTORY) {
       const data = await this.prefetch(path)
       if (data !== null) ctx.data = data
     }
-    return this.track(ctx)
+    return this.handles.add(ctx)
   }
 
   async release(fd: number): Promise<void> {
@@ -536,7 +504,7 @@ export class MountCore {
       // written through an fskit mount.
       await this.flush(ctx.path, fd)
     }
-    this.handles.delete(fd)
+    this.handles.pop(fd)
   }
 
   async flush(path: string, fd: number): Promise<void> {
@@ -544,27 +512,6 @@ export class MountCore {
     if (ctx?.writeBuf === undefined || ctx.writeBuf.length === 0) return
     const writes = ctx.writeBuf
     ctx.writeBuf = []
-    let existing: Uint8Array = new Uint8Array(0)
-    try {
-      existing = await this.ws.fs.readFile(this.resolve(path), { raw: true })
-    } catch {
-      // missing file: start from empty; the write creates it
-    }
-    let total = existing.byteLength
-    for (const [off, chunk] of writes) {
-      total = Math.max(total, off + chunk.byteLength)
-    }
-    const merged = new Uint8Array(total)
-    merged.set(existing, 0)
-    for (const [off, chunk] of writes) {
-      merged.set(chunk, off)
-    }
-    await this.writeFile(path, merged)
-  }
-
-  private track(ctx: Handle): number {
-    const fh = this.nextFh++
-    this.handles.set(fh, ctx)
-    return fh
+    await this.applyWrites(path, writes)
   }
 }

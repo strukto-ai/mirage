@@ -14,6 +14,7 @@
 
 import type { RedisClientType } from 'redis'
 import { loadOptionalPeer } from '../../optional_peer.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 export interface RedisStoreOptions {
   url?: string
@@ -111,7 +112,7 @@ export class RedisStore {
       const keys = Array.isArray(k) ? k : [k]
       for (const key of keys) result.push(key.slice(strip))
     }
-    return result.sort()
+    return result.sort(compareCodePoints)
   }
 
   async fileLen(path: string): Promise<number> {

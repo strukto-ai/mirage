@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
-import { USAGE_EXIT, USAGE_HINT_PREFIX } from './constants'
+import {
+  OLD_OPTION_EXIT,
+  PYTHON_NAMES,
+  pythonUsage,
+  USAGE_EXIT,
+  USAGE_HINT_PREFIX,
+} from './constants'
 import { CommandName } from './types.ts'
 
 /** GNU usage-error exit code for a command. */
@@ -31,6 +37,10 @@ export function usageExitCode(cmdName: string): number {
  * are deliberately omitted; the `--help` hint line is kept because every
  * registered command serves `--help`.
  */
+function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] {
+  return [new TextEncoder().encode(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
+}
+
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
   if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
@@ -38,6 +48,16 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
       new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`),
       usageExitCode(cmdName),
     ]
+  }
+  if (PYTHON_NAMES.has(cmdName)) {
+    // CPython's own two shapes, which do not match each other: the short
+    // form capitalizes and takes a colon, the long form does neither.
+    // Both pinned on 3.12.13.
+    if (token.startsWith('--')) {
+      return pythonOptionError(cmdName, `unknown option ${token}\n`)
+    }
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Unknown option: ${dashed}\n`)
   }
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`
@@ -100,11 +120,36 @@ export function invalidFloatError(
 
 /** GNU-shaped error for a declared value flag with no argument left. */
 export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
+  if (PYTHON_NAMES.has(cmdName)) {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)
+  }
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`
   const hint = `Try '${cmdName} --help' for more information.\n`
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * GNU tar refusal for an old-style cluster letter with no argument.
+ *
+ * First line and exit pinned against GNU tar 1.35 (`tar xzf` with
+ * nothing after it, and `tar cfC a.tar`, which names C). tar's own
+ * wording, capital and full stop included, because it counts the
+ * cluster's argument needs before argp sees the line at all.
+ *
+ * The hint line is deliberately mirage's, not GNU's: GNU offers
+ * `Try 'tar --help' or 'tar --usage' for more information.` because argp
+ * gives every argp program a `--usage`, and mirage's tar serves only
+ * `--help`. Naming a flag that does not exist would be worse than the
+ * shorter hint, and every other refusal here words it this way, so tar's
+ * two refusals stay consistent with each other.
+ */
+export function oldOptionError(cmdName: string, letter: string): [Uint8Array, number] {
+  const line = `${cmdName}: Old option '${letter}' requires an argument.\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), OLD_OPTION_EXIT]
 }
 
 /**

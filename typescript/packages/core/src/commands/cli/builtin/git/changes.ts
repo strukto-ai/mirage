@@ -32,6 +32,7 @@ import type {
   WorkTree,
 } from './types.ts'
 import { scan } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const UNCHANGED = ' '
 const MODIFIED = 'M'
@@ -163,7 +164,13 @@ async function contentRenames(
       if (score >= RENAME_THRESHOLD) candidates.push([-score, fresh, old])
     }
   }
-  candidates.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]) || a[2].localeCompare(b[2]))
+  // Python is `candidates.sort()`, a code-point tuple sort, so the paths
+  // tie-break by code point rather than ICU collation. The comment above
+  // promises the same resolution on every run; that only holds if both
+  // trees break the tie the same way.
+  candidates.sort(
+    (a, b) => a[0] - b[0] || compareCodePoints(a[1], b[1]) || compareCodePoints(a[2], b[2]),
+  )
   const takenNew = new Set<string>()
   const takenOld = new Set<string>()
   const pairs: [string, string][] = []
@@ -192,7 +199,7 @@ async function pairRenames(
     [...staged.entries()]
       .filter(([path, held]) => held === letter && regular.has(path))
       .map(([path]) => path)
-      .sort()
+      .sort(compareCodePoints)
   const adds = pick(ADDED)
   const deletes = pick(DELETED)
   const pairs = exactRenames(adds, deletes, oids)
@@ -352,7 +359,9 @@ function merge(
   untracked: readonly string[],
 ): StatusEntry[] {
   const rows: StatusEntry[] = []
-  const paths = [...new Set([...staged.keys(), ...unstaged.keys(), ...conflicts.keys()])].sort()
+  const paths = [...new Set([...staged.keys(), ...unstaged.keys(), ...conflicts.keys()])].sort(
+    compareCodePoints,
+  )
   for (const path of paths) {
     const code = conflicts.get(path)
     if (code !== undefined) {
@@ -372,7 +381,7 @@ function merge(
       original: origin,
     })
   }
-  for (const path of [...untracked].sort()) {
+  for (const path of [...untracked].sort(compareCodePoints)) {
     rows.push({ path, indexStatus: UNTRACKED, treeStatus: UNTRACKED, original: null })
   }
   return rows

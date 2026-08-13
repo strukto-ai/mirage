@@ -132,6 +132,66 @@
         "stdout": "/data/qsha/sh.txt: OK\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sha256sum_c_missing_list_reports_and_continues",
+      "seq": 960093,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qshm && printf 'hello' > /data/qshm/sh.txt && sha256sum /data/qshm/sh.txt > /data/qshm/sums && sha256sum -c /data/qshm/sums /data/qshm/nope.sums",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/qshm/sh.txt: OK\n",
+        "stderr": "sha256sum: /data/qshm/nope.sums: No such file or directory\n"
+      }
+    },
+    {
+      "id": "sha256sum_c_directory_list_is_read_error",
+      "seq": 960094,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qshr/d && printf 'hello' > /data/qshr/sh.txt && sha256sum /data/qshr/sh.txt > /data/qshr/sums && sha256sum -c /data/qshr/sums /data/qshr/d",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/qshr/sh.txt: OK\n",
+        "stderr": "sha256sum: /data/qshr/d: read error\n"
+      }
     }
   ]
 }

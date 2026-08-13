@@ -97,12 +97,138 @@ async def test_ln_sn_and_sT_are_accepted_noops():
 
 
 @pytest.mark.asyncio
-async def test_cd_through_symlink():
+async def test_cd_through_symlink_keeps_the_name_it_was_given():
+    # GNU bash 5.2: `cd /data/slink && pwd` prints the link, not the
+    # target. The logical name is what the shell reports and what the
+    # next `cd ..` acts on; `pwd -P` is how you ask for the target.
     ws = _ws()
     await ws.execute("mkdir -p /data/real")
     await ws.execute("ln -s /data/real /data/slink")
     r = await ws.execute("cd /data/slink && pwd")
+    assert r.stdout.decode() == "/data/slink\n"
+    r = await ws.execute("cd /data/slink && pwd -P")
     assert r.stdout.decode() == "/data/real\n"
+
+
+# Every row pinned in GNU bash 5.2 (debian:stable-slim) against the same
+# fixture this test builds: /data/deep/real/sub, /data/lk -> /data/deep/real.
+# The shell keeps two names for the cwd -- the logical one you typed and
+# the physical one it resolves to -- and each row says which one a given
+# surface reports.
+LOGICAL_CWD_ROWS = [
+    # `pwd` and `$PWD` report the logical name; `pwd -P` the physical one.
+    ("cd /data/lk && pwd", "/data/lk\n"),
+    ("cd /data/lk && pwd -L", "/data/lk\n"),
+    ("cd /data/lk && pwd -P", "/data/deep/real\n"),
+    ('cd /data/lk && echo "$PWD"', "/data/lk\n"),
+    # Last flag wins, exactly as `cd -L -P` does.
+    ("cd /data/lk && pwd -L -P", "/data/deep/real\n"),
+    ("cd /data/lk && pwd -P -L", "/data/lk\n"),
+    # A relative operand joins the logical name under -L, the physical
+    # one under -P. This is the row where the two disagree about which
+    # directory you end up in, not just how it is spelled.
+    ("cd /data/lk && cd .. && pwd", "/data\n"),
+    ("cd /data/lk && cd -P .. && pwd", "/data/deep\n"),
+    ("cd /data/lk && cd sub && pwd", "/data/lk/sub\n"),
+    ("cd /data/lk && cd -P sub && pwd", "/data/deep/real/sub\n"),
+    # -P collapses the pair, so it re-spells the cwd without moving.
+    ("cd /data/lk && cd -P . && pwd", "/data/deep/real\n"),
+    ("cd -P /data/lk && pwd", "/data/deep/real\n"),
+    # $OLDPWD stores the logical name, so `cd -` returns to that spelling.
+    ('cd /data/lk && cd /data && echo "$OLDPWD"', "/data/lk\n"),
+    ("cd /data/lk && cd /data && cd -", "/data/lk\n"),
+    # Everything that is not a shell builtin stays physical, the way a
+    # real child process does: bash's own `ls ..` lists /data/deep here.
+    ("cd /data/lk && ls ..", "real\n"),
+    # `-P` announces the path as selected and lands on the target: the
+    # printed name and the resulting cwd deliberately disagree.
+    ("cd /data/lk && cd /data && cd -P -", "/data/lk\n"),
+    ("cd /data/lk && cd /data && cd -P - && pwd",
+     "/data/lk\n/data/deep/real\n"),
+    # `set -P` is the session-wide `-P`, and GNU applies it to `cd` and
+    # `pwd` alike. With no logical name ever recorded, `pwd -L` has
+    # nothing else to report.
+    ("set -P; cd /data/lk; pwd", "/data/deep/real\n"),
+    ("set -P; cd /data/lk; pwd -L", "/data/deep/real\n"),
+    ('set -P; cd /data/lk; echo "$PWD"', "/data/deep/real\n"),
+    ("set -o physical; cd /data/lk; pwd", "/data/deep/real\n"),
+    ("set -P; set +P; cd /data/lk; pwd", "/data/lk\n"),
+    # A relative operand follows the session mode too.
+    ("set -P; cd /data/lk; cd ..; pwd", "/data/deep\n"),
+]
+
+
+@pytest.mark.parametrize("command,expected", LOGICAL_CWD_ROWS)
+@pytest.mark.asyncio
+async def test_logical_and_physical_cwd(command: str, expected: str):
+    ws = _ws()
+    await ws.execute("mkdir -p /data/deep/real/sub")
+    await ws.execute("ln -s /data/deep/real /data/lk")
+    r = await ws.execute(command)
+    assert r.exit_code == 0, r.stderr.decode()
+    assert r.stdout.decode() == expected
+
+
+@pytest.mark.asyncio
+async def test_pwd_rejects_an_unknown_option():
+    ws = _ws()
+    r = await ws.execute("pwd -x")
+    assert r.exit_code == 2
+    assert r.stderr.decode() == ("pwd: -x: invalid option\n"
+                                 "pwd: usage: pwd [-LP]\n")
+
+
+@pytest.mark.asyncio
+async def test_pwd_ignores_operands():
+    ws = _ws()
+    r = await ws.execute("cd /data && pwd extra")
+    assert r.exit_code == 0
+    assert r.stdout.decode() == "/data\n"
+
+
+@pytest.mark.asyncio
+async def test_logical_cwd_is_not_revalidated():
+    # bash never re-checks the logical name: removing the link it was
+    # spelled through leaves `pwd` printing it, and only `pwd -P` tells
+    # you where you actually are.
+    ws = _ws()
+    await ws.execute("mkdir -p /data/deep/real")
+    await ws.execute("ln -s /data/deep/real /data/lk")
+    r = await ws.execute("cd /data/lk && rm /data/lk && pwd && pwd -P")
+    assert r.exit_code == 0, r.stderr.decode()
+    assert r.stdout.decode() == "/data/lk\n/data/deep/real\n"
+
+
+@pytest.mark.asyncio
+async def test_cdpath_hit_announces_the_spelling_not_the_target():
+    # GNU prints the name it selected through $CDPATH even under -P,
+    # where the directory it lands on is the link's target.
+    ws = _ws()
+    await ws.execute("mkdir -p /data/c/t")
+    await ws.execute("ln -s /data/c/t /data/c/lnk")
+    r = await ws.execute("export CDPATH=/data/c; cd -P lnk; pwd")
+    assert r.exit_code == 0, r.stderr.decode()
+    assert r.stdout.decode() == "/data/c/lnk\n/data/c/t\n"
+
+
+@pytest.mark.asyncio
+async def test_set_o_rejects_a_name_bash_does_not_have():
+    ws = _ws()
+    r = await ws.execute("set -o bogusname")
+    assert r.exit_code == 2
+    assert r.stderr.decode() == "set: bogusname: invalid option name\n"
+
+
+@pytest.mark.asyncio
+async def test_set_o_keeps_what_it_applied_before_the_bad_name():
+    # GNU applies left to right and stops at the bad name, so an option
+    # named before it stays on and one named after it never lands.
+    ws = _ws()
+    r = await ws.execute("set -o pipefail -o bogus -o noclobber")
+    assert r.exit_code == 2
+    session = ws.get_session(ws.default_session_id)
+    assert session.shell_options.get("pipefail") is True
+    assert "noclobber" not in session.shell_options
 
 
 @pytest.mark.asyncio

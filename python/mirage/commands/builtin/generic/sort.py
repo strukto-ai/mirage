@@ -6,7 +6,7 @@ from mirage.commands.builtin.sort_helper import (SortKeyError, build_config,
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,7 +34,7 @@ class SortFlags:
     zero_terminated: bool = False
 
 
-def parse_flags(flags: Mapping[str, object]) -> SortFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     fl = FlagView(flags, spec=SPECS["sort"])
     raw_check = fl.raw("check")
     if raw_check not in (None, True, "diagnose-first", "quiet", "silent"):
@@ -79,7 +79,7 @@ async def sort(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
-    flags: Mapping[str, object] | None = None,
+    flags: Mapping[str, FlagValue] | None = None,
     reverse: bool = False,
     numeric: bool = False,
     unique: bool = False,

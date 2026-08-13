@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "type_builtin",
+      "id": "lookup_type_builtin",
       "seq": 904,
       "targets": [
         "ram"
@@ -14,7 +14,7 @@
       }
     },
     {
-      "id": "type_t_builtin",
+      "id": "lookup_type_t_builtin",
       "seq": 905,
       "targets": [
         "ram"
@@ -27,7 +27,7 @@
       }
     },
     {
-      "id": "type_keyword",
+      "id": "lookup_type_keyword",
       "seq": 906,
       "targets": [
         "ram"
@@ -40,7 +40,7 @@
       }
     },
     {
-      "id": "type_t_keyword",
+      "id": "lookup_type_t_keyword",
       "seq": 907,
       "targets": [
         "ram"
@@ -53,7 +53,7 @@
       }
     },
     {
-      "id": "type_function",
+      "id": "lookup_type_function",
       "seq": 908,
       "targets": [
         "ram"
@@ -66,7 +66,7 @@
       }
     },
     {
-      "id": "type_not_found",
+      "id": "lookup_type_not_found",
       "seq": 909,
       "targets": [
         "ram"
@@ -79,7 +79,7 @@
       }
     },
     {
-      "id": "type_all_found_exit_rule",
+      "id": "lookup_type_all_found_exit_rule",
       "seq": 910,
       "targets": [
         "ram"
@@ -92,7 +92,7 @@
       }
     },
     {
-      "id": "type_t_not_found_is_silent",
+      "id": "lookup_type_t_not_found_is_silent",
       "seq": 911,
       "targets": [
         "ram"
@@ -105,7 +105,7 @@
       }
     },
     {
-      "id": "type_p_prints_no_path",
+      "id": "lookup_type_p_prints_no_path",
       "seq": 912,
       "targets": [
         "ram"
@@ -118,7 +118,7 @@
       }
     },
     {
-      "id": "type_invalid_option",
+      "id": "lookup_type_invalid_option",
       "seq": 913,
       "targets": [
         "ram"
@@ -131,7 +131,7 @@
       }
     },
     {
-      "id": "type_a_lists_every_layer",
+      "id": "lookup_type_a_lists_every_layer",
       "seq": 914,
       "targets": [
         "ram"
@@ -144,7 +144,7 @@
       }
     },
     {
-      "id": "type_a_keeps_the_function_under_a_keyword",
+      "id": "lookup_type_a_keeps_the_function_under_a_keyword",
       "seq": 922,
       "targets": [
         "ram"
@@ -157,7 +157,7 @@
       }
     },
     {
-      "id": "type_t_time_is_not_a_keyword_here",
+      "id": "lookup_type_t_time_is_not_a_keyword_here",
       "seq": 923,
       "targets": [
         "ram"

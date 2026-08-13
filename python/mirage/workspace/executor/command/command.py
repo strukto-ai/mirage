@@ -40,13 +40,9 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
                                                        default_cwd_operand,
                                                        merge_scopes,
                                                        path_flag_scopes)
-from mirage.workspace.executor.command.run import (drop_service_caches,
-                                                   exec_node, mount_root_of,
-                                                   run_on_mount,
-                                                   scalar_find_flags)
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
-                                              _should_fan_out)
+                                              _should_fan_out, run_with_fanout)
 from mirage.workspace.executor.jobs import (handle_fg, handle_jobs,
                                             handle_kill, handle_ps,
                                             handle_wait)
@@ -57,6 +53,10 @@ from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
+
+from mirage.workspace.executor.command.run import (  # isort: skip
+    drop_service_caches, exec_node, link_view, mount_root_of, mount_view,
+    registry_child_mounts, run_on_mount, scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; route already narrowed the name.
 JOB_HANDLERS = {
@@ -221,13 +221,22 @@ async def handle_command(
                                        dispatch,
                                        namespace,
                                        routing_decision=routing_decision)
+        # A per-operand native run is single-mount by construction, so a
+        # traversal operand holding nested mounts has to fan out inside
+        # it, exactly as the same operand would on a line of its own.
+        run_operand = functools.partial(
+            run_with_fanout, run_single, registry, session.cwd,
+            mount_view(registry), link_view(namespace, dispatch),
+            functools.partial(registry_child_mounts, registry, namespace),
+            functools.partial(path_stat, dispatch)
+            if dispatch is not None else None)
         stdout, io = await handle_cross_mount(
             cmd_name,
             cross_scopes,
             cross_texts,
             cross_parsed.flag_kwargs,
             dispatch,
-            run_single,
+            run_operand,
             stdin=stdin,
             storage_key=make_storage_key(registry))
         if cross_parsed.warnings:
@@ -323,10 +332,28 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        stdout, io, node = await _fan_out_traversal(cmd_name, paths, texts,
-                                                    flag_kwargs, registry,
-                                                    mount, session.cwd,
-                                                    cmd_str, stdin)
+        # The child-mount names and the dispatcher-backed start-point
+        # stat. A start point only the namespace serves (a nested
+        # mount's ancestor) has no backend listing, so without them the
+        # primary run reports the operand missing. The stat overlay is
+        # still dropped here, a known seam of the fan-out.
+        child_mounts = functools.partial(registry_child_mounts, registry,
+                                         namespace)
+        stdout, io, node = await _fan_out_traversal(
+            cmd_name,
+            paths,
+            texts,
+            flag_kwargs,
+            registry,
+            mount,
+            session.cwd,
+            cmd_str,
+            stdin,
+            mounts=mount_view(registry),
+            links=link_view(namespace, dispatch),
+            child_mounts=child_mounts,
+            stat_path=(functools.partial(path_stat, dispatch)
+                       if dispatch is not None else None))
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing

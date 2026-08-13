@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult } from '../../../../io/types.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/types.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 const ENC = new TextEncoder()
@@ -37,13 +39,15 @@ export const LN_BUILDER: Builder = {
     const source = resolved[0]
     const dest = resolved[1]
     if (source === undefined || dest === undefined) return [null, new IOResult()]
-    if (opts.flags.n === true && (await exists(accessor, dest))) {
+    const fl = new FlagView(opts.flags, specOf('ln'))
+    if (fl.asBool('n') && (await exists(accessor, dest))) {
       return [null, new IOResult()]
     }
     const data = await ops.readBytes(accessor, source, idx)
     await write(accessor, dest, data)
-    const out: ByteSource | null =
-      opts.flags.v === true ? ENC.encode(`'${source.virtual}' -> '${dest.virtual}'\n`) : null
+    const out: ByteSource | null = fl.asBool('v')
+      ? ENC.encode(`'${source.virtual}' -> '${dest.virtual}'\n`)
+      : null
     return [out, new IOResult({ writes: { [dest.mountPath]: data } })]
   },
 }

@@ -20,6 +20,7 @@ import {
   startBasename,
   type FindOptions,
   type PathSpec,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import {
@@ -185,5 +186,5 @@ export async function find(
       maxSize: options.maxSize,
     })
   }
-  return results.sort()
+  return results.sort(compareCodePoints)
 }

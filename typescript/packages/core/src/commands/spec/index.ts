@@ -29,4 +29,5 @@ export {
   ParsedArgs,
   type ParsedArgsInit,
   specFlagNames,
+  UsageStyle,
 } from './types.ts'

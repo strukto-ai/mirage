@@ -59,6 +59,8 @@ def diff_row(a: dict, b: dict) -> list[str]:
         diffs.append(f"stdout py={a['stdout']!r} ts={b['stdout']!r}")
     if a["stderr"].rstrip("\n") != b["stderr"].rstrip("\n"):
         diffs.append(f"stderr py={a['stderr']!r} ts={b['stderr']!r}")
+    if a["check"] != b["check"]:
+        diffs.append(f"check py={a['check']!r} ts={b['check']!r}")
     return diffs
 
 
@@ -103,6 +105,12 @@ def main() -> None:
     compared = len(py.keys() & ts.keys())
     print(f"\n{compared} case/target pairs compared, {mismatches} mismatch(es)"
           f" across targets: {', '.join(targets)}")
+    # Both emit runs skip a target whose service never came up, and a run
+    # that compared nothing agrees with itself trivially. Zero pairs is a
+    # broken run, never a clean one.
+    if compared == 0:
+        print("no case/target pairs compared", file=sys.stderr)
+        sys.exit(2)
     if mismatches:
         sys.exit(1)
 

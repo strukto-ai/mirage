@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "id": "split_separator_multi_char_refused",
+      "seq": 960010,
+      "note": "GNU 9.7 refuses a separator longer than one byte rather than taking its first byte.",
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/sepm && printf 'a\\nb\\n' > /data/sepm/in && split --separator=XY /data/sepm/in /data/sepm/s",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: multi-character separator 'XY'\n"
+      },
+      "flags": ["separator"]
+    },
+    {
+      "id": "split_separator_empty_refused",
+      "seq": 960011,
+      "note": "GNU 9.7 reports an explicitly empty --separator instead of falling back to newline.",
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/sepe && printf 'a\\nb\\n' > /data/sepe/in && split --separator='' /data/sepe/in /data/sepe/s",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: empty record separator\n"
+      },
+      "flags": ["separator"]
+    },
+    {
+      "id": "split_separator_nul_escape",
+      "seq": 960012,
+      "note": "GNU 9.7 reads the two-character spelling \\0 as a NUL separator; each record keeps its terminator, so 3 NUL-terminated records at 2 per file are 4 bytes then 2. The default newline separator would see one 6-byte record.",
+      "targets": ["ram", "disk"],
+      "command": "mkdir -p /data/sepn && printf 'a\\0b\\0c\\0' > /data/sepn/in && split --lines 2 --separator='\\0' /data/sepn/in /data/sepn/s && wc -c < /data/sepn/saa && wc -c < /data/sepn/sab",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n2\n",
+        "stderr": ""
+      },
+      "flags": ["separator", "lines"]
+    }
+  ]
+}

@@ -160,13 +160,13 @@ jobs:
       - name: Run lancedb integ (embedded, JSON harness)
         env:
           LANCEDB_ENABLED: "1"
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target lancedb --strict
 
       - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet argerr --strict
 
       - name: Run curl/wget battery (HTTP fixture started by the adapter)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet http
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet http --strict
 
       - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
         run: ./python/.venv/bin/python integ/cross_commands.py
@@ -216,7 +216,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -252,7 +252,7 @@ jobs:
 
       - name: Run declarative battery on Nextcloud
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud
+        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud --strict
 
       - name: Start MinIO
         run: |
@@ -297,25 +297,48 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
 
+      - name: Start fake Notion API (Prisma)
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
+        run: |
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
+
       - name: Run notion integ (TS, mock server, JSON harness)
         working-directory: integ
         env:
           NOTION_ENABLED: "1"
-        run: pnpm exec tsx runners/typescript/main.ts --target notion
+        run: pnpm exec tsx runners/typescript/main.ts --target notion --strict
 
       - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
         run: pnpm exec tsx notion_mcp_parity.ts
 
+      # Runs every cli-ntn case through the REAL Notion CLI against the same
+      # fake, so the goldens the battery asserts are by construction what the
+      # official binary prints. Pinned by version; the script refuses any other.
+      - name: Run ntn CLI conformance against the real binary
+        working-directory: integ
+        run: |
+          # Installed outside the pnpm workspace so it cannot disturb
+          # node_modules the rest of the job depends on.
+          mkdir -p /tmp/ntncli
+          (cd /tmp/ntncli && npm i --no-audit --no-fund ntn@0.21.9)
+          NTN_BIN=/tmp/ntncli/node_modules/.bin/ntn pnpm exec tsx ntn_conformance.ts
+
       - name: Run lancedb integ (TS, embedded, JSON harness)
         working-directory: integ
         env:
           LANCEDB_ENABLED: "1"
-        run: pnpm exec tsx runners/typescript/main.ts --target lancedb
+        run: pnpm exec tsx runners/typescript/main.ts --target lancedb --strict
 
       - name: Run find arg-error battery (SaaS backends, dummy creds, no server)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet argerr
+        run: pnpm exec tsx runners/typescript/main.ts --facet argerr --strict
 
   integ-shared-py:
     needs: changes
@@ -362,7 +385,7 @@ jobs:
         with:
           build-packages: "false"
       - name: Run declarative battery (python hosts)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
   integ-shared-ts:
     needs: changes
@@ -406,16 +429,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/integ-battery-setup
+
+      # Every "verified by integ" claim rests on the runner failing when it
+      # tests nothing, so assert the gates themselves before the battery.
+      # This job hosts them because it is the only one with both halves: the
+      # setup action always installs the python venv, and this job is the
+      # one that builds the mirage packages the typescript runner imports
+      # (integ-shared-py passes build-packages: false). --require-ts turns
+      # an absent tsx into a failure rather than a silent half-run.
+      - name: Assert the integ runner gates (strict exit, services, case ids)
+        run: ./python/.venv/bin/python integ/runners/tools/gate_selftest.py --require-ts
+
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet core
+        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
       # The fixture server is python (started by the adapter through
       # startPythonServer), so this runs here rather than in integ-ts, which
       # has no python toolchain.
       - name: Run curl/wget battery (typescript host)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet http
+        run: pnpm exec tsx runners/typescript/main.ts --facet http --strict
 
   # The two jobs above prove each language passes its own battery. This one
   # runs both emitters and diffs them case by case, so a change that breaks
@@ -512,7 +546,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -573,6 +607,7 @@ jobs:
         run: >-
           ./python/.venv/bin/python integ/runners/python/main.py
           --target mongodb --target postgres --target chroma --target qdrant
+          --strict
 
       - name: Run database battery (typescript host)
         if: ${{ !cancelled() }}
@@ -580,6 +615,7 @@ jobs:
         run: >-
           pnpm exec tsx runners/typescript/main.ts
           --target mongodb --target postgres --target chroma --target qdrant
+          --strict
 
   integ-data:
     needs: changes
@@ -616,10 +652,38 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
+      # The notion fake is a Node server shared by both hosts, so this
+      # otherwise python-only job needs node to start it. No package build is
+      # required: notion_server.ts imports only node, prisma and the MCP sdk.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Start fake Notion API (Prisma)
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
+        run: |
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notionsrv.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notionsrv.log && break; sleep 1; done
+          cat /tmp/notionsrv.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
+
       - name: Run notion integ (mock server, JSON harness)
         env:
           NOTION_ENABLED: "1"
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target notion
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target notion --strict
 
       - name: Wait for Nextcloud install
         shell: bash
@@ -636,7 +700,7 @@ jobs:
           exit 1
 
       - name: Run declarative battery on nextcloud
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
 
       - name: Run watch battery on nextcloud
         env:
@@ -683,7 +747,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -928,7 +992,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -1030,7 +1094,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -1076,14 +1140,14 @@ jobs:
         env:
           LANGFUSE_URL: http://localhost:3000
           JAEGER_URL: http://localhost:16686
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet observability
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet observability --strict
 
       - name: Run observability battery (typescript host)
         working-directory: integ
         env:
           LANGFUSE_URL: http://localhost:3000
           JAEGER_URL: http://localhost:16686
-        run: pnpm exec tsx runners/typescript/main.ts --facet observability
+        run: pnpm exec tsx runners/typescript/main.ts --facet observability --strict
 
       - name: Jaeger logs on failure
         if: failure()
@@ -1136,7 +1200,7 @@ jobs:
           node-version: '24'
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.9
+        uses: pnpm/action-setup@v6.0.10
         with:
           version: 10.32.1
 
@@ -1160,8 +1224,11 @@ jobs:
 
       - name: Start fake Trello and Linear APIs
         if: matrix.facet == 'project'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-trello-ci.db
         run: |
-          nohup ./python/.venv/bin/python integ/server/trello_server.py --port 5095 > /tmp/trello.log 2>&1 &
+          (cd integ && ./node_modules/.bin/prisma generate --schema prisma/schema.prisma)
+          (cd integ && nohup ./node_modules/.bin/tsx server/trello.ts --port 5095 > /tmp/trello.log 2>&1 &)
           nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
           for f in trello linear; do
             for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/$f.log && break; sleep 1; done
@@ -1194,7 +1261,7 @@ jobs:
         if: matrix.facet == 'chat' || matrix.facet == 'cli'
         working-directory: integ
         env:
-          SLACK_DB_URL: file:/tmp/mirage-slack-ci.db
+          INTEG_DB_URL: file:/tmp/mirage-slack-ci.db
         run: |
           ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
           nohup ./node_modules/.bin/tsx server/slack.ts --port 5097 > /tmp/slack.log 2>&1 &
@@ -1210,15 +1277,33 @@ jobs:
           cat /tmp/discord.log
           echo "DISCORD_ENDPOINT=http://127.0.0.1:5099" >> "$GITHUB_ENV"
 
+      - name: Start fake GitHub API
+        if: matrix.facet == 'cli'
+        run: |
+          nohup ./python/.venv/bin/python integ/server/github_server.py \
+            --port 5098 --repo integ/repo-cli=github/repo-v1 \
+            > /tmp/github.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "GITHUB_ENDPOINT=" /tmp/github.log && break; sleep 1; done
+          cat /tmp/github.log
+          echo "GITHUB_URL=http://127.0.0.1:5098" >> "$GITHUB_ENV"
+
       # The ntn and linear CLIs ride the notion mock (self-started by each
       # runner under NOTION_ENABLED) and the fake Linear GraphQL server.
-      - name: Start fake Linear API and enable the Notion mock
+      - name: Start fake Linear API and the Notion mock
         if: matrix.facet == 'cli'
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-notion-ci.db
         run: |
           nohup ./python/.venv/bin/python integ/server/linear_server.py --port 5094 > /tmp/linear.log 2>&1 &
           for i in $(seq 1 30); do grep -q "ENDPOINT=" /tmp/linear.log && break; sleep 1; done
           cat /tmp/linear.log
           echo "LINEAR_ENDPOINT=http://127.0.0.1:5094/graphql" >> "$GITHUB_ENV"
+          cd integ
+          ./node_modules/.bin/prisma generate --schema prisma/schema.prisma
+          nohup ./node_modules/.bin/tsx server/notion_server.ts --port 5091 > /tmp/notion.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "NOTION_URL=" /tmp/notion.log && break; sleep 1; done
+          cat /tmp/notion.log
+          echo "NOTION_URL=http://127.0.0.1:5091" >> "$GITHUB_ENV"
           echo "NOTION_ENABLED=1" >> "$GITHUB_ENV"
 
       - name: Start fake Dify API
@@ -1230,11 +1315,26 @@ jobs:
           echo "DIFY_ENDPOINT=http://127.0.0.1:5093" >> "$GITHUB_ENV"
 
       - name: Run ${{ matrix.facet }} battery (python host)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet ${{ matrix.facet }}
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet ${{ matrix.facet }} --strict
 
       - name: Run ${{ matrix.facet }} battery (typescript host)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet ${{ matrix.facet }}
+        run: pnpm exec tsx runners/typescript/main.ts --facet ${{ matrix.facet }} --strict
+
+      # A 404 is an answer to a real client -- "no such repository", "no such
+      # file" -- so an endpoint the fake does not implement is indistinguishable
+      # from a negative result, and what comes out is a confident wrong
+      # conclusion rather than an error. The fake names every unrouted request
+      # on stderr; this is what makes that a failure rather than a log line.
+      - name: Fail on any unrouted GitHub request
+        if: matrix.facet == 'cli'
+        run: |
+          if grep -q "no route for" /tmp/github.log; then
+            echo "The gh battery reached endpoints the fake does not implement:"
+            grep "no route for" /tmp/github.log | sort -u
+            exit 1
+          fi
+          echo "no unrouted GitHub requests"
 
       - name: Stop GreenMail
         if: always() && (matrix.facet == 'email' || matrix.facet == 'cli')

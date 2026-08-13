@@ -30,7 +30,8 @@ async def test_env_prints_environment_in_insertion_order():
     session.env["AAA"] = "2"
     out, io, _ = await handle_env(_unused_execute_fn, [], session)
     assert io.exit_code == 0
-    assert await materialize(out) == b"ZZZ=1\nAAA=2\n"
+    # `$PWD` is seeded at construction, so it leads the insertion order.
+    assert await materialize(out) == b"PWD=/\nZZZ=1\nAAA=2\n"
 
 
 @pytest.mark.asyncio
@@ -181,7 +182,7 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
     assert args[0] == "printenv FOO"
     assert kwargs["stdin"] == b"piped\n"
     # The session environment is restored after the inner command runs.
-    assert session.env == {"FOO": "original"}
+    assert session.env == {"PWD": "/", "FOO": "original"}
 
 
 @pytest.mark.asyncio
@@ -685,7 +686,9 @@ async def test_export_bare_prints_like_p():
     session.env["FOO"] = "bar"
     out, io, _ = await handle_export([], session)
     assert io.exit_code == 0
-    assert await materialize(out) == b'declare -x FOO="bar"\n'
+    # `$PWD` is exported like any other variable, so bash lists it too.
+    assert await materialize(out) == (b'declare -x FOO="bar"\n'
+                                      b'declare -x PWD="/"\n')
 
 
 @pytest.mark.asyncio

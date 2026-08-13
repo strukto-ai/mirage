@@ -27,6 +27,7 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type FileStat,
+  type FlagValue,
   type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
@@ -66,7 +67,7 @@ interface FlagSet {
   beforeContext: number
 }
 
-function parseFlags(flags: Record<string, string | boolean | number | string[]>): FlagSet {
+function parseFlags(flags: Record<string, FlagValue>): FlagSet {
   const toInt = (v: string | boolean | number | string[] | undefined): number | null =>
     typeof v === 'string' ? Number.parseInt(v, 10) : null
   const aCtx = toInt(flags.A)
@@ -88,10 +89,7 @@ function parseFlags(flags: Record<string, string | boolean | number | string[]>)
   }
 }
 
-function getPattern(
-  texts: readonly string[],
-  flags: Record<string, string | boolean | number | string[]>,
-): string {
+function getPattern(texts: readonly string[], flags: Record<string, FlagValue>): string {
   if (typeof flags.e === 'string') return flags.e
   if (texts.length > 0 && texts[0] !== undefined) return texts[0]
   throw new Error('grep: usage: grep [flags] pattern [path]')

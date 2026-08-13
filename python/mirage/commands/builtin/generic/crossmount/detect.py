@@ -16,11 +16,11 @@ from mirage.commands.builtin.generic.crossmount.constants import (
     CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS)
 from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec
 
 
-def strategy_for(cmd_name: str, flag_kwargs: dict[str, object]) -> Strategy:
+def strategy_for(cmd_name: str, flag_kwargs: dict[str, FlagValue]) -> Strategy:
     """Pick the combine strategy for one cross-mount command invocation.
 
     Flags can flip the strategy: ``sed -i`` edits each operand in place

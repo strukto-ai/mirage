@@ -161,13 +161,17 @@ class TestMirageFile:
         assert _read(ops, "/data/dir/f.txt") == b"visible"
         f.close()
 
-    def test_exclusive_mode_creates_once(self):
+    @pytest.mark.parametrize("mode", ["x", "wx"])
+    def test_exclusive_mode_creates_once(self, mode):
         ops, _ = make_ops_with_dir()
-        with MirageFile(ops, "/data/dir/f.txt", "x") as f:
+        with MirageFile(ops, "/data/dir/f.txt", mode) as f:
             f.write("new")
         assert _read(ops, "/data/dir/f.txt") == b"new"
         with pytest.raises(FileExistsError):
-            MirageFile(ops, "/data/dir/f.txt", "x")
+            MirageFile(ops, "/data/dir/f.txt", mode)
+        # wx carries the truncate fact too; exclusivity must win, so a
+        # refused open leaves the existing content untouched.
+        assert _read(ops, "/data/dir/f.txt") == b"new"
 
     def test_append_mode_creates_missing_file_on_open(self):
         ops, _ = make_ops_with_dir()

@@ -13,31 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseMode } from './mode.ts'
+import { parseChmod } from './mode.ts'
 
-describe('parseMode', () => {
+describe('parseChmod', () => {
   it('parses octal modes', () => {
-    expect(parseMode('644', 0)).toBe(0o644)
-    expect(parseMode('0', 0o777)).toBe(0)
-    expect(parseMode('7777', 0)).toBe(0o7777)
+    expect(parseChmod('644', 0)).toBe(0o644)
+    expect(parseChmod('0', 0o777)).toBe(0)
+    expect(parseChmod('7777', 0)).toBe(0o7777)
   })
 
   it('rejects out-of-range octal', () => {
-    expect(parseMode('77777', 0)).toBeNull()
+    expect(parseChmod('77777', 0)).toBeNull()
   })
 
   it('applies symbolic add/remove/assign', () => {
-    expect(parseMode('u+x', 0o644)).toBe(0o744)
-    expect(parseMode('+x', 0o644)).toBe(0o755)
-    expect(parseMode('go-r', 0o644)).toBe(0o600)
-    expect(parseMode('a=r', 0o777)).toBe(0o444)
-    expect(parseMode('u=rwx,go=', 0o644)).toBe(0o700)
-    expect(parseMode('u+x,g-r', 0o644)).toBe(0o704)
+    expect(parseChmod('u+x', 0o644)).toBe(0o744)
+    expect(parseChmod('+x', 0o644)).toBe(0o755)
+    expect(parseChmod('go-r', 0o644)).toBe(0o600)
+    expect(parseChmod('a=r', 0o777)).toBe(0o444)
+    expect(parseChmod('u=rwx,go=', 0o644)).toBe(0o700)
+    expect(parseChmod('u+x,g-r', 0o644)).toBe(0o704)
   })
 
   it('rejects invalid symbolic text', () => {
-    expect(parseMode('zz', 0o644)).toBeNull()
-    expect(parseMode('u~x', 0o644)).toBeNull()
-    expect(parseMode('u+q', 0o644)).toBeNull()
+    expect(parseChmod('zz', 0o644)).toBeNull()
+    expect(parseChmod('u~x', 0o644)).toBeNull()
+    expect(parseChmod('u+q', 0o644)).toBeNull()
   })
 })

@@ -56,11 +56,23 @@ export async function* stream(accessor: GridFSAccessor, path: PathSpec): AsyncIt
   }
 }
 
+/**
+ * The resource-level `range_read(path, start, end)`, end exclusive.
+ *
+ * Every other backend's `rangeRead` and all of python's spell the window this
+ * way; gridfs read its fourth argument as a length, so `range_read(p, 10, 20)`
+ * returned twenty bytes from offset ten where python returned ten.
+ *
+ * @param accessor the GridFS accessor
+ * @param path the file path
+ * @param start first byte to read
+ * @param end one past the last byte to read
+ */
 export async function rangeRead(
   accessor: GridFSAccessor,
   path: PathSpec,
-  offset: number,
-  size: number,
+  start: number,
+  end: number,
 ): Promise<Uint8Array> {
-  return read(accessor, path, undefined, { offset, size })
+  return read(accessor, path, undefined, { offset: start, size: end - start })
 }

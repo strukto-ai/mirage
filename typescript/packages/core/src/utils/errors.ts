@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
 import { rstripSlash } from './slash.ts'
 
@@ -65,6 +66,13 @@ export function eacces(path: string | { virtual: string }): FsError {
 
 export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
+}
+
+// A rename whose two ends sit on different mounts. POSIX's answer for a
+// rename across filesystems, and the one a caller reads as "copy and
+// unlink instead" (that is what makes `mv` work over a FUSE mount).
+export function exdev(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EXDEV')
 }
 
 // The errno a failed directory listing should report. opendir reports ENOTDIR
@@ -184,14 +192,20 @@ export function enoentWithMessage(
   return err
 }
 
+// The phrases live once, in the posix table. The DOMAIN here stays
+// deliberately narrower than the vocabulary: these are the per-operand
+// codes a read-family command skips-and-reports, and widening it (say
+// to ELOOP or EIO) would widen isFsError's swallow set, which mirrors
+// python's typed FS_ERRORS tuple, not the whole condition enum.
 const STRERROR: Record<string, string> = {
-  ENOENT: 'No such file or directory',
-  ENOTDIR: 'Not a directory',
-  EISDIR: 'Is a directory',
-  EACCES: 'Permission denied',
-  EEXIST: 'File exists',
-  ENOTEMPTY: 'Directory not empty',
-  ENOTSUP: 'Operation not supported',
+  ENOENT: gnuPhrase('ENOENT'),
+  ENOTDIR: gnuPhrase('ENOTDIR'),
+  EISDIR: gnuPhrase('EISDIR'),
+  EACCES: gnuPhrase('EACCES'),
+  EEXIST: gnuPhrase('EEXIST'),
+  ENOTEMPTY: gnuPhrase('ENOTEMPTY'),
+  ENOTSUP: gnuPhrase('ENOTSUP'),
+  EXDEV: gnuPhrase('EXDEV'),
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized
@@ -221,6 +235,21 @@ export function errorVirtualPath(err: unknown): string {
 export function isFsError(err: unknown): boolean {
   const code = (err as { code?: unknown }).code
   return typeof code === 'string' && gnuStrerror(code) !== null
+}
+
+// `enoent()` puts the *path* in the message, so matching on message text never
+// fires; the stamped code is the only reliable signal. Python's twin is
+// `except FileNotFoundError`. Three modules had grown their own copy of this.
+export function isEnoent(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
+}
+
+// Python's twin is `except IsADirectoryError`. GNU sometimes spells a
+// directory read as something other than the EISDIR strerror (checksum
+// --check says the literal "read error"), so callers need the code, not
+// just the walk-error class.
+export function isEisdir(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === 'EISDIR'
 }
 
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):

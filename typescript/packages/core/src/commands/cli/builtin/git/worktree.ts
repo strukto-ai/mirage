@@ -19,6 +19,7 @@ import { loadIgnores } from './ignore.ts'
 import { readNames, readOptional, under } from './io.ts'
 import { basename } from './path.ts'
 import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const GIT_DIR = '.git'
 const GITIGNORE = '.gitignore'
@@ -140,7 +141,9 @@ class Scanner {
    */
   async walk(relative: string, ignored: boolean, ignores: IgnoreStack): Promise<void> {
     const rules = await this.descend(relative, ignores)
-    const entries = (await readNames(this.dispatch, this.absolute(relative))).sort()
+    const entries = (await readNames(this.dispatch, this.absolute(relative))).sort(
+      compareCodePoints,
+    )
     for (const entry of entries) {
       const name = basename(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue

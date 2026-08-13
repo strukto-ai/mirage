@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "sed_missing_script",
+      "seq": 960030,
+      "note": "GNU 9.7 prints its usage block and exits 1; mirage names the problem in one line. Run on every backend so a wrapper cannot grow its own spelling again.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sed: missing script\n"
+      }
+    },
+    {
+      "id": "sed_no_input_files",
+      "seq": 960031,
+      "note": "GNU 9.7's spelling and exit 4 for -i with no operands; mirage reuses them with no stdin either, having no terminal to read.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed 's/a/b/'",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "sed: no input files\n"
+      }
+    }
+  ]
+}

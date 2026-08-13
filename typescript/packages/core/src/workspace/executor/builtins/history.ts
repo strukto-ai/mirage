@@ -18,6 +18,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
+import type { FlagValue } from '../../../commands/spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -36,13 +37,13 @@ function usageError(message: string): Result {
 }
 
 interface ParsedArgs {
-  flags: Record<string, string | boolean | number | string[]>
+  flags: Record<string, FlagValue>
   texts: string[]
   error: string | null
 }
 
 function parseArgs(args: string[]): ParsedArgs {
-  const flags: Record<string, string | boolean | number | string[]> = {}
+  const flags: Record<string, FlagValue> = {}
   const texts: string[] = []
   let optionsDone = false
   let i = 0

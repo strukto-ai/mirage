@@ -12,27 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseCutRanges, type CutOptions } from '../cut_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
-async function* chainStreams(
-  streams: readonly AsyncIterable<Uint8Array>[],
-): AsyncIterable<Uint8Array> {
-  for (const stream of streams) {
-    for await (const chunk of stream) yield chunk
-  }
-}
-
-function stringFlag(
-  flags: Record<string, string | boolean | number | string[]>,
-  ...names: string[]
-): string | null {
+function stringFlag(flags: Record<string, FlagValue>, ...names: string[]): string | null {
   for (const name of names) {
     const value = flags[name]
     if (typeof value === 'string') return value
@@ -40,9 +31,7 @@ function stringFlag(
   return null
 }
 
-function parseFlags(
-  flags: Record<string, string | boolean | number | string[]>,
-): CutOptions | string {
+function parseFlags(flags: Record<string, FlagValue>): CutOptions | string {
   const bytesRange = stringFlag(flags, 'b', 'bytes')
   const charsRange = stringFlag(flags, 'c', 'characters')
   const fieldsRange = stringFlag(flags, 'F', 'f', 'fields')
@@ -100,7 +89,7 @@ export async function cutGeneric(
     const io = operandsIo(err, { cache: ok.map((operand) => operand.path.virtual) })
     if (ok.length === 0 && err !== '') return [null, io]
     const outputs = ok.map((operand) => cutStream(singleChunk(operand.data), parsed))
-    const out: ByteSource = chainStreams(outputs)
+    const out: ByteSource = asyncChain(...outputs)
     return [out, io]
   }
   let source: AsyncIterable<Uint8Array>

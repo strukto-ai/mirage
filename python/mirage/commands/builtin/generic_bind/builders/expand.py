@@ -14,13 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.expand import expand as generic_expand
+from mirage.commands.builtin.generic.expand import expand_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,22 +32,14 @@ async def expand(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    t: str | None = None,
-    i: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["expand"])
-    paths, err = await resolve_readable(ops, accessor, paths, index, "expand")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_expand(paths,
-                             read_bytes=bound_op(ops.read_bytes, accessor,
-                                                 index),
-                             stdin=stdin,
-                             tabsize=int(t or fl.as_str("tabs") or "8"),
-                             initial_only=i or fl.as_bool("initial")), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await expand_generic(resolved, list(texts),
+                                CommandOpts(stdin=stdin, flags=flags),
+                                dir_aware_stat(ops, accessor, index),
+                                bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('expand', expand, None, False, None, read=True)

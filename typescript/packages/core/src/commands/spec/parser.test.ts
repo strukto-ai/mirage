@@ -391,7 +391,7 @@ describe('parseCommand — unknown dash tokens warn and drop', () => {
   })
 
   it('keeps dash tokens for TEXT-rest commands', () => {
-    const p = parseCommand(specOf('python'), ['-x', 'hello'], '/')
+    const p = parseCommand(specOf('expr'), ['-x', 'hello'], '/')
     expect(p.texts()).toEqual(['-x', 'hello'])
     expect(p.warnings).toEqual([])
   })
@@ -874,5 +874,267 @@ describe('flag-driven operand kinds', () => {
     const p = parseCommand(specOf('jq'), ['.', '/d/a.json'], '/')
     expect(p.texts()).toEqual(['.'])
     expect(p.paths()).toEqual(['/d/a.json'])
+  })
+})
+
+describe("parseCommand — tar's old option style", () => {
+  it('parses a cluster as flags', () => {
+    const p = parseCommand(specOf('tar'), ['xzf', '/data/a.tgz'], '/')
+    expect(p.flags['-x']).toBe(true)
+    expect(p.flags['-z']).toBe(true)
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.paths()).toEqual([])
+    expect(p.pathFlagValues).toEqual(['/data/a.tgz'])
+  })
+
+  it('marks the cluster word TEXT so it is never classified as a path', () => {
+    // The cluster carries no dash, so without an explicit TEXT kind the
+    // shape heuristic would classify it and dispatch would re-read it as
+    // a resolved path instead of letters.
+    const p = parseCommand(specOf('tar'), ['xzf', '/data/a.tgz'], '/')
+    expect(p.wordKinds).toEqual(['str', 'path'])
+  })
+
+  it('keeps operands in their own argv slots', () => {
+    const p = parseCommand(
+      specOf('tar'),
+      ['czf', '/data/a.tgz', '/data/one.txt', '/data/two.txt'],
+      '/',
+    )
+    expect(p.paths()).toEqual(['/data/one.txt', '/data/two.txt'])
+    expect(p.wordKinds).toEqual(['str', 'path', 'path', 'path'])
+  })
+
+  it('binds two value letters in letter order', () => {
+    const p = parseCommand(specOf('tar'), ['xfC', '/data/a.tgz', '/data/out'], '/')
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.flags['-C']).toEqual(['/data/out'])
+  })
+
+  it('keeps a bool letter that follows a value letter', () => {
+    const p = parseCommand(specOf('tar'), ['cfz', '/data/a.tgz'], '/')
+    expect(p.flags['-f']).toBe('/data/a.tgz')
+    expect(p.flags['-z']).toBe(true)
+  })
+
+  it('reports a missing cluster argument instead of throwing', () => {
+    expect(parseCommand(specOf('tar'), ['xzf'], '/').oldOptionNeedsValue).toBe('f')
+  })
+
+  it('reports an undeclared cluster letter as an undeclared option', () => {
+    const p = parseCommand(specOf('tar'), ['xQz', '/data/a.tgz'], '/')
+    expect(p.invalidOptions).toEqual(['Q'])
+    expect(p.oldOptionNeedsValue).toBeNull()
+  })
+
+  it('reports no old option on a dashed line', () => {
+    const p = parseCommand(specOf('tar'), ['-x', '-z', '-f', '/data/a.tgz'], '/')
+    expect(p.oldOptionNeedsValue).toBeNull()
+    expect(p.wordKinds).toEqual([null, null, null, 'path'])
+  })
+
+  it('still accepts long options after the cluster', () => {
+    const p = parseCommand(
+      specOf('tar'),
+      ['xzf', '/data/a.tgz', '--strip-components', '1', '-C', '/data/out'],
+      '/',
+    )
+    expect(p.flags['--strip-components']).toBe('1')
+    expect(p.flags['-C']).toEqual(['/data/out'])
+  })
+
+  it('is off for every other command', () => {
+    // A first word with no dash stays an operand everywhere else.
+    const p = parseCommand(specOf('gzip'), ['dkf'], '/')
+    expect(p.paths()).toEqual(['/dkf'])
+    expect(p.oldOptionNeedsValue).toBeNull()
+  })
+})
+
+describe('required operands and typed dests', () => {
+  it('reports a missing required operand rather than throwing', () => {
+    // The parser classifies and reports; the dialect that words the refusal is
+    // the caller's choice, which is why this is a list of names.
+    const spec = new CommandSpec({
+      positional: [new Operand({ type: 'str', name: 'PAGE_ID', required: true })],
+    })
+    expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PAGE_ID'])
+    expect(parseCommand(spec, ['abc'], '/').missingRequiredOperands).toEqual([])
+  })
+
+  it('lets a flag that supplies a slot satisfy required', () => {
+    // providedBy is the declarative form of grep's `if (!pattern_given)`: the
+    // slot is skipped, so it cannot also be missing.
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--expr', short: '-e', type: 'str' })],
+      positional: [
+        new Operand({ type: 'str', name: 'PATTERN', required: true, providedBy: ['-e'] }),
+      ],
+    })
+    expect(parseCommand(spec, [], '/').missingRequiredOperands).toEqual(['PATTERN'])
+    expect(parseCommand(spec, ['-e', 'x'], '/').missingRequiredOperands).toEqual([])
+  })
+
+  it('excludes defaults from typed dests and keeps scan order', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--limit', type: 'int', default: '25' }),
+        new Option({ long: '--sort', type: 'str' }),
+        new Option({ long: '--json', type: 'bool' }),
+      ],
+    })
+    // --limit is present in flags (the default landed) but was never typed,
+    // which is the whole distinction a clap usage line needs.
+    const parsed = parseCommand(spec, ['--json', '--sort', 'x'], '/')
+    expect(parsed.flags['--limit']).toBe('25')
+    expect(parsed.typedDests).toEqual(['--json', '--sort'])
+  })
+})
+
+describe('operandBase (tar -C)', () => {
+  it('re-bases the operands typed after it, leaving -f on the cwd', () => {
+    // GNU tar's -C is a chdir for the operands that follow it, so the
+    // archive stays relative to the session cwd while the files move.
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-czf', 'out.tgz', '-C', '/work/check', 'my_paper'],
+      '/home',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/check/my_paper',
+    ])
+    expect(parsed.flags['-f']).toBe('/home/out.tgz')
+    expect(parsed.flags['-C']).toEqual(['/work/check'])
+  })
+
+  it('is cumulative like a real chdir', () => {
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-cf', 'a.tar', '-C', 'd1', 'x', '-C', '../d2', 'y'],
+      '/work',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/d1/x',
+      '/work/d2/y',
+    ])
+    // Every occurrence is kept in order: GNU chdirs at each one.
+    expect(parsed.flags['-C']).toEqual(['/work/d1', '/work/d2'])
+  })
+
+  it('only moves what follows it', () => {
+    const parsed = parseCommand(
+      specOf('tar'),
+      ['-cf', 'a.tar', 'top.txt', '-C', '/work/e', 'e.txt'],
+      '/work',
+    )
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual([
+      '/work/top.txt',
+      '/work/e/e.txt',
+    ])
+  })
+
+  it('survives the old-style cluster', () => {
+    const parsed = parseCommand(specOf('tar'), ['czf', 'a.tgz', '-C', 'sub', 'x'], '/work')
+    expect(parsed.args.filter(([, k]) => k === 'path').map(([v]) => v)).toEqual(['/work/sub/x'])
+    expect(parsed.wordBases.at(-1)).toBe('/work/sub')
+  })
+
+  it('records no bases for a spec that declares none', () => {
+    const parsed = parseCommand(specOf('cat'), ['a.txt'], '/work')
+    expect(parsed.wordBases).toEqual([null])
+  })
+})
+
+describe('options an environment variable supplies', () => {
+  const versioned = new CommandSpec({
+    options: [new Option({ long: '--version', type: 'str', env: 'X_VERSION' })],
+  })
+
+  it('fills an option the line omitted', () => {
+    expect(parseCommand(versioned, [], '/', { X_VERSION: '9' }).flags['--version']).toBe('9')
+  })
+
+  it('yields to what the line typed', () => {
+    const parsed = parseCommand(versioned, ['--version', 'typed'], '/', { X_VERSION: '9' })
+    expect(parsed.flags['--version']).toBe('typed')
+  })
+
+  it('outranks a declared default', () => {
+    const spec = new CommandSpec({
+      options: [
+        new Option({ long: '--version', type: 'str', default: 'fallback', env: 'X_VERSION' }),
+      ],
+    })
+    expect(parseCommand(spec, [], '/', { X_VERSION: '9' }).flags['--version']).toBe('9')
+    expect(parseCommand(spec, [], '/', {}).flags['--version']).toBe('fallback')
+  })
+
+  it('satisfies a required option before it is refused', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--version', type: 'str', env: 'X_VERSION', required: true })],
+    })
+    expect(parseCommand(spec, [], '/', { X_VERSION: '9' }).missingRequiredOptions).toEqual([])
+    expect(parseCommand(spec, [], '/', {}).missingRequiredOptions).toEqual(['--version'])
+  })
+
+  it('is coerced and choice-checked like a typed value', () => {
+    // Filling after the parse left these unchecked: an int stayed a string
+    // nobody validated and a choice was never tested.
+    const ints = new CommandSpec({
+      options: [new Option({ long: '--count', type: 'int', env: 'X_COUNT' })],
+    })
+    expect(parseCommand(ints, [], '/', { X_COUNT: 'nope' }).invalidIntOptions).toEqual([
+      ['--count', 'nope'],
+    ])
+    expect(parseCommand(ints, [], '/', { X_COUNT: '4' }).invalidIntOptions).toEqual([])
+    const picks = new CommandSpec({
+      options: [new Option({ long: '--mode', type: 'str', choices: ['a', 'b'], env: 'X_MODE' })],
+    })
+    expect(parseCommand(picks, [], '/', { X_MODE: 'zzz' }).invalidValueOptions.length).toBe(1)
+    expect(parseCommand(picks, [], '/', { X_MODE: 'a' }).invalidValueOptions).toEqual([])
+  })
+
+  it('resolves a path value against the cwd like a typed one', () => {
+    const spec = new CommandSpec({
+      options: [new Option({ long: '--conf', type: 'path', env: 'X_CONF' })],
+    })
+    expect(parseCommand(spec, [], '/work', { X_CONF: 'rel.json' }).flags['--conf']).toBe(
+      '/work/rel.json',
+    )
+  })
+
+  it('does not count as typed', () => {
+    // clap's usage line echoes what the line carried; an env-supplied option
+    // is supplied but not typed.
+    const parsed = parseCommand(versioned, [], '/', { X_VERSION: '9' })
+    expect(parsed.flags['--version']).toBe('9')
+    expect(parsed.typedDests).toEqual([])
+  })
+})
+
+describe('parseCommand — remainder (argparse nargs=REMAINDER)', () => {
+  const PYTHON_LIKE = new CommandSpec({
+    options: [new Option({ short: '-c', type: 'str' }), new Option({ short: '-u' })],
+    rest: new Operand({ type: 'str', remainder: true }),
+  })
+
+  it('rejects an unknown flag before the operand', () => {
+    const p = parseCommand(PYTHON_LIKE, ['-z', '-c', 'print(1)'], '/')
+    expect(p.invalidOptions).toEqual(['z'])
+  })
+
+  it('keeps dash words after the operand verbatim', () => {
+    const p = parseCommand(PYTHON_LIKE, ['s.py', '--foo', '-z'], '/')
+    expect(p.texts()).toEqual(['s.py', '--foo', '-z'])
+    expect(p.invalidOptions).toEqual([])
+  })
+
+  it('consumes the marker that hands off the line', () => {
+    // The router writes the `--`; the parser eats exactly that one, so
+    // the words after it are the program's argv.
+    const p = parseCommand(PYTHON_LIKE, ['-c', 'print(1)', '--', '-u', 'x'], '/')
+    expect(p.flags['-c']).toBe('print(1)')
+    expect(p.flags['-u']).not.toBe(true)
+    expect(p.texts()).toEqual(['-u', 'x'])
   })
 })

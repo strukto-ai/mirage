@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
+
 from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
+from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, invalid_argument_error, invalid_float_error,
     invalid_int_error, missing_required_error, missing_value_error,
-    unknown_option_error)
+    old_option_error, unknown_option_error)
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.types import ParsedCommand
 
@@ -49,6 +52,7 @@ def parse_flags(
     cmd_name: str,
     cwd: str,
     str_flag_paths: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
 
@@ -64,6 +68,11 @@ def parse_flags(
             cross-mount path; None falls back to type separation.
         cmd_name (str): command name used in warnings.
         cwd (str): current working directory for relative path resolution.
+        env (Mapping[str, str] | None): the session environment, so an
+            option declaring one gets its value from there. Filled
+            inside the parse rather than after it, or an env-supplied
+            int would go unchecked and an env-supplied path would stay
+            a bare string.
         str_flag_paths (bool): keep PATH flag values as their resolved
             virtual-path strings instead of PathSpec. Cross-mount
             strategies read flags through FlagView, which type-checks
@@ -87,8 +96,10 @@ def parse_flags(
                 scope_map[stripped] = item
 
     if spec is not None:
-        parsed = parse_command(spec, argv, cwd=cwd)
-        flag_kwargs = parse_to_kwargs(parsed)
+        parsed = parse_command(spec, argv, cwd=cwd, env=env)
+        # Widens from ParsedFlagValue to FlagValue: PATH values
+        # become PathSpec just below.
+        flag_kwargs: dict[str, FlagValue] = dict(parse_to_kwargs(parsed))
 
         # Recover PathSpec for PATH flag values; multiple PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
@@ -115,16 +126,22 @@ def parse_flags(
         }
         if not str_flag_paths:
             for key, value in flag_kwargs.items():
+                # Only the parser's own list[str] values reach here; a
+                # PathSpec list is already promoted.
+                texts_in: list[str] = ([
+                    item for item in value if isinstance(item, str)
+                ] if isinstance(value, list) else [])
                 if key in pair_path_keys and isinstance(value, list):
+                    # A pair is (name, value): only the odd slots are paths.
                     flag_kwargs[key] = [
                         scope_map.get(part, synthesize_path_spec(part))
                         if index % 2 else part
-                        for index, part in enumerate(value)
+                        for index, part in enumerate(texts_in)
                     ]
                 elif key in repeat_path_keys and isinstance(value, list):
                     flag_kwargs[key] = [
                         scope_map.get(part, synthesize_path_spec(part))
-                        for part in value
+                        for part in texts_in
                     ]
                 elif key in single_path_keys and isinstance(value, str):
                     flag_kwargs[key] = scope_map.get(
@@ -148,7 +165,8 @@ def parse_flags(
             parsed.ambiguous_options, parsed.option_error_kinds,
             parsed.needs_value_options, parsed.invalid_value_options,
             parsed.invalid_int_options, parsed.invalid_float_options,
-            parsed.missing_required_options)
+            parsed.missing_required_options, parsed.old_option_needs_value,
+            parsed.missing_required_operands, parsed.typed_dests)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
@@ -169,6 +187,11 @@ def option_error(cmd_name: str,
     """
     if cmd_name == "find":
         return None
+    # An old-style cluster short of an argument outranks every scan error
+    # below: tar counts the cluster's needs before argp validates a
+    # letter, so `tar Qf` and `tar fQ` both name f, not Q.
+    if parsed.old_option_needs_value is not None:
+        return old_option_error(cmd_name, parsed.old_option_needs_value)
     # Scan-order between unknown and ambiguous options: GNU stops at the
     # first offending token, so `grep --c --bogus` reports the ambiguity
     # and the reversed line reports --bogus.

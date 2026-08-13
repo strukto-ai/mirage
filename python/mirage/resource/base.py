@@ -78,6 +78,35 @@ class BaseResource:
         self._index: IndexCacheStore
         self.set_index(index)
 
+    @classmethod
+    async def build(cls, *args: Any, **kwargs: Any) -> "BaseResource":
+        """Construct a resource, awaiting any setup it needs first.
+
+        The default just calls the constructor: most backends open
+        nothing at build time, so there is nothing to await. A backend
+        whose setup needs I/O overrides this and keeps ``__init__``
+        free of network calls — a constructor cannot await, so doing
+        the I/O there means doing it with a blocking client, which
+        stalls whatever event loop the caller runs on.
+
+        Mirrors the TypeScript ``ResourceFactory``
+        (``node/src/resource/registry.ts``), which is uniformly
+        ``(config) => Promise<Resource>`` for the same reason. Named
+        ``build`` rather than TypeScript's ``create`` because ``create``
+        is already an op name (make an empty file, what ``touch``
+        calls): ops are served by ``__getattr__``, which only runs when
+        normal lookup fails, so a real ``create`` on the class would
+        shadow every backend's create op.
+
+        Args:
+            *args (Any): forwarded to the constructor.
+            **kwargs (Any): forwarded to the constructor.
+
+        Returns:
+            BaseResource: a fresh instance, ready to mount.
+        """
+        return cls(*args, **kwargs)
+
     def set_index(self, config: IndexConfig | None = None) -> None:
         cfg = (config if config is not None else IndexConfig(
             ttl=self.index_ttl))

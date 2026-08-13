@@ -29,8 +29,9 @@
       },
       "expect": {
         "exit": 0,
-        "stdout": "mode=- uid=- gid=-\n",
-        "stderr": ""
+        "stdout": "",
+        "stderr": "",
+        "check": "mode=- uid=- gid=-\n"
       }
     }
   ]

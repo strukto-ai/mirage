@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
 
-from mirage.io import IOResult
+from mirage.io import IOResult, OpReport
 from mirage.types import PathSpec
 
 # The value contract of eval: never richer than JSON plus bytes, so any
@@ -42,9 +42,16 @@ class DispatchFn(Protocol):
     The contract a sandboxed runtime's file I/O rides: defined here,
     on the consumer side, because runtimes receive it (attach) while
     the workspace provides it, and the runtime package imports no
-    workspace module."""
+    workspace module. ``report``, when a caller passes one, is stamped
+    by the door the moment the op completes, so an observer reads what
+    ran even when a later step throws the result away; runtimes never
+    pass it."""
 
-    def __call__(self, op: str, path: PathSpec,
+    def __call__(self,
+                 op: str,
+                 path: PathSpec,
+                 *,
+                 report: OpReport | None = None,
                  **kwargs: Any) -> Awaitable[tuple[Any, IOResult]]:
         ...
 
@@ -52,6 +59,32 @@ class DispatchFn(Protocol):
 # Live view of the workspace mount prefixes, read per run so mounts
 # added or removed after construction are always picked up.
 PrefixSource: TypeAlias = Callable[[], list[str]]
+
+
+@dataclass(frozen=True, slots=True)
+class VFSEntry:
+    """One directory entry as the mounts report it (TS ``VFSEntry``).
+
+    Resolved once at the door off the stat index the readdir just
+    populated, so no guest pays one stat per entry for a fact the door
+    already had.
+
+    Args:
+        path (str): the entry's virtual path, in the door's own
+            spelling (a backend that slash-marks directories keeps the
+            trailing slash).
+        size (int): rendered content bytes, 0 for directories and for
+            entries whose stat answered absent.
+        is_dir (bool): the entry is a directory.
+        is_link (bool): the entry is a namespace symlink. The TS
+            bridge marks it from its namespace; python rows carry
+            False until links enter dispatch (R8).
+    """
+
+    path: str
+    size: int
+    is_dir: bool
+    is_link: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,12 +1,14 @@
 import difflib
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.types import CommandName
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
@@ -159,3 +161,49 @@ async def diff(
 
 
 __all__ = ["diff"]
+
+
+@dataclass(frozen=True, slots=True)
+class DiffFlags:
+    ignore_case: bool = False
+    ignore_all_space: bool = False
+    ignore_space_change: bool = False
+    ed: bool = False
+    unified: bool = False
+    brief: bool = False
+    recursive: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags:
+    fl = FlagView(flags, spec=SPECS["diff"])
+    return DiffFlags(
+        ignore_case=fl.as_bool("i"),
+        ignore_all_space=fl.as_bool("w"),
+        ignore_space_change=fl.as_bool("b"),
+        ed=fl.as_bool("e"),
+        unified=fl.as_bool("u"),
+        brief=fl.as_bool("q"),
+        recursive=fl.as_bool("r"),
+    )
+
+
+async def diff_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    read_bytes: Callable[..., Awaitable[bytes]],
+    readdir_fn: Callable[..., Awaitable[list[str]]],
+    stat_fn: Callable[..., Awaitable[FileStat]],
+) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(opts.flags)
+    return await diff(paths,
+                      read_bytes=read_bytes,
+                      readdir_fn=readdir_fn,
+                      stat_fn=stat_fn,
+                      i=parsed.ignore_case,
+                      w=parsed.ignore_all_space,
+                      b=parsed.ignore_space_change,
+                      e=parsed.ed,
+                      u=parsed.unified,
+                      q=parsed.brief,
+                      r=parsed.recursive)

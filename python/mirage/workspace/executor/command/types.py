@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from typing import NamedTuple, Protocol
 
 import tree_sitter
 
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
@@ -43,7 +44,7 @@ class ExecuteNodeFn(Protocol):
 class ParsedCommand(NamedTuple):
     paths: list[PathSpec]
     texts: list[str]
-    flag_kwargs: dict[str, object]
+    flag_kwargs: dict[str, FlagValue]
     warnings: list[str]
     invalid_options: list[str]
     ambiguous_options: list[tuple[str, tuple[str, ...]]]
@@ -53,3 +54,11 @@ class ParsedCommand(NamedTuple):
     invalid_int_options: list[tuple[str, str]]
     invalid_float_options: list[tuple[str, str]]
     missing_required_options: list[str]
+    old_option_needs_value: str | None = None
+    # Only a CLI reads these two: the display names of required operand
+    # slots the line left empty, and the dests it actually typed in scan
+    # order. Both feed a usage line rendered in another program's
+    # dialect, which is why they carry names and order at all. Sequence
+    # and not list because a NamedTuple default is one shared object.
+    missing_required_operands: Sequence[str] = ()
+    typed_dests: Sequence[str] = ()

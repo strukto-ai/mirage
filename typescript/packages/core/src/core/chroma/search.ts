@@ -23,6 +23,7 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { metadataString } from './_client.ts'
 import { resolvePath } from './path.ts'
 import { walk } from './walk.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -46,7 +47,9 @@ export async function searchSegments(
   if (paths.length > 0) {
     scopedSlugs = new Set((await targetEntries(accessor, paths, index)).keys())
     if (scopedSlugs.size === 0) return new Uint8Array(0)
-    where = { [accessor.config.slugField]: { $in: [...scopedSlugs].sort() } } as Where
+    where = {
+      [accessor.config.slugField]: { $in: [...scopedSlugs].sort(compareCodePoints) },
+    } as Where
   }
   const collection = await accessor.getCollection()
   const response = await collection.query({

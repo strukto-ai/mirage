@@ -42,5 +42,5 @@ class HistoryViewResource(BaseResource):
         self.accessor = HistoryAccessor(observer)
         for fn in COMMANDS:
             self.register(fn)
-        for fn in OPS:
-            self.register_op(fn)
+        for op in OPS:
+            self.register_op(op)

@@ -21,6 +21,8 @@ from typing import Any, Callable, ClassVar
 
 from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.python.bootstrap import bootstrap
+from mirage.runtime.python.flags import init_argv
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
@@ -63,10 +65,14 @@ class LocalRuntime(PythonRuntime):
             self._python = sys.executable
 
     async def run(self, args: RunArgs) -> RunResult:
+        # Honoring the init switches is just handing them back to the
+        # real interpreter, which is why this tier gets them exactly
+        # right (sys.flags included) where an in-process engine cannot.
         proc = await asyncio.create_subprocess_exec(
             self._python,
+            *init_argv(args.flags),
             "-c",
-            args.code,
+            bootstrap(args.code, args.prog),
             *args.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

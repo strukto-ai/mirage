@@ -34,6 +34,7 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const HEAD = 'HEAD'
@@ -164,7 +165,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
     throw err
   }
   const lines: string[] = []
-  const keys = [...refs.keys()].sort()
+  const keys = [...refs.keys()].sort(compareCodePoints)
   if (!remotesOnly) {
     for (const ref of keys.filter((k) => k.startsWith(HEADS_PREFIX))) {
       const name = ref.slice(HEADS_PREFIX.length)

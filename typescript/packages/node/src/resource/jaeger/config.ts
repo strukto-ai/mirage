@@ -12,17 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, z } from '@struktoai/mirage-core'
-
-export interface JaegerConfig {
-  host?: string
-  defaultTraceLimit?: number
-  defaultFromTimestamp?: string
-  defaultToTimestamp?: string
-  requestTimeout?: number
-}
-
-export type JaegerConfigRedacted = JaegerConfig
+import { type ConfigOf, normalizeFields, redactConfigWithSchema, z } from '@struktoai/mirage-core'
 
 const JaegerConfigSchema = z.object({
   host: z.string().optional(),
@@ -31,6 +21,11 @@ const JaegerConfigSchema = z.object({
   defaultToTimestamp: z.string().optional(),
   requestTimeout: z.number().optional(),
 })
+
+export type JaegerConfig = ConfigOf<typeof JaegerConfigSchema>
+
+// Nothing on a Jaeger config is a secret, so the twin is the config.
+export type JaegerConfigRedacted = JaegerConfig
 
 export function redactJaegerConfig(config: JaegerConfig): JaegerConfigRedacted {
   return redactConfigWithSchema(JaegerConfigSchema, config) as unknown as JaegerConfigRedacted

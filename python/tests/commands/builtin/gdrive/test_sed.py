@@ -183,5 +183,9 @@ async def test_sed_in_place_writes_back(accessor, index):
 
 @pytest.mark.asyncio
 async def test_sed_missing_expression(accessor, index):
-    with pytest.raises(ValueError, match="sed: usage"):
-        await sed(accessor, [], index=index)
+    # A missing script is reported, not raised: GNU exits 1 with a message,
+    # and the TypeScript twin has always returned an IOResult here.
+    out, io = await sed(accessor, [], index=index)
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == b"sed: missing script\n"

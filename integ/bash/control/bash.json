@@ -132,6 +132,210 @@
         "stdout": "hi\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ctl_bash_script_file_args",
+      "seq": 502154,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo zero=$0 argc=$# args=$@\\n' > /data/bf.sh && bash /data/bf.sh AA BB && rm /data/bf.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "zero=/data/bf.sh argc=2 args=AA BB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_script_file_xtrace",
+      "seq": 502155,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo traced\\n' > /data/bx.sh && bash -x /data/bx.sh && rm /data/bx.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "traced\n",
+        "stderr": "+ echo traced\n"
+      }
+    },
+    {
+      "id": "ctl_bash_script_file_set_o",
+      "seq": 502158,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'false | true\\necho pipefail=$?\\n' > /data/bo.sh && bash -o pipefail /data/bo.sh && rm /data/bo.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "pipefail=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_script_file_plus_flag",
+      "seq": 502159,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'echo hi\\n' > /data/bp.sh && bash +x /data/bp.sh && rm /data/bp.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_script_file_export_isolated",
+      "seq": 502160,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'export LEAK=1\\n' > /data/be.sh && bash /data/be.sh && echo [$LEAK] && rm /data/be.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ctl_bash_unknown_long_option",
+      "seq": 502161,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash --nosuch",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "bash: --nosuch: unsupported option\n"
+      }
     }
   ]
 }

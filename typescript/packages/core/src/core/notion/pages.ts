@@ -65,8 +65,8 @@ export async function searchTopLevelPages(transport: NotionTransport): Promise<J
   return filtered
 }
 
-export async function searchDatabases(transport: NotionTransport): Promise<Json[]> {
-  const baseArgs = { filter: { value: 'database', property: 'object' }, page_size: 100 }
+export async function searchDataSources(transport: NotionTransport): Promise<Json[]> {
+  const baseArgs = { filter: { value: 'data_source', property: 'object' }, page_size: 100 }
   return paginateTool(transport, 'API-post-search', baseArgs)
 }
 
@@ -74,20 +74,61 @@ export async function getDatabase(transport: NotionTransport, databaseId: string
   return transport.callTool('API-retrieve-a-database', { database_id: databaseId })
 }
 
-export async function queryDatabase(
+export async function getDataSource(
   transport: NotionTransport,
-  databaseId: string,
+  dataSourceId: string,
+): Promise<Json> {
+  return transport.callTool('API-retrieve-a-data-source', { data_source_id: dataSourceId })
+}
+
+export async function queryDataSource(
+  transport: NotionTransport,
+  dataSourceId: string,
   body: Json = {},
 ): Promise<Json[]> {
-  return paginateTool(transport, 'API-post-database-query', {
+  return paginateTool(transport, 'API-post-data-source-query', {
     ...body,
-    database_id: databaseId,
+    data_source_id: dataSourceId,
     page_size: 100,
   })
 }
 
 export async function getPage(transport: NotionTransport, pageId: string): Promise<Json> {
   return transport.callTool('API-retrieve-a-page', { page_id: pageId })
+}
+
+export async function getSelf(transport: NotionTransport): Promise<Json> {
+  return transport.callTool('API-get-self', {})
+}
+
+export async function getPageMarkdown(transport: NotionTransport, pageId: string): Promise<Json> {
+  return transport.callTool('API-retrieve-page-markdown', { page_id: pageId })
+}
+
+export async function replacePageMarkdown(
+  transport: NotionTransport,
+  pageId: string,
+  markdown: string,
+): Promise<Json> {
+  return transport.callTool('API-patch-page-markdown', {
+    page_id: pageId,
+    type: 'replace_content',
+    replace_content: { new_str: markdown },
+  })
+}
+
+// `ntn datasources query` is explicitly one page at a time: it honors
+// --limit, reports has_more and hands the caller the cursor, so it cannot
+// use the paginating helper the mount uses.
+export async function queryDataSourcePage(
+  transport: NotionTransport,
+  dataSourceId: string,
+  body: Json,
+): Promise<Json> {
+  return transport.callTool('API-post-data-source-query', {
+    ...body,
+    data_source_id: dataSourceId,
+  })
 }
 
 export async function getChildBlocks(transport: NotionTransport, blockId: string): Promise<Json[]> {

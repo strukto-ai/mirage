@@ -17,12 +17,12 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
                                  operand_spelling)
-from mirage.utils.mode import DEFAULT_DIR_MODE, parse_mode
+from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 
 
 async def mkdir(
@@ -31,23 +31,20 @@ async def mkdir(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    p: bool = False,
-    v: bool = False,
-    m: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["mkdir"])
-    parents = p or fl.as_bool("parents")
-    verbose = v or fl.as_bool("verbose")
-    mode_text = m or fl.as_str("mode")
+    parents = fl.as_bool("parents")
+    verbose = fl.as_bool("verbose")
+    mode_text = fl.as_str("mode")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("mkdir: missing operand")
     mode: int | None = None
     if mode_text is not None:
         # Symbolic clauses build on what mirage renders for a new
         # directory, since there is no umask to subtract from.
-        mode = parse_mode(mode_text, DEFAULT_DIR_MODE)
+        mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
         if mode is None:
             raise ValueError(f"mkdir: invalid mode '{mode_text}'")
         if ops.set_attrs is None:

@@ -20,7 +20,6 @@ import stat
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
@@ -28,7 +27,9 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.fuse.errors import NO_XATTR
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
+from mirage.runtime.handles import FileTable, merge_writes
 from mirage.types import FileStat, FileType
+from mirage.utils.stat_view import DIR_MODE, FILE_MODE, mtime_ns
 from mirage.workspace.session.session import Session
 
 # How long prefetched bytes for size-unknown files outlive their handle, so a
@@ -36,12 +37,14 @@ from mirage.workspace.session.session import Session
 # an unknown size. Mirrors the TS PREFETCH_TTL_MS.
 PREFETCH_TTL = 30.0
 
+WriteBuf = list[tuple[int, bytes]]
+
 
 @dataclass(slots=True)
 class Handle:
     path: str
     data: bytes | None = None
-    write_buf: list[tuple[int, bytes]] = field(default_factory=list)
+    write_buf: WriteBuf = field(default_factory=list)
 
 
 class MountCore:
@@ -73,19 +76,12 @@ class MountCore:
         self._session = session
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
-        # When scoped to a single mount, the root maps onto that mount and
-        # there are no virtual intermediate directories to synthesize.
-        if self._root:
-            self._prefixes: list[str] = []
-        else:
-            self._prefixes = self._ops.mount_prefixes()
-        self._handles: dict[int, Handle] = {}
+        self._handles: FileTable[Handle] = FileTable()
         # Prefetched content for size-unknown files: path -> (data, expiry).
         self._prefetch: dict[str, tuple[bytes, float]] = {}
         # In-memory extended attributes, keyed by path. Backends have no
         # POSIX xattrs, so these are advisory, not persisted (see setxattr).
         self._xattrs: dict[str, dict[str, bytes]] = {}
-        self._next_fh = 1
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
         # as owned by the mounting user (see mount.py). Mirrors fs.ts.
@@ -101,8 +97,17 @@ class MountCore:
         return self._ops
 
     @property
-    def handles(self) -> dict[int, Handle]:
+    def handles(self) -> FileTable[Handle]:
         return self._handles
+
+    def _ctx(self, fh: int | None) -> Handle | None:
+        """The open handle under `fh`, or None for a path-based op.
+
+        Args:
+            fh (int | None): handle id; the adapter passes None when the
+                kernel op arrived without one.
+        """
+        return self._handles.get(fh) if fh is not None else None
 
     def _run(self, coro: Coroutine[Any, Any, Any]) -> Any:
         if self._session is not None:
@@ -145,7 +150,7 @@ class MountCore:
 
     def dir_stat(self) -> dict[str, Any]:
         return {
-            "st_mode": stat.S_IFDIR | 0o755,
+            "st_mode": DIR_MODE,
             "st_nlink": 2,
             "st_uid": self._uid,
             "st_gid": self._gid,
@@ -157,7 +162,7 @@ class MountCore:
 
     def file_stat(self, size: int) -> dict[str, Any]:
         return {
-            "st_mode": stat.S_IFREG | 0o644,
+            "st_mode": FILE_MODE,
             "st_nlink": 1,
             "st_uid": self._uid,
             "st_gid": self._gid,
@@ -191,15 +196,13 @@ class MountCore:
         if isinstance(s.gid, int):
             entry["st_gid"] = s.gid
         if s.modified is not None:
-            try:
-                ts = datetime.fromisoformat(s.modified)
-            except ValueError:
-                return entry
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            ns = int(ts.timestamp()) * 1_000_000_000
-            entry["st_mtime"] = ns
-            entry["st_ctime"] = ns
+            # One translator per language: the naive-stamp-is-UTC rule
+            # lives in stat_view, never re-parsed here. None means the
+            # stamp did not parse; epoch zero is a real time and lands.
+            ns = mtime_ns(s)
+            if ns is not None:
+                entry["st_mtime"] = ns
+                entry["st_ctime"] = ns
         return entry
 
     def link_target(self, path: str) -> str | None:
@@ -241,24 +244,6 @@ class MountCore:
         entry = self.file_stat(len(target.encode()))
         entry["st_mode"] = stat.S_IFLNK | 0o777
         return entry
-
-    def _is_virtual_dir(self, path: str) -> bool:
-        normalized = path.rstrip("/") + "/"
-        for p in self._prefixes:
-            if p.startswith(normalized) or p.rstrip("/") == path.rstrip("/"):
-                return True
-        return False
-
-    def _virtual_children(self, path: str) -> list[str]:
-        normalized = path.rstrip("/") + "/" if path != "/" else "/"
-        children = set()
-        for p in self._prefixes:
-            if p.startswith(normalized) and p != normalized:
-                rest = p[len(normalized):]
-                child = rest.split("/")[0]
-                if child:
-                    children.add(child)
-        return sorted(children)
 
     def drain_ops(self) -> list[dict[str, Any]]:
         records = [asdict(r) for r in self._ops.records]
@@ -355,8 +340,6 @@ class MountCore:
         target = self.link_target(path)
         if target is not None:
             return self.link_stat(target)
-        if self._is_virtual_dir(path):
-            return self.dir_stat()
         s = self._run(self._ops.stat(self.resolve(path)))
         if s.type == FileType.DIRECTORY:
             return self._apply_stat_attrs(self.dir_stat(), s)
@@ -385,21 +368,16 @@ class MountCore:
         Raises:
             FileNotFoundError: no such directory and nothing virtual there.
         """
-        names = set(self._virtual_children(path))
-        links = self._ops.links
-        if links is not None:
-            for link_name in links.links_under(self.resolve(path)):
-                if link_name and not is_macos_metadata(link_name):
-                    names.add(link_name)
-        try:
-            entries = self._run(self._ops.readdir(self.resolve(path)))
-            for e in entries:
-                part = e.rstrip("/").rsplit("/", 1)[-1]
-                if part and not is_macos_metadata(part):
-                    names.add(part)
-        except (FileNotFoundError, ValueError, NotADirectoryError):
-            if not names:
-                raise
+        # The ops facade merges namespace structure (child mounts and
+        # symlinks) into readdir and answers structure-only directories
+        # itself, so the core only normalizes entry shapes and drops
+        # macOS metadata names.
+        names = set()
+        entries = self._run(self._ops.readdir(self.resolve(path)))
+        for e in entries:
+            part = e.rstrip("/").rsplit("/", 1)[-1]
+            if part and not is_macos_metadata(part):
+                names.add(part)
         return [".", ".."] + sorted(names)
 
     def read(self, path: str, size: int, offset: int, fh: int | None) -> bytes:
@@ -414,7 +392,7 @@ class MountCore:
         Returns:
             bytes: the requested slice, possibly short at EOF.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is not None and ctx.data is not None:
             return ctx.data[offset:offset + size]
         data = self.cached_data(path)
@@ -423,6 +401,26 @@ class MountCore:
         if ctx is not None:
             ctx.data = data
         return data[offset:offset + size]
+
+    def _apply_writes(self, path: str, writes: WriteBuf) -> None:
+        """Merge buffered writes over the raw base and persist the result.
+
+        The base is read raw so a flush never stores a rendered view
+        back into the mount.
+
+        Args:
+            path (str): mount path being written.
+            writes (WriteBuf): (offset, payload) pairs in arrival order.
+        """
+        existing = b""
+        try:
+            existing = self._run(self._ops.read(self.resolve(path), raw=True))
+        except FileNotFoundError:
+            # missing file: start from empty; the write creates it
+            pass
+        merged = merge_writes(existing, writes)
+        self._run(self._ops.write(self.resolve(path), merged))
+        self._prefetch.pop(path, None)
 
     def write(self, path: str, data: bytes, offset: int,
               fh: int | None) -> int:
@@ -437,21 +435,11 @@ class MountCore:
         Returns:
             int: number of bytes accepted.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is not None:
             ctx.write_buf.append((offset, data))
             return len(data)
-        existing = b""
-        try:
-            existing = self._run(self._ops.read(self.resolve(path)))
-        except FileNotFoundError:
-            # missing file: start from empty and let the write create it
-            pass
-        if offset > len(existing):
-            existing = existing + b"\0" * (offset - len(existing))
-        new_data = existing[:offset] + data + existing[offset + len(data):]
-        self._run(self._ops.write(self.resolve(path), new_data))
-        self._prefetch.pop(path, None)
+        self._apply_writes(path, [(offset, data)])
         return len(data)
 
     def create(self, path: str) -> int:
@@ -465,7 +453,7 @@ class MountCore:
         """
         self._run(self._ops.create(self.resolve(path)))
         self._prefetch.pop(path, None)
-        return self._track(Handle(path=path))
+        return self._handles.add(Handle(path=path))
 
     def mkdir(self, path: str) -> None:
         self._run(self._ops.mkdir(self.resolve(path)))
@@ -594,24 +582,11 @@ class MountCore:
             path (str): mount path being flushed.
             fh (int | None): the handle whose buffer to drain.
         """
-        ctx = self._handles.get(fh) if fh is not None else None
+        ctx = self._ctx(fh)
         if ctx is None or not ctx.write_buf:
             return
-        existing = b""
-        try:
-            existing = self._run(self._ops.read(self.resolve(path)))
-        except FileNotFoundError:
-            # missing file: start from empty; the write creates it
-            pass
-        merged = bytearray(existing)
-        for off, chunk in ctx.write_buf:
-            end = off + len(chunk)
-            if end > len(merged):
-                merged.extend(b"\0" * (end - len(merged)))
-            merged[off:off + len(chunk)] = chunk
-        self._run(self._ops.write(self.resolve(path), bytes(merged)))
+        self._apply_writes(path, ctx.write_buf)
         ctx.write_buf = []
-        self._prefetch.pop(path, None)
 
     def open(self, path: str) -> int:
         """Open a path, hydrating it when its size is unknown.
@@ -632,7 +607,7 @@ class MountCore:
             # now: getattr(fh) and read() then serve real bytes, and the TTL
             # cache keeps release-then-stat bursts from refetching.
             ctx.data = self.prefetch_read(path)
-        return self._track(ctx)
+        return self._handles.add(ctx)
 
     def release(self, fh: int) -> None:
         ctx = self._handles.get(fh)
@@ -642,17 +617,11 @@ class MountCore:
             # still hold buffered writes here. Dropping them would silently
             # lose data written through an fskit mount.
             self.flush(ctx.path, fh)
-        self._handles.pop(fh, None)
+        self._handles.pop(fh)
 
     def truncate(self, path: str, length: int) -> None:
         self._run(self._ops.truncate(self.resolve(path), length))
         self._prefetch.pop(path, None)
-
-    def _track(self, ctx: Handle) -> int:
-        fh = self._next_fh
-        self._next_fh += 1
-        self._handles[fh] = ctx
-        return fh
 
     def _forget(self, path: str) -> None:
         self._xattrs.pop(path, None)

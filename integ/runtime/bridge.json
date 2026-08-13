@@ -292,6 +292,209 @@
           }
         }
       ]
+    },
+    {
+      "id": "redis_guest_open_modes",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/redis": {
+            "resource": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/redis/notes.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "python3 -c \"f = open('/redis/notes.txt', 'a'); f.write('hey'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "append /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /redis/notes.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hey"
+          }
+        }
+      ]
+    },
+    {
+      "id": "redis_guest_open_modes_js",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/redis": {
+            "resource": "redis"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/redis/notes.txt', 'w'); f.puts('hey'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /redis/notes.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /redis/notes.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hey"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_guest_open_w",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ],
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm -f /s3/report.txt"
+        },
+        {
+          "command": "python3 -c \"f = open('/s3/report.txt', 'w'); f.write('r1'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /s3/report.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /s3/report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "r1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_guest_open_w_js",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ],
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "rm -f /s3/report.txt"
+        },
+        {
+          "command": "js -e \"const f = std.open('/s3/report.txt', 'w'); f.puts('r1'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": [
+              "create /s3/report.txt"
+            ]
+          }
+        },
+        {
+          "command": "cat /s3/report.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "r1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3_facade_probes",
+      "world": {
+        "mounts": {
+          "/s3": {
+            "resource": "s3"
+          }
+        }
+      },
+      "steps": [
+        {
+          "s3_put": {
+            "key": "probe/x.txt",
+            "body": "payload"
+          }
+        },
+        {
+          "facade": {
+            "method": "is_dir",
+            "path": "/s3/probe"
+          },
+          "expect": {
+            "value": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/s3/nope.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "cat",
+            "path": "/s3/greeting.txt"
+          },
+          "expect": {
+            "value": "hello from s3\n",
+            "ops_contain": [
+              "read /s3/greeting.txt"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

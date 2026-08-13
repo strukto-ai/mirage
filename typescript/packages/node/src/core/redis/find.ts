@@ -23,6 +23,7 @@ import {
   type PredNode,
   rstripSlash,
   startBasename,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 
 export interface FindOptions {
@@ -120,6 +121,6 @@ export async function find(
       maxSize: options.maxSize,
     })
   }
-  results.sort()
+  results.sort(compareCodePoints)
   return results
 }

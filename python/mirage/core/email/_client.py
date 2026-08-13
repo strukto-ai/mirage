@@ -30,6 +30,103 @@ INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 FETCH_ITEMS = "(UID FLAGS INTERNALDATE BODY.PEEK[])"
 
 
+def quote_mailbox(folder: str) -> str:
+    """Spell a mailbox name as an IMAP quoted string.
+
+    aioimaplib joins a command's arguments with spaces exactly as
+    given, so a bare mailbox name containing one arrives as two
+    arguments and the server reads only the first word. That is not
+    exotic: the sent mailbox is ``Sent Items`` on Exchange and
+    ``[Gmail]/Sent Mail`` on Gmail.
+
+    Args:
+        folder (str): the mailbox name as the server listed it.
+
+    Returns:
+        str: the name wrapped in quotes, with quotes and backslashes
+            escaped per RFC 3501's quoted-string rules.
+    """
+    escaped = folder.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def read_quoted(text: str) -> tuple[str, str]:
+    """Read one RFC 3501 quoted string off the front of ``text``.
+
+    Args:
+        text (str): a fragment whose first character is the opening
+            quote.
+
+    Returns:
+        tuple[str, str]: the unescaped contents, and whatever follows
+            the closing quote with leading spaces dropped.
+    """
+    chars: list[str] = []
+    index = 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text):
+            chars.append(text[index + 1])
+            index += 2
+            continue
+        if char == '"':
+            return "".join(chars), text[index + 1:].lstrip()
+        chars.append(char)
+        index += 1
+    return "".join(chars), ""
+
+
+def parse_folder_line(line: str | bytes) -> tuple[str, tuple[str, ...]] | None:
+    """Read one LIST response line as a name and its attributes.
+
+    The grammar is ``(attrs) delimiter mailbox``, and the mailbox is an
+    astring: a quoted string on most servers but a bare atom whenever
+    the name needs no quoting, which is legal and which some servers
+    emit. Splitting on quotes reads the delimiter as the name for the
+    atom form, so the three tokens are walked in order instead.
+
+    Args:
+        line (str | bytes): one line of the LIST response.
+
+    Returns:
+        tuple[str, tuple[str, ...]] | None: the mailbox name and its
+            attributes, or None for a line that is not a mailbox (the
+            trailing "LIST completed" among them).
+    """
+    if isinstance(line, (bytes, bytearray)):
+        line = bytes(line).decode(errors="replace")
+    text = line.strip()
+    # An untagged LIST line always opens with its attribute list, which
+    # is what tells it apart from the completion line.
+    if not text.startswith("("):
+        return None
+    end = text.find(")")
+    if end == -1:
+        return None
+    attributes = tuple(text[1:end].split())
+    rest = text[end + 1:].lstrip()
+    if rest.startswith('"'):
+        _, rest = read_quoted(rest)
+    elif rest[:3].upper() == "NIL":
+        rest = rest[3:].lstrip()
+    if not rest:
+        return None
+    name = read_quoted(rest)[0] if rest.startswith('"') else rest.split()[0]
+    return (name, attributes) if name else None
+
+
+async def list_folder_entries(
+        accessor: EmailAccessor) -> list[tuple[str, tuple[str, ...]]]:
+    imap = await accessor.get_imap()
+    response = await imap.list('""', "*")
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    for line in response.lines:
+        parsed = parse_folder_line(line)
+        if parsed is not None:
+            entries.append(parsed)
+    return entries
+
+
 async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
     """Select a mailbox, failing loudly when it does not exist.
 
@@ -45,23 +142,13 @@ async def select_folder(imap: aioimaplib.IMAP4_SSL, folder: str) -> None:
     Raises:
         FileNotFoundError: the server refused the mailbox.
     """
-    response = await imap.select(folder)
+    response = await imap.select(quote_mailbox(folder))
     if response.result != "OK":
         raise FileNotFoundError(f"no such mailbox {folder!r}")
 
 
 async def list_folders(accessor: EmailAccessor) -> list[str]:
-    imap = await accessor.get_imap()
-    response = await imap.list('""', "*")
-    folders: list[str] = []
-    for line in response.lines:
-        if isinstance(line, (bytes, bytearray)):
-            line = bytes(line).decode(errors="replace")
-        if '"' in line:
-            parts = line.rsplit('"', 2)
-            if len(parts) >= 2:
-                folders.append(parts[-2])
-    return folders
+    return [name for name, _ in await list_folder_entries(accessor)]
 
 
 async def list_message_uids(

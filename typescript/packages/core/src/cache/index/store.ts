@@ -24,5 +24,29 @@ export abstract class IndexCacheStore {
     expiredAt?: Date | null,
   ): Promise<void>
   abstract invalidateDir(resourcePath: string): Promise<void>
+  /**
+   * Mark every entry stale without discarding it.
+   *
+   * The difference from `clear` is what a later lookup can tell. `clear`
+   * leaves an empty store, which reads exactly like a store that was never
+   * filled, so a backend whose index *is* its listing cannot tell an
+   * invalidation from an empty repository. Expiring instead keeps that
+   * distinction: the lookup answers EXPIRED and the backend refetches.
+   */
+  abstract invalidate(): Promise<void>
+
   abstract clear(): Promise<void>
+
+  /**
+   * Release whatever the store holds open. The default is a no-op:
+   * an in-memory index owns nothing. A store backed by a connection
+   * (redis) overrides this and must be idempotent — `close()` is
+   * called once per owning resource, and a resource shared between
+   * workspaces is closed by whichever one owns it.
+   *
+   * Mirrors Python `IndexCacheStore.close` (`cache/index/store.py`).
+   */
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
 }

@@ -57,7 +57,203 @@ def meta_fields(py_meta: dict[str, Any], ts_meta: dict[str, Any]) -> list[str]:
     return sorted((set(py_meta) | set(ts_meta)) - {"by_resource"})
 
 
-def check_resources(language_only: set[str], expansions: dict[str, list[str]],
+def load_resource_trees() -> dict[str, dict[str, Any]]:
+    """The three ``resources.json`` payloads, or a SystemExit naming the
+    generator that has not been run."""
+    trees = {
+        "python": SPEC / "python" / "resources.json",
+        "node": SPEC / "typescript" / "node" / "resources.json",
+        "browser": SPEC / "typescript" / "browser" / "resources.json",
+    }
+    loaded: dict[str, dict[str, Any]] = {}
+    for tree, path in trees.items():
+        if not path.is_file():
+            raise SystemExit(f"missing {path}\nrun scripts/gen_specs.py and "
+                             "typescript/scripts/gen-specs.ts first")
+        loaded[tree] = json.loads(path.read_text())
+    return loaded
+
+
+def merge_variants(loaded: dict[str, dict[str, Any]], key: str,
+                   language_only: set[str]) -> dict[str, Any]:
+    """One typescript view of ``key``, node's entry winning over browser's.
+
+    Where only one runtime carries a real entry — the browser registers
+    ``lancedb`` and ``email`` solely to explain that it cannot serve them,
+    so their capabilities dump as null — the runtime that can actually
+    mount the backend is the one worth comparing against python.
+
+    Preferring node is only safe because ``check_variant_facts`` has
+    already failed on any name the two runtimes describe differently.
+    Without it the preference silently hid a divergence rather than
+    resolving one: the fifteen browser S3-family resources declared
+    neither ``sizes_always_known`` nor ``storage_id`` while their node
+    twins declared both, and python matched node, so the whole
+    python-versus-typescript comparison passed.
+
+    Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        key (str): the payload key to merge, e.g. ``"capabilities"``.
+        language_only (set[str]): names with no counterpart to compare.
+    """
+    out: dict[str, Any] = {}
+    for tree in ("node", "browser"):
+        for name, entry in loaded[tree].get(key, {}).items():
+            if name in language_only:
+                continue
+            if out.get(name) is None:
+                out[name] = entry
+    return out
+
+
+def check_variant_facts(loaded: dict[str, dict[str, Any]], key: str,
+                        allowed: dict[str, dict[str, str]],
+                        used: set[str]) -> list[str]:
+    """Node against browser for one resource-fact table.
+
+    A backend both runtimes register is one backend, and it should not
+    behave differently depending on which package mounted it. Nothing
+    compared the two: ``compare_variants`` only sees the command specs,
+    and ``merge_variants`` resolves the tables by preferring node, which
+    turns a divergence into a silently discarded value.
+
+    A ``null`` entry is a runtime declining to serve the backend at all,
+    which is a membership fact ``check_resources`` already covers.
+
+    Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        key (str): the payload key to compare, e.g. ``"capabilities"``.
+        allowed (dict[str, dict[str, str]]): per-resource keys whose
+            divergence is documented, each mapped to its reason.
+        used (set[str]): collects the exemptions that fired.
+    """
+    node = loaded["node"].get(key, {})
+    browser = loaded["browser"].get(key, {})
+    failures: list[str] = []
+    for name in sorted(set(node) & set(browser)):
+        a, b = node[name], browser[name]
+        if a is None or b is None:
+            continue
+        exempt = allowed.get(name, {})
+        for field in sorted(set(a) | set(b)):
+            if a.get(field) == b.get(field):
+                continue
+            if field in exempt:
+                used.add(f"{key}:{name}:{field}")
+                continue
+            failures.append(f"{key}[{name}].{field}: typescript node="
+                            f"{a.get(field)!r} browser={b.get(field)!r}")
+    return failures
+
+
+def check_capabilities(loaded: dict[str, dict[str, Any]],
+                       expansions: dict[str,
+                                        list[str]], language_only: set[str],
+                       allowed: dict[str,
+                                     dict[str,
+                                          str]], used: set[str]) -> list[str]:
+    """Per-resource behavior values: TTLs, caching, snapshot support.
+
+    Registry membership says a backend can be built; these say what it
+    does once mounted, and they are just as hand-maintained. Python kept
+    the 600 s ``index_ttl`` default for postgres and mongodb where
+    typescript pins 0, so a python mount could serve a ten-minute-stale
+    listing of a live schema while its typescript twin was exact.
+
+    Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        expansions (dict[str, list[str]]): python alias table.
+        language_only (set[str]): names present in one runtime only.
+        allowed (dict[str, dict[str, str]]): per-resource keys whose
+            divergence is documented, each mapped to its reason.
+        used (set[str]): collects the exemptions that fired.
+    """
+    py: dict[str, Any] = {}
+    for name, entry in loaded["python"].get("capabilities", {}).items():
+        for alias in expansions.get(name, [name]):
+            py[alias] = entry
+    ts = merge_variants(loaded, "capabilities", language_only)
+    failures = _membership(py, ts, language_only, "capabilities")
+    for name in sorted(set(py) & set(ts)):
+        a, b = py[name], ts[name]
+        if b is None:
+            failures.append(f"capabilities[{name}]: python builds it, no "
+                            f"typescript runtime does")
+            continue
+        exempt = allowed.get(name, {})
+        for key in sorted(set(a) | set(b)):
+            if a.get(key) == b.get(key):
+                continue
+            if key in exempt:
+                used.add(f"{name}:{key}")
+                continue
+            failures.append(f"capabilities[{name}].{key}: "
+                            f"python={a.get(key)!r} typescript={b.get(key)!r}")
+    return failures
+
+
+def check_command_io(loaded: dict[str, dict[str, Any]], aliases: dict[str,
+                                                                      str],
+                     language_only: set[str], allowed: dict[str, dict[str,
+                                                                      str]],
+                     used: set[str]) -> list[str]:
+    """The wired ``CommandIO`` slots per backend.
+
+    The adapter's slot set is a hand-filled literal that nothing else
+    reads, so a backend can omit ``du`` or ``find`` and quietly fall back
+    to the capped readdir walk — a partial total and an exit 1 past the
+    cap — while its twin pushes the same query down to the API.
+
+    Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        aliases (dict[str, str]): python command-package name to the
+            typescript one where the directories differ.
+        language_only (set[str]): backends present in one runtime only.
+        allowed (dict[str, dict[str, str]]): per-backend keys whose
+            divergence is documented, each mapped to its reason.
+        used (set[str]): collects the exemptions that fired.
+    """
+    py = {
+        aliases.get(name, name): entry
+        for name, entry in loaded["python"].get("command_io", {}).items()
+    }
+    ts = merge_variants(loaded, "command_io", language_only)
+    failures = _membership(py, ts, language_only, "command_io")
+    for name in sorted(set(py) & set(ts)):
+        a, b = py[name], ts[name]
+        exempt = allowed.get(name, {})
+        for key in sorted(set(a) | set(b)):
+            if a.get(key) == b.get(key):
+                continue
+            if key in exempt:
+                used.add(f"{name}:{key}")
+                continue
+            if key == "slots":
+                only_py = sorted(set(a["slots"]) - set(b["slots"]))
+                only_ts = sorted(set(b["slots"]) - set(a["slots"]))
+                failures.append(f"command_io[{name}].slots: "
+                                f"python-only={only_py} "
+                                f"typescript-only={only_ts}")
+                continue
+            failures.append(f"command_io[{name}].{key}: "
+                            f"python={a.get(key)!r} typescript={b.get(key)!r}")
+    return failures
+
+
+def _membership(py: dict[str, Any], ts: dict[str, Any],
+                language_only: set[str], label: str) -> list[str]:
+    only_py = sorted(set(py) - set(ts) - language_only)
+    only_ts = sorted(set(ts) - set(py) - language_only)
+    failures: list[str] = []
+    if only_py:
+        failures.append(f"{label} only in python: {only_py}")
+    if only_ts:
+        failures.append(f"{label} only in typescript: {only_ts}")
+    return failures
+
+
+def check_resources(loaded: dict[str, dict[str, Any]], language_only: set[str],
+                    expansions: dict[str, list[str]],
                     unconstructible: dict[str, dict[str, str]]) -> list[str]:
     """Registry membership, the surface the command specs cannot see.
 
@@ -69,6 +265,7 @@ def check_resources(language_only: set[str], expansions: dict[str, list[str]],
     tables.
 
     Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
         language_only (set[str]): resources that exist in one runtime only.
         expansions (dict[str, list[str]]): python alias table, so one
             python name can stand for several typescript ones.
@@ -76,20 +273,6 @@ def check_resources(language_only: set[str], expansions: dict[str, list[str]],
             register commands on purpose without a registry factory.
     """
     failures: list[str] = []
-    trees = {
-        "python": SPEC / "python" / "resources.json",
-        "node": SPEC / "typescript" / "node" / "resources.json",
-        "browser": SPEC / "typescript" / "browser" / "resources.json",
-    }
-    loaded: dict[str, dict[str, list[str]]] = {}
-    for tree, path in trees.items():
-        if not path.is_file():
-            return [
-                f"missing {path}\nrun scripts/gen_specs.py and "
-                "typescript/scripts/gen-specs.ts first"
-            ]
-        loaded[tree] = json.loads(path.read_text())
-
     for tree, payload in loaded.items():
         registry = set(payload["registry"])
         allowed = unconstructible.get(tree, {})
@@ -222,12 +405,14 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
         return (f"    {diff}: python={py['_meta'].get(key)!r} "
                 f"typescript={ts['_meta'].get(key)!r}")
     if diff == "options":
+        # An option that declares only one spelling carries only that
+        # key, since the dumps omit anything left at its default.
         py_by_name = {
-            o["long"] or o["short"]: o
+            o.get("long") or o.get("short"): o
             for o in py.get("options", [])
         }
         ts_by_name = {
-            o["long"] or o["short"]: o
+            o.get("long") or o.get("short"): o
             for o in ts.get("options", [])
         }
         lines = [f"    {diff}:"]
@@ -285,12 +470,20 @@ def main() -> int:
                           dict[str,
                                str]] = exceptions["unconstructible_resources"]
     allowed: dict[str, Any] = exceptions["commands"]
+    capability_exempt: dict[str,
+                            dict[str,
+                                 str]] = exceptions["resource_capabilities"]
+    io_exempt: dict[str, dict[str, str]] = exceptions["command_io"]
+    io_aliases: dict[str, str] = exceptions["command_io_aliases"]["python"]
+    variant_exempt: dict[str, dict[str, dict[
+        str, str]]] = exceptions["variant_resource_facts"]
 
     py_specs = load_dir(PYTHON)
     ts_variants = [load_dir(p) for p in TYPESCRIPT]
 
     failures: list[str] = []
     used: set[str] = set()
+    used_facts: set[str] = set()
 
     # Python has no runtime split, so its command set must equal the union
     # of the two typescript variants; comparing against node alone would
@@ -305,9 +498,39 @@ def main() -> int:
     if only_ts:
         failures.append(f"commands only in typescript: {only_ts}")
 
+    trees = load_resource_trees()
     failures.extend(compare_variants(ts_variants))
-    failures.extend(check_resources(language_only, expansions,
-                                    unconstructible))
+    failures.extend(
+        check_resources(trees, language_only, expansions, unconstructible))
+    # Before python is compared against the merged typescript view, since
+    # that merge prefers node and would otherwise discard the difference.
+    for table in ("capabilities", "command_io"):
+        failures.extend(
+            check_variant_facts(trees, table, variant_exempt.get(table, {}),
+                                used_facts))
+    failures.extend(
+        check_capabilities(trees, expansions, language_only, capability_exempt,
+                           used_facts))
+    failures.extend(
+        check_command_io(trees, io_aliases, language_only, io_exempt,
+                         used_facts))
+    declared = {
+        f"{name}:{key}"
+        for table in (capability_exempt, io_exempt)
+        for name, keys in table.items()
+        for key in keys
+    }
+    declared |= {
+        f"{table}:{name}:{key}"
+        for table, entries in variant_exempt.items()
+        for name, keys in entries.items()
+        for key in keys
+    }
+    stale_facts = sorted(declared - used_facts)
+    if stale_facts:
+        failures.append(f"stale resource-fact exemptions in "
+                        f"{EXCEPTIONS.name}, the divergence they cover is "
+                        f"gone: {stale_facts}")
 
     for name in sorted(set(py_specs) & set(ts_variants[0])):
         py, ts = py_specs[name], ts_variants[0][name]

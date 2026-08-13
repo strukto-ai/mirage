@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '@struktoai/mirage-core'
+import { compareCodePoints, mountPrefixOf } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 import { enoent, enotdir } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -40,5 +40,5 @@ export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<s
   const base = norm(virtual)
   const dirPrefix = base === '/' ? '/' : `${base}/`
   const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
-  return names.map((n) => `${mountPrefix}${dirPrefix}${n}`).sort()
+  return names.map((n) => `${mountPrefix}${dirPrefix}${n}`).sort(compareCodePoints)
 }

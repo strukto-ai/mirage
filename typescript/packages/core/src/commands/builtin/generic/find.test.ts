@@ -19,7 +19,7 @@ import type { FindOptions } from '../../../resource/base.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
-import { findGeneric } from './find.ts'
+import { findGeneric, linkResults } from './find.ts'
 
 const DEC = new TextDecoder()
 
@@ -294,6 +294,52 @@ describe('generic command find', () => {
     await expect(findGeneric([spec('/limited')], [], makeOpts(), fakeFind)).rejects.toThrow(
       'rate limited',
     )
+  })
+
+  describe('-mtime reads timestamps through modifiedTs', () => {
+    function linkViewOf(modified: string | null): LinkView {
+      const st = { name: 'l', size: 1, type: FileType.TEXT, modified } as FileStat
+      return {
+        statAt: () => null,
+        children: () => [],
+        subtree: () => [['/l', st]],
+        resolve: (p: string) => p,
+        exists: () => Promise.resolve(true),
+        targetStat: () => Promise.resolve(null),
+      }
+    }
+
+    async function withMtime(modified: string | null): Promise<string[]> {
+      return linkResults(
+        linkViewOf(modified),
+        '/',
+        '',
+        '',
+        { op: 'true' },
+        null,
+        null,
+        null,
+        null,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        false,
+      )
+    }
+
+    it('drops a malformed timestamp instead of keeping it', async () => {
+      // Date.parse('nonsense') is NaN, and every NaN comparison is false,
+      // so both window checks passed and the entry survived — where Python
+      // drops it. modifiedTs returns null for the same input.
+      expect(await withMtime('not-a-date')).toEqual([])
+    })
+
+    it('keeps an entry whose timestamp is inside the window', async () => {
+      expect(await withMtime('2025-06-01T12:00:00Z')).toEqual(['/l'])
+    })
+
+    it('reads a date-only stamp as midnight UTC rather than NaN', async () => {
+      expect(await withMtime('2025-06-01')).toEqual(['/l'])
+    })
   })
 
   it.each([

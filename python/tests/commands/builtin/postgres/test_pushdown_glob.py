@@ -234,15 +234,19 @@ async def test_tail_glob_does_not_query_a_relation_named_star(accessor):
     async def fake_resolve(_accessor, _paths, index=None):
         return _resolved_pair()
 
+    async def fake_generic(paths, _texts, _opts, _stat, _stream):
+        return b"", IOResult()
+
     with patch(
             "mirage.commands.builtin.postgres.tail._client.count_rows",
             new=AsyncMock(side_effect=AssertionError("pushdown ran on glob")),
     ), patch(
-            "mirage.commands.builtin.postgres.tail.resolve_glob",
-            new=fake_resolve,
+            "mirage.commands.builtin.postgres.tail.resolve_or_empty",
+            new=lambda _ops, _accessor, _paths, _index: fake_resolve(
+                _accessor, _paths),
     ), patch(
-            "mirage.commands.builtin.postgres.tail.tail_multi",
-            new=lambda paths, **_kw: b"",
+            "mirage.commands.builtin.postgres.tail.tail_generic",
+            new=fake_generic,
     ):
         _, io = await tail(accessor, [_glob_path()], n="1", index=NULL_INDEX)
 

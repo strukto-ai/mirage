@@ -18,7 +18,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -89,17 +89,11 @@ async function* trStream(
   }
 }
 
-function boolFlag(
-  flags: Record<string, string | boolean | number | string[]>,
-  ...names: string[]
-): boolean {
+function boolFlag(flags: Record<string, FlagValue>, ...names: string[]): boolean {
   return names.some((n) => flags[n] === true)
 }
 
-function buildOptions(
-  texts: readonly string[],
-  flags: Record<string, string | boolean | number | string[]>,
-): TrOptions {
+function buildOptions(texts: readonly string[], flags: Record<string, FlagValue>): TrOptions {
   if (texts.length === 0) throw new Error('tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]')
   const complement = boolFlag(flags, 'c', 'C', 'complement')
   const del = boolFlag(flags, 'd', 'delete')

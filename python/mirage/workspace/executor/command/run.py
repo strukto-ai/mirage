@@ -15,13 +15,15 @@
 import functools
 from typing import Any
 
-from mirage.commands.builtin.generic.ls import LS_FAILURE
 from mirage.commands.builtin.utils.limit import CommandTimeoutError
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
-from mirage.ops.types import LinkView
+from mirage.ops.config import NamespaceLinks
+from mirage.ops.namespace_view import namespace_names
+from mirage.ops.types import LinkView, MountView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VFSRuntime
@@ -29,7 +31,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, ResourceName
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
-                                                      path_exists, path_stat)
+                                                      path_exists,
+                                                      path_readdir, path_stat)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -103,7 +106,8 @@ def line_runtime_for(
     return runtime, None
 
 
-def scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, object]:
+def scalar_find_flags(
+        flag_kwargs: dict[str, FlagValue]) -> dict[str, FlagValue]:
     # `multiple=True` on find value-flags makes parse_to_kwargs emit
     # lists; bespoke backend wrappers read these as scalars. Migrated
     # backends read the expression from `texts` and ignore flag_kwargs.
@@ -111,6 +115,25 @@ def scalar_find_flags(flag_kwargs: dict[str, object]) -> dict[str, object]:
         k: (v[-1] if isinstance(v, list) and v else v)
         for k, v in flag_kwargs.items()
     }
+
+
+def registry_child_mounts(registry: MountRegistry,
+                          links: NamespaceLinks | None,
+                          parent: str) -> list[str]:
+    """Child names the namespace owes ``parent``: mounts and links.
+
+    The ``child_mounts`` fact offered to listing commands: the same
+    names the door merges into its own readdir, derived from the same
+    tables (mount names session-filtered), so the shell and the ops
+    surface cannot disagree about what a directory holds.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        links (NamespaceLinks | None): the namespace symlink table.
+        parent (str): directory whose child segments to enumerate.
+    """
+    return namespace_names([m.prefix for m in registry.mounts()], links,
+                           parent)
 
 
 def link_view(namespace: Namespace | None,
@@ -138,6 +161,19 @@ def link_view(namespace: Namespace | None,
                                                   dispatch))
 
 
+def mount_roots_below(registry: MountRegistry, virtual: str) -> list[str]:
+    """Mount roots strictly under a path, without the trailing slash.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        virtual (str): absolute virtual path to scan beneath.
+    """
+    return [
+        m.prefix.rstrip("/") or "/"
+        for m in registry.descendant_mounts(virtual)
+    ]
+
+
 def mount_root_of(registry: MountRegistry, virtual: str) -> str:
     """The mount prefix serving a virtual path, "/" when none does.
 
@@ -155,6 +191,23 @@ def mount_root_of(registry: MountRegistry, virtual: str) -> str:
         return registry.mount_for(virtual).prefix
     except ValueError:
         return "/"
+
+
+def mount_view(registry: MountRegistry) -> MountView:
+    """The mount-boundary facts on offer to every command.
+
+    Which commands receive it is decided at dispatch by whether the
+    handler names a ``mounts`` parameter, the same opt-in ``links``
+    uses, so there is no list of boundary-aware commands to keep in
+    step.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+    """
+    return MountView(descendants=functools.partial(mount_roots_below,
+                                                   registry),
+                     is_root=registry.is_mount_root,
+                     root_of=functools.partial(mount_root_of, registry))
 
 
 async def drop_service_caches(registry: MountRegistry,
@@ -188,7 +241,12 @@ async def drop_service_caches(registry: MountRegistry,
     for mount in registry.mounts():
         if mount.resource.name not in wanted:
             continue
-        await mount.resource.index.clear()
+        # Invalidate rather than clear: a cleared index reads exactly like
+        # one that was never filled, so a backend whose index *is* its
+        # listing (github seeds the whole tree once) cannot tell the drop
+        # from an empty repository and reports the mount as gone. Expiring
+        # keeps that distinction and the next read refetches.
+        await mount.resource.index.invalidate()
         if mount.cache_manager is not None:
             await mount.cache_manager.drop_prefix()
 
@@ -227,7 +285,7 @@ async def run_on_mount(
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
-    flag_kwargs: dict[str, object],
+    flag_kwargs: dict[str, FlagValue],
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
@@ -280,7 +338,7 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    # Three facts the backend cannot supply, offered to every command and
+    # The facts the backend cannot supply, offered to every command and
     # delivered only to the handlers that name them as a parameter.
     # ls/stat render stat rows from the backend's own stat, which never
     # sees namespace attr overlays (chmod/chown/touch on overlay backends)
@@ -296,6 +354,10 @@ async def run_on_mount(
     links = link_view(namespace, dispatch)
     stat_path = (functools.partial(path_stat, dispatch)
                  if dispatch is not None else None)
+    readdir_path = (functools.partial(path_readdir, dispatch)
+                    if dispatch is not None else None)
+    child_mounts = functools.partial(registry_child_mounts, registry,
+                                     namespace)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -319,6 +381,9 @@ async def run_on_mount(
             stat_overlay=stat_overlay,
             links=links,
             stat_path=stat_path,
+            readdir_path=readdir_path,
+            child_mounts=child_mounts,
+            mounts=mount_view(registry),
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
@@ -338,16 +403,14 @@ async def run_on_mount(
         return None, IOResult(exit_code=1,
                               stderr=format_fs_error(cmd_name, exc, paths))
 
-    # A minor problem (exit 1: an entry below the operand could not be
-    # stat'd) still lists the directory, so the mount and link rows belong
-    # in that output; only a failed operand (exit 2) has nothing to augment.
-    if cmd_name == "ls" and io.exit_code != LS_FAILURE:
-        stdout = await inject_child_mounts(stdout, registry, paths,
-                                           flag_kwargs, session.cwd)
-
     if cmd_name == "find":
-        stdout, action_err = await _apply_find_actions(stdout, flag_kwargs,
-                                                       registry, session.cwd)
+        stdout, action_err = await _apply_find_actions(
+            stdout,
+            flag_kwargs,
+            registry,
+            session.cwd,
+            child_mounts=child_mounts,
+            stat_path=stat_path)
         if action_err:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = existing + action_err
@@ -360,70 +423,3 @@ async def run_on_mount(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     return wrap_cachable_streams(stdout, io)
-
-
-def listed_names(existing: str, long_form: bool) -> set[str]:
-    """Names already rendered in an ls listing, for injection dedup.
-
-    Long rows come in two shapes: the degraded ``mode\t-\t-\tname``
-    form used for entries with neither size nor mtime, and the full GNU
-    row whose name is the ninth whitespace-separated field. Splitting on
-    tabs alone reads a full row as a single field, so a name would never
-    match and an injected row could duplicate an entry the backend
-    already listed.
-
-    Args:
-        existing (str): the backend's rendered ls output.
-        long_form (bool): whether -l rows are being parsed.
-    """
-    names: set[str] = set()
-    for line in existing.split("\n"):
-        if line == "":
-            continue
-        if not long_form:
-            names.add(line.rstrip("/*@|="))
-        elif "\t" in line:
-            names.add(line.split("\t")[-1])
-        else:
-            parts = line.split(maxsplit=8)
-            if len(parts) == 9:
-                names.add(parts[8])
-    names.discard("")
-    return names
-
-
-async def inject_child_mounts(
-    stdout: ByteSource | None,
-    registry: MountRegistry,
-    paths: list[PathSpec],
-    flag_kwargs: dict[str, object],
-    cwd: str,
-) -> ByteSource | None:
-    if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:
-        return stdout
-    if len(paths) > 1:
-        return stdout
-    listed = paths[0].virtual if paths else cwd
-    include_hidden = (flag_kwargs.get("a") is True
-                      or flag_kwargs.get("A") is True)
-    child_names = registry.child_mount_names(listed, include_hidden)
-    if not child_names:
-        return stdout
-
-    existing_bytes = await materialize(stdout) if stdout is not None else b""
-    existing = existing_bytes.decode("utf-8")
-    long_form = flag_kwargs.get("args_l") is True
-    classify = flag_kwargs.get("F") is True
-    present = listed_names(existing, long_form)
-    extras: list[str] = []
-    for name in child_names:
-        if name in present:
-            continue
-        if long_form:
-            extras.append(f"d\t-\t-\t{name}")
-        else:
-            extras.append(f"{name}/" if classify else name)
-    if not extras:
-        return stdout
-    sep = "" if existing == "" or existing.endswith("\n") else "\n"
-    return (existing + sep + "\n".join(extras)).encode("utf-8")

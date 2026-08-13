@@ -25,7 +25,8 @@ import { MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.t
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // The one thing the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -254,26 +255,11 @@ export class MountRegistry {
       if (!m.prefix.startsWith(norm)) continue
       out.push(m)
     }
-    return out.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0))
+    return out.sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   }
 
-  childMountNames(parentPath: string, includeHidden = false): string[] {
-    const norm = normalizePrefix(parentPath)
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const m of this.mountList) {
-      if (m.prefix === norm) continue
-      if (!m.prefix.startsWith(norm)) continue
-      const rest = m.prefix.slice(norm.length)
-      const slash = rest.indexOf('/')
-      const name = slash === -1 ? rest : rest.slice(0, slash)
-      if (name === '') continue
-      if (!includeHidden && name.startsWith('.')) continue
-      if (seen.has(name)) continue
-      seen.add(name)
-      out.push(name)
-    }
-    return out.sort()
+  mountPrefixes(): string[] {
+    return this.mountList.map((m) => m.prefix)
   }
 
   opsMounts(): OpsMountInfo[] {
@@ -345,14 +331,12 @@ export class MountRegistry {
   }
 
   mountFor(path: string): MountEntry | null {
-    const norm = `/${stripSlash(path)}`
-    for (const m of this.mountList) {
-      const prefixNoTrail = rstripSlash(m.prefix) || '/'
-      if (norm === prefixNoTrail || norm.startsWith(m.prefix)) {
-        return m
-      }
-    }
-    return null
+    const owner = ownerPrefix(
+      this.mountList.map((m) => m.prefix),
+      path,
+    )
+    if (owner === null) return null
+    return this.mountList.find((m) => m.prefix === owner) ?? null
   }
 
   allMounts(): readonly MountEntry[] {

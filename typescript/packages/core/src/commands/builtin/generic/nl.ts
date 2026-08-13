@@ -18,6 +18,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import type { FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -117,7 +118,7 @@ function parseNumbering(raw: string): [string, RegExp | null] {
   return [raw, null]
 }
 
-function parseOptions(flags: Record<string, string | boolean | number | string[]>): NlConfig {
+function parseOptions(flags: Record<string, FlagValue>): NlConfig {
   const bodyValue = flags.body_numbering
   const footerValue = flags.footer_numbering
   const headerValue = flags.header_numbering

@@ -71,10 +71,6 @@ export class BoxResource extends BaseResource implements Resource {
     return Promise.resolve()
   }
 
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-
   commands(): readonly RegisteredCommand[] {
     return BOX_COMMANDS
   }

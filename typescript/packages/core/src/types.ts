@@ -16,6 +16,11 @@ import type { IndexCacheStore } from './cache/index/store.ts'
 import type { FindOptions } from './resource/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
+// Any value that survives a JSON round trip: what a decoded payload holds,
+// what jq evaluates over, what an API field hands back. The mirror of
+// python's mirage.types.JsonValue.
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue }
+
 export const MountMode = Object.freeze({
   READ: 'read',
   WRITE: 'write',
@@ -164,18 +169,42 @@ export class Limit {
     this.onExceed = init.onExceed ?? OnExceed.TRUNCATE
   }
 
+  /**
+   * Aggregate several limits using each field's declared rule.
+   *
+   * Reads the rules off LIMIT_AGGR rather than naming the fields here, so a
+   * new bound composes as soon as it is declared — the same property Python
+   * gets from walking `model_fields` for each field's `Aggr(rule)`. Returns
+   * null when nothing is configured. Used wherever bounds stack (policy
+   * composition, cross-mount fan-out, layered configs).
+   */
   static aggr(limits: Iterable<Limit | null>): Limit | null {
     const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    return new Limit({
-      maxBytes: minPositive(present.map((s) => s.maxBytes)),
-      maxLines: minPositive(present.map((s) => s.maxLines)),
-      timeoutSeconds: minPositive(present.map((s) => s.timeoutSeconds)),
-      onExceed: present.some((s) => s.onExceed === OnExceed.ERROR)
-        ? OnExceed.ERROR
-        : OnExceed.TRUNCATE,
-    })
+    const init: LimitInit = {}
+    for (const key of Object.keys(LIMIT_AGGR) as LimitAggrField[]) {
+      Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
+    }
+    return new Limit(init)
   }
+}
+
+/** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
+type LimitAggrField = Exclude<keyof Limit, 'kind'>
+
+/**
+ * Each bound's composition law, keyed by field.
+ *
+ * The mapped type is what makes this a table rather than a second copy of the
+ * field list: declaring a new bound on Limit without adding its rule here is a
+ * compile error, where the old inline literal would have silently dropped it.
+ */
+const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[K] } = {
+  maxBytes: (present) => minPositive(present.map((s) => s.maxBytes)),
+  maxLines: (present) => minPositive(present.map((s) => s.maxLines)),
+  timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
+  onExceed: (present) =>
+    present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,
 }
 
 /**
@@ -201,6 +230,7 @@ export const ResourceName = Object.freeze({
   RAM: 'ram',
   GITHUB: 'github',
   LINEAR: 'linear',
+  GCAL: 'gcal',
   GDOCS: 'gdocs',
   GSHEETS: 'gsheets',
   GSLIDES: 'gslides',

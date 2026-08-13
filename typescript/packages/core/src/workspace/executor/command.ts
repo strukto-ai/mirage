@@ -23,6 +23,8 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { ChildMounts } from '../../ops/types.ts'
+import { namespaceNames } from '../../ops/namespace_view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
@@ -37,7 +39,7 @@ import { resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
-import { fanOutTraversal, shouldFanOut } from './fanout.ts'
+import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
 import {
   FindParseError,
   findExprTail,
@@ -51,7 +53,7 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceCaches, mountRootOf } from './command/run.ts'
+import { dropServiceCaches, linkViewFor, mountRootOf, mountView } from './command/run.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -62,6 +64,7 @@ import {
 } from './command/routing.ts'
 import { runOnMount, type RunOnMountCtx } from './command/run.ts'
 import type { Result } from './command/types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export { ReturnSignal } from './control.ts'
 
@@ -232,6 +235,7 @@ export async function handleCommand(
       csParsed[9],
       csParsed[10],
       csParsed[11],
+      csParsed[12],
     )
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
@@ -261,13 +265,26 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
+    // A per-operand native run is single-mount by construction, so a
+    // traversal operand holding nested mounts has to fan out inside it,
+    // exactly as the same operand would on a line of its own.
+    const runOperand = runWithFanout(
+      runSingle,
+      registry,
+      session.cwd,
+      mountView(registry),
+      linkViewFor(namespace ?? null, dispatch),
+      ensureOpen,
+      (parent: string) => namespaceNames(registry.mountPrefixes(), namespace ?? null, parent),
+      (path: string) => pathStat(dispatch, path, null),
+    )
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
       csScopes,
       csTexts,
       csFlags,
       dispatch,
-      runSingle,
+      runOperand,
       stdin,
       cmdStr,
       makeStorageKey(registry),
@@ -304,7 +321,7 @@ export async function handleCommand(
       if (m !== null) mountPrefixes.add(m.prefix)
     }
     if (mountPrefixes.size > 1) {
-      const prefixesStr = [...mountPrefixes].sort().join(', ')
+      const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
       const err = new TextEncoder().encode(
         `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
       )
@@ -365,6 +382,7 @@ export async function handleCommand(
     invalidIntOptions,
     invalidFloatOptions,
     missingRequiredOptions,
+    oldOptionNeedsValue,
   ] = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
   const refusal = optionError(
     cmdName,
@@ -376,6 +394,7 @@ export async function handleCommand(
     invalidIntOptions,
     invalidFloatOptions,
     missingRequiredOptions,
+    oldOptionNeedsValue,
   )
   if (refusal !== null) {
     const [msg, code] = refusal
@@ -407,6 +426,8 @@ export async function handleCommand(
   }
 
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+    const fanChildMounts: ChildMounts = (parent: string) =>
+      namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
     const [fanOut, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -418,6 +439,10 @@ export async function handleCommand(
       cmdStr,
       stdin,
       ensureOpen,
+      mountView(registry),
+      linkViewFor(namespace ?? null, dispatch),
+      fanChildMounts,
+      (path: string) => pathStat(dispatch, path, null),
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)

@@ -14,6 +14,7 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { compareCodePoints } from '@struktoai/mirage-core'
 import {
   ALLOWED_KEYS,
   DaemonConfigError,
@@ -116,7 +117,7 @@ export function resolvedConfig(
   const home = mirageHome(env)
   const table = readDaemonTable(home)
   const out: Record<string, [string, string]> = {}
-  for (const key of [...ALLOWED_KEYS].sort()) {
+  for (const key of [...ALLOWED_KEYS].sort(compareCodePoints)) {
     const envName = ENV_FOR_KEY[key]
     if (envName !== undefined) {
       const envValue = env[envName]
@@ -138,7 +139,7 @@ export function resolvedConfig(
 function checkKey(key: string): void {
   if (!ALLOWED_KEYS.has(key)) {
     throw new DaemonConfigError(
-      `unknown config key: '${key}'; allowed: ${[...ALLOWED_KEYS].sort().join(', ')}`,
+      `unknown config key: '${key}'; allowed: ${[...ALLOWED_KEYS].sort(compareCodePoints).join(', ')}`,
     )
   }
 }

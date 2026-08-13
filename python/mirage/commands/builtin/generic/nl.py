@@ -1,11 +1,49 @@
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.operands import (merge_split_errors,
+                                                    normalized_read,
+                                                    split_readable)
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+
+
+@dataclass(frozen=True, slots=True)
+class NlFlags:
+    body_numbering_raw: str | None = None
+    start_raw: str | None = None
+    increment_raw: str | None = None
+    width_raw: str | None = None
+    separator: str | None = None
+    footer_numbering_raw: str | None = None
+    header_numbering_raw: str | None = None
+    join_blank_lines_raw: str | None = None
+    number_format: str = "rn"
+    delimiter: str = "\\:"
+    no_renumber: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> NlFlags:
+    fl = FlagView(flags, spec=SPECS["nl"])
+    return NlFlags(
+        body_numbering_raw=fl.as_str("body_numbering"),
+        start_raw=fl.as_str("starting_line_number"),
+        increment_raw=fl.as_str("line_increment"),
+        width_raw=fl.as_str("number_width"),
+        separator=fl.as_str("number_separator"),
+        footer_numbering_raw=fl.as_str("footer_numbering"),
+        header_numbering_raw=fl.as_str("header_numbering"),
+        join_blank_lines_raw=fl.as_str("join_blank_lines"),
+        number_format=fl.as_str("number_format") or "rn",
+        delimiter=fl.as_str("section_delimiter") or "\\:",
+        no_renumber=fl.as_bool("no_renumber"),
+    )
 
 
 def _should_number(line: str, numbering: str,
@@ -169,4 +207,42 @@ async def nl(
     return _nl_stream(source, config, NlState(start)), IOResult()
 
 
-__all__ = ["nl"]
+async def nl_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run nl over resolved operands; mirrors nlGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by nl.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    parsed = parse_flags(opts.flags)
+    readable, err = await split_readable(paths, stat, "nl")
+    if err and not readable:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await nl(readable,
+                 read_stream=normalized_read(stream),
+                 stdin=opts.stdin,
+                 body_numbering_raw=parsed.body_numbering_raw,
+                 start_raw=parsed.start_raw,
+                 increment_raw=parsed.increment_raw,
+                 width_raw=parsed.width_raw,
+                 separator=parsed.separator,
+                 footer_numbering_raw=parsed.footer_numbering_raw,
+                 header_numbering_raw=parsed.header_numbering_raw,
+                 join_blank_lines_raw=parsed.join_blank_lines_raw,
+                 number_format=parsed.number_format,
+                 delimiter=parsed.delimiter,
+                 no_renumber=parsed.no_renumber), err)
+
+
+__all__ = ["nl", "nl_generic"]

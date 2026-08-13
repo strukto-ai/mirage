@@ -12,23 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.cli.builtin.ntn.util import parse_json_flag
+from mirage.commands.cli.builtin.ntn.util import (content_or_stdin,
+                                                  notion_config, pretty_json)
 from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import to_json_bytes
 from mirage.core.notion.pages import create_page
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import JsonValue
+
+PARENT_KEYS = {
+    "page": "page_id",
+    "database": "database_id",
+    "data-source": "data_source_id",
+}
+
+
+def parse_parent(spec: str) -> dict[str, JsonValue]:
+    """Turn a `--parent kind:id` operand into a request parent.
+
+    Args:
+        spec (str): the flag value, e.g. ``data-source:<uuid>``.
+
+    Returns:
+        dict: the parent object to send.
+    """
+    kind, _, ident = spec.partition(":")
+    key = PARENT_KEYS.get(kind)
+    if key is None or ident == "":
+        raise UsageError(
+            "--parent must be page:<id>, database:<id>, or data-source:<id>")
+    return {key: ident}
 
 
 async def create(
         inv: CLIInvocation[NotionConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    body = parse_json_flag(fl.as_str("json"), "--json")
-    if "parent" not in body:
-        raise UsageError("--json must contain parent")
-    page = await create_page(inv.config, body)
-    return yield_bytes(to_json_bytes(page)), IOResult()
+    markdown = await content_or_stdin(fl.as_str("content"), inv.stdin)
+    body: dict[str, JsonValue] = {"markdown": markdown}
+    # The parent really is optional upstream: omitted, the request goes
+    # out without one and the API decides whether to refuse it.
+    parent = fl.as_str("parent")
+    if parent:
+        body["parent"] = parse_parent(parent)
+    page = await create_page(notion_config(inv), body)
+    if fl.as_bool("json"):
+        return yield_bytes(pretty_json(page)), IOResult()
+    return yield_bytes(f"{page.get('id', '')}\n".encode()), IOResult()

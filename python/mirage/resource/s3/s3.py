@@ -83,8 +83,8 @@ class S3Resource(BaseResource):
         self.accessor = S3Accessor(self.config)
         for fn in S3_COMMANDS:
             self.register(fn)
-        for fn in S3_OPS:
-            self.register_op(fn)
+        for op in S3_OPS:
+            self.register_op(op)
 
     def storage_id(self) -> str:
         # Endpoint, bucket and key prefix pin the object namespace. The

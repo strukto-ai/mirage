@@ -16,11 +16,13 @@ from mirage.commands.builtin.dropbox.grep import grep
 from mirage.commands.builtin.dropbox.io import IO as _IO
 from mirage.commands.builtin.dropbox.rg import rg
 from mirage.commands.builtin.generic_bind import make_generic_commands
+from mirage.commands.builtin.generic_bind.provision import \
+    with_default_provisions
 
 _DROPBOX_OVERRIDES = {"grep", "rg"}
 
 COMMANDS = [
     *make_generic_commands("dropbox", _IO, overrides=_DROPBOX_OVERRIDES),
-    grep,
-    rg,
+    *with_default_provisions([grep, rg], _IO.stat, _IO.resolve_glob,
+                             _IO.readdir),
 ]

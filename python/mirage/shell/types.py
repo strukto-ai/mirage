@@ -141,7 +141,61 @@ SET_FLAG_TO_OPTION = {
     "u": "nounset",
     "x": "xtrace",
     "f": "noglob",
+    "P": "physical",
 }
+
+# Every name GNU's `set -o` accepts, pinned from `set -o` on
+# debian:stable-slim. mirage acts on a few and stores the rest, mirroring
+# how a cluster letter naming no option is kept rather than refused. A
+# name absent from here is the one thing bash rejects outright, and it
+# rejects it with exit 2 -- which is what keeps a silently-ignored
+# `set -o physical` from looking supported.
+SET_OPTION_NAMES = frozenset({
+    "allexport",
+    "braceexpand",
+    "emacs",
+    "errexit",
+    "errtrace",
+    "functrace",
+    "hashall",
+    "histexpand",
+    "history",
+    "ignoreeof",
+    "interactive-comments",
+    "keyword",
+    "monitor",
+    "noclobber",
+    "noexec",
+    "noglob",
+    "nolog",
+    "notify",
+    "nounset",
+    "onecmd",
+    "physical",
+    "pipefail",
+    "posix",
+    "privileged",
+    "verbose",
+    "vi",
+    "xtrace",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class OptionWord:
+    """One word of the shell's option grammar.
+
+    Args:
+        settings (tuple[tuple[str, bool], ...]): shell options the word
+            turns on or off, in the order they were written.
+        other (str): cluster letters that name no shell option. `set`
+            ignores them; shell startup reads its own startup letters
+            out of them and refuses the rest.
+        consumed (int): words the option took, 2 for the `-o NAME` form.
+    """
+    settings: tuple[tuple[str, bool], ...] = ()
+    other: str = ""
+    consumed: int = 1
 
 
 class RedirectKind(StrEnum):

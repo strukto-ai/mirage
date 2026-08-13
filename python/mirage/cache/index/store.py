@@ -56,6 +56,18 @@ class IndexCacheStore:
     async def invalidate_dir(self, resource_path: str) -> None:
         raise NotImplementedError
 
+    async def invalidate(self) -> None:
+        """Mark every entry stale without discarding it.
+
+        The difference from ``clear`` is what a later lookup can tell.
+        ``clear`` leaves an empty store, which reads exactly like a store
+        that was never filled, so a backend whose index *is* its listing
+        cannot tell an invalidation from an empty repository. Expiring
+        instead keeps that distinction: the lookup answers EXPIRED and
+        the backend knows to refetch.
+        """
+        raise NotImplementedError
+
     async def clear(self) -> None:
         raise NotImplementedError
 

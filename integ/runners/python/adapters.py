@@ -18,6 +18,7 @@ import functools
 import gzip
 import imaplib
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -64,6 +65,8 @@ from mirage.resource.discord.discord import DiscordResource
 from mirage.resource.disk import DiskResource
 from mirage.resource.dropbox import DropboxConfig, DropboxResource
 from mirage.resource.email.email import EmailResource
+from mirage.resource.gcal.config import GCalConfig
+from mirage.resource.gcal.gcal import GCalResource
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdocs.gdocs import GDocsResource
@@ -114,7 +117,13 @@ EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
+# The repository the `gh` install defaults to, standing in for the current
+# git remote real gh reads. Seeded by the fake alongside the mounted one.
+GH_CLI_REPO = "integ/repo-cli"
 EMAIL_PASSWORD = "secret"
+EMAIL_SENT_FOLDER = "Sent"
+# Doubles as the workspace id on the fake notion server.
+NOTION_TOKEN = "integ-test"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
@@ -334,11 +343,6 @@ def _load_ssh_server() -> ModuleType:
         Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
 
 
-def _load_notion_server() -> ModuleType:
-    return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "notion_server.py")
-
-
 def _load_box_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" / "box_server.py")
@@ -353,11 +357,6 @@ def _load_databricks_server() -> ModuleType:
     return _load_module(
         Path(__file__).resolve().parents[2] / "server" /
         "databricks_server.py")
-
-
-def _load_trello_server() -> ModuleType:
-    return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "trello_server.py")
 
 
 def _load_discord_server() -> ModuleType:
@@ -508,7 +507,16 @@ class GwsService:
         # Native mounts (gdocs/gsheets/gslides) render the modified date
         # into filenames, so those targets pin the server clock.
         epoch = target.get("epoch")
-        reset_body = {"epoch": epoch} if epoch else {}
+        reset_body: dict = {"epoch": epoch} if epoch else {}
+        # Secondary calendars and seeded form responses are declared to
+        # /reset rather than inserted: a calendar's accessRole and a form
+        # response are both states no API call can produce.
+        calendar = cls._manifest(target.get("calendar"))
+        if calendar and calendar.get("calendars"):
+            reset_body["calendars"] = calendar["calendars"]
+        forms = cls._manifest(target.get("forms"))
+        if forms:
+            reset_body["forms"] = forms
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{url}/reset", json=reset_body) as resp:
                 resp.raise_for_status()
@@ -527,19 +535,31 @@ class GwsService:
                 for segment in str(mount["root"]).split("/"):
                     parent = await cls._folder(session, url, segment, parent)
                 folder_ids[mount["path"]] = parent
-            apps = target.get("apps")
+            apps = cls._manifest(target.get("apps"))
             if apps:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{apps}.json"
-                await cls._seed_apps(session, url,
-                                     json.loads(manifest.read_text()))
-            mail = target.get("mail")
+                await cls._seed_apps(session, url, apps)
+            mail = cls._manifest(target.get("mail"))
             if mail:
-                manifest = Path(__file__).resolve(
-                ).parents[2] / "fixtures" / f"{mail}.json"
-                await cls._seed_mail(session, url,
-                                     json.loads(manifest.read_text()))
+                await cls._seed_mail(session, url, mail)
+            if calendar:
+                await cls._seed_calendar(session, url, calendar["events"])
         return cls(url, folder_ids, target.get("cli_scope"))
+
+    @staticmethod
+    def _manifest(name: str | None) -> list | dict | None:
+        """Read a fixture manifest by its targets.json name.
+
+        Args:
+            name (str | None): the fixture path, e.g. ``calendar/v1``.
+
+        Returns:
+            list | dict | None: the parsed manifest, or None when unnamed.
+        """
+        if not name:
+            return None
+        path = Path(
+            __file__).resolve().parents[2] / "fixtures" / f"{name}.json"
+        return json.loads(path.read_text())
 
     @staticmethod
     async def _seed_apps(session: aiohttp.ClientSession, url: str,
@@ -584,6 +604,18 @@ class GwsService:
                     resp.raise_for_status()
             else:
                 raise ValueError(f"unknown google-apps kind: {kind}")
+
+    @staticmethod
+    async def _seed_calendar(session: aiohttp.ClientSession, url: str,
+                             entries: list[dict]) -> None:
+        # Events are API objects, so they seed through events.insert and
+        # take the ids the server mints; the manifest pins the times, which
+        # is what the day directories are derived from.
+        for entry in entries:
+            async with session.post(
+                    f"{url}/calendar/v3/calendars/primary/events",
+                    json=entry) as resp:
+                resp.raise_for_status()
 
     @staticmethod
     async def _seed_mail(session: aiohttp.ClientSession, url: str,
@@ -649,6 +681,15 @@ class GwsService:
                           refresh_token="integ",
                           api_base=self.url))
 
+    def gcal_resource(self) -> GCalResource:
+        # today is pinned so the rolling window is the same on both hosts
+        # and lands on the seeded events.
+        return GCalResource(
+            GCalConfig(client_id="integ",
+                       refresh_token="integ",
+                       api_base=self.url,
+                       today="2026-02-11"))
+
     def gmail_resource(self) -> GmailResource:
         return GmailResource(
             GmailConfig(client_id="integ",
@@ -701,7 +742,12 @@ class EmailService:
         # before the workspace opens, not backend code.
         imap = imaplib.IMAP4(host, EMAIL_IMAP_PORT)
         imap.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-        known = {"INBOX"}
+        # GreenMail hands a new account nothing but an INBOX, where every
+        # real provider ships a sent mailbox already made. himalaya files
+        # a copy of each sent message into one, so create it here rather
+        # than leave the copy with nowhere to land.
+        imap.create(EMAIL_SENT_FOLDER)
+        known = {"INBOX", EMAIL_SENT_FOLDER}
         for entry in entries:
             folder = entry["folder"]
             if folder not in known:
@@ -1004,10 +1050,13 @@ class GitHubService:
     """Points github mounts at the fake api.github.com server.
 
     The server (integ/server/github_server.py) runs out of process on
-    GITHUB_URL, mirroring the fake Slack and Google Workspace servers.
-    In-process is not an option here: GitHubResource fetches the repo tree
-    with a blocking urlopen from its constructor, which would starve an
-    aiohttp fake sharing the runner's event loop.
+    GITHUB_URL, mirroring the fake Slack and Google Workspace servers and
+    shared with the typescript host. It used to be out of process by
+    necessity — GitHubResource fetched the repo tree with a blocking
+    urlopen from its constructor, which would starve an aiohttp fake on
+    the runner's loop. That constraint is gone now that the fetch is
+    awaited in `GitHubResource.build`; sharing one fake across both hosts
+    is why it stays external.
 
     Args:
         url (str): GITHUB_URL origin the fake is listening on.
@@ -1020,13 +1069,33 @@ class GitHubService:
     async def create(cls) -> "GitHubService":
         return cls(os.environ["GITHUB_URL"].rstrip("/"))
 
-    def resource(self, mount: dict) -> GitHubResource:
+    async def reset(self) -> None:
+        """Drop every write since startup, restoring the seeded state.
+
+        The write battery runs once per host against one shared fake, so it
+        starts from the seed rather than from the other host's writes.
+        """
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{self.url}/reset") as resp:
+                resp.raise_for_status()
+
+    async def resource(self, mount: dict) -> GitHubResource:
         owner, _, repo = mount["repo"].partition("/")
-        return GitHubResource(
+        return await GitHubResource.build(
             GitHubConfig(token="ghp-integ",
                          owner=owner,
                          repo=repo,
                          base_url=self.url))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "gh": (cli_spec_for("gh"), {
+                "token": "ghp-integ",
+                "base_url": self.url,
+                "repo": GH_CLI_REPO,
+                "branch": "main",
+            }),
+        }
 
     async def teardown(self) -> None:
         return None
@@ -1085,17 +1154,26 @@ class DifyService:
 
 
 class TrelloService:
+    """Points trello mounts at the shared fake Trello REST API server.
 
-    def __init__(self, state, runner, base: str) -> None:
-        self.state = state
-        self.runner = runner
+    The server (integ/server/trello.ts) is external, Prisma-backed, and
+    shared across both hosts; /reset re-seeds it to the fixture, so the
+    write cases see the same state on every run and on either host.
+
+    Args:
+        base (str): TRELLO_ENDPOINT origin.
+    """
+
+    def __init__(self, base: str) -> None:
         self.base = base
 
     @classmethod
     async def create(cls) -> "TrelloService":
-        module = _load_trello_server()
-        state, _server, runner = await module.start_fake_trello()
-        return cls(state, runner, state.base)
+        base = os.environ["TRELLO_ENDPOINT"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{base}/reset") as resp:
+                resp.raise_for_status()
+        return cls(base)
 
     def resource(self, mount: dict) -> TrelloResource:
         return TrelloResource(
@@ -1104,7 +1182,7 @@ class TrelloService:
                          base_url=self.base))
 
     async def teardown(self) -> None:
-        await self.runner.cleanup()
+        return None
 
 
 class DiscordService:
@@ -1265,31 +1343,44 @@ class SharePointService:
 
 
 class NotionService:
+    """Points notion mounts at the shared fake Notion REST API.
 
-    def __init__(self, server, port: int) -> None:
-        self.server = server
-        self.port = port
+    The server (integ/server/notion_server.ts) is external, Prisma-backed and
+    shared across both hosts; /reset re-seeds it to the fixture. The api key
+    doubles as the workspace id on that server, the way a real Notion
+    integration token scopes you to one workspace, so scenarios that use
+    different keys do not see each other's writes.
+
+    Args:
+        url (str): NOTION_URL origin (the REST surface lives under /v1).
+    """
+
+    def __init__(self, url: str) -> None:
+        self.url = url
 
     @classmethod
     async def create(cls) -> "NotionService":
-        module = _load_notion_server()
-        server, port = module.start_server()
-        return cls(server, port)
+        url = os.environ["NOTION_URL"].rstrip("/")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/reset",
+                                    json={"workspace": NOTION_TOKEN}) as resp:
+                resp.raise_for_status()
+        return cls(url)
 
     def resource(self, mount: dict) -> NotionResource:
-        return NotionResource(config=NotionConfig(
-            api_key="integ-test", base_url=f"http://127.0.0.1:{self.port}/v1"))
+        return NotionResource(config=NotionConfig(api_key=NOTION_TOKEN,
+                                                  base_url=f"{self.url}/v1"))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
         return {
             "ntn": (cli_spec_for("ntn"), {
-                "api_key": "integ-test",
-                "base_url": f"http://127.0.0.1:{self.port}/v1",
+                "api_key": NOTION_TOKEN,
+                "base_url": f"{self.url}/v1",
             }),
         }
 
     async def teardown(self) -> None:
-        self.server.shutdown()
+        return None
 
 
 LANCEDB_ROWS = [
@@ -1858,6 +1949,13 @@ def build_email(
     return service.resource(mount), _noop
 
 
+def build_gcal(
+        mount: dict, run_id: str, service: Service | None
+) -> tuple[object, Callable[[], Awaitable[None]]]:
+    assert isinstance(service, GwsService)
+    return service.gcal_resource(), _noop
+
+
 def build_gmail(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
@@ -1872,11 +1970,11 @@ def build_nextcloud(
     return service.resource(mount), _noop
 
 
-def build_github(
+async def build_github(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GitHubService)
-    return service.resource(mount), _noop
+    return await service.resource(mount), _noop
 
 
 def build_github_ci(
@@ -2011,6 +2109,7 @@ BUILDERS = {
     "gdocs": build_gdocs,
     "gsheets": build_gsheets,
     "gslides": build_gslides,
+    "gcal": build_gcal,
     "gmail": build_gmail,
     "email": build_email,
     "hf": build_hf,
@@ -2071,7 +2170,12 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "dropbox":
         return await DropboxService.create(target)
     if target.get("service") == "github":
-        return await GitHubService.create()
+        github = await GitHubService.create()
+        # The write battery runs once per host against one shared fake, so
+        # it starts from the seed rather than from the other host's writes.
+        if "gh" in (target.get("clis") or []):
+            await github.reset()
+        return github
     if target.get("service") == "github_ci":
         return await GitHubCIService.create()
     if target.get("service") == "slack":
@@ -2093,7 +2197,7 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
     return None
 
 
-def build_mounts(
+async def build_mounts(
     target: dict, run_id: str, service: "Service | None"
 ) -> tuple[dict[str, object], list[Callable[[], Awaitable[None]]]]:
     mounts: dict[str, object] = {}
@@ -2110,7 +2214,13 @@ def build_mounts(
             cleanup = _noop
         else:
             builder = BUILDERS[mount["resource"]]
-            resource, cleanup = builder(mount, run_id, service)
+            # A builder is async only when its resource needs I/O to come
+            # up — github fetches the repo tree. Awaiting whatever the
+            # table returns keeps the other forty builders plain.
+            pair = builder(mount, run_id, service)
+            if inspect.isawaitable(pair):
+                pair = await pair
+            resource, cleanup = pair
         built[mount["path"]] = resource
         if mount.get("mode") == "read":
             mounts[mount["path"]] = (resource, MountMode.READ)
@@ -2139,8 +2249,9 @@ def cli_install(service: "Service | None",
     if service is None:
         return cli_spec_for(cli_name), None
     # Widen the assert when another service grows a CLI.
-    assert isinstance(service, (DiscordService, EmailService, GwsService,
-                                LinearService, NotionService, SlackService))
+    assert isinstance(service,
+                      (DiscordService, EmailService, GitHubService, GwsService,
+                       LinearService, NotionService, SlackService))
     return service.cli_installs()[cli_name]
 
 
@@ -2168,7 +2279,7 @@ async def open_target(
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    mounts, cleanups = build_mounts(target, run_id, service)
+    mounts, cleanups = await build_mounts(target, run_id, service)
     agent_id = target.get("agentId")
     if consistency is not None:
         ws = Workspace(mounts,
@@ -2180,6 +2291,11 @@ async def open_target(
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)
+    # A target's declared environment. A CLI whose spec reads a variable
+    # (ntn's --notion-version off NOTION_API_VERSION) behaves differently
+    # with and without it, so the conformance runner passes the same map
+    # to the real binary and the comparison stays like for like.
+    ws.env.update(target.get("env", {}))
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 
@@ -2192,12 +2308,18 @@ async def open_consistency(
 ]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
-    read_mounts, read_cleanups = build_mounts(target, run_id, service)
-    shadow_mounts, shadow_cleanups = build_mounts(target, run_id, service)
+    read_mounts, read_cleanups = await build_mounts(target, run_id, service)
+    shadow_mounts, shadow_cleanups = await build_mounts(
+        target, run_id, service)
     read_ws = Workspace(read_mounts,
                         mode=MountMode.WRITE,
                         consistency=consistency)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
+    # Same rule as open_target: a target's declared environment reaches
+    # every workspace a case can run against, or a consistency scenario
+    # would silently run under a different one.
+    read_ws.env.update(target.get("env", {}))
+    shadow_ws.env.update(target.get("env", {}))
     return (
         read_ws,
         functools.partial(mutate_write, shadow_ws),

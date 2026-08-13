@@ -17,6 +17,7 @@ import {
   type IndexCacheStore,
   type PathSpec,
   rstripSlash,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { readdirError } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -60,7 +61,7 @@ export async function readdir(
     const first = remainder.split('/')[0]
     if (first !== undefined && first.length > 0) seen.add(dirPrefix + first)
   }
-  const sorted = [...seen].sort()
+  const sorted = [...seen].sort(compareCodePoints)
   const virtualEntries = sorted.map((entry) => `${mountPrefix}${entry}`)
   if (index !== undefined) {
     const fileSet = new Set(files)

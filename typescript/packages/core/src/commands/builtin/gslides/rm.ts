@@ -22,6 +22,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import { formatRecords } from '../utils/output.ts'
+import { FlagView } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(GSLIDES_IO)
 
@@ -37,8 +38,9 @@ async function rmCommand(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('rm: missing operand\n') })]
   }
   const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  const force = opts.flags.f === true
-  const verbose = opts.flags.v === true
+  const fl = new FlagView(opts.flags, specOf('rm'))
+  const force = fl.asBool('f')
+  const verbose = fl.asBool('v')
   const verboseParts: string[] = []
   const errors: string[] = []
   const writes: Record<string, Uint8Array> = {}

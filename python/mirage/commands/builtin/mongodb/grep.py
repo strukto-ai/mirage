@@ -20,13 +20,12 @@ from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_helper import (has_search_shaping_flags,
                                                  pattern_arg)
-from mirage.commands.builtin.mongodb._provision import search_provision
 from mirage.commands.builtin.mongodb.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagView
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.readdir import readdir as _readdir
@@ -44,10 +43,7 @@ SEARCHABLE_SCOPE_TYPES = (MongoDBEntityScope, MongoDBDatabaseScope,
                           MongoDBRootScope)
 
 
-@command("grep",
-         resource="mongodb",
-         spec=SPECS["grep"],
-         provision=search_provision)
+@command("grep", resource="mongodb", spec=SPECS["grep"])
 async def grep(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],
@@ -55,7 +51,7 @@ async def grep(
     stdin: ByteSource | None = None,
     prefix: str = "",
     index: IndexCacheStore,
-    **flags: object,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)

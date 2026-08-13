@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.constants import USAGE_EXIT, USAGE_HINT_PREFIX
+from mirage.commands.spec.constants import (OLD_OPTION_EXIT, PYTHON_NAMES,
+                                            PYTHON_USAGE, USAGE_EXIT,
+                                            USAGE_HINT_PREFIX)
 from mirage.commands.spec.types import CommandName
 
 
@@ -24,6 +26,18 @@ def usage_exit_code(cmd_name: str) -> int:
         cmd_name (str): command name.
     """
     return USAGE_EXIT.get(cmd_name, 1)
+
+
+def python_option_error(cmd_name: str, line: str) -> tuple[bytes, int]:
+    """CPython's option refusal: one message line, then its usage block.
+
+    Args:
+        cmd_name (str): the interpreter as invoked, which names the
+            usage line ('python' or 'python3').
+        line (str): the message line, newline included.
+    """
+    return (line + PYTHON_USAGE.format(name=cmd_name)).encode(), \
+        usage_exit_code(cmd_name)
 
 
 def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
@@ -44,6 +58,14 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
         return line.encode(), usage_exit_code(cmd_name)
+    if cmd_name in PYTHON_NAMES:
+        # CPython's own two shapes, which do not match each other: the
+        # short form capitalizes and takes a colon, the long form does
+        # neither. Both pinned on 3.12.13.
+        if token.startswith("--"):
+            return python_option_error(cmd_name, f"unknown option {token}\n")
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(cmd_name, f"Unknown option: {dashed}\n")
     if token.startswith("--"):
         line = f"{cmd_name}: unrecognized option '{token}'\n"
     else:
@@ -117,12 +139,40 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): long token ('--max-depth') or short char ('m').
     """
+    if cmd_name in PYTHON_NAMES:
+        dashed = token if token.startswith("-") else f"-{token}"
+        return python_option_error(
+            cmd_name, f"Argument expected for the {dashed} option\n")
     if token.startswith("--"):
         line = f"{cmd_name}: option '{token}' requires an argument\n"
     else:
         line = f"{cmd_name}: option requires an argument -- '{token}'\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
+    """GNU tar refusal for an old-style cluster letter with no argument.
+
+    First line and exit pinned against GNU tar 1.35 (``tar xzf`` with
+    nothing after it, and ``tar cfC a.tar``, which names C). tar's own
+    wording, capital and full stop included, because it counts the
+    cluster's argument needs before argp sees the line at all.
+
+    The hint line is deliberately mirage's, not GNU's: GNU offers
+    ``Try 'tar --help' or 'tar --usage' for more information.`` because
+    argp gives every argp program a ``--usage``, and mirage's tar serves
+    only ``--help``. Naming a flag that does not exist would be worse
+    than the shorter hint, and every other refusal here words it this
+    way, so tar's two refusals stay consistent with each other.
+
+    Args:
+        cmd_name (str): command name for the message.
+        letter (str): the cluster letter whose argument ran out.
+    """
+    line = f"{cmd_name}: Old option '{letter}' requires an argument.\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), OLD_OPTION_EXIT
 
 
 def invalid_argument_error(cmd_name: str, option: str, value: str,

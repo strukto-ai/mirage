@@ -69,6 +69,18 @@ function sessionMode(mountPrefix: string): MountMode | undefined {
 }
 
 /**
+ * Whether the current session may touch this mount at all.
+ *
+ * The non-raising twin of `assertMountAllowed`, for enumeration:
+ * structure merges and fan-outs filter names through it, so a scoped
+ * session never learns that an ungranted mount exists. True when no
+ * session is bound or the session is unrestricted.
+ */
+export function mountAllowed(mountPrefix: string): boolean {
+  return sessionMode(mountPrefix) !== undefined
+}
+
+/**
  * Throw if the current session may not touch this mount. A user-defined
  * root mount is governed like any other: a session must be granted `/`
  * to touch it.
