@@ -359,7 +359,13 @@ export async function handleCli(
   // matters. Dropping the service's listings is what lets the agent's next
   // `ls` see what it just made, and dropping its cached bodies is what lets
   // the next `cat` see an edit rather than the pre-write content.
-  if (leaf.write && dropCaches !== null) await dropCaches()
+  //
+  // The spec's `write` is the static answer, which is the only one most
+  // verbs have; a handler that knows better says so on its result, so a
+  // read-only `gh api` does not expire every github mount.
+  const mutated = io.mutated ?? leaf.write
+  if (mutated && dropCaches !== null) await dropCaches()
+
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {

@@ -40,10 +40,10 @@ export function ghRepo(config: unknown, spec: string | undefined): RepoRef {
   return parseRepo(named)
 }
 
-export function jsonOut(value: unknown): CommandFnResult {
+export function jsonOut(value: unknown, mutated?: boolean): CommandFnResult {
   const text = value === null ? '' : `${JSON.stringify(value, null, 2)}\n`
   const out: ByteSource = ENC.encode(text)
-  return [out, new IOResult()]
+  return [out, new IOResult(mutated === undefined ? {} : { mutated })]
 }
 
 export function textOut(text: string): CommandFnResult {
