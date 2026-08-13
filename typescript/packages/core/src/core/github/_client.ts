@@ -12,8 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Octokit } from '@octokit/core'
+import { RequestError } from '@octokit/request-error'
+import { retry } from '@octokit/plugin-retry'
+import { throttling } from '@octokit/plugin-throttling'
+
 export const GITHUB_API_BASE = 'https://api.github.com'
 export const GITHUB_API_VERSION = '2022-11-28'
+// A rate limit is a wait, not a failure, but an unbounded wait is a hang;
+// three attempts is what octokit's own docs use for an unattended client.
+const GITHUB_RETRIES = 3
 
 export interface GitHubTransport {
   get(path: string, params?: Record<string, string>): Promise<unknown>
@@ -25,13 +33,48 @@ export interface GitHubTransport {
   ): Promise<unknown>
 }
 
+const Kit = Octokit.plugin(retry, throttling)
+
+/**
+ * Octokit reads `{name}` in a url as a route-template placeholder and drops
+ * the segment when nothing fills it, silently and without an error. Every
+ * caller here passes a path that is already final -- `gh api` takes one
+ * straight from the agent's command line -- so the braces are escaped to
+ * the percent forms a server sees them as.
+ *
+ * Args:
+ *   path (string): the request path as the caller spelled it.
+ *
+ * Returns:
+ *   string: the path with `{` and `}` percent-encoded.
+ */
+function escapeBraces(path: string): string {
+  return path.replace(/\{/g, '%7B').replace(/\}/g, '%7D')
+}
+
 export class HttpGitHubTransport implements GitHubTransport {
-  readonly token: string
   readonly baseUrl: string
+  private readonly kit: InstanceType<typeof Kit>
 
   constructor(opts: { token: string; baseUrl?: string }) {
-    this.token = opts.token
     this.baseUrl = opts.baseUrl ?? GITHUB_API_BASE
+    this.kit = new Kit({
+      auth: opts.token,
+      baseUrl: this.baseUrl,
+      request: { retries: GITHUB_RETRIES },
+      throttle: {
+        // The write limiter holds every non-GET a second apart, which is
+        // github.com's own guidance and its secondary rate limit. That limit
+        // is github.com's, not the API's: a GHES install does not impose it
+        // and a fake certainly does not, so paying it there would add a
+        // second per write for nothing.
+        enabled: this.baseUrl === GITHUB_API_BASE,
+        onRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
+          count < GITHUB_RETRIES,
+        onSecondaryRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
+          count < GITHUB_RETRIES,
+      },
+    })
   }
 
   get(path: string, params?: Record<string, string>): Promise<unknown> {
@@ -44,29 +87,33 @@ export class HttpGitHubTransport implements GitHubTransport {
     body?: unknown,
     params?: Record<string, string>,
   ): Promise<unknown> {
-    const url = new URL(this.baseUrl + path)
-    if (params !== undefined) {
-      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+    try {
+      // Octokit routes a parameter by method the way gh does: query string on
+      // GET, JSON body otherwise. A call with neither sends no body at all,
+      // which is what a bare DELETE has to look like on the wire.
+      const r = await this.kit.request({
+        method: method.toUpperCase(),
+        url: escapeBraces(path),
+        headers: { 'X-GitHub-Api-Version': GITHUB_API_VERSION },
+        ...(params ?? {}),
+        ...((body as Record<string, unknown> | undefined) ?? {}),
+      })
+      // 204 and an empty 202 decode to '' rather than a body; the caller gets
+      // null on a call that worked.
+      return r.data === '' ? null : r.data
+    } catch (err) {
+      if (err instanceof RequestError) {
+        // Octokit composes its message as `<message> - <documentation_url>`.
+        // The suffix is octokit's, not GitHub's: the service says only the
+        // message, real gh prints only the message, and the python client
+        // reports only the message. Read it off the body rather than
+        // trimming the composed string.
+        const data = err.response?.data as { message?: string } | undefined
+        const message = typeof data?.message === 'string' ? data.message : err.message
+        throw new GitHubApiError(message, err.status)
+      }
+      throw err
     }
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': GITHUB_API_VERSION,
-    }
-    const init: RequestInit = { method, headers }
-    if (body !== undefined) {
-      headers['Content-Type'] = 'application/json'
-      init.body = JSON.stringify(body)
-    }
-    const r = await fetch(url.toString(), init)
-    if (!r.ok) {
-      const text = await r.text().catch(() => '')
-      throw new GitHubApiError(`GitHub ${path} → ${String(r.status)} ${text}`, r.status)
-    }
-    // 204 and an empty 202 have no body to decode; the caller gets null
-    // rather than a parse error on a call that succeeded.
-    const text = await r.text()
-    return text === '' ? null : (JSON.parse(text) as unknown)
   }
 }
 

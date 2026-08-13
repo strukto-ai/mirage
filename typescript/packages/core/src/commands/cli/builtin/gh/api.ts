@@ -40,15 +40,27 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const fl = new FlagView(inv.flags)
   const endpoint = inv.texts[0] ?? ''
   if (endpoint === '') throw new Error('an API endpoint is required')
-  const body: Record<string, string | number | boolean | null> = {}
-  for (const pair of fl.asList('raw_field')) body[split(pair)[0]] = split(pair)[1]
-  for (const pair of fl.asList('field')) body[split(pair)[0]] = typed(split(pair)[1])
+  const fields: Record<string, string | number | boolean | null> = {}
+  for (const pair of fl.asList('raw_field')) {
+    const [key, value] = split(pair)
+    fields[key] = value
+  }
+  for (const pair of fl.asList('field')) {
+    const [key, value] = split(pair)
+    fields[key] = typed(value)
+  }
   // gh sends a body-bearing call as POST unless --method says otherwise,
   // and a bare one as GET.
-  const method = fl.asStr('method') ?? (Object.keys(body).length > 0 ? 'POST' : 'GET')
+  const method = fl.asStr('method') ?? (Object.keys(fields).length > 0 ? 'POST' : 'GET')
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
   const upper = method.toUpperCase()
-  const payload = upper === 'GET' ? undefined : body
-  const params = upper === 'GET' ? (body as Record<string, string>) : undefined
-  return jsonOut(await ghTransport(inv.config).request(upper, path, payload, params))
+  const empty = Object.keys(fields).length === 0
+  // A GET carries its fields in the query string, everything else in a JSON
+  // body; a call with no fields sends neither, so a bare DELETE has no body.
+  if (upper === 'GET') {
+    const params: Record<string, string> = {}
+    for (const [key, value] of Object.entries(fields)) params[key] = String(value)
+    return jsonOut(await ghTransport(inv.config).request(upper, path, undefined, params))
+  }
+  return jsonOut(await ghTransport(inv.config).request(upper, path, empty ? undefined : fields))
 }

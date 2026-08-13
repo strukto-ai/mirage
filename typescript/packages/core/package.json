@@ -61,6 +61,10 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@octokit/core": "^7.0.7",
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
+    "@octokit/request-error": "^7.1.1",
     "bson": "^6.10.4",
     "isomorphic-git": "^1.38.1",
     "jq-wasm": "1.1.0-jq-1.8.1",
