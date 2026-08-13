@@ -16,7 +16,7 @@
 // Redis, and Slack mounted side by side, with monty capturing python.
 // dsh's file tools write into Redis, its bash tool greps across the
 // mounts, and a script uploaded to a Slack channel runs with monty,
-// its output filed back into RAM.
+// its output filed back into Redis.
 //
 // Usage: SLACK_BOT_TOKEN=... [SLACK_CHANNEL=general] [REDIS_URL=...] npx tsx dsh.ts
 // Upload example.py (next to this file) to the channel first.
@@ -82,7 +82,7 @@ async function fileTools(ctx: Context): Promise<void> {
 async function bashTool(ctx: Context): Promise<void> {
   console.log('=== ctx.shell: bash tool ===')
   const shell = ctx.shell
-  const grep = await bash(shell, 'grep -rn shipped /redis /notes')
+  const grep = await bash(shell, 'grep -rn shipped /redis /tmp')
   console.log('grep:', grep.stdout.text.trim())
   const channels = await bash(shell, 'ls /slack/channels | head -3')
   console.log(channels.stdout.text.trim())
@@ -112,7 +112,7 @@ async function findScript(ctx: Context, channel: string): Promise<string | null>
 
 // python under monty: the Slack backend serves the source, monty
 // computes in its sandbox, and the shell's redirection files the
-// report into RAM for any tool to read.
+// report into Redis for any tool to read.
 async function runFromSlack(ctx: Context, channel: string): Promise<void> {
   console.log('=== python: monty on a slack-hosted script ===')
   const script = await findScript(ctx, channel)
@@ -125,9 +125,9 @@ async function runFromSlack(ctx: Context, channel: string): Promise<void> {
   }
   console.log('running:', script)
   const shell = ctx.shell
-  const ran = await bash(shell, `MIRAGE_RUNNER=dsh-monty python3 ${script} > /notes/report.txt`)
+  const ran = await bash(shell, `MIRAGE_RUNNER=dsh-monty python3 ${script} > /redis/report.txt`)
   console.log('exit:', ran.exitCode, ran.stderr.text.trim())
-  const report = await bash(shell, 'cat /notes/report.txt')
+  const report = await bash(shell, 'cat /redis/report.txt')
   console.log(report.stdout.text.trim())
 }
 
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
   // runtime serving the shell commands is always present.
   const ws = new Workspace(
     {
-      '/notes': [new RAMResource(), MountMode.EXEC],
+      '/tmp': [new RAMResource(), MountMode.EXEC],
       '/redis': [new RedisResource({ url: redisUrl, keyPrefix: 'dsh:' }), MountMode.WRITE],
       '/slack': [new SlackResource({ token }), MountMode.EXEC],
     },
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
     await fileTools(ctx)
     await bashTool(ctx)
     await runFromSlack(ctx, channel)
-    await bash(ctx.shell, 'rm /redis/todo.txt')
+    await bash(ctx.shell, 'rm -f /redis/todo.txt /redis/report.txt')
   } finally {
     await ws.close()
   }

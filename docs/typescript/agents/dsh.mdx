@@ -23,7 +23,7 @@ import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai
 
 const ws = new Workspace(
   {
-    '/notes': [new RAMResource(), MountMode.EXEC],
+    '/tmp': [new RAMResource(), MountMode.EXEC],
     '/redis': [new RedisResource({ url: redisUrl }), MountMode.WRITE],
     '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
@@ -40,19 +40,19 @@ Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `E
 
 ```ts
 const shell = ctx.shell
-const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis /notes' }))
+const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis /tmp' }))
 ```
 
 `MirageService` also accepts `mounts` instead of a live `workspace`; it then constructs the workspace itself and closes it when the plugin unloads.
 
 ## Run Python with monty
 
-The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
 
 ```ts
 const script = await shell.run(
   shell.resolve({
-    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /notes/report.txt',
+    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /redis/report.txt',
   }),
 )
 ```
@@ -61,8 +61,10 @@ const script = await shell.run(
 
 A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
 
-| Harness | Where Mirage sits | A session is | Concurrent on 2 vCPU / 8 GB |
-| --- | --- | --- | --- |
-| dsh | its filesystem and shell | objects in your process, no subprocess, roughly 0.5 ms and 240 KB each | thousands (a couple hundred with a live Python engine, ~27 MB each) |
-| [Codex](/typescript/agents/codex) | tools beside the CLI's native ones | a Codex CLI process plus a Node tool server | a few dozen |
-| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | MCP tools served from your process | a spawned Claude Code CLI process | about 15 to 20 |
+| Harness | Startup | Est. concurrent sessions (2 vCPU / 8 GB) |
+| --- | --- | --- |
+| dsh | ~0.5 ms | ~200 |
+| [Codex](/typescript/agents/codex) | ~20 ms | ~30 |
+| [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | ~40 ms | ~15 |
+
+Concurrency is estimated as about 6 GB of free memory divided by a session's measured resident footprint (a dsh session with a live Python engine is about 27 MB, idle workspaces 240 KB, a Codex session about 200 MB, a Claude Code CLI session about 430 MB); startup is the measured time to bring one session up, process boot for the CLIs and workspace construction for dsh.
