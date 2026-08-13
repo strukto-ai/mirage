@@ -70,12 +70,26 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
 )
 
 /**
- * The default world when no runtimes list is given: today's behavior
- * exactly. Pyodide stays the TypeScript python default until
- * `@pydantic/monty` can answer builtin `open()` calls; `local`/`wasi`
- * are Python-only.
+ * The python engine a default world registers, named rather than left
+ * to a slot in DEFAULT_ENTRIES because it is the one entry the two
+ * implementations disagree on: TypeScript registers pyodide, Python
+ * registers monty (`DEFAULT_PYTHON` in `mirage/runtime/table.py`),
+ * because `@pydantic/monty` cannot answer builtin `open()` calls yet
+ * while `pydantic-monty` can. Both are sandboxed; neither reaches the
+ * host. Pinned by integ/runtime/defaults.json, which reads the split
+ * back out of a default world on each host.
+ *
+ * A name, not a class: `name` is an instance field, so `PyodideRuntime.name`
+ * is the JS function name, not the registry key.
  */
-export const DEFAULT_ENTRIES: readonly string[] = ['pyodide', 'quickjs', 'vfs']
+export const DEFAULT_PYTHON = 'pyodide'
+
+/**
+ * The default world when no runtimes list is given: one python engine,
+ * one js engine, and the builtin command engine. `local`/`wasi` are
+ * Python-only.
+ */
+export const DEFAULT_ENTRIES: readonly string[] = [DEFAULT_PYTHON, 'quickjs', 'vfs']
 
 /** Python-only runtime names a cross-language config may carry. */
 const PYTHON_ONLY_HINTS: Record<string, string> = {

@@ -16,9 +16,11 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.patch import patch as generic_patch
+from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,24 +31,14 @@ async def patch(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    p: str | None = None,
-    R: bool = False,
-    i: PathSpec | None = None,
-    N: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await generic_patch(paths,
-                               read_bytes=bound_op(ops.read_bytes, accessor,
-                                                   index),
-                               write_bytes=partial(
-                                   ops.require(Operation.WRITE), accessor),
-                               has_resource=ops.is_mounted(accessor),
-                               stdin=stdin,
-                               p=p,
-                               R=R,
-                               i=i,
-                               N=N)
+    return await patch_generic(paths, list(texts),
+                               CommandOpts(stdin=stdin, flags=flags),
+                               bound_op(ops.read_bytes, accessor, index),
+                               partial(ops.require(Operation.WRITE), accessor),
+                               ops.is_mounted(accessor))
 
 
 BUILDER = Builder('patch',

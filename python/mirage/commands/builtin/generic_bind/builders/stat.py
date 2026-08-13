@@ -16,10 +16,12 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.stat import stat as generic_stat
+from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op,
                                                           overlaid_stat)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
@@ -31,29 +33,25 @@ async def stat(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    c: str | None = None,
-    f: str | None = None,
-    L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     ns: NamespaceView | None = None,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     stat_overlay = ns.stat_overlay if ns is not None else None
     links = ns.links if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("stat: no resource")
-    paths = await ops.resolve_glob(accessor, paths, index)
+    resolved = await ops.resolve_glob(accessor, paths, index)
     stat_fn = bound_op(ops.stat, accessor, index)
     if stat_overlay is not None:
         stat_fn = partial(overlaid_stat,
                           partial(ops.stat, accessor),
                           stat_overlay,
                           index=index)
-    return await generic_stat(paths,
-                              stat_fn=stat_fn,
-                              c=c,
-                              f=f,
-                              L=L,
+    return await stat_generic(resolved,
+                              list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              stat_fn,
                               links=links)
 
 

@@ -14,13 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.fold import fold as generic_fold
+from mirage.commands.builtin.generic.fold import fold_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,18 +35,11 @@ async def fold(
     index: IndexCacheStore = NULL_INDEX,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["fold"])
-    paths, err = await resolve_readable(ops, accessor, paths, index, "fold")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_fold(paths,
-                           read_bytes=bound_op(ops.read_bytes, accessor,
-                                               index),
-                           stdin=stdin,
-                           width=int(fl.as_str("width") or "80"),
-                           break_spaces=fl.as_bool("spaces"),
-                           count_bytes=fl.as_bool("bytes")), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await fold_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              dir_aware_stat(ops, accessor, index),
+                              bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('fold', fold, None, False, None, read=True)

@@ -24,6 +24,17 @@ export abstract class IndexCacheStore {
     expiredAt?: Date | null,
   ): Promise<void>
   abstract invalidateDir(resourcePath: string): Promise<void>
+  /**
+   * Mark every entry stale without discarding it.
+   *
+   * The difference from `clear` is what a later lookup can tell. `clear`
+   * leaves an empty store, which reads exactly like a store that was never
+   * filled, so a backend whose index *is* its listing cannot tell an
+   * invalidation from an empty repository. Expiring instead keeps that
+   * distinction: the lookup answers EXPIRED and the backend refetches.
+   */
+  abstract invalidate(): Promise<void>
+
   abstract clear(): Promise<void>
 
   /**

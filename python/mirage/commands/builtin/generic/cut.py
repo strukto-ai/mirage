@@ -2,12 +2,16 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.cut_helper import cut_stream, parse_ranges
+from mirage.commands.builtin.utils.operands import (merge_split_errors,
+                                                    normalized_read,
+                                                    split_readable)
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,4 +111,31 @@ async def cut(
                       zero_terminated=parsed.zero_terminated), IOResult()
 
 
-__all__ = ["cut"]
+async def cut_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run cut over resolved operands; mirrors cutGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by cut.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    readable, err = await split_readable(paths, stat, "cut")
+    if err and not readable:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await cut(readable,
+                  read_stream=normalized_read(stream),
+                  stdin=opts.stdin,
+                  flags=opts.flags), err)
+
+
+__all__ = ["cut", "cut_generic"]

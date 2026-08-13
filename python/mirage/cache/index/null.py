@@ -57,6 +57,9 @@ class NullIndexCacheStore(IndexCacheStore):
     async def invalidate_dir(self, resource_path: str) -> None:
         return None
 
+    async def invalidate(self) -> None:
+        return None
+
     async def clear(self) -> None:
         return None
 

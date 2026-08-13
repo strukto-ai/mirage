@@ -20,6 +20,7 @@ import {
   bindCommands,
   buildRuntime,
   DEFAULT_ENTRIES,
+  DEFAULT_PYTHON,
   VFSRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
@@ -32,7 +33,7 @@ export interface RuntimesInit {
   registry: MountRegistry
   /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
   entries: RuntimeEntry[] | undefined
-  /** `options.python`, forwarded into the default pyodide build. */
+  /** `options.python`, forwarded into the default python engine's build. */
   pythonConfig: Record<string, unknown>
   bridge: () => BridgeDispatchFn
   resolver: MountResolver
@@ -64,7 +65,7 @@ export class Runtimes {
     if (init.entries === undefined) {
       for (const name of DEFAULT_ENTRIES) {
         this.entries.push(
-          buildRuntime(name, name === 'pyodide' ? { config: { ...init.pythonConfig } } : {}),
+          buildRuntime(name, name === DEFAULT_PYTHON ? { config: { ...init.pythonConfig } } : {}),
         )
       }
     } else {

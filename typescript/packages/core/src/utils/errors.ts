@@ -250,6 +250,14 @@ export function isEnoent(err: unknown): boolean {
   return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
 }
 
+// Python's twin is `except IsADirectoryError`. GNU sometimes spells a
+// directory read as something other than the EISDIR strerror (checksum
+// --check says the literal "read error"), so callers need the code, not
+// just the walk-error class.
+export function isEisdir(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === 'EISDIR'
+}
+
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
 // every stamped filesystem code plus the unstamped no-mount refusal.
 // Mirrors Python's `except (OSError, ValueError)`, where ValueError is

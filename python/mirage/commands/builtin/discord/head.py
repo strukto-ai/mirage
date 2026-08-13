@@ -17,11 +17,13 @@ import json
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
-from mirage.commands.builtin.discord.io import resolve_glob
+from mirage.commands.builtin.discord.io import IO
 from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi, parse_flags
+from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -85,19 +87,8 @@ async def head(
                 json.dumps(m, ensure_ascii=False, separators=(",", ":"))
                 for m in msgs) + "\n"
             return generic_head(jsonl.encode(), n=lines), IOResult()
-
-        paths = await resolve_glob(accessor, paths, index)
-        return head_multi(paths,
-                          read=bound_op(discord_read, accessor, index),
-                          n=parsed.lines,
-                          c=parsed.bytes_,
-                          show_headers=(parsed.verbose or len(paths) > 1)
-                          and not parsed.quiet,
-                          zero_terminated=parsed.zero_terminated), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("head: missing operand")
-    return generic_head(raw,
-                        n=parsed.lines,
-                        c=parsed.bytes_,
-                        zero_terminated=parsed.zero_terminated), IOResult()
+    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    return await head_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              bound_op(IO.stat, accessor, index),
+                              bound_op(discord_read, accessor, index))

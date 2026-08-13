@@ -1034,6 +1034,32 @@
       ]
     },
     {
+      "id": "cli-gh",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "github",
+      "facet": "cli",
+      "clis": [
+        "gh"
+      ],
+      "mounts": [
+        {
+          "path": "/repo",
+          "resource": "github",
+          "backend": "github",
+          "repo": "integ/repo-cli",
+          "mode": "read"
+        },
+        {
+          "path": "/scratch",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "github_ci",
       "hosts": [
         "python",

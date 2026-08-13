@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GitHubAccessor } from '../../accessor/github.ts'
+import { fetchTree } from './_client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { GitHubTreeItem } from './_client.ts'
@@ -34,4 +36,41 @@ export async function populateIndex(index: IndexCacheStore, tree: GitHubTreeItem
     dirs.set(parent, arr)
   }
   await Promise.all([...dirs].map(([parent, entries]) => index.setDir(parent, entries)))
+}
+
+/**
+ * Refetch the recursive tree and re-seed the index from it.
+ *
+ * The mount fetches the whole tree once and seeds the index with it, so
+ * the index is the listing rather than a cache in front of one. That makes
+ * a cleared or expired index indistinguishable from an empty repository --
+ * `ls` reported the mount root missing after an invalidation, and reported
+ * nothing at all once the day-long TTL lapsed. This is the refill that
+ * makes dropping the index mean "refetch", which is what invalidating it
+ * was always supposed to mean.
+ *
+ * Args:
+ *   accessor (GitHubAccessor): the mount's accessor, holding the transport
+ *     and the ref to refetch.
+ *   index (IndexCacheStore | undefined): the index to re-seed.
+ *
+ * Returns:
+ *   boolean: whether a refill happened; false when there is no index to
+ *   seed, so a caller does not retry a lookup that cannot change.
+ */
+export async function refillIndex(
+  accessor: GitHubAccessor,
+  index: IndexCacheStore | undefined,
+): Promise<boolean> {
+  if (index === undefined) return false
+  const { tree, truncated } = await fetchTree(
+    accessor.transport,
+    accessor.owner,
+    accessor.repo,
+    accessor.ref,
+  )
+  accessor.truncated = truncated
+  accessor.tree = buildTreeMap(tree)
+  await populateIndex(index, tree)
+  return true
 }

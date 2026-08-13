@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore
@@ -11,6 +11,9 @@ from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
                                                  _parse_size)
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec
@@ -767,3 +770,150 @@ async def walk_find(
                                       tree,
                                       follow=follow))
     return sorted(results)
+
+
+@dataclass(frozen=True, slots=True)
+class FindFlags:
+    name: str | None = None
+    type: str | None = None
+    size: str | None = None
+    mtime: str | None = None
+    maxdepth: str | None = None
+    iname: str | None = None
+    path: str | None = None
+    mindepth: str | None = None
+    empty: bool = False
+    follow: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
+    fl = FlagView(flags, spec=SPECS["find"])
+    return FindFlags(
+        name=fl.as_str("name"),
+        type=fl.as_str("type"),
+        size=fl.as_str("size"),
+        mtime=fl.as_str("mtime"),
+        maxdepth=fl.as_str("maxdepth"),
+        iname=fl.as_str("iname"),
+        path=fl.as_str("path"),
+        mindepth=fl.as_str("mindepth"),
+        empty=fl.as_bool("empty"),
+        follow=fl.as_bool("L"),
+    )
+
+
+async def find_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    *,
+    find_core: Callable[..., Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
+    stat_path: StatPath | None = None,
+    dir_empty: Callable[[PathSpec], Awaitable[bool]] | None = None,
+    links: LinkView | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run find through a backend's native op; mirrors findGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved start points.
+        texts (list[str]): The raw expression words.
+        opts (CommandOpts): Flags from the dispatcher.
+        find_core (Callable): The backend's native find op, bound.
+        stat (Callable | None): Bound overlaid stat, when the backend
+            serves local stats cheaply.
+        stat_path (StatPath | None): Dispatcher-backed stat of one path.
+        dir_empty (Callable | None): Whether a directory start point is
+            empty, for ``-empty``.
+        links (LinkView | None): The namespace's symlink facts.
+    """
+    parsed = parse_flags(opts.flags)
+    return await find(paths,
+                      tuple(texts),
+                      find_core=find_core,
+                      stat_path=stat_path,
+                      stat=stat,
+                      dir_empty=dir_empty,
+                      name=parsed.name,
+                      type=parsed.type,
+                      size=parsed.size,
+                      mtime=parsed.mtime,
+                      maxdepth=parsed.maxdepth,
+                      iname=parsed.iname,
+                      path=parsed.path,
+                      mindepth=parsed.mindepth,
+                      empty=parsed.empty,
+                      links=links,
+                      follow=parsed.follow)
+
+
+async def find_walk_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    *,
+    readdir: Callable[..., Awaitable[list[str]]],
+    stat: Callable[..., Awaitable[FileStat]],
+    index: IndexCacheStore,
+    stat_path: StatPath | None = None,
+    links: LinkView | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run find by walking readdir/stat; the no-native-op twin.
+
+    GNU find walks every start point in operand order, names each one it
+    cannot stat, keeps going with the rest, and exits 1; results print
+    under the operand as typed.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved start points.
+        texts (list[str]): The raw expression words.
+        opts (CommandOpts): Flags from the dispatcher.
+        readdir (Callable): Bound readdir called as ``readdir(p, index)``.
+        stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
+        index (IndexCacheStore): Index cache store for the walk.
+        stat_path (StatPath | None): Dispatcher-backed stat of one path.
+        links (LinkView | None): The namespace's symlink facts.
+    """
+    parsed = parse_flags(opts.flags)
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
+    args = parse_find_args(tuple(texts),
+                           name=parsed.name,
+                           type=parsed.type,
+                           size=parsed.size,
+                           mtime=parsed.mtime,
+                           maxdepth=parsed.maxdepth,
+                           iname=parsed.iname,
+                           path=parsed.path,
+                           mindepth=parsed.mindepth,
+                           empty=parsed.empty)
+    results: list[str] = []
+    missing: list[str] = []
+    for search in searches:
+        # Same start-point rule as the native-op path, so what `find` does
+        # with a file or a missing operand does not depend on whether the
+        # mounted backend ships a find op.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if start.missing:
+            missing.append(missing_start_line(search))
+            continue
+        if not start.walk:
+            results.extend(start.results)
+            continue
+        walked = await walk_find(search,
+                                 readdir=readdir,
+                                 stat=stat,
+                                 index=index,
+                                 args=args,
+                                 links=links,
+                                 follow=parsed.follow)
+        results.extend(respell_raw(walked, search.virtual, search.raw_path))
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
+    return format_records(results), IOResult()

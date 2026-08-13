@@ -16,10 +16,11 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
+from mirage.commands.builtin.generic.zip_cmd import zip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView
@@ -32,11 +33,6 @@ async def zip_cmd(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    r: bool = False,
-    j: bool = False,
-    q: bool = False,
-    y: bool = False,
-    x: list[str] | None = None,
     index: IndexCacheStore = NULL_INDEX,
     ns: NamespaceView | None = None,
     **flags: FlagValue,
@@ -45,19 +41,14 @@ async def zip_cmd(
     mounts = ns.mounts if ns is not None else None
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_zip(paths,
-                             read_bytes=bound_op(ops.read_bytes, accessor,
-                                                 index),
-                             write_bytes=partial(ops.require(Operation.WRITE),
-                                                 accessor),
-                             stat=partial(ops.stat, accessor, index=index),
-                             walk=walk_of(ops, accessor, index),
-                             r=r,
-                             j=j,
-                             q=q,
-                             y=y,
-                             x=x,
+    resolved = await ops.resolve_glob(accessor, paths, index)
+    return await zip_generic(resolved,
+                             list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             bound_op(ops.read_bytes, accessor, index),
+                             partial(ops.require(Operation.WRITE), accessor),
+                             partial(ops.stat, accessor, index=index),
+                             walk_of(ops, accessor, index),
                              links=links,
                              mounts=mounts)
 

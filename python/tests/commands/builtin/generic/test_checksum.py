@@ -42,6 +42,8 @@ def _spec(path: str) -> PathSpec:
 def _fs(files: dict[str, str]):
 
     async def read_bytes(p: PathSpec) -> bytes:
+        if p.virtual not in files:
+            raise FileNotFoundError(p.virtual)
         return files[p.virtual].encode()
 
     async def read_stream(p: PathSpec):
@@ -55,9 +57,10 @@ def _fs(files: dict[str, str]):
 
 async def _run_check(files: dict[str, str],
                      cwd: str = "/",
+                     paths: list[str] | None = None,
                      **flags: bool) -> tuple[str, str, int]:
     read_bytes, read_stream = _fs(files)
-    out, io = await hashsum([_spec("/sums.txt")],
+    out, io = await hashsum([_spec(p) for p in (paths or ["/sums.txt"])],
                             factory=_FakeDigest,
                             algorithm="md5",
                             read_bytes=read_bytes,
@@ -224,3 +227,83 @@ async def test_warn_adds_per_line_diagnostics():
                       "checksum line\n"
                       "md5sum: WARNING: 1 line is improperly formatted\n")
     assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_check_verifies_every_list_operand():
+    stdout, stderr, code = await _run_check(
+        {
+            "/one.txt": "5aabc  /a.txt\n",
+            "/two.txt": "5adef  /b.txt\n",
+            "/a.txt": "abc",
+            "/b.txt": "def",
+        },
+        paths=["/one.txt", "/two.txt"])
+    assert stdout == "/a.txt: OK\n/b.txt: OK\n"
+    assert stderr == ""
+    assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_check_missing_list_reports_and_continues():
+    stdout, stderr, code = await _run_check(
+        {
+            "/one.txt": "5aabc  /a.txt\n",
+            "/a.txt": "abc",
+        },
+        paths=["/one.txt", "/nope.txt"])
+    assert stdout == "/a.txt: OK\n"
+    assert stderr == "md5sum: /nope.txt: No such file or directory\n"
+    assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_check_missing_list_first_keeps_operand_order():
+    stdout, stderr, code = await _run_check(
+        {
+            "/one.txt": "5aabc  /a.txt\n",
+            "/a.txt": "abc",
+        },
+        paths=["/nope.txt", "/one.txt"])
+    assert stdout == "/a.txt: OK\n"
+    assert stderr == "md5sum: /nope.txt: No such file or directory\n"
+    assert code == 1
+
+
+@pytest.mark.asyncio
+async def test_check_directory_list_operand_is_a_read_error():
+    # GNU 9.7: `md5sum -c d` on a directory says the literal "read
+    # error", not the EISDIR strerror (its fopen succeeds, the read
+    # fails).
+    async def read_bytes(p: PathSpec) -> bytes:
+        if p.virtual == "/d":
+            raise IsADirectoryError(p.virtual)
+        return b"5aabc  /a.txt\n"
+
+    async def read_stream(p: PathSpec):
+        yield b"abc"
+
+    out, io = await hashsum([_spec("/d"), _spec("/one.txt")],
+                            factory=_FakeDigest,
+                            algorithm="md5",
+                            read_bytes=read_bytes,
+                            read_stream=read_stream,
+                            check=True)
+    assert isinstance(out, bytes) and out.decode() == "/a.txt: OK\n"
+    assert io.stderr is not None
+    assert io.stderr.decode() == "md5sum: /d: read error\n"
+    assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_check_status_keeps_missing_list_strerror():
+    stdout, stderr, code = await _run_check(
+        {
+            "/one.txt": "5aabc  /a.txt\n",
+            "/a.txt": "abc",
+        },
+        paths=["/one.txt", "/nope.txt"],
+        status=True)
+    assert stdout == ""
+    assert stderr == "md5sum: /nope.txt: No such file or directory\n"
+    assert code == 1

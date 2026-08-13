@@ -1,13 +1,14 @@
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.dify.io import resolve_glob
-from mirage.commands.builtin.generic.cat import cat as generic_cat
-from mirage.commands.builtin.generic.cat import needs_display
+from mirage.commands.builtin.generic.cat import cat_generic
 from mirage.commands.builtin.generic_bind import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
-from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -25,34 +26,16 @@ def make_cat(ops: CommandIO):
         accessor,
         paths: list[PathSpec],
         *texts: str,
+        stdin: ByteSource | None = None,
         index: IndexCacheStore,
         **flags: FlagValue,
     ) -> tuple[ByteSource | None, IOResult]:
-        paths = await resolve_glob(accessor, paths, index)
-        # dify is a remote (cacheable) backend. Single file: stream via a
-        # cachable returned AS stdout so the tee fills the cache as the
-        # consumer reads. Multiple files: per-file cachables plus a joined
-        # stdout are different objects, so the cache-fill background drain
-        # races the consumer on the same stream and poisons each file's cache
-        # slot. Read each file to bytes: cache real bytes directly (no drain,
-        # no race) and concatenate for stdout.
-        if len(paths) == 1:
-            p = paths[0]
-            cachable = CachableAsyncIterator(
-                ops.read_stream(accessor, p, index))
-            io = IOResult(reads={p.mount_path: cachable}, cache=[p.mount_path])
-            source: ByteSource = cachable
-        else:
-            reads: dict[str, ByteSource] = {}
-            parts: list[bytes] = []
-            for p in paths:
-                data = await ops.read_bytes(accessor, p, index)
-                reads[p.mount_path] = data
-                parts.append(data)
-            io = IOResult(reads=reads, cache=list(reads))
-            source = async_chain(*parts)
-        if needs_display(flags):
-            return generic_cat(source, flags=flags), io
-        return source, io
+        resolved = await resolve_or_empty(ops, accessor, paths, index)
+        return await cat_generic(resolved,
+                                 list(texts),
+                                 CommandOpts(stdin=stdin, flags=flags),
+                                 dir_aware_stat(ops, accessor, index),
+                                 bound_op(ops.read_stream, accessor, index),
+                                 local=ops.local)
 
     return cat

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, overload
@@ -22,8 +22,10 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.ops.types import StatOverlay
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import MISS_ERRORS, eisdir
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
+from mirage.utils.path import norm, parent
 
 OperationFn = Callable[..., Any]
 
@@ -191,3 +193,106 @@ class CommandIO:
             raise NotImplementedError(
                 f"operation {op!r} is not supported on this backend")
         return fn
+
+
+async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
+                           index: IndexCacheStore) -> bool:
+    """Whether a path that failed stat with ENOENT is an implicit directory.
+
+    Keyed backends (RAM/Redis/S3) have no directory entries: stat of a
+    prefix that only exists through deeper keys raises ENOENT. The operand's
+    own readdir cannot serve as the probe: synthetic hierarchies fabricate
+    children for any name (postgres answers ``tables/views`` for a missing
+    schema) and database backends raise driver errors for missing tables.
+    The parent listing is authoritative instead: the operand is an implicit
+    directory only if its parent's readdir lists it. When the operand is
+    the mount root there is no parent to list, so its own readdir decides
+    (root listings are real in every backend). Any probe failure is a
+    negative probe (the original ENOENT stands), never an error to surface,
+    which is why the except is deliberately broad.
+
+    Args:
+        ops (CommandIO): Backend I/O bundle providing ``readdir``.
+        accessor (Accessor): Backend accessor.
+        path (PathSpec): The operand whose stat raised ENOENT.
+        index (IndexCacheStore): Index cache store for ``readdir``.
+    """
+    target = norm(path.virtual)
+    key = path.resource_path.strip("/")
+    if not key:
+        try:
+            entries = await ops.readdir(accessor, path, index)
+        except MISS_ERRORS:
+            return False
+        return bool(entries)
+    parent_key = key.rsplit("/", 1)[0] if "/" in key else ""
+    parent_virtual = parent(target)
+    parent_path = PathSpec(virtual=parent_virtual,
+                           directory=parent_virtual,
+                           resource_path=parent_key)
+    try:
+        entries = await ops.readdir(accessor, parent_path, index)
+    except MISS_ERRORS:
+        return False
+    return any(norm(entry) == target for entry in entries)
+
+
+async def _stat_refusing_dirs(ops: CommandIO, accessor: Accessor,
+                              index: IndexCacheStore,
+                              path: PathSpec) -> FileStat:
+    try:
+        st: FileStat = await ops.stat(accessor, path, index)
+    except FileNotFoundError:
+        if await _is_implicit_dir(ops, accessor, path, index):
+            raise eisdir(path) from None
+        raise
+    if getattr(st, "type", None) == FileType.DIRECTORY:
+        raise eisdir(path)
+    return st
+
+
+def dir_aware_stat(ops: CommandIO, accessor: Accessor,
+                   index: IndexCacheStore) -> OperationFn:
+    """Bound stat for the read-family chokepoint (``split_readable``).
+
+    A directory operand fails with EISDIR instead of succeeding
+    (explicit, via the stat type) or failing with ENOENT (implicit
+    keyed-backend directory, via a readdir probe), so cat/head/tail
+    report GNU's ``Is a directory`` and keep the remaining operands
+    (#457). Called as ``stat(path)``; mirrors ``dirAwareStat`` in
+    adapter.ts.
+
+    Args:
+        ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
+        accessor (Accessor): Backend accessor bound into stats.
+        index (IndexCacheStore): Index cache store bound into stats.
+    """
+    return functools.partial(_stat_refusing_dirs, ops, accessor, index)
+
+
+async def _stream_refusing_dirs(ops: CommandIO, accessor: Accessor,
+                                index: IndexCacheStore,
+                                path: PathSpec) -> AsyncIterator[bytes]:
+    await _stat_refusing_dirs(ops, accessor, index, path)
+    async for chunk in ops.read_stream(accessor, path, index):
+        yield chunk
+
+
+def dir_aware_stream(ops: CommandIO, accessor: Accessor,
+                     index: IndexCacheStore) -> OperationFn:
+    """Bound read stream for the per-operand chokepoint (``read_operands``).
+
+    The operand is stat'ed first so a directory fails with EISDIR before
+    any backend read runs (sftp reads of a directory raise an opaque
+    ``Failure``, not ENOENT), and an ENOENT for an implicit keyed-backend
+    directory is refined the same way ``dir_aware_stat`` does, before the
+    generic formats the stderr line (#457). Called as ``read(path)``;
+    mirrors ``dirAwareStream`` in adapter.ts.
+
+    Args:
+        ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``
+            and ``read_stream``.
+        accessor (Accessor): Backend accessor bound into reads.
+        index (IndexCacheStore): Index cache store bound into reads.
+    """
+    return functools.partial(_stream_refusing_dirs, ops, accessor, index)

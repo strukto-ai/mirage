@@ -14,8 +14,9 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.stat import stat as generic_stat
+from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -31,19 +32,15 @@ async def stat(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    c: str | None = None,
-    f: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    L: bool = False,
     ns: NamespaceView | None = None,
-    **_extra: FlagValue,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     links = ns.links if ns is not None else None
     if not paths:
         raise ValueError("stat: missing operand")
-    return await generic_stat(list(paths),
-                              stat_fn=bound_op(history_stat, accessor, index),
-                              c=c,
-                              f=f,
-                              links=links,
-                              L=L)
+    return await stat_generic(list(paths),
+                              list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              bound_op(history_stat, accessor, index),
+                              links=links)

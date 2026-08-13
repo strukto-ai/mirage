@@ -118,3 +118,30 @@ def test_handlers_declare_no_flag_the_parser_cannot_emit():
         "these parameters name a flag spelling the parser never emits "
         "(read the canonical dest through FlagView instead):\n" +
         "\n".join(sorted(set(offenders))))
+
+
+def test_builders_declare_only_dispatcher_params():
+    """Generic-bind builders are wiring: no declared flag parameters.
+
+    Flag semantics live in the generics, which parse the forwarded bag
+    once into a frozen struct through a spec-bound FlagView (or, for a
+    builder that IS the implementation, inline through the same view).
+    A builder that names a flag in its signature is interpreting the
+    command line at the wiring layer again, which is exactly the drift
+    T2-2 removed; this pins the inversion.
+    """
+    offenders = []
+    for name, label, spec, fn in _handlers():
+        if not label.startswith("builders/"):
+            continue
+        signature = inspect.signature(inspect.unwrap(fn))
+        declared = [
+            param for param, kind in signature.parameters.items()
+            if kind.kind not in (kind.VAR_KEYWORD, kind.VAR_POSITIONAL)
+            and param not in DISPATCHER_PARAMS
+        ]
+        if declared:
+            offenders.append(f"{label}: {name}({', '.join(declared)})")
+    assert not offenders, (
+        "builders are wiring only; forward **flags wholesale and parse "
+        "them in the generic:\n" + "\n".join(sorted(set(offenders))))

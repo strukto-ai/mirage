@@ -14,11 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.strings import strings as generic_strings
+from mirage.commands.builtin.generic.strings import strings_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,19 +32,14 @@ async def strings(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths, err = await resolve_readable(ops, accessor, paths, index, "strings")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_strings(paths,
-                              read_bytes=bound_op(ops.read_bytes, accessor,
-                                                  index),
-                              stdin=stdin,
-                              min_len=int(n) if n else 4), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await strings_generic(resolved, list(texts),
+                                 CommandOpts(stdin=stdin, flags=flags),
+                                 dir_aware_stat(ops, accessor, index),
+                                 bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('strings', strings, None, False, None, read=True)

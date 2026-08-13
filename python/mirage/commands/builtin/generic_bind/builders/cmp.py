@@ -14,9 +14,11 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
+from mirage.commands.builtin.generic.cmp import cmp_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -27,25 +29,15 @@ async def cmp_cmd(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    s: bool = False,
-    args_l: bool = False,
-    n: str | None = None,
-    b: bool = False,
-    i: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **flags,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError('cmp: requires two paths')
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_cmp(paths,
-                             read_bytes=bound_op(ops.read_bytes, accessor,
-                                                 index),
-                             silent=s,
-                             verbose=args_l,
-                             limit=int(n) if n is not None else None,
-                             print_bytes=b,
-                             skip=int(i) if i is not None else None)
+    resolved = await ops.resolve_glob(accessor, paths, index)
+    return await cmp_generic(resolved, list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('cmp', cmp_cmd, None, False, None, read=True)

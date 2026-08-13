@@ -69,6 +69,7 @@ export interface IOResultInit {
   writes?: Record<string, ByteSource>
   cache?: string[]
   producer?: Producer | null
+  mutated?: boolean | null
 }
 
 export class IOResult {
@@ -84,6 +85,12 @@ export class IOResult {
   // policy layer as context. Facts ride the envelope, policy
   // decisions never do.
   producer: Producer | null
+  // Whether this run changed service state, when only the handler can
+  // tell. A CLI leaf declares `write` statically because for almost every
+  // verb it is static, but `gh api` carries its method on the line, so a
+  // plain `gh api /user` is a read through a leaf that is declared
+  // writable. null leaves the spec's answer standing.
+  mutated: boolean | null
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
@@ -94,6 +101,7 @@ export class IOResult {
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
     this.producer = init.producer ?? null
+    this.mutated = init.mutated ?? null
     this.streamSource = null
   }
 

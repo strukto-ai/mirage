@@ -346,12 +346,16 @@ async def handle_cli(
         return None, err_io, ExecutionNode(command=cmd_str,
                                            exit_code=1,
                                            stderr=err_stderr)
-    if leaf.write and drop_caches is not None:
-        await drop_caches()
     if out is None:
         stdout, io = None, IOResult()
     else:
         stdout, io = out
+    # The spec's `write` is the static answer, which is the only one most
+    # verbs have; a handler that knows better says so on its result, so a
+    # read-only `gh api` does not expire every github mount.
+    mutated = leaf.write if io.mutated is None else io.mutated
+    if mutated and drop_caches is not None:
+        await drop_caches()
     io.producer = Producer(command=prog, declared=leaf.limit)
 
     if parsed.warnings:

@@ -1,9 +1,32 @@
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.operands import (merge_split_errors,
+                                                    normalized_read,
+                                                    split_readable)
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+
+
+@dataclass(frozen=True, slots=True)
+class TacFlags:
+    separator: str = "\n"
+    before: bool = False
+    regex: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> TacFlags:
+    fl = FlagView(flags, spec=SPECS["tac"])
+    return TacFlags(
+        separator=fl.as_str("separator") or "\n",
+        before=fl.as_bool("before"),
+        regex=fl.as_bool("regex"),
+    )
 
 
 async def _reverse_source(source: AsyncIterator[bytes], separator: str,
@@ -44,4 +67,34 @@ async def tac(
     return await _reverse_source(source, separator, before, regex), IOResult()
 
 
-__all__ = ["tac"]
+async def tac_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run tac over resolved operands; mirrors tacGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by tac.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    parsed = parse_flags(opts.flags)
+    readable, err = await split_readable(paths, stat, "tac")
+    if err and not readable:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await tac(readable,
+                  read_stream=normalized_read(stream),
+                  stdin=opts.stdin,
+                  separator=parsed.separator,
+                  before=parsed.before,
+                  regex=parsed.regex), err)
+
+
+__all__ = ["tac", "tac_generic"]

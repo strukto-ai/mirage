@@ -14,13 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.tac import tac as generic_tac
+from mirage.commands.builtin.generic.tac import tac_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,18 +35,11 @@ async def tac(
     index: IndexCacheStore = NULL_INDEX,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["tac"])
-    paths, err = await resolve_readable(ops, accessor, paths, index, "tac")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_tac(paths,
-                          read_stream=bound_op(ops.read_stream, accessor,
-                                               index),
-                          stdin=stdin,
-                          separator=fl.as_str("separator") or "\n",
-                          before=fl.as_bool("before"),
-                          regex=fl.as_bool("regex")), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await tac_generic(resolved, list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             dir_aware_stat(ops, accessor, index),
+                             bound_op(ops.read_stream, accessor, index))
 
 
 BUILDER = Builder('tac', tac, None, False, None, read=True)

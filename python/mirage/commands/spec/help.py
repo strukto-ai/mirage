@@ -82,6 +82,26 @@ def flag_rows(spec: CommandSpec) -> list[tuple[str, str]]:
     return [(_flag_display(o), o.description or "") for o in spec.options]
 
 
+def _slot(operand: Operand) -> str:
+    """One operand's placeholder outside the clap dialect.
+
+    A spec that named the slot gets that name, which is what argparse
+    prints too (it renders the dest, not a generic word); a spec that did
+    not falls back to the type. Only `gh` names one outside clap today, so
+    this is the difference between `gh api [flags] <text>` and upstream's
+    `gh api <endpoint>`.
+
+    Args:
+        operand (Operand): the slot to render.
+
+    Returns:
+        str: the bracketed placeholder.
+    """
+    if operand.name:
+        return f"<{operand.name}>"
+    return "<path>" if operand.type == "path" else "<text>"
+
+
 def usage_line(name: str, spec: CommandSpec, subcommands: SubcommandRows,
                style: UsageStyle) -> str:
     """The ``Usage:`` line, in the dialect the CLI declares.
@@ -107,14 +127,12 @@ def usage_line(name: str, spec: CommandSpec, subcommands: SubcommandRows,
         if clap:
             bits.append(operand_slot(operand))
         else:
-            bits.append("<path>" if operand.type == "path" else "<text>")
+            bits.append(_slot(operand))
     if spec.rest is not None:
         if clap:
             bits.append(operand_slot(spec.rest, ellipsis=True))
-        elif spec.rest.type == "path":
-            bits.append("[<path>...]")
         else:
-            bits.append("[<text>...]")
+            bits.append(f"[{_slot(spec.rest)}...]")
     return "Usage: " + " ".join(bits)
 
 

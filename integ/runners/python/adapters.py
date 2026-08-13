@@ -117,6 +117,9 @@ EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
+# The repository the `gh` install defaults to, standing in for the current
+# git remote real gh reads. Seeded by the fake alongside the mounted one.
+GH_CLI_REPO = "integ/repo-cli"
 EMAIL_PASSWORD = "secret"
 EMAIL_SENT_FOLDER = "Sent"
 # Doubles as the workspace id on the fake notion server.
@@ -1066,6 +1069,16 @@ class GitHubService:
     async def create(cls) -> "GitHubService":
         return cls(os.environ["GITHUB_URL"].rstrip("/"))
 
+    async def reset(self) -> None:
+        """Drop every write since startup, restoring the seeded state.
+
+        The write battery runs once per host against one shared fake, so it
+        starts from the seed rather than from the other host's writes.
+        """
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{self.url}/reset") as resp:
+                resp.raise_for_status()
+
     async def resource(self, mount: dict) -> GitHubResource:
         owner, _, repo = mount["repo"].partition("/")
         return await GitHubResource.build(
@@ -1073,6 +1086,16 @@ class GitHubService:
                          owner=owner,
                          repo=repo,
                          base_url=self.url))
+
+    def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
+        return {
+            "gh": (cli_spec_for("gh"), {
+                "token": "ghp-integ",
+                "base_url": self.url,
+                "repo": GH_CLI_REPO,
+                "branch": "main",
+            }),
+        }
 
     async def teardown(self) -> None:
         return None
@@ -2147,7 +2170,12 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
     if target.get("service") == "dropbox":
         return await DropboxService.create(target)
     if target.get("service") == "github":
-        return await GitHubService.create()
+        github = await GitHubService.create()
+        # The write battery runs once per host against one shared fake, so
+        # it starts from the seed rather than from the other host's writes.
+        if "gh" in (target.get("clis") or []):
+            await github.reset()
+        return github
     if target.get("service") == "github_ci":
         return await GitHubCIService.create()
     if target.get("service") == "slack":
@@ -2221,8 +2249,9 @@ def cli_install(service: "Service | None",
     if service is None:
         return cli_spec_for(cli_name), None
     # Widen the assert when another service grows a CLI.
-    assert isinstance(service, (DiscordService, EmailService, GwsService,
-                                LinearService, NotionService, SlackService))
+    assert isinstance(service,
+                      (DiscordService, EmailService, GitHubService, GwsService,
+                       LinearService, NotionService, SlackService))
     return service.cli_installs()[cli_name]
 
 

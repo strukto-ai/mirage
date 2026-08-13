@@ -93,6 +93,12 @@ class IOResult:
         reads (dict[str, ByteSource]): Paths read with content or streams.
         writes (dict[str, ByteSource]): Paths written with content or streams.
         cache (list[str]): Paths worth caching (from reads or writes).
+        mutated (bool | None): whether this run changed service state,
+            when only the handler can tell. A CLI leaf declares
+            ``write`` statically because for almost every verb it is
+            static, but ``gh api`` carries its method on the line, so a
+            plain ``gh api /user`` is a read through a leaf that is
+            declared writable. None leaves the spec's answer standing.
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
             producer, mirroring whose stream the shell shows. The
@@ -126,6 +132,7 @@ class IOResult:
     writes: dict[str, ByteSource] = field(default_factory=dict)
     cache: list[str] = field(default_factory=list)
     producer: Producer | None = None
+    mutated: bool | None = None
     _stream_source: "IOResult | None" = field(default=None, repr=False)
 
     def __setattr__(self, name: str, value: object) -> None:

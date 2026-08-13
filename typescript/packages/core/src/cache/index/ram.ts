@@ -83,6 +83,12 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return Promise.resolve()
   }
 
+  invalidate(): Promise<void> {
+    const past = Date.now() - 1000
+    for (const key of this.expiry.keys()) this.expiry.set(key, past)
+    return Promise.resolve()
+  }
+
   clear(): Promise<void> {
     this.entries.clear()
     this.children.clear()

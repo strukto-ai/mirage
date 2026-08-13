@@ -1,0 +1,329 @@
+{
+  "cases": [
+    {
+      "id": "gh_repo_view_default_repo",
+      "seq": 569000,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo view | head -5",
+      "expect": {
+        "exit": 0,
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n--\n# repo-v1\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_view_operand",
+      "seq": 569001,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo view integ/repo-cli | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_view_host_prefix_is_dropped",
+      "seq": 569002,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo view github.com/integ/repo-cli | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "name:\tinteg/repo-cli\ndescription:\t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_view_rejects_a_bare_name",
+      "seq": 569003,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo view justaname",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh repo view: expected the \"[HOST/]OWNER/REPO\" format, got \"justaname\"\n"
+      }
+    },
+    {
+      "id": "gh_api_get_is_the_default_method",
+      "seq": 569004,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli | head -3",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"repo-cli\",\n  \"full_name\": \"integ/repo-cli\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_put_lands_in_the_mount",
+      "seq": 569005,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/NOTES.md -X PUT -f message=add -f content=bmV3IGZpbGUK > /dev/null && cat /repo/NOTES.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "new file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_put_shows_up_in_ls",
+      "seq": 569006,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "ls /repo | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "NOTES.md\nREADME.md\ndocs\npyproject.toml\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_put_without_a_sha_is_refused",
+      "seq": 569007,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/NOTES.md -X PUT -f message=again -f content=b3RoZXIK",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: NOTES.md does not match\n"
+      }
+    },
+    {
+      "id": "gh_api_sha_for_a_new_file_is_refused",
+      "seq": 569008,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/ABSENT.md -X PUT -f message=x -f content=eAo= -f sha=deadbeef",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: Invalid request.\n\n\"sha\" wasn't supplied.\n"
+      }
+    },
+    {
+      "id": "gh_api_delete_drops_the_file_from_the_mount",
+      "seq": 569009,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/NOTES.md -X DELETE -f message=rm -f sha=fa49b077972391ad58037050f2a75f74e3671e92 > /dev/null && ls /repo | head -3",
+      "expect": {
+        "exit": 0,
+        "stdout": "README.md\ndocs\npyproject.toml\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_404_on_a_repository_that_is_not_there",
+      "seq": 569010,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: Not Found\n"
+      }
+    },
+    {
+      "id": "gh_api_reads_dash_f_as_json_types",
+      "seq": 569011,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/issues -f title=hi -F draft=false | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"number\": 1,\n  \"title\": \"hi\",\n  \"body\": \"\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_refuses_a_field_that_is_not_key_value",
+      "seq": 569012,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli -f nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: expected \"key=value\", got \"nope\"\n"
+      }
+    },
+    {
+      "id": "gh_repo_fork_names_where_it_landed",
+      "seq": 569013,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo fork integ/repo-cli --fork-name forked",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u2713 Created fork integ-user/forked\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_rename_takes_the_new_name_as_the_operand",
+      "seq": 569014,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo rename renamed -R integ-user/forked",
+      "expect": {
+        "exit": 0,
+        "stdout": "\u2713 Renamed repository integ-user/renamed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_update_then_cat_serves_the_new_bytes",
+      "seq": 569015,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/contents/PROBE.md -X PUT -f message=a -f content=b25lCg== > /dev/null && cat /repo/PROBE.md && gh api repos/integ/repo-cli/contents/PROBE.md -X PUT -f message=b -f content=dHdvCg== -f sha=$(gh api repos/integ/repo-cli/contents/PROBE.md | jq -r .sha) > /dev/null && cat /repo/PROBE.md",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_leading_slash_is_optional",
+      "seq": 569016,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api /repos/integ/repo-cli | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_typed_fields_reach_a_get_query",
+      "seq": 569017,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X GET repos/integ/repo-cli/contents/README.md -F ref=main | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"type\": \"file\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_without_an_endpoint_is_refused",
+      "seq": 569018,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gh api: an API endpoint is required\n"
+      }
+    },
+    {
+      "id": "gh_is_discoverable_as_a_cli",
+      "seq": 569019,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "type -t gh; which gh",
+      "expect": {
+        "exit": 0,
+        "stdout": "cli\ngh\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "man_gh_renders_the_spec",
+      "seq": 569020,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "man gh | head -8",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh: GitHub CLI\n\nUsage: gh [flags] <command> [<args>]\n\nCommands:\n  api   Make an authenticated GitHub API request\n  repo  Manage repositories\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "man_gh_api_renders_one_leaf",
+      "seq": 569021,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "man gh api | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh api: Make an authenticated GitHub API request\n\nUsage: gh api [flags] <ENDPOINT>\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_repo_rename_answers_help",
+      "seq": 569022,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh repo rename --help | head -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "gh repo rename: Rename a repository\n\nUsage: gh repo rename [flags] <NEW-NAME>\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_expands_owner_and_repo",
+      "seq": 569023,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api 'repos/{owner}/{repo}' | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"repo-cli\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_api_expands_a_placeholder_in_a_typed_field",
+      "seq": 569025,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api -X GET repos/integ/repo-cli/contents/README.md -F ref='{branch}' | head -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"type\": \"file\",\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

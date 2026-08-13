@@ -12,16 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexConfig, IndexEntry
+from mirage.cache.index import IndexConfig
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.repo import fetch_default_branch
-from mirage.core.github.tree import fetch_tree
+from mirage.core.github.tree import fetch_tree, index_rows
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.resource.base import BaseResource
 from mirage.resource.github.prompt import PROMPT
@@ -140,32 +139,9 @@ class GitHubResource(BaseResource):
                    truncated=truncated)
 
     def _populate_index(self, tree: dict[str, TreeEntry]) -> None:
-        dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
-        for path, entry in tree.items():
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                parent, name = "/" + parts[0], parts[1]
-            else:
-                parent, name = "/", parts[0]
-            resource_type = "folder" if entry.type == "tree" else "file"
-            idx_entry = IndexEntry(
-                id=entry.sha,
-                name=name,
-                resource_type=resource_type,
-                size=entry.size,
-            )
-            dirs[parent].append((name, idx_entry))
-        self._github_index_entries = {
-            ("/" + parent.strip("/") + "/" + name).replace("//", "/"): entry
-            for parent, entries in dirs.items()
-            for name, entry in entries
-        }
-        self._github_index_children = {
-            parent:
-            sorted(("/" + parent.strip("/") + "/" + name).replace("//", "/")
-                   for name, _ in entries)
-            for parent, entries in dirs.items()
-        }
+        entries, children = index_rows(tree)
+        self._github_index_entries = entries
+        self._github_index_children = children
         self._github_index_expiry = (datetime.now(timezone.utc) +
                                      timedelta(days=365))
         self._seed_github_index()

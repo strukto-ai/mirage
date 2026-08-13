@@ -1,6 +1,11 @@
 import posixpath
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.wrap import to_pathspec
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, StatFn
 from mirage.utils.key_prefix import mount_prefix_of
@@ -39,3 +44,23 @@ async def realpath(
 
 
 __all__ = ["realpath"]
+
+
+@dataclass(frozen=True, slots=True)
+class RealpathFlags:
+    must_exist: bool = False
+    allow_missing: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> RealpathFlags:
+    fl = FlagView(flags, spec=SPECS["realpath"])
+    return RealpathFlags(must_exist=fl.as_bool("e"),
+                         allow_missing=fl.as_bool("m"))
+
+
+async def realpath_generic(paths, texts, opts: CommandOpts, stat_fn):
+    parsed = parse_flags(opts.flags)
+    return await realpath(paths,
+                          stat_fn=stat_fn,
+                          e=parsed.must_exist,
+                          m=parsed.allow_missing)

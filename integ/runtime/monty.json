@@ -34,6 +34,31 @@
       ]
     },
     {
+      "id": "module_flag_refused_by_name",
+      "world": {
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -m nosuchmodule",
+          "expect": {
+            "exit": 1,
+            "stderr": "python3: -m is not supported by the 'monty' runtime\n"
+          }
+        },
+        {
+          "command": "python -m json.tool",
+          "expect": {
+            "exit": 1,
+            "stderr": "python3: -m is not supported by the 'monty' runtime\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "argv_global",
       "world": {
         "runtimes": [

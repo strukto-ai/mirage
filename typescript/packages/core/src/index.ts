@@ -533,7 +533,13 @@ export { Runtime, type RuntimeEntry } from './runtime/base.ts'
 export { LanguageRuntime } from './runtime/language.ts'
 export { PythonRuntime } from './runtime/python/base.ts'
 export { JsRuntime } from './runtime/js/base.ts'
-export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
+export {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  DEFAULT_PYTHON,
+  runtimeBindingsFor,
+  VFSRuntime,
+} from './runtime/table.ts'
 export {
   coerceRuntimeConfig,
   HOME_CONFIG_KEYS,
@@ -712,6 +718,7 @@ export { DISCORD } from './commands/cli/builtin/discord/index.ts'
 export { NTN } from './commands/cli/builtin/ntn/index.ts'
 export { LINEAR } from './commands/cli/builtin/linear/index.ts'
 export { GIT } from './commands/cli/builtin/git/index.ts'
+export { GH } from './commands/cli/builtin/gh/index.ts'
 export { nodeHelp, walk } from './commands/cli/walk.ts'
 export { CLIRegistry } from './workspace/cli/registry.ts'
 export type { CLIInstall } from './workspace/cli/types.ts'
@@ -937,6 +944,20 @@ export {
 export { GitHubAccessor, type GitHubResourceLike } from './accessor/github.ts'
 export { GITHUB_COMMANDS } from './commands/builtin/github/index.ts'
 export { GITHUB_OPS } from './ops/github/index.ts'
+export {
+  type GhConfig,
+  type GhConfigRedacted,
+  GhConfigSchema,
+  normalizeGhConfig,
+  redactGhConfig,
+} from './core/github/config.ts'
+export {
+  forkRepo as githubForkRepo,
+  login as githubLogin,
+  parseRepo as githubParseRepo,
+  renameRepo as githubRenameRepo,
+  viewRepo as githubViewRepo,
+} from './core/github/repo.ts'
 export { read as githubRead, stream as githubStream } from './core/github/read.ts'
 export { readdir as githubReaddir } from './core/github/readdir.ts'
 export {

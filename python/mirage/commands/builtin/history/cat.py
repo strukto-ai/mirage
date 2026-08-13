@@ -15,13 +15,16 @@
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
-from mirage.commands.builtin.generic.cat import cat as generic_cat
-from mirage.commands.builtin.generic.cat import needs_display
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.cat import cat_generic
+from mirage.commands.builtin.generic_bind.adapter import (bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.history.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
-from mirage.core.history.read import read as history_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,18 +41,10 @@ async def cat(
     index: IndexCacheStore,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        contents: dict[str, bytes] = {
-            p.mount_path: await history_read(accessor, p, index)
-            for p in paths
-        }
-        merged = b"".join(contents.values())
-        reads: dict[str, ByteSource] = {k: v for k, v in contents.items()}
-        io = IOResult(reads=reads)
-        if needs_display(flags):
-            return generic_cat(merged, flags=flags), io
-        return merged, io
-    source = _resolve_source(stdin, "cat: missing operand")
-    if needs_display(flags):
-        return generic_cat(source, flags=flags), IOResult()
-    return source, IOResult()
+    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    return await cat_generic(resolved,
+                             list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             dir_aware_stat(IO, accessor, index),
+                             bound_op(IO.read_stream, accessor, index),
+                             local=IO.local)

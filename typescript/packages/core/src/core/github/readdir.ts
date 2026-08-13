@@ -18,6 +18,7 @@ import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchDirTree } from './_client.ts'
+import { refillIndex } from './tree.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -49,7 +50,15 @@ export async function readdir(
   const stripped = stripPrefix(path)
   const key = normalizeKey(stripped)
 
-  const listing = await index.listDir(key)
+  let listing = await index.listDir(key)
+  // The index is the whole listing here, not a cache in front of one, so an
+  // *expired* answer means the tree aged out, not that the path is gone.
+  // Refetch once and ask again. A NOT_FOUND against a live index is a real
+  // absence and must not cost a tree fetch: refilling on any miss spends a
+  // recursive-tree call on every ENOENT.
+  if (listing.status === LookupStatus.EXPIRED && !accessor.truncated) {
+    if (await refillIndex(accessor, index)) listing = await index.listDir(key)
+  }
   if (listing.entries !== undefined && listing.entries !== null) {
     return prefix !== '' && listing.entries.length > 0 && !listing.entries[0]?.startsWith(prefix)
       ? listing.entries.map((e) => prefix + e)

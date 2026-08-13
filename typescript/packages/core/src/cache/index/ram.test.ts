@@ -91,6 +91,30 @@ describe('RAMIndexCacheStore', () => {
     expect(get.entry ?? null).toBeNull()
   })
 
+  // The distinction the whole github invalidation rests on: `clear` leaves
+  // a store that reads exactly like one that was never filled, so a backend
+  // whose index *is* its listing reports an empty repository. `invalidate`
+  // keeps the rows and only expires them, so the lookup says EXPIRED and
+  // the backend knows to refetch.
+  it('invalidate expires every directory without discarding it', async () => {
+    const store = new RAMIndexCacheStore()
+    await store.setDir('/a', [['x', mkEntry('1', 'x')]])
+    await store.setDir('/b', [['y', mkEntry('2', 'y')]])
+    await store.invalidate()
+    expect((await store.listDir('/a')).status).toBe(LookupStatus.EXPIRED)
+    expect((await store.listDir('/b')).status).toBe(LookupStatus.EXPIRED)
+    await store.clear()
+    expect((await store.listDir('/a')).status).toBe(LookupStatus.NOT_FOUND)
+  })
+
+  // An empty store has nothing to expire, and must not grow a row that
+  // makes a never-listed directory answer EXPIRED instead of NOT_FOUND.
+  it('invalidate leaves an unlisted directory absent', async () => {
+    const store = new RAMIndexCacheStore()
+    await store.invalidate()
+    expect((await store.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
+  })
+
   it('clear wipes everything', async () => {
     const store = new RAMIndexCacheStore()
     await store.put('/a', mkEntry('1', 'a'))

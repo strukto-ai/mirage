@@ -68,6 +68,20 @@ function flagRows(spec: CommandSpec): [string, string][] {
 }
 
 /**
+ * One operand's placeholder outside the clap dialect.
+ *
+ * A spec that named the slot gets that name, which is what argparse prints
+ * too (it renders the dest, not a generic word); a spec that did not falls
+ * back to the type. Only `gh` names one outside clap today, so this is the
+ * difference between `gh api [flags] <text>` and upstream's
+ * `gh api <endpoint>`.
+ */
+function slot(operand: Operand): string {
+  if (operand.name !== '') return `<${operand.name}>`
+  return operand.type === 'path' ? '<path>' : '<text>'
+}
+
+/**
  * Render one command's help; a CLI group is the same shape plus a Commands
  * section. `subcommands` carries (name, one-line help) rows for a CLI
  * group node; when given, the usage line reads `<command> [<args>]`
@@ -84,11 +98,11 @@ function usageLine(
   if (spec.options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
   if (subcommands.length > 0) bits.push(clap ? '<COMMAND>' : '<command> [<args>]')
   for (const op of spec.positional) {
-    bits.push(clap ? operandSlot(op) : op.type === 'path' ? '<path>' : '<text>')
+    bits.push(clap ? operandSlot(op) : slot(op))
   }
   if (spec.rest !== null) {
     if (clap) bits.push(operandSlot(spec.rest, !spec.rest.required))
-    else bits.push(spec.rest.type === 'path' ? '[<path>...]' : '[<text>...]')
+    else bits.push(`[${slot(spec.rest)}...]`)
   }
   return `Usage: ${bits.join(' ')}`
 }

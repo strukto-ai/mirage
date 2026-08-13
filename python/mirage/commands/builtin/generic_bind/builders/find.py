@@ -16,75 +16,15 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic.find import (is_link, missing_start_line,
-                                                  parse_find_args,
-                                                  resolve_start, walk_find)
+from mirage.commands.builtin.generic.find import (find_generic,
+                                                  find_walk_generic)
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
-from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, NamespaceView, StatOverlay, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import PathSpec
-from mirage.utils.path import respell_raw
-
-
-async def find(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    name: str | None = None,
-    type: str | None = None,
-    maxdepth: str | None = None,
-    size: str | None = None,
-    mtime: str | None = None,
-    iname: str | None = None,
-    path: str | None = None,
-    mindepth: str | None = None,
-    empty: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    ns: NamespaceView | None = None,
-    stat_path: StatPath | None = None,
-    L: bool = False,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
-    stat_overlay = ns.stat_overlay if ns is not None else None
-    links = ns.links if ns is not None else None
-    if not ops.is_mounted(accessor):
-        raise ValueError("find: no resource")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    if ops.find is None:
-        return await _find_walk(ops, accessor, paths, texts, name, type, size,
-                                mtime, maxdepth, iname, path, mindepth, empty,
-                                index, stat_overlay, links, stat_path, L)
-    stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
-    if stat is not None and stat_overlay is not None:
-        # -mtime must see namespace times (touch results, observed
-        # writes on mtime-less backends), same as ls.
-        stat = partial(overlaid_stat,
-                       partial(ops.stat, accessor),
-                       stat_overlay,
-                       index=index)
-    return await generic_find(paths,
-                              texts,
-                              find_core=partial(ops.find, accessor),
-                              stat=stat,
-                              stat_path=stat_path,
-                              dir_empty=partial(_dir_is_empty, ops, accessor,
-                                                index),
-                              name=name,
-                              type=type,
-                              size=size,
-                              mtime=mtime,
-                              maxdepth=maxdepth,
-                              iname=iname,
-                              path=path,
-                              mindepth=mindepth,
-                              empty=empty,
-                              links=links,
-                              follow=L)
 
 
 async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
@@ -105,77 +45,52 @@ async def _dir_is_empty(ops: CommandIO, accessor: Accessor,
     return not await ops.readdir(accessor, search, index=index)
 
 
-async def _find_walk(
+async def find(
     ops: CommandIO,
     accessor: Accessor,
     paths: list[PathSpec],
-    texts: tuple[str, ...],
-    name: str | None,
-    type: str | None,
-    size: str | None,
-    mtime: str | None,
-    maxdepth: str | None,
-    iname: str | None,
-    path: str | None,
-    mindepth: str | None,
-    empty: bool,
-    index: IndexCacheStore,
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
+    *texts: str,
+    stdin: bytes | None = None,
+    index: IndexCacheStore = NULL_INDEX,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
-    L: bool = False,
-    H: bool = False,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    searches = paths if paths else [
-        PathSpec(virtual="/", directory="/", resource_path="")
-    ]
-    args = parse_find_args(texts,
-                           name=name,
-                           type=type,
-                           size=size,
-                           mtime=mtime,
-                           maxdepth=maxdepth,
-                           iname=iname,
-                           path=path,
-                           mindepth=mindepth,
-                           empty=empty)
-    stat_fn = partial(ops.stat, accessor)
-    if stat_overlay is not None:
-        stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
-    # GNU find walks every start point in operand order.
-    results: list[str] = []
-    missing: list[str] = []
-    for search in searches:
-        # Same start-point rule as the native-op path, so what `find` does
-        # with a file or a missing operand does not depend on whether the
-        # mounted backend ships a find op.
-        start = await resolve_start(search,
-                                    args,
-                                    stat_path,
-                                    is_link=is_link(links, search))
-        if start.missing:
-            # GNU names each start point it cannot stat, keeps going with
-            # the rest, and exits 1.
-            missing.append(missing_start_line(search))
-            continue
-        if not start.walk:
-            results.extend(start.results)
-            continue
-        walked = await walk_find(search,
-                                 readdir=partial(ops.readdir, accessor),
-                                 stat=stat_fn,
-                                 index=index,
-                                 args=args,
-                                 links=links,
-                                 follow=L)
-        # GNU prints each result under the operand as typed; walk_find
-        # returns virtual paths, so rebase like generic_find does.
-        results.extend(respell_raw(walked, search.virtual, search.raw_path))
-    if missing:
-        return format_records(results), IOResult(stderr=("\n".join(missing) +
-                                                         "\n").encode(),
-                                                 exit_code=1)
-    return format_records(results), IOResult()
+    stat_overlay = ns.stat_overlay if ns is not None else None
+    links = ns.links if ns is not None else None
+    if not ops.is_mounted(accessor):
+        raise ValueError("find: no resource")
+    resolved = await ops.resolve_glob(accessor, paths, index)
+    opts = CommandOpts(stdin=stdin, flags=flags)
+    if ops.find is None:
+        # -mtime must see namespace times (touch results, observed
+        # writes on mtime-less backends), same as ls.
+        walk_stat = partial(ops.stat, accessor)
+        if stat_overlay is not None:
+            walk_stat = partial(overlaid_stat, walk_stat, stat_overlay)
+        return await find_walk_generic(resolved,
+                                       list(texts),
+                                       opts,
+                                       readdir=partial(ops.readdir, accessor),
+                                       stat=walk_stat,
+                                       index=index,
+                                       stat_path=stat_path,
+                                       links=links)
+    stat = (partial(ops.stat, accessor, index=index) if ops.local else None)
+    if stat is not None and stat_overlay is not None:
+        stat = partial(overlaid_stat,
+                       partial(ops.stat, accessor),
+                       stat_overlay,
+                       index=index)
+    return await find_generic(resolved,
+                              list(texts),
+                              opts,
+                              find_core=partial(ops.find, accessor),
+                              stat=stat,
+                              stat_path=stat_path,
+                              dir_empty=partial(_dir_is_empty, ops, accessor,
+                                                index),
+                              links=links)
 
 
 BUILDER = Builder('find', find, None, False, None)

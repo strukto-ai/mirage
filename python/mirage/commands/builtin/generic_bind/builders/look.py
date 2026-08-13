@@ -14,11 +14,13 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.look import look as generic_look
+from mirage.commands.builtin.generic.look import look_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,19 +31,13 @@ async def look(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    f: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("look: missing prefix")
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_look(paths,
-                              texts[0],
-                              read_bytes=bound_op(ops.read_bytes, accessor,
-                                                  index),
-                              stdin=stdin,
-                              fold_case=f)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await look_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('look', look, None, False, None, read=True)

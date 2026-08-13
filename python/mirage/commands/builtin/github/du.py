@@ -16,9 +16,10 @@ from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import run_du
+from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -60,38 +61,35 @@ async def du_provision(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
+async def _resolve(accessor: GitHubAccessor, index: IndexCacheStore,
+                   targets: list[PathSpec]) -> list[PathSpec]:
+    return await resolve_glob(accessor, targets, index)
+
+
+async def _stat(accessor: GitHubAccessor, index: IndexCacheStore,
+                path: PathSpec):
+    return await IO.stat(accessor, path, index)
+
+
 @command("du", resource="github", spec=SPECS["du"], provision=du_provision)
 async def du(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    h: bool = False,
-    s: bool = False,
-    a: bool = False,
-    max_depth: str | None = None,
-    c: bool = False,
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
-    L: bool = False,
     ns: NamespaceView | None = None,
-    **_extra: FlagValue,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     links = ns.links if ns is not None else None
     mounts = ns.mounts if ns is not None else None
-    out = await run_du(
-        paths,
-        cwd,
-        lambda targets: resolve_glob(accessor, targets, index),
-        lambda path: IO.stat(accessor, path, index),
-        partial(_du_size, index),
-        partial(_du_entries, index),
-        s=s,
-        a=a,
-        h=h,
-        c=c,
-        max_depth=max_depth,
-        links=None if L else links,
-        mounts=mounts,
-    )
-    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
+    return await du_generic(paths,
+                            list(texts),
+                            CommandOpts(stdin=stdin, flags=flags, cwd=cwd),
+                            partial(_resolve, accessor, index),
+                            partial(_stat, accessor, index),
+                            partial(_du_size, index),
+                            partial(_du_entries, index),
+                            links=links,
+                            mounts=mounts)

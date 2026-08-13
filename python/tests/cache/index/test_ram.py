@@ -17,6 +17,7 @@ from datetime import datetime
 import pytest
 
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.cache.index.config import LookupStatus
 
 
 @pytest.fixture
@@ -56,6 +57,40 @@ async def test_invalidate_dir_evicts_child_entries(store):
     assert (await store.get("/dir/f.txt")).entry is None
     assert "/dir" not in store._children
     assert "/dir" not in store._expiry
+
+
+# The distinction the whole github invalidation rests on: `clear` leaves a
+# store that reads exactly like one that was never filled, so a backend
+# whose index *is* its listing reports an empty repository. `invalidate`
+# keeps the rows and only expires them, so the lookup says EXPIRED and the
+# backend knows to refetch.
+@pytest.mark.asyncio
+async def test_invalidate_expires_without_discarding(store):
+    entry = IndexEntry(id="1", name="f", resource_type="file")
+    await store.set_dir("/dir", [("f.txt", entry)])
+    await store.invalidate()
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+    assert store._children["/dir"] == ["/dir/f.txt"]
+    await store.clear()
+    assert (await store.list_dir("/dir")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_invalidate_expires_every_directory(store):
+    entry = IndexEntry(id="1", name="f", resource_type="file")
+    await store.set_dir("/a", [("f.txt", entry)])
+    await store.set_dir("/b", [("g.txt", entry)])
+    await store.invalidate()
+    assert (await store.list_dir("/a")).status == LookupStatus.EXPIRED
+    assert (await store.list_dir("/b")).status == LookupStatus.EXPIRED
+
+
+# An empty store has nothing to expire, and must not grow a row that makes
+# a never-listed directory answer EXPIRED instead of NOT_FOUND.
+@pytest.mark.asyncio
+async def test_invalidate_leaves_an_unlisted_directory_absent(store):
+    await store.invalidate()
+    assert (await store.list_dir("/dir")).status == LookupStatus.NOT_FOUND
 
 
 @pytest.mark.asyncio

@@ -5,10 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
+from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
-from mirage.types import PathSpec
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.stream import ensure_stream
 from mirage.utils.width import advance_column, is_space
@@ -319,6 +323,47 @@ async def format_multi(
                     max_line_length=max_line_length,
                     total=total)
     return format_count_rows(rows, totals, len(paths), flags), err
+
+
+async def wc_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run wc over resolved operands, GNU semantics; mirrors wcGeneric.
+
+    The wiring resolves globs and binds the backend reader (usually the
+    dir-aware stream, so a directory operand reports ``Is a directory``);
+    everything else lives here: flag parsing, per-operand
+    report-and-continue via ``format_multi``, the total row, and the
+    stdin fallback. wc reads every operand anyway, so the read itself is
+    the probe and no separate stat is taken.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by wc.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    try:
+        parsed = parse_flags(opts.flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+    if paths:
+        body, err = await format_multi(paths,
+                                       read=stream,
+                                       lines=parsed.lines,
+                                       words=parsed.words,
+                                       bytes_=parsed.bytes_,
+                                       chars=parsed.chars,
+                                       max_line_length=parsed.max_line_length,
+                                       total=parsed.total)
+        return body, operands_io(err)
+    source = _resolve_source(opts.stdin, "wc: missing operand")
+    counts = await wc(source)
+    return format_stdin(counts, parsed), IOResult()
 
 
 def format_stdin(counts: WCCounts, flags: WCFlags) -> bytes:

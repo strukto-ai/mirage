@@ -6,7 +6,11 @@ from functools import partial
 
 from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
+from mirage.io.types import IOResult
 from mirage.ops.types import LinkView, MountView
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -572,3 +576,57 @@ async def du(
         exit_code = 1
     stderr = ("\n".join(notes) + "\n").encode() if notes else b""
     return DuOutput(format_records(lines), stderr, exit_code)
+
+
+async def du_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    compute_size: ComputeSize,
+    compute_entries: ComputeEntries,
+    truncated: Callable[[], bool] | None = None,
+    links: LinkView | None = None,
+    mounts: MountView | None = None,
+) -> tuple[bytes, IOResult]:
+    """Run du over the given operands; mirrors duGeneric.
+
+    The wiring binds the backend ops (native du or the readdir walk plus
+    its budget); flag semantics live here. -L dereferences: the operand
+    was already rewritten at dispatch, and withholding the link table
+    stops the links below it from being counted as entries in their own
+    right, which is what GNU does (it follows each one and finds the
+    target already accounted for). A link pointing outside the operand's
+    own subtree is undercounted; GNU would traverse into it.
+
+    Args:
+        paths (list[PathSpec]): The operands as parsed, possibly empty.
+        texts (list[str]): Non-path words, unused by du.
+        opts (CommandOpts): Flags and cwd from the dispatcher.
+        resolve_glob (Callable): Expands globs against the backend.
+        stat (Callable): Raises when an operand cannot be read.
+        compute_size (ComputeSize): Recursive byte size of one operand.
+        compute_entries (ComputeEntries): Per-file breakdown.
+        truncated (Callable[[], bool] | None): Whether the walk was cut.
+        links (LinkView | None): The namespace's symlink facts.
+        mounts (MountView | None): Mounts nested under this one.
+    """
+    fl = FlagView(opts.flags, spec=SPECS["du"])
+    out = await run_du(
+        paths,
+        opts.cwd,
+        resolve_glob,
+        stat,
+        compute_size,
+        compute_entries,
+        s=fl.as_bool("s"),
+        a=fl.as_bool("a"),
+        h=fl.as_bool("h"),
+        c=fl.as_bool("c"),
+        max_depth=fl.as_str("max_depth"),
+        truncated=truncated,
+        links=None if fl.as_bool("L") else links,
+        mounts=mounts,
+    )
+    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)

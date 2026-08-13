@@ -16,7 +16,8 @@ from functools import partial
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.tree import tree as generic_tree
+from mirage.commands.builtin.generic.tree import tree_generic
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -33,26 +34,16 @@ async def tree(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    L: str | None = None,
-    a: bool = False,
-    args_I: str | None = None,
-    d: bool = False,
-    P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
     ns: NamespaceView | None = None,
-    **_extra: FlagValue,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await generic_tree(
-        paths[0],
-        readdir=partial(readdir, accessor),
-        stat=partial(stat, accessor),
-        stat_path=stat_path,
-        max_depth=int(L) if L is not None else None,
-        show_hidden=a,
-        ignore_pattern=args_I,
-        dirs_only=d,
-        match_pattern=P,
-        index=index,
-        mounts=ns.mounts if ns is not None else None,
-    )
+    return await tree_generic(list(paths),
+                              list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              partial(readdir, accessor),
+                              partial(stat, accessor),
+                              index=index,
+                              stat_path=stat_path,
+                              mounts=ns.mounts if ns is not None else None)

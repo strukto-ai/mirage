@@ -16,13 +16,15 @@ import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tail import parse_flags
 from mirage.commands.builtin.generic.tail import tail as generic_tail
-from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic.tail import tail_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.postgres.io import resolve_glob
-from mirage.commands.builtin.tail_helper import parse_counts
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -39,16 +41,18 @@ async def tail(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
     index: IndexCacheStore,
-    **_extra: FlagValue,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    counts = parse_counts(n, c)
+    try:
+        parsed = parse_flags(flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+    counts = parsed.counts
     if paths:
         scope = detect_scope(paths[0])
+        # Row scopes fetch only the last N rows server-side (COUNT then
+        # OFFSET) instead of reading the whole relation.
         if (len(paths) == 1 and not has_unresolved_glob(paths)
                 and isinstance(scope, PostgresEntityRowsScope)
                 and counts.byte_count is None and counts.from_byte is None
@@ -64,32 +68,18 @@ async def tail(
                                                 scope.entity,
                                                 limit=limit,
                                                 offset=offset)
-            if not rows:
-                return generic_tail(b"",
-                                    n=counts.lines,
-                                    c=counts.byte_count,
-                                    from_line=counts.from_line,
-                                    from_byte=counts.from_byte), IOResult()
-            jsonl = "\n".join(
-                orjson.dumps(r, default=str).decode() for r in rows) + "\n"
-            return generic_tail(jsonl.encode(),
+            data = b""
+            if rows:
+                data = ("\n".join(
+                    orjson.dumps(r, default=str).decode()
+                    for r in rows) + "\n").encode()
+            return generic_tail(data,
                                 n=counts.lines,
                                 c=counts.byte_count,
                                 from_line=counts.from_line,
                                 from_byte=counts.from_byte), IOResult()
-
-        paths = await resolve_glob(accessor, paths, index=index)
-        show_headers = (v or len(paths) > 1) and not q
-        return tail_multi(paths,
-                          read=bound_op(postgres_read, accessor, index),
-                          n=counts.lines,
-                          c=counts.byte_count,
-                          from_line=counts.from_line,
-                          from_byte=counts.from_byte,
-                          show_headers=show_headers), IOResult()
-    source = _resolve_source(stdin, "tail: missing operand")
-    return generic_tail(source,
-                        n=counts.lines,
-                        c=counts.byte_count,
-                        from_line=counts.from_line,
-                        from_byte=counts.from_byte), IOResult()
+    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    return await tail_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              bound_op(IO.stat, accessor, index),
+                              bound_op(postgres_read, accessor, index))

@@ -1,6 +1,7 @@
 import io
 import tarfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.generic.archive.walk import (DirProbe, StatFn,
                                                           WalkFn)
@@ -10,6 +11,9 @@ from mirage.commands.builtin.generic.tar.create import plan_create
 from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
                                                        CreateResult, Member,
                                                        ReadMode, WriteMode)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
@@ -205,3 +209,73 @@ async def tar(
 
 
 __all__ = ["tar"]
+
+
+@dataclass(frozen=True, slots=True)
+class TarFlags:
+    create: bool = False
+    extract: bool = False
+    list_only: bool = False
+    gzip: bool = False
+    bzip2: bool = False
+    xz: bool = False
+    verbose: bool = False
+    deref: bool = False
+    archive: PathSpec | None = None
+    directories: tuple[PathSpec, ...] = ()
+    strip_components: str | None = None
+    exclude: str | None = None
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags:
+    fl = FlagView(flags, spec=SPECS["tar"])
+    archive = fl.raw("f")
+    return TarFlags(
+        create=fl.as_bool("c"),
+        extract=fl.as_bool("x"),
+        list_only=fl.as_bool("t"),
+        gzip=fl.as_bool("z"),
+        bzip2=fl.as_bool("j"),
+        xz=fl.as_bool("J"),
+        verbose=fl.as_bool("v"),
+        deref=fl.as_bool("h"),
+        archive=archive if isinstance(archive, PathSpec) else None,
+        directories=tuple(fl.as_paths("C")),
+        strip_components=fl.as_str("strip_components"),
+        exclude=fl.as_str("exclude"),
+    )
+
+
+async def tar_generic(paths,
+                      texts,
+                      opts: CommandOpts,
+                      read_bytes,
+                      write_bytes,
+                      mkdir_fn,
+                      stat,
+                      walk,
+                      is_dir,
+                      links=None,
+                      mounts=None):
+    parsed = parse_flags(opts.flags)
+    return await tar(paths,
+                     read_bytes=read_bytes,
+                     write_bytes=write_bytes,
+                     mkdir_fn=mkdir_fn,
+                     stat=stat,
+                     walk=walk,
+                     is_dir=is_dir,
+                     c=parsed.create,
+                     x=parsed.extract,
+                     t=parsed.list_only,
+                     z=parsed.gzip,
+                     j=parsed.bzip2,
+                     J=parsed.xz,
+                     v=parsed.verbose,
+                     h=parsed.deref,
+                     f=parsed.archive,
+                     C=list(parsed.directories) or None,
+                     strip_components=parsed.strip_components,
+                     exclude=parsed.exclude,
+                     links=links,
+                     mounts=mounts)

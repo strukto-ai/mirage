@@ -15,10 +15,12 @@
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
-                                                format_stdin, parse_flags)
-from mirage.commands.builtin.generic.wc import wc as generic_wc
-from mirage.commands.builtin.postgres.io import resolve_glob
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+                                                parse_flags, wc_generic)
+from mirage.commands.builtin.generic_bind.adapter import bound_op
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.postgres.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
@@ -42,40 +44,28 @@ async def wc(
         parsed = parse_flags(flags)
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        # Line counts on tables/views come from a server-side COUNT(*)
-        # instead of reading every row. -l only (default prints words and
-        # bytes too, which needs the content).
-        count_only = parsed.lines and not (parsed.words or parsed.bytes_
-                                           or parsed.chars
-                                           or parsed.max_line_length)
-        scopes = [detect_scope(p) for p in paths]
-        row_scopes = [
-            scope for scope in scopes
-            if isinstance(scope, PostgresEntityRowsScope)
-        ]
+    resolved = await resolve_or_empty(IO, accessor, paths, index)
+    # Line counts on tables/views come from a server-side COUNT(*) instead
+    # of reading every row. -l only (default prints words and bytes too,
+    # which needs the content).
+    count_only = parsed.lines and not (parsed.words or parsed.bytes_ or
+                                       parsed.chars or parsed.max_line_length)
+    scopes = [detect_scope(p) for p in resolved]
+    row_scopes = [
+        scope for scope in scopes if isinstance(scope, PostgresEntityRowsScope)
+    ]
+    if resolved and count_only and len(row_scopes) == len(scopes):
         rows: list[tuple[WCCounts, str | None]] = []
-        if count_only and len(row_scopes) == len(scopes):
-            total = 0
-            pool = await accessor.pool()
-            async with pool.acquire() as conn:
-                for p, scope in zip(paths, row_scopes):
-                    count = await _client.count_rows(conn, scope.schema,
-                                                     scope.entity)
-                    rows.append((WCCounts(lines=count), p.virtual))
-                    total += count
-            return format_count_rows(rows, WCCounts(lines=total), len(paths),
-                                     parsed), IOResult()
-        totals = WCCounts()
-        for p in paths:
-            data = await postgres_read(accessor, p, index)
-            counts = await generic_wc(data)
-            rows.append((counts, p.virtual))
-            totals.merge(counts)
-        return format_count_rows(rows, totals, len(paths), parsed), IOResult()
-    stdin_data = await _read_stdin_async(stdin)
-    if stdin_data is None:
-        raise ValueError("wc: missing operand")
-    counts = await generic_wc(stdin_data)
-    return format_stdin(counts, parsed), IOResult()
+        total = 0
+        pool = await accessor.pool()
+        async with pool.acquire() as conn:
+            for p, scope in zip(resolved, row_scopes):
+                count = await _client.count_rows(conn, scope.schema,
+                                                 scope.entity)
+                rows.append((WCCounts(lines=count), p.raw_path))
+                total += count
+        return format_count_rows(rows, WCCounts(lines=total), len(resolved),
+                                 parsed), IOResult()
+    return await wc_generic(resolved, list(texts),
+                            CommandOpts(stdin=stdin, flags=flags),
+                            bound_op(postgres_read, accessor, index))

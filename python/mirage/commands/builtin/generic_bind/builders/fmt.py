@@ -14,13 +14,14 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.fmt import fmt as generic_fmt
+from mirage.commands.builtin.generic.fmt import fmt_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,23 +35,11 @@ async def fmt(
     index: IndexCacheStore = NULL_INDEX,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["fmt"])
-    goal_value = fl.as_str("goal")
-    paths, err = await resolve_readable(ops, accessor, paths, index, "fmt")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await
-        generic_fmt(paths,
-                    read_bytes=bound_op(ops.read_bytes, accessor, index),
-                    stdin=stdin,
-                    width=int(fl.as_str("width") or "75"),
-                    goal=int(goal_value) if goal_value is not None else None,
-                    prefix=fl.as_str("prefix"),
-                    split_only=fl.as_bool("split_only"),
-                    tagged=fl.as_bool("tagged_paragraph"),
-                    crown=fl.as_bool("crown_margin"),
-                    uniform=fl.as_bool("uniform_spacing")), err)
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await fmt_generic(resolved, list(texts),
+                             CommandOpts(stdin=stdin, flags=flags),
+                             dir_aware_stat(ops, accessor, index),
+                             bound_op(ops.read_bytes, accessor, index))
 
 
 BUILDER = Builder('fmt', fmt, None, False, None, read=True)

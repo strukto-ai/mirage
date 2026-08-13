@@ -15,13 +15,14 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.tail import tail as generic_tail
-from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic.tail import tail_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import split_readable
-from mirage.commands.builtin.tail_helper import number_flag_error, parse_counts
-from mirage.commands.builtin.utils.stream import _resolve_source
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,37 +33,14 @@ async def tail(
     paths: list[PathSpec],
     *texts: str,
     stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
-    num_err = number_flag_error("tail", n, c)
-    if num_err is not None:
-        return None, IOResult(exit_code=1, stderr=num_err.encode())
-    counts = parse_counts(n, c)
-    if paths and ops.is_mounted(accessor):
-        paths = await ops.resolve_glob(accessor, paths, index)
-        show_headers = (v or len(paths) > 1) and not q
-        paths, err = await split_readable(ops, accessor, paths, index, "tail")
-        io = IOResult(exit_code=1 if err else 0, stderr=err or None)
-        if not paths:
-            return None, io
-        return tail_multi(paths,
-                          read=bound_op(ops.read_stream, accessor, index),
-                          n=counts.lines,
-                          c=counts.byte_count,
-                          from_line=counts.from_line,
-                          from_byte=counts.from_byte,
-                          show_headers=show_headers), io
-    source = _resolve_source(stdin, "tail: missing operand")
-    return generic_tail(source,
-                        n=counts.lines,
-                        c=counts.byte_count,
-                        from_line=counts.from_line,
-                        from_byte=counts.from_byte), IOResult()
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    return await tail_generic(resolved, list(texts),
+                              CommandOpts(stdin=stdin, flags=flags),
+                              dir_aware_stat(ops, accessor, index),
+                              bound_op(ops.read_stream, accessor, index))
 
 
 BUILDER = Builder('tail', tail, None, False, header_aggregate, read=True)

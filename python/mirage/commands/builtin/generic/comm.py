@@ -1,7 +1,10 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.spec.types import CommandName
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -105,3 +108,40 @@ async def comm(
 
 
 __all__ = ["comm"]
+
+
+@dataclass(frozen=True, slots=True)
+class CommFlags:
+    suppress1: bool = False
+    suppress2: bool = False
+    suppress3: bool = False
+    check_order: bool = False
+    output_delimiter: str = "\t"
+    total: bool = False
+    zero_terminated: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> CommFlags:
+    fl = FlagView(flags, spec=SPECS["comm"])
+    return CommFlags(
+        suppress1=fl.as_bool("args_1"),
+        suppress2=fl.as_bool("2"),
+        suppress3=fl.as_bool("3"),
+        check_order=fl.as_bool("check_order"),
+        output_delimiter=fl.as_str("output_delimiter") or "\t",
+        total=fl.as_bool("total"),
+        zero_terminated=fl.as_bool("zero_terminated"),
+    )
+
+
+async def comm_generic(paths, texts, opts: CommandOpts, read_bytes):
+    parsed = parse_flags(opts.flags)
+    return await comm(paths,
+                      read_bytes=read_bytes,
+                      suppress1=parsed.suppress1,
+                      suppress2=parsed.suppress2,
+                      suppress3=parsed.suppress3,
+                      check_order=parsed.check_order,
+                      output_delimiter=parsed.output_delimiter,
+                      total=parsed.total,
+                      zero_terminated=parsed.zero_terminated)

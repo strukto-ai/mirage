@@ -4,8 +4,9 @@ import pytest
 
 from mirage.commands.builtin.generic.cmp import cmp_cmd
 from mirage.commands.builtin.generic.md5 import md5
-from mirage.commands.builtin.generic.sha256sum import sha256sum
-from mirage.types import PathSpec
+from mirage.commands.builtin.generic.sha256sum import sha256sum_generic
+from mirage.commands.config import CommandOpts
+from mirage.types import FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
@@ -30,6 +31,17 @@ def _make_backend(files: dict[str, bytes]):
         yield files[key]
 
     return read_bytes, read_stream
+
+
+def _make_stat(files: dict[str, bytes]):
+
+    async def stat(path):
+        key = path.virtual if isinstance(path, PathSpec) else path
+        if key not in files:
+            raise FileNotFoundError(key)
+        return FileStat(name=key, size=len(files[key]), type=FileType.TEXT)
+
+    return stat
 
 
 async def _drain(stdout) -> bytes:
@@ -67,11 +79,10 @@ async def test_md5_no_paths_raises():
 
 @pytest.mark.asyncio
 async def test_sha256sum_stdin():
-    rb, rs = _make_backend({})
-    output, _ = await sha256sum([],
-                                read_bytes=rb,
-                                read_stream=rs,
-                                stdin=b"hello\n")
+    files: dict[str, bytes] = {}
+    _, rs = _make_backend(files)
+    output, _ = await sha256sum_generic([], [], CommandOpts(stdin=b"hello\n"),
+                                        _make_stat(files), rs)
     decoded = (await _drain(output)).decode()
     expected = hashlib.sha256(b"hello\n").hexdigest()
     assert expected in decoded
@@ -80,9 +91,11 @@ async def test_sha256sum_stdin():
 
 @pytest.mark.asyncio
 async def test_sha256sum_multi_file():
-    rb, rs = _make_backend({"/a.txt": b"foo", "/b.txt": b"bar"})
-    output, _ = await sha256sum(
-        [_spec("/a.txt"), _spec("/b.txt")], read_bytes=rb, read_stream=rs)
+    files = {"/a.txt": b"foo", "/b.txt": b"bar"}
+    _, rs = _make_backend(files)
+    output, _ = await sha256sum_generic(
+        [_spec("/a.txt"), _spec("/b.txt")], [], CommandOpts(),
+        _make_stat(files), rs)
     decoded = (await _drain(output)).decode().splitlines()
     assert len(decoded) == 2
     assert hashlib.sha256(b"foo").hexdigest() in decoded[0]
@@ -90,18 +103,31 @@ async def test_sha256sum_multi_file():
 
 
 @pytest.mark.asyncio
+async def test_sha256sum_missing_operand_reports_and_continues():
+    files = {"/a.txt": b"foo"}
+    _, rs = _make_backend(files)
+    output, io = await sha256sum_generic(
+        [_spec("/a.txt"), _spec("/nope")], [], CommandOpts(),
+        _make_stat(files), rs)
+    decoded = (await _drain(output)).decode()
+    assert hashlib.sha256(b"foo").hexdigest() in decoded
+    assert io.exit_code == 1
+    assert b"sha256sum: /nope: No such file or directory\n" in io.stderr
+
+
+@pytest.mark.asyncio
 async def test_sha256sum_check_passing():
     payload = b"hello"
     digest = hashlib.sha256(payload).hexdigest()
     manifest = f"{digest}  /file.txt\n".encode()
-    rb, rs = _make_backend({
+    files = {
         "/manifest.sha256": manifest,
         "/file.txt": payload,
-    })
-    output, io = await sha256sum([_spec("/manifest.sha256")],
-                                 read_bytes=rb,
-                                 read_stream=rs,
-                                 check=True)
+    }
+    _, rs = _make_backend(files)
+    output, io = await sha256sum_generic([_spec("/manifest.sha256")], [],
+                                         CommandOpts(flags={"check": True}),
+                                         _make_stat(files), rs)
     assert b"/file.txt: OK" in await _drain(output)
     assert io.exit_code == 0
 
@@ -109,14 +135,14 @@ async def test_sha256sum_check_passing():
 @pytest.mark.asyncio
 async def test_sha256sum_check_failing():
     manifest = b"deadbeef  /file.txt\n"
-    rb, rs = _make_backend({
+    files = {
         "/manifest.sha256": manifest,
         "/file.txt": b"actual content",
-    })
-    output, io = await sha256sum([_spec("/manifest.sha256")],
-                                 read_bytes=rb,
-                                 read_stream=rs,
-                                 check=True)
+    }
+    _, rs = _make_backend(files)
+    output, io = await sha256sum_generic([_spec("/manifest.sha256")], [],
+                                         CommandOpts(flags={"check": True}),
+                                         _make_stat(files), rs)
     assert b"/file.txt: FAILED" in await _drain(output)
     assert io.exit_code == 1
 

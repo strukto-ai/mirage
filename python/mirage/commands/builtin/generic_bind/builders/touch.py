@@ -16,6 +16,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
@@ -27,12 +29,10 @@ async def touch(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
-    c: bool = False,
-    r: str | None = None,
-    d: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
+    **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    c = FlagView(flags, spec=SPECS["touch"]).as_bool("c")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("touch: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
