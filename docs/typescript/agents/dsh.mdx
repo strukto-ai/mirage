@@ -58,3 +58,5 @@ const script = await shell.run(
 ```
 
 [`examples/typescript/dsh/dsh.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/dsh.ts) is the runnable version of this whole page, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+
+Everything above is purely in memory — the workspace, both providers, and monty are objects in the host process, with no subprocess, no disk, and no kernel mount — so a world can be created per request and garbage-collected with it. A composed world costs about 0.5 ms and 100 KB of heap, so one Node process holds thousands side by side; a world that runs Python adds its own sandboxed monty engine at roughly 55 MB, so python-active worlds are bounded by RAM at about 15–20 per GB.
