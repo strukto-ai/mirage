@@ -23,7 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           OperationFn)
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import NamespaceView
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 
@@ -151,10 +151,11 @@ async def du(
     L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
+    ns: NamespaceView | None = None,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
+    mounts = ns.mounts if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("du: no resource")
     budget = WalkBudget(ops.max_du_entries)

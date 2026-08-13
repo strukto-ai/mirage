@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.io import IOResult
+from mirage.ops.types import NamespaceView
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
@@ -308,11 +309,11 @@ def test_du_max_depth_prunes_printing_not_accounting():
     assert _stdout(io) == "17\t/base\n"
 
 
-def test_fanout_offers_links_and_mounts_to_every_sub_run():
+def test_fanout_offers_the_namespace_view_to_every_sub_run():
     primary = TraversalMount("/", output=b"root\n")
     child = TraversalMount("/data/")
     path = PathSpec.from_str_path("/")
-    view = SimpleNamespace()
+    view = NamespaceView()
     asyncio.run(
         _fan_out_traversal("find", [path], [], {},
                            TraversalRegistry([child]),
@@ -320,11 +321,9 @@ def test_fanout_offers_links_and_mounts_to_every_sub_run():
                            "/",
                            "find /",
                            None,
-                           mounts=view,
-                           links=view))
+                           ns=view))
     for mount in (primary, child):
-        assert mount.calls[0]["links"] is view
-        assert mount.calls[0]["mounts"] is view
+        assert mount.calls[0]["ns"] is view
 
 
 def _linked_workspace(nested: bool) -> Workspace:

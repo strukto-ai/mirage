@@ -25,7 +25,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
 from mirage.core.gridfs.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -39,10 +39,11 @@ async def stat(
     f: str | None = None,
     L: bool = False,
     index: IndexCacheStore,
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    stat_overlay = ns.stat_overlay if ns is not None else None
+    links = ns.links if ns is not None else None
     if not paths:
         raise ValueError("stat: missing operand")
     paths = await resolve_glob(accessor, paths, index)

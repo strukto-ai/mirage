@@ -27,7 +27,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatOverlay
+from mirage.ops.types import NamespaceView, StatOverlay
 from mirage.types import NativeCopy, PathSpec
 from mirage.utils.key_prefix import rekey
 
@@ -84,9 +84,10 @@ async def cp(
     *texts: str,
     stdin: bytes | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    stat_overlay: StatOverlay | None = None,
+    ns: NamespaceView | None = None,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    stat_overlay = ns.stat_overlay if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("cp: no resource")
     fl = FlagView(flags, spec=SPECS["cp"])

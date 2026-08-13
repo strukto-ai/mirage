@@ -6,7 +6,7 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.s3.stat import stat
 from mirage.io.types import materialize
-from mirage.ops.types import StatOverlay
+from mirage.ops.types import NamespaceView, StatOverlay
 from mirage.types import FileStat, FileType, PathSpec
 
 _BACKEND_MTIME = "2020-05-05T05:05:05Z"
@@ -49,7 +49,7 @@ async def _render(fmt: str,
                          [PathSpec.from_str_path("/s3/f.txt")],
                          c=fmt,
                          index=NULL_INDEX,
-                         stat_overlay=stat_overlay)
+                         ns=NamespaceView(stat_overlay=stat_overlay))
     return io.exit_code, (await materialize(out)).decode()
 
 

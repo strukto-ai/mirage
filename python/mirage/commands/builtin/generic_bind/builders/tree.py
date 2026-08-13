@@ -19,7 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountView, ReaddirPath, StatPath
+from mirage.ops.types import NamespaceView, ReaddirPath, StatPath
 from mirage.types import PathSpec
 
 
@@ -37,9 +37,10 @@ async def tree(
     index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
     readdir_path: ReaddirPath | None = None,
-    mounts: MountView | None = None,
+    ns: NamespaceView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    mounts = ns.mounts if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("tree: no resource")
     paths = await ops.resolve_glob(accessor, paths, index)

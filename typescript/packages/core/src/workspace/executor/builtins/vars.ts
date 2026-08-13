@@ -23,15 +23,48 @@ import { shellJoin } from '../../../shell/join.ts'
 import { parseOptionWord } from '../../../shell/options.ts'
 import { SET_OPTION_NAMES } from '../../../shell/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { PolicyDenied } from '../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../shell/array.ts'
 import { arrayIndex } from '../../expand/variable.ts'
+import { ReadonlyVariableError } from '../../session/errors.ts'
 import { ownRecord, sessionEntry } from '../../session/session.ts'
 import type { Session } from '../../session/session.ts'
+import { envSnapshot, sessionView } from '../../session/state.ts'
+import type { SessionView } from '../../../ops/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../control.ts'
 import { PRINTF_TARGET_RE } from './text.ts'
 import type { ExecuteStringFn, Result } from './scope.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+
+/**
+ * The session view to write through. Production callers thread the
+ * workspace's gated view; a direct invocation (a unit test) gets an
+ * ungated one over the same session.
+ */
+function viewOf(session: Session, state: SessionView | null): SessionView {
+  return state ?? sessionView(session)
+}
+
+function refusalText(err: ReadonlyVariableError | PolicyDenied): string {
+  return err instanceof ReadonlyVariableError
+    ? `bash: ${err.varName}: readonly variable\n`
+    : `${err.message}\n`
+}
+
+/** Render a session-plane refusal in the builtin's own voice. */
+function doorRefusal(cmd: string, err: ReadonlyVariableError | PolicyDenied): Result {
+  const encoded = new TextEncoder().encode(refusalText(err))
+  return [
+    null,
+    new IOResult({ exitCode: 1, stderr: encoded }),
+    new ExecutionNode({ command: cmd, exitCode: 1, stderr: encoded }),
+  ]
+}
+
+function isDoorRefusal(err: unknown): err is ReadonlyVariableError | PolicyDenied {
+  return err instanceof ReadonlyVariableError || err instanceof PolicyDenied
+}
 
 const EXPORT_USAGE = 'export: usage: export [-fn] [name[=value] ...] or export -p\n'
 const READONLY_USAGE = 'readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p\n'
@@ -159,8 +192,14 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
  *
  * With no name operands, prints every entry in `session.env` as
  * `declare -x NAME="value"`. Invalid option characters fail with status 2.
+ * Writes go through the session view, so readonly refusal and the
+ * preSession policy gate fire here exactly as for any other writer.
  */
-export function handleExport(assignments: string[], session: Session): Result {
+export async function handleExport(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, EXPORT_FLAGS)
   if (bad !== null) {
     const err = new TextEncoder().encode(`bash: export: -${bad}: invalid option\n${EXPORT_USAGE}`)
@@ -175,21 +214,27 @@ export function handleExport(assignments: string[], session: Session): Result {
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
   }
+  const view = viewOf(session, state)
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
-      if (session.readonlyVars.has(key)) {
-        const err = new TextEncoder().encode(`bash: ${key}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: 'export', exitCode: 1, stderr: err }),
-        ]
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (isDoorRefusal(err)) return doorRefusal('export', err)
+        throw err
       }
-      session.env[key] = assign.slice(eq + 1)
     } else if (!(assign in session.env)) {
-      session.env[assign] = ''
+      // `export NAME` with no value writes an empty entry, which is
+      // still a session write; an existing name is only re-marked for
+      // export, so nothing is written.
+      try {
+        await view.set(assign, '')
+      } catch (err) {
+        if (isDoorRefusal(err)) return doorRefusal('export', err)
+        throw err
+      }
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'export', exitCode: 0 })]
@@ -201,7 +246,11 @@ export function handleExport(assignments: string[], session: Session): Result {
  * With no name operands, prints every readonly name as `declare -r` (or
  * `declare -ar` for arrays). Invalid options fail with status 2.
  */
-export function handleReadonly(assignments: string[], session: Session): Result {
+export async function handleReadonly(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+): Promise<Result> {
   const { flags, names, bad } = splitDeclFlags(assignments, READONLY_FLAGS)
   if (bad !== null) {
     const err = new TextEncoder().encode(
@@ -218,19 +267,17 @@ export function handleReadonly(assignments: string[], session: Session): Result 
     const out = new TextEncoder().encode(lines.length > 0 ? `${lines.join('\n')}\n` : '')
     return [out, new IOResult(), new ExecutionNode({ command: 'readonly', exitCode: 0 })]
   }
+  const view = viewOf(session, state)
   for (const assign of names) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
       const key = assign.slice(0, eq)
-      if (session.readonlyVars.has(key)) {
-        const err = new TextEncoder().encode(`bash: ${key}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: 'readonly', exitCode: 1, stderr: err }),
-        ]
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (isDoorRefusal(err)) return doorRefusal('readonly', err)
+        throw err
       }
-      session.env[key] = assign.slice(eq + 1)
       session.readonlyVars.add(key)
     } else {
       session.readonlyVars.add(assign)
@@ -292,7 +339,11 @@ function unsetVariable(session: Session, name: string): 'ok' | 'notarray' | 'sub
  * has no referent here — mirage has no nameref attribute — so it matches
  * bash on a non-nameref name and leaves it untouched.
  */
-export function handleUnset(args: string[], session: Session): Result {
+export async function handleUnset(
+  args: string[],
+  session: Session,
+  state: SessionView | null = null,
+): Promise<Result> {
   let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'
   let i = 0
   while (i < args.length && (args[i] ?? '').startsWith('-') && args[i] !== '-') {
@@ -343,6 +394,17 @@ export function handleUnset(args: string[], session: Session): Result {
       ]
     }
     const existed = isElement || name in session.env || name in session.arrays
+    if (!isElement) {
+      // The env half of the unset goes through the session view, so the
+      // preSession gate fires; the array/function mechanics below stay the
+      // builtin's own.
+      try {
+        await viewOf(session, state).unset(name)
+      } catch (err) {
+        if (err instanceof PolicyDenied) return doorRefusal('unset', err)
+        throw err
+      }
+    }
     const status = unsetVariable(session, name)
     if (status !== 'ok') {
       // bash names the base for "not an array variable" but prints only
@@ -479,7 +541,7 @@ export async function handleEnv(
   }
 
   const dropSet = new Set(unset)
-  const source = ignoreEnv ? {} : session.env
+  const source = ignoreEnv ? {} : envSnapshot(session)
   const base: Record<string, string> = ownRecord()
   for (const [k, v] of Object.entries(source)) {
     if (!dropSet.has(k)) base[k] = v
@@ -550,8 +612,13 @@ export function noteLocalArray(session: Session, name: string): boolean {
   return true
 }
 
-export function handleLocal(assignments: string[], session: Session): Result {
+export async function handleLocal(
+  assignments: string[],
+  session: Session,
+  state: SessionView | null = null,
+): Promise<Result> {
   const locals = session.localVars
+  const view = viewOf(session, state)
   for (const assign of assignments) {
     const eq = assign.indexOf('=')
     if (eq >= 0) {
@@ -559,12 +626,24 @@ export function handleLocal(assignments: string[], session: Session): Result {
       if (locals !== null && !locals.has(key)) {
         locals.set(key, key in session.env ? (session.env[key] ?? null) : null)
       }
-      session.env[key] = assign.slice(eq + 1)
+      try {
+        await view.set(key, assign.slice(eq + 1))
+      } catch (err) {
+        if (isDoorRefusal(err)) return doorRefusal('local', err)
+        throw err
+      }
     } else {
       if (locals !== null && !locals.has(assign)) {
         locals.set(assign, assign in session.env ? (session.env[assign] ?? null) : null)
       }
-      if (!(assign in session.env)) session.env[assign] = ''
+      if (!(assign in session.env)) {
+        try {
+          await view.set(assign, '')
+        } catch (err) {
+          if (isDoorRefusal(err)) return doorRefusal('local', err)
+          throw err
+        }
+      }
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'local', exitCode: 0 })]
@@ -665,8 +744,9 @@ function isValidName(name: string): boolean {
   return IDENTIFIER_RE.test(name)
 }
 
-function getoptsFinish(
+async function getoptsFinish(
   session: Session,
+  view: SessionView,
   name: string,
   optValue: string,
   optarg: string | null,
@@ -674,22 +754,30 @@ function getoptsFinish(
   newPos: number,
   exitCode: number,
   stderr: Uint8Array | null = null,
-): Result {
+): Promise<Result> {
   // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
   // the hidden cursor still advance, but a bad destination fails the
-  // write and turns the call into a status-1 error.
-  if (!isValidName(name)) {
-    stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+  // write and turns the call into a status-1 error. Writes go through
+  // the session view, so a preSession policy or a readonly OPTARG /
+  // OPTIND refuses here too.
+  try {
+    if (!isValidName(name)) {
+      stderr = new TextEncoder().encode(`bash: getopts: \`${name}': not a valid identifier\n`)
+      exitCode = 1
+    } else if (session.readonlyVars.has(name)) {
+      stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+      exitCode = 1
+    } else {
+      await view.set(name, optValue)
+    }
+    if (optarg === null) await view.unset('OPTARG')
+    else await view.set('OPTARG', optarg)
+    await view.set('OPTIND', String(newOptind))
+  } catch (err) {
+    if (!isDoorRefusal(err)) throw err
+    stderr = new TextEncoder().encode(refusalText(err))
     exitCode = 1
-  } else if (session.readonlyVars.has(name)) {
-    stderr = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
-    exitCode = 1
-  } else {
-    session.env[name] = optValue
   }
-  if (optarg === null) delete session.env.OPTARG
-  else session.env.OPTARG = optarg
-  session.env.OPTIND = String(newOptind)
   session.getoptsPos = newPos
   session.getoptsOptind = newOptind
   const io = new IOResult(stderr === null ? { exitCode } : { exitCode, stderr })
@@ -701,11 +789,12 @@ function getoptsFinish(
 }
 
 /** Parse one option per call, with bash's getopts semantics. */
-export function handleGetopts(
+export async function handleGetopts(
   args: readonly string[],
   session: Session,
   callStack: CallStack | null = null,
-): Result {
+  state: SessionView | null = null,
+): Promise<Result> {
   if (args.length < 2) {
     const err = new TextEncoder().encode('getopts: usage: getopts optstring name [arg]\n')
     return [
@@ -714,6 +803,7 @@ export function handleGetopts(
       new ExecutionNode({ command: 'getopts', exitCode: 2, stderr: err }),
     ]
   }
+  const view = viewOf(session, state)
   const optstring = args[0] ?? ''
   const name = args[1] ?? ''
   let params: readonly string[]
@@ -732,7 +822,7 @@ export function handleGetopts(
   let pos = session.getoptsPos
 
   if (optind > params.length) {
-    return getoptsFinish(session, name, '?', null, optind, 0, 1)
+    return getoptsFinish(session, view, name, '?', null, optind, 0, 1)
   }
   const word = params[optind - 1] ?? ''
   // A stale cursor left past the end of the current word (a shorter or
@@ -740,9 +830,9 @@ export function handleGetopts(
   if (pos >= word.length) pos = 0
   if (pos === 0) {
     if (!word.startsWith('-') || word === '-') {
-      return getoptsFinish(session, name, '?', null, optind, 0, 1)
+      return getoptsFinish(session, view, name, '?', null, optind, 0, 1)
     }
-    if (word === '--') return getoptsFinish(session, name, '?', null, optind + 1, 0, 1)
+    if (word === '--') return getoptsFinish(session, view, name, '?', null, optind + 1, 0, 1)
     pos = 1
   }
 
@@ -755,23 +845,23 @@ export function handleGetopts(
 
   if (!isValid) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
-    if (silent) return getoptsFinish(session, name, '?', letter, afterOptind, afterPos, 0)
+    if (silent) return getoptsFinish(session, view, name, '?', letter, afterOptind, afterPos, 0)
     const err = verbose ? enc.encode(`bash: illegal option -- ${letter}\n`) : null
-    return getoptsFinish(session, name, '?', null, afterOptind, afterPos, 0, err)
+    return getoptsFinish(session, view, name, '?', null, afterOptind, afterPos, 0, err)
   }
 
   if (!takesArg) {
     const [afterOptind, afterPos] = rest ? [optind, pos + 1] : [optind + 1, 0]
-    return getoptsFinish(session, name, letter, null, afterOptind, afterPos, 0)
+    return getoptsFinish(session, view, name, letter, null, afterOptind, afterPos, 0)
   }
 
-  if (rest) return getoptsFinish(session, name, letter, rest, optind + 1, 0, 0)
+  if (rest) return getoptsFinish(session, view, name, letter, rest, optind + 1, 0, 0)
   if (optind < params.length) {
-    return getoptsFinish(session, name, letter, params[optind] ?? '', optind + 2, 0, 0)
+    return getoptsFinish(session, view, name, letter, params[optind] ?? '', optind + 2, 0, 0)
   }
-  if (silent) return getoptsFinish(session, name, ':', letter, optind + 1, 0, 0)
+  if (silent) return getoptsFinish(session, view, name, ':', letter, optind + 1, 0, 0)
   const err = verbose ? enc.encode(`bash: option requires an argument -- ${letter}\n`) : null
-  return getoptsFinish(session, name, '?', null, optind + 1, 0, 0, err)
+  return getoptsFinish(session, view, name, '?', null, optind + 1, 0, 0, err)
 }
 
 export function handleTrap(_session: Session): Result {
@@ -869,6 +959,7 @@ export async function handleRead(
   args: string[],
   session: Session,
   stdin: ByteSource | null,
+  state: SessionView | null = null,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
@@ -897,9 +988,15 @@ export async function handleRead(
   if (session.stdinBuffer !== null) {
     lineBytes = await session.stdinBuffer.readline()
   }
+  const view = viewOf(session, state)
   if (lineBytes === null) {
     for (const v of variables) {
-      session.env[v] = ''
+      try {
+        await view.set(v, '')
+      } catch (err) {
+        if (isDoorRefusal(err)) return doorRefusal('read', err)
+        throw err
+      }
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.arrays[v]
     }
@@ -948,7 +1045,12 @@ export async function handleRead(
   for (let i = 0; i < variables.length; i++) {
     const name = variables[i]
     if (name === undefined) continue
-    session.env[name] = parts[i] ?? ''
+    try {
+      await view.set(name, parts[i] ?? '')
+    } catch (err) {
+      if (isDoorRefusal(err)) return doorRefusal('read', err)
+      throw err
+    }
     // A scalar write replaces any array of the same name, matching
     // the variable_assignment path.
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete

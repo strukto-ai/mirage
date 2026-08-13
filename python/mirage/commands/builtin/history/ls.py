@@ -23,7 +23,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import NamespaceView
 from mirage.types import LsSortBy, PathSpec
 
 
@@ -46,9 +46,10 @@ async def ls(
     F: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
     return await generic_ls(
         list(paths),

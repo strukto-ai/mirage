@@ -12,7 +12,7 @@ from mirage.core.dify.find import find as find_core
 from mirage.core.dify.stat import stat as stat_core
 from mirage.core.dify.stat import stat_light
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -66,10 +66,11 @@ async def find(
     index: IndexCacheStore,
     cwd: PathSpec | None = None,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     paths = default_paths(paths, cwd)
     paths = await resolve_glob(accessor, paths, index)
     search_path = paths[0]

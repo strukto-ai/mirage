@@ -15,7 +15,7 @@
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import ChildMounts, StatPath
+from mirage.ops.types import ChildMounts, NamespaceView, StatPath
 from mirage.types import PathSpec
 from mirage.workspace.mount import MountRegistry
 
@@ -116,14 +116,15 @@ async def _apply_find_actions(
                 resolved=True,
             )
             try:
-                ls_out, _ = await mount.execute_cmd("ls", [ps], [], {
-                    "args_l": True,
-                    "d": True
-                },
-                                                    stdin=None,
-                                                    cwd=cwd,
-                                                    child_mounts=child_mounts,
-                                                    stat_path=stat_path)
+                ls_out, _ = await mount.execute_cmd(
+                    "ls", [ps], [], {
+                        "args_l": True,
+                        "d": True
+                    },
+                    stdin=None,
+                    cwd=cwd,
+                    ns=NamespaceView(child_mounts=child_mounts),
+                    stat_path=stat_path)
             except (FileNotFoundError, NotADirectoryError, PermissionError,
                     ValueError) as exc:
                 errors.append(f"find: cannot ls '{path}': {exc}\n".encode())

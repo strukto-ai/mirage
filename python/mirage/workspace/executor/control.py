@@ -21,6 +21,7 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyError
@@ -163,6 +164,7 @@ async def handle_for(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
@@ -177,8 +179,19 @@ async def handle_for(
     try:
         for val in values:
             # env stores strings only; bash keeps `for f in sub/*.txt`
-            # matches relative, so the loop variable takes the typed form
-            session.env[variable] = word_text(val)
+            # matches relative, so the loop variable takes the typed form.
+            # The write is a session write, so it clears the pre_session
+            # gate; a denial aborts the loop before its body runs, like
+            # a readonly loop variable in bash.
+            text_val = word_text(val)
+            try:
+                await pre_session_gate(policies, "env", "set", variable,
+                                       text_val)
+            except PolicyDenied as exc:
+                merged_io = await merged_io.merge(
+                    IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode()))
+                break
+            session.env[variable] = text_val
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)
@@ -453,6 +466,7 @@ async def handle_select(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's select loop: menu to stderr, choice read from stdin.
 
@@ -498,12 +512,22 @@ async def handle_select(
             if not reply:
                 merged_io = await merged_io.merge(IOResult(stderr=menu))
                 continue
-            session.env["REPLY"] = reply
             choice = ""
             if reply.strip().isdigit():
                 idx = int(reply.strip())
                 if 1 <= idx <= len(values):
                     choice = word_text(values[idx - 1])
+            # REPLY and the select variable are session writes, so they
+            # clear the pre_session gate like the for-loop variable.
+            try:
+                await pre_session_gate(policies, "env", "set", "REPLY", reply)
+                await pre_session_gate(policies, "env", "set", variable,
+                                       choice)
+            except PolicyDenied as exc:
+                merged_io = await merged_io.merge(
+                    IOResult(exit_code=1, stderr=f"{exc.strerror}\n".encode()))
+                break
+            session.env["REPLY"] = reply
             session.env[variable] = choice
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,

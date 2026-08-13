@@ -445,7 +445,7 @@ export async function runDu(
   // follows each one and finds the target already accounted for). A
   // link pointing outside the operand's own subtree is undercounted;
   // GNU would traverse into it.
-  const links = new FlagView(opts.flags, specOf('du')).asBool('L') ? null : (opts.links ?? null)
+  const links = new FlagView(opts.flags, specOf('du')).asBool('L') ? null : (opts.ns?.links ?? null)
   const { present, missing } = await duOperands(
     paths,
     opts.cwd,
@@ -463,7 +463,7 @@ export async function runDu(
     missing,
     truncated,
     links,
-    opts.mounts ?? null,
+    opts.ns?.mounts ?? null,
   )
 }
 

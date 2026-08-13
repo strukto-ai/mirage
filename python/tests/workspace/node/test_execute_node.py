@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.policy import Policies
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
@@ -65,7 +66,9 @@ def _mock_registry():
     reg = MagicMock()
     reg.mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
-    reg.policies.pre_command = AsyncMock(return_value=None)
+    # A bare MagicMock policies answers wants() truthy and then fails the
+    # await inside the gates; an empty Policies is what production carries.
+    reg.policies = Policies()
     # A bare MagicMock answers clis.get() with a truthy mock, which
     # would spuriously dispatch every command as an installed CLI.
     reg.clis = CLIRegistry()

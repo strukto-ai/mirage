@@ -399,6 +399,30 @@ class Ops:
     async def create(self, path: str) -> None:
         await self._call("create", path)
 
+    async def symlink(self, path: str, target: str) -> None:
+        """Create or overwrite a namespace symlink at ``path``.
+
+        Routed through the door like every write: session grants and
+        admission policies fire on the link's turf, and the write lands
+        on the ledger. The target is stored verbatim as typed.
+
+        Args:
+            path (str): Virtual path of the link.
+            target (str): What the link points to, as typed.
+        """
+        await self._call("symlink", path, target=target)
+
+    async def readlink(self, path: str) -> str:
+        """The stored target of the link at ``path``.
+
+        Args:
+            path (str): Virtual path of the link.
+
+        Raises:
+            OSError: EINVAL when the path is not a link.
+        """
+        return await self._call("readlink", path)
+
     async def truncate(self, path: str, length: int) -> None:
         """Truncate file to given length.
 

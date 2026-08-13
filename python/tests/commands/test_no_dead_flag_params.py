@@ -24,7 +24,7 @@ from mirage.commands.spec.types import CommandSpec, spec_flag_names
 
 # The context the dispatcher hands a handler, none of it a command-line
 # flag. Everything except the leading positionals is set in
-# `workspace/mount/mount.py::execute_cmd`; `stat_overlay`, `links` and
+# `workspace/mount/mount.py::execute_cmd`; `ns`, `session_view` and
 # `stat_path` reach only handlers that name them. `command`, `prefix` and
 # `spec` are the provision call's own context
 # (`workspace/provision/command.py`), `results` the aggregate's.
@@ -45,12 +45,10 @@ DISPATCHER_PARAMS = frozenset({
     "exec_allowed",
     "runtime",
     "runtime_unavailable",
-    "stat_overlay",
-    "links",
+    "ns",
+    "session_view",
     "stat_path",
     "readdir_path",
-    "child_mounts",
-    "mounts",
     "prefix",
     "command",
 })

@@ -18,6 +18,7 @@ import type {
   ExecuteResultContext,
   OpsContext,
   OpsResultContext,
+  SessionContext,
 } from './types.ts'
 
 /**
@@ -46,4 +47,9 @@ export interface Policy {
    * caps the line's stdout at the workspace boundary.
    */
   postExecute?(ctx: ExecuteResultContext): Action | null | Promise<Action | null>
+  /**
+   * Admit or refuse one session-state mutation (an env set/unset) on
+   * the session plane, before the write lands.
+   */
+  preSession?(ctx: SessionContext): Action | null | Promise<Action | null>
 }

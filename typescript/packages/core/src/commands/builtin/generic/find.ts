@@ -400,7 +400,7 @@ export async function findGeneric(
       ...options,
       tree: prefixPathNodes(optionsTree(options), prefix),
     }
-    const rootIsLink = (opts.links ?? null)?.statAt(root.virtual) != null
+    const rootIsLink = (opts.ns?.links ?? null)?.statAt(root.virtual) != null
     // What the start point is decides which walk is even possible, so it
     // is resolved once, ahead of all of them: a symlink has no backend
     // inode (linkResults reports it), a non-directory has no subtree, and
@@ -482,7 +482,7 @@ export async function findGeneric(
       // A symlink is namespace state no backend readdir can see, so a
       // directory holding only one would read as empty. GNU counts the
       // link as an entry.
-      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.links, root.virtual)
+      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.ns?.links, root.virtual)
       rows = withRootRow(
         rootMatches,
         root.virtual === '/' ? '/' : rstripSlash(root.virtual),
@@ -496,7 +496,7 @@ export async function findGeneric(
     const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
     const withLinks = filtered.concat(
       await linkResults(
-        opts.links ?? null,
+        opts.ns?.links ?? null,
         rootPath,
         prefix,
         stripSlash(rootKey),

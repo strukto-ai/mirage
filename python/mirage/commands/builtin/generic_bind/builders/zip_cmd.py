@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -38,10 +38,11 @@ async def zip_cmd(
     y: bool = False,
     x: list[str] | None = None,
     index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
+    ns: NamespaceView | None = None,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
+    mounts = ns.mounts if ns is not None else None
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
     paths = await ops.resolve_glob(accessor, paths, index)

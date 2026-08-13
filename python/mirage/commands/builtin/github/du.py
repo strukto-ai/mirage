@@ -23,7 +23,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import NamespaceView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -74,10 +74,11 @@ async def du(
     index: IndexCacheStore,
     cwd: PathSpec | str = "/",
     L: bool = False,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
+    ns: NamespaceView | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
+    mounts = ns.mounts if ns is not None else None
     out = await run_du(
         paths,
         cwd,

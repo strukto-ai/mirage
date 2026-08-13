@@ -231,8 +231,8 @@ async function planZip(
     const scan = await scanOperand(path, {
       stat: deps.stat,
       walk: deps.walk,
-      links: opts.links ?? null,
-      mounts: opts.mounts ?? null,
+      links: opts.ns?.links ?? null,
+      mounts: opts.ns?.mounts ?? null,
       dereference: !fl.asBool('y'),
       recurse,
     })

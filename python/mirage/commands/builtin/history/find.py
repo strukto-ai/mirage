@@ -23,7 +23,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.history.find import find as find_core
 from mirage.core.history.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import PathSpec
 
 
@@ -44,10 +44,11 @@ async def find(
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     return await generic_find(
         list(paths),
         texts,

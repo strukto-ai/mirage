@@ -180,8 +180,8 @@ export async function tarGeneric(
       walk: deps.walk,
       isDir: deps.isDir,
       directories: CFlags.map((c) => makePathSpec(c, mountPrefix)),
-      links: opts.links ?? null,
-      mounts: opts.mounts ?? null,
+      links: opts.ns?.links ?? null,
+      mounts: opts.ns?.mounts ?? null,
     })
     if (!plan.write) {
       const stderr = stderrOf(plan.notices)

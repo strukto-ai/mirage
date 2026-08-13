@@ -44,7 +44,7 @@ from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 # A textual rest operand is the spec's pass-through form: the parser
@@ -241,7 +241,7 @@ async def handle_cli(
                          parse_spec,
                          prog,
                          session.cwd,
-                         env=session.env)
+                         env=env_snapshot(session))
     if mirage_help and parsed.flag_kwargs.get("help") is True:
         help_text = render_help(prog, parse_spec, style=style).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,
@@ -294,7 +294,7 @@ async def handle_cli(
                         texts=tuple(parsed.texts),
                         flags=kw,
                         stdin=stdin,
-                        env=dict(session.env),
+                        env=env_snapshot(session),
                         ops=ops)
 
     if leaf.script is not None:

@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.policy import PolicyDenied, pre_session_gate
 from mirage.runtime.policy import PolicyDecision
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (array_append, array_extent, array_get,
@@ -55,6 +56,7 @@ from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
 from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
@@ -450,10 +452,22 @@ async def execute_node(
             registry,
             noglob=bool(session.shell_options.get("noglob")))
         if kind == NodeKind.SELECT:
-            return await handle_select(recurse, var, classified, body, session,
-                                       stdin, cs)
-        return await handle_for(recurse, var, classified, body, session, stdin,
-                                cs)
+            return await handle_select(recurse,
+                                       var,
+                                       classified,
+                                       body,
+                                       session,
+                                       stdin,
+                                       cs,
+                                       policies=namespace.registry.policies)
+        return await handle_for(recurse,
+                                var,
+                                classified,
+                                body,
+                                session,
+                                stdin,
+                                cs,
+                                policies=namespace.registry.policies)
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
@@ -570,20 +584,28 @@ async def execute_node(
             # -p / illegal-option handling; `declare -r` keeps names only.
             if keyword == "readonly":
                 return await handle_readonly(
-                    flag_words + assignments + array_names, session)
-            return await handle_readonly(assignments + array_names, session)
+                    flag_words + assignments + array_names, session,
+                    session_view(session, namespace.registry.policies))
+            return await handle_readonly(
+                assignments + array_names, session,
+                session_view(session, namespace.registry.policies))
         # declare/typeset scope like `local` inside a function (bash
         # semantics) and assign globally at top level, which is exactly
         # handle_local's fallback when no function scope is active.
         if keyword in (NT.LOCAL, "declare", "typeset"):
-            return await handle_local(assignments, session)
+            return await handle_local(
+                assignments, session,
+                session_view(session, namespace.registry.policies))
         # Pass export flags through so -p / bare print and bad options work.
-        return await handle_export(flag_words + assignments, session)
+        return await handle_export(
+            flag_words + assignments, session,
+            session_view(session, namespace.registry.policies))
 
     # ── unset ───────────────────────────────────
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
-        return await handle_unset(args, session)
+        return await handle_unset(
+            args, session, session_view(session, namespace.registry.policies))
 
     # ── test ([ ] or [[ ]]) ─────────────────────
     if kind == NodeKind.TEST:
@@ -693,15 +715,23 @@ async def execute_node(
             code = assignment_status(session, sub_seq)
             return None, IOResult(exit_code=code), ExecutionNode(
                 command=text, exit_code=code)
-        if append:
-            arr = session.arrays.get(key)
-            if arr is not None:
-                array_set(arr, 0, array_get(arr, 0) + val)
-            else:
-                session.env[key] = session.env.get(key, "") + val
+        arr = session.arrays.get(key) if append else None
+        if append and arr is not None:
+            array_set(arr, 0, array_get(arr, 0) + val)
         else:
-            session.env[key] = val
-            session.arrays.pop(key, None)
+            # The scalar write is a session write, so it clears the
+            # same pre_session gate as `export`; denial mirrors the
+            # readonly case above (a fatal variable-assignment error).
+            new_val = session.env.get(key, "") + val if append else val
+            try:
+                await pre_session_gate(namespace.registry.policies, "env",
+                                       "set", key, new_val)
+            except PolicyDenied as exc:
+                err = f"{exc.strerror}\n".encode()
+                raise ExitSignal(1, stderr=err, contained_code=1) from exc
+            session.env[key] = new_val
+            if not append:
+                session.arrays.pop(key, None)
         # Reassigning OPTIND (even to its current value) restarts the
         # getopts scan, matching bash's internal char pointer.
         if key == "OPTIND":

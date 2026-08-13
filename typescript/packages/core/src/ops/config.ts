@@ -15,7 +15,13 @@
 // Ops with lstat semantics: they act on the entry named by the path, so
 // no stat surface (dispatch, the fs facade, FUSE) may rewrite their
 // operand through the symlink table.
-export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set(['unlink', 'rename', 'rmdir'])
+export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set([
+  'unlink',
+  'rename',
+  'rmdir',
+  'symlink',
+  'readlink',
+])
 
 // Content-writing ops whose completion stamps an observed mtime on the
 // namespace node (removals invalidate but must not stamp).

@@ -187,7 +187,7 @@ export async function treeGeneric(
     ignorePattern: ignoreRaw,
     dirsOnly: fl.asBool('d'),
     matchPattern: matchRaw,
-    mounts: opts.mounts ?? null,
+    mounts: opts.ns?.mounts ?? null,
     crossReaddir: readdirPath === undefined ? null : (p: PathSpec) => readdirPath(p.virtual),
     crossStat:
       statPath === undefined

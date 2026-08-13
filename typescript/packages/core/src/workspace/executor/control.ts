@@ -16,6 +16,8 @@ import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { preSessionGate, type Policies } from '../../policy/index.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { finishStatement } from './statement.ts'
@@ -164,6 +166,7 @@ export async function handleFor(
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  policies: Policies | null = null,
 ): Promise<Result> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
@@ -175,8 +178,20 @@ export async function handleFor(
   try {
     for (const val of values) {
       // env stores strings only; bash keeps `for f in sub/*.txt`
-      // matches relative, so the loop variable takes the typed form
-      session.env[variable] = wordText(val)
+      // matches relative, so the loop variable takes the typed form.
+      // The write is a session write, so it clears the preSession gate;
+      // a denial aborts the loop before its body runs.
+      const textVal = wordText(val)
+      try {
+        await preSessionGate(policies, 'env', 'set', variable, textVal)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        mergedIo = await mergedIo.merge(
+          new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${err.message}\n`) }),
+        )
+        break
+      }
+      session.env[variable] = textVal
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
         allStdout.push(stdout)
@@ -458,6 +473,7 @@ export async function handleSelect(
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  policies: Policies | null = null,
 ): Promise<Result> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
@@ -485,7 +501,6 @@ export async function handleSelect(
         mergedIo = await mergedIo.merge(new IOResult({ stderr: menu }))
         continue
       }
-      session.env.REPLY = reply
       let choice = ''
       if (/^\d+$/.test(reply.trim())) {
         const idx = parseInt(reply.trim(), 10)
@@ -493,6 +508,19 @@ export async function handleSelect(
           choice = wordText(values[idx - 1] ?? '')
         }
       }
+      // REPLY and the select variable are session writes, so they clear
+      // the preSession gate like the for-loop variable.
+      try {
+        await preSessionGate(policies, 'env', 'set', 'REPLY', reply)
+        await preSessionGate(policies, 'env', 'set', variable, choice)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        mergedIo = await mergedIo.merge(
+          new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${err.message}\n`) }),
+        )
+        break
+      }
+      session.env.REPLY = reply
       session.env[variable] = choice
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, null, callStack)

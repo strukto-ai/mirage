@@ -424,7 +424,7 @@ export async function lsGeneric(
   const recursive = fl.asBool('R')
   const listDirItself = fl.asBool('d')
   const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
-  const links = opts.links ?? null
+  const links = opts.ns?.links ?? null
   const deref = fl.asBool('L')
   const warnings: LsWarning[] = []
   const lines: string[] = []
@@ -444,7 +444,7 @@ export async function lsGeneric(
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
         if (!isWalkError(err)) throw err
-        if ((opts.childMounts?.(p.virtual) ?? []).length > 0) {
+        if ((opts.ns?.childMounts?.(p.virtual) ?? []).length > 0) {
           // No backend serves it, but the namespace owes it children,
           // so the door stats it as a directory and -d must print the
           // same row.
@@ -469,7 +469,7 @@ export async function lsGeneric(
     recursive,
     links,
     deref,
-    childMounts: opts.childMounts ?? null,
+    childMounts: opts.ns?.childMounts ?? null,
   }
   const probed: Operand[] = []
   for (const p of targets) {

@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
-import { Limit, MountMode, PathSpec } from '../types.ts'
-import { getTestParser } from './fixtures/workspace_fixture.ts'
-import { Workspace } from './workspace.ts'
+import { OpsRegistry } from '../../ops/registry.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
+import { Limit, MountMode, PathSpec } from '../../types.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

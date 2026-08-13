@@ -14,7 +14,6 @@
 
 import dataclasses
 import posixpath
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -36,6 +35,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
 
 async def handle_ln(
     namespace: Namespace,
+    dispatch: Callable[..., Any],
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -47,8 +47,13 @@ async def handle_ln(
     a namespace link name is never dereferenced nor treated as a directory
     to descend into, so both are already the effective behavior.
 
+    The write itself is a dispatch op, so session grants and admission
+    policies fire at the door; this handler keeps only the GNU operand
+    semantics and renders a refusal in ln's own words.
+
     Args:
         namespace (Namespace): addressing authority holding the link table.
+        dispatch (Callable): op dispatcher.
         session (Session): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
     """
@@ -83,7 +88,14 @@ async def handle_ln(
         return fail(
             "ln", f"ln: failed to create symbolic link "
             f"'{word_text(operands[1])}': File exists\n")
-    await namespace.symlink(link_abs, target_typed, time.time())
+    try:
+        await dispatch("symlink",
+                       PathSpec.from_str_path(link_abs),
+                       target=target_typed)
+    except PermissionError:
+        return fail(
+            "ln", f"ln: failed to create symbolic link "
+            f"'{word_text(operands[1])}': Permission denied\n")
     out = None
     if "v" in flags:
         out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()

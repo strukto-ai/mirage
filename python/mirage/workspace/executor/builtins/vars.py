@@ -22,6 +22,8 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
+from mirage.ops.types import SessionView
+from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
@@ -32,7 +34,49 @@ from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
+from mirage.workspace.session.errors import ReadonlyVariableError
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
+
+
+def _view(session: Session, state: SessionView | None) -> SessionView:
+    """The session view to write through.
+
+    Production callers thread the workspace's gated view; a direct
+    invocation (a unit test) gets an ungated one over the same session.
+
+    Args:
+        session (Session): shell session state.
+        state (SessionView | None): the caller's view, if threaded.
+    """
+    return state if state is not None else session_view(session)
+
+
+def _refusal_text(exc: ReadonlyVariableError | PolicyDenied) -> str:
+    """The stderr line a session-plane refusal renders as.
+
+    Args:
+        exc (ReadonlyVariableError | PolicyDenied): the plane's refusal.
+    """
+    if isinstance(exc, ReadonlyVariableError):
+        return f"bash: {exc.name}: readonly variable\n"
+    return f"{exc.strerror}\n"
+
+
+def _refusal(
+    cmd: str, exc: ReadonlyVariableError | PolicyDenied
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Render a session-plane refusal in the builtin's own voice.
+
+    Args:
+        cmd (str): builtin name for the node.
+        exc (ReadonlyVariableError | PolicyDenied): the plane's refusal.
+    """
+    err = _refusal_text(exc).encode()
+    return None, IOResult(exit_code=1, stderr=err), ExecutionNode(command=cmd,
+                                                                  exit_code=1,
+                                                                  stderr=err)
+
 
 _ENV_HELP_HINT = "Try 'env --help' for more information.\n"
 _EXPORT_USAGE = "export: usage: export [-fn] [name[=value] ...] or export -p\n"
@@ -197,12 +241,15 @@ def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
 async def handle_export(
     assignments: list[str],
     session: Session,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Export names, or print them (``export -p`` / bare ``export``).
 
     With no name operands, prints every entry in ``session.env`` as
     ``declare -x NAME="value"`` (bash's ``-p`` form). Invalid option
-    characters fail with status 2 and the GNU usage line.
+    characters fail with status 2 and the GNU usage line. Writes go
+    through the session view, so readonly refusal and the pre_session
+    policy gate fire here exactly as for any other writer.
     """
     flags, names, bad = _split_decl_flags(assignments, _EXPORT_FLAGS)
     if bad is not None:
@@ -218,22 +265,29 @@ async def handle_export(
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="export", exit_code=0)
     # -f/-n accepted; name path matches prior export semantics.
+    view = _view(session, state)
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
-            if key in session.readonly_vars:
-                err = f"bash: {key}: readonly variable\n".encode()
-                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                    command="export", exit_code=1, stderr=err)
-            session.env[key] = val
-        else:
-            session.env.setdefault(assign, "")
+            try:
+                await view.set(key, val)
+            except (ReadonlyVariableError, PolicyDenied) as exc:
+                return _refusal("export", exc)
+        elif assign not in session.env:
+            # `export NAME` with no value writes an empty entry, which
+            # is still a session write; an existing name is only
+            # re-marked for export, so nothing is written.
+            try:
+                await view.set(assign, "")
+            except (ReadonlyVariableError, PolicyDenied) as exc:
+                return _refusal("export", exc)
     return None, IOResult(), ExecutionNode(command="export", exit_code=0)
 
 
 async def handle_readonly(
     assignments: list[str],
     session: Session,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Mark names readonly, or print them (``readonly -p`` / bare form).
 
@@ -253,14 +307,14 @@ async def handle_readonly(
         out = (("\n".join(lines) + "\n") if lines else "").encode()
         return out, IOResult(), ExecutionNode(command="readonly", exit_code=0)
     # -a/-A/-f accepted; array shape is applied by the declaration path.
+    view = _view(session, state)
     for assign in names:
         if "=" in assign:
             key, _, val = assign.partition("=")
-            if key in session.readonly_vars:
-                err = f"bash: {key}: readonly variable\n".encode()
-                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                    command="readonly", exit_code=1, stderr=err)
-            session.env[key] = val
+            try:
+                await view.set(key, val)
+            except (ReadonlyVariableError, PolicyDenied) as exc:
+                return _refusal("readonly", exc)
             session.readonly_vars.add(key)
         else:
             session.readonly_vars.add(assign)
@@ -319,6 +373,7 @@ def _unset_variable(session: Session, name: str) -> str:
 async def handle_unset(
     args: list[str],
     session: Session,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
@@ -377,6 +432,14 @@ async def handle_unset(
                                                              exit_code=1,
                                                              stderr=err)
         existed = is_element or name in session.env or name in session.arrays
+        if not is_element:
+            # The env half of the unset goes through the session view,
+            # so the pre_session gate fires; the array/function mechanics
+            # below stay the builtin's own.
+            try:
+                await _view(session, state).unset(name)
+            except PolicyDenied as exc:
+                return _refusal("unset", exc)
         status = _unset_variable(session, name)
         if status != "ok":
             # bash names the base for "not an array variable" but prints
@@ -492,7 +555,7 @@ async def handle_env(
             continue
         break
 
-    base = {} if ignore_env else dict(session.env)
+    base = {} if ignore_env else env_snapshot(session)
     for name in unset:
         base.pop(name, None)
     while i < len(args) and "=" in args[i] and not args[i].startswith("="):
@@ -540,6 +603,7 @@ async def handle_read(
     args: list[str],
     session: Session,
     stdin: ByteSource | None = None,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read one line into variables, with bash's option handling.
 
@@ -578,9 +642,13 @@ async def handle_read(
     if session._stdin_buffer is not None:
         line_bytes = await session._stdin_buffer.readline()
 
+    view = _view(session, state)
     if line_bytes is None:
         for var in variables:
-            session.env[var] = ""
+            try:
+                await view.set(var, "")
+            except (ReadonlyVariableError, PolicyDenied) as exc:
+                return _refusal("read", exc)
             session.arrays.pop(var, None)
         return None, IOResult(exit_code=1), ExecutionNode(command="read",
                                                           exit_code=1)
@@ -610,7 +678,10 @@ async def handle_read(
         out.append("".join(cur))
         parts = out
     for i, var in enumerate(variables):
-        session.env[var] = parts[i] if i < len(parts) else ""
+        try:
+            await view.set(var, parts[i] if i < len(parts) else "")
+        except (ReadonlyVariableError, PolicyDenied) as exc:
+            return _refusal("read", exc)
         # A scalar write replaces any array of the same name, matching
         # the variable_assignment path.
         session.arrays.pop(var, None)
@@ -644,18 +715,27 @@ def note_local_array(session: Session, name: str) -> bool:
 async def handle_local(
     assignments: list[str],
     session: Session,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     local_vars = getattr(session, "_local_vars", None)
+    view = _view(session, state)
     for assign in assignments:
         if "=" in assign:
             key, _, val = assign.partition("=")
             if local_vars is not None and key not in local_vars:
                 local_vars[key] = session.env.get(key)
-            session.env[key] = val
+            try:
+                await view.set(key, val)
+            except (ReadonlyVariableError, PolicyDenied) as exc:
+                return _refusal("local", exc)
         else:
             if local_vars is not None and assign not in local_vars:
                 local_vars[assign] = session.env.get(assign)
-            session.env.setdefault(assign, "")
+            if assign not in session.env:
+                try:
+                    await view.set(assign, "")
+                except (ReadonlyVariableError, PolicyDenied) as exc:
+                    return _refusal("local", exc)
     return None, IOResult(), ExecutionNode(command="local", exit_code=0)
 
 
@@ -748,8 +828,9 @@ def _is_valid_name(name: str) -> bool:
     return _IDENTIFIER_RE.fullmatch(name) is not None
 
 
-def _getopts_finish(
+async def _getopts_finish(
     session: Session,
+    view: SessionView,
     name: str,
     opt_value: str,
     optarg: str | None,
@@ -760,20 +841,27 @@ def _getopts_finish(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The name is assigned last, exactly as bash does: OPTIND/OPTARG and
     # the hidden cursor still advance, but a bad destination fails the
-    # write and turns the call into a status-1 error.
-    if not _is_valid_name(name):
-        stderr = f"bash: getopts: `{name}': not a valid identifier\n".encode()
+    # write and turns the call into a status-1 error. Writes go through
+    # the session view, so a pre_session policy or a readonly OPTARG /
+    # OPTIND refuses here too.
+    try:
+        if not _is_valid_name(name):
+            stderr = (f"bash: getopts: `{name}': "
+                      f"not a valid identifier\n").encode()
+            exit_code = 1
+        elif name in session.readonly_vars:
+            stderr = f"bash: {name}: readonly variable\n".encode()
+            exit_code = 1
+        else:
+            await view.set(name, opt_value)
+        if optarg is None:
+            await view.unset("OPTARG")
+        else:
+            await view.set("OPTARG", optarg)
+        await view.set("OPTIND", str(new_optind))
+    except (ReadonlyVariableError, PolicyDenied) as exc:
+        stderr = _refusal_text(exc).encode()
         exit_code = 1
-    elif name in session.readonly_vars:
-        stderr = f"bash: {name}: readonly variable\n".encode()
-        exit_code = 1
-    else:
-        session.env[name] = opt_value
-    if optarg is None:
-        session.env.pop("OPTARG", None)
-    else:
-        session.env["OPTARG"] = optarg
-    session.env["OPTIND"] = str(new_optind)
     session._getopts_pos = new_pos
     session._getopts_optind = new_optind
     io = IOResult(exit_code=exit_code, stderr=stderr)
@@ -786,6 +874,7 @@ async def handle_getopts(
     args: list[str],
     session: Session,
     call_stack: CallStack | None = None,
+    state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Parse one option per call, with bash's getopts semantics.
 
@@ -805,6 +894,7 @@ async def handle_getopts(
                               stderr=err), ExecutionNode(command="getopts",
                                                          exit_code=2,
                                                          stderr=err)
+    view = _view(session, state)
     optstring = args[0]
     name = args[1]
     if len(args) > 2:
@@ -828,7 +918,8 @@ async def handle_getopts(
     pos = session._getopts_pos
 
     if optind > len(params):
-        return _getopts_finish(session, name, "?", None, optind, 0, 1)
+        return await _getopts_finish(session, view, name, "?", None, optind, 0,
+                                     1)
     word = params[optind - 1]
     # A stale cursor left past the end of the current word (a shorter or
     # reused argument) restarts the scan rather than indexing out of range.
@@ -836,9 +927,11 @@ async def handle_getopts(
         pos = 0
     if pos == 0:
         if not word.startswith("-") or word == "-":
-            return _getopts_finish(session, name, "?", None, optind, 0, 1)
+            return await _getopts_finish(session, view, name, "?", None,
+                                         optind, 0, 1)
         if word == "--":
-            return _getopts_finish(session, name, "?", None, optind + 1, 0, 1)
+            return await _getopts_finish(session, view, name, "?", None,
+                                         optind + 1, 0, 1)
         pos = 1
 
     letter = word[pos]
@@ -854,31 +947,34 @@ async def handle_getopts(
         else:
             after_optind, after_pos = optind + 1, 0
         if silent:
-            return _getopts_finish(session, name, "?", letter, after_optind,
-                                   after_pos, 0)
+            return await _getopts_finish(session, view, name, "?", letter,
+                                         after_optind, after_pos, 0)
         err = (f"bash: illegal option -- {letter}\n".encode()
                if verbose else b"")
-        return _getopts_finish(session, name, "?", None, after_optind,
-                               after_pos, 0, err)
+        return await _getopts_finish(session, view, name, "?", None,
+                                     after_optind, after_pos, 0, err)
 
     if not takes_arg:
         if rest:
             after_optind, after_pos = optind, pos + 1
         else:
             after_optind, after_pos = optind + 1, 0
-        return _getopts_finish(session, name, letter, None, after_optind,
-                               after_pos, 0)
+        return await _getopts_finish(session, view, name, letter, None,
+                                     after_optind, after_pos, 0)
 
     if rest:
-        return _getopts_finish(session, name, letter, rest, optind + 1, 0, 0)
+        return await _getopts_finish(session, view, name, letter, rest,
+                                     optind + 1, 0, 0)
     if optind < len(params):
-        return _getopts_finish(session, name, letter, params[optind],
-                               optind + 2, 0, 0)
+        return await _getopts_finish(session, view, name, letter,
+                                     params[optind], optind + 2, 0, 0)
     if silent:
-        return _getopts_finish(session, name, ":", letter, optind + 1, 0, 0)
+        return await _getopts_finish(session, view, name, ":", letter,
+                                     optind + 1, 0, 0)
     err = (f"bash: option requires an argument -- {letter}\n".encode()
            if verbose else b"")
-    return _getopts_finish(session, name, "?", None, optind + 1, 0, 0, err)
+    return await _getopts_finish(session, view, name, "?", None, optind + 1, 0,
+                                 0, err)
 
 
 async def handle_trap(

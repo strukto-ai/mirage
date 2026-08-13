@@ -33,7 +33,7 @@ export const FIND_BUILDER: Builder = {
       // aware stat instead of pushing the window into the core.
       const stat =
         ops.local === true
-          ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.statOverlay)
+          ? overlaidStat((spec) => ops.stat(accessor, spec, idx), opts.ns?.statOverlay)
           : undefined
       return findGeneric(
         resolved,
@@ -59,11 +59,12 @@ export const FIND_BUILDER: Builder = {
             // writes on mtime-less backends), same as ls.
             stat: async (spec, i) => {
               const st = await ops.stat(accessor, spec, i)
-              return opts.statOverlay !== undefined ? opts.statOverlay(spec.virtual, st) : st
+              const overlay = opts.ns?.statOverlay
+              return overlay !== undefined ? overlay(spec.virtual, st) : st
             },
             // A namespace symlink is an entry `-empty` must count and no
             // backend readdir can see.
-            links: opts.links ?? null,
+            links: opts.ns?.links ?? null,
           },
           options,
           idx,

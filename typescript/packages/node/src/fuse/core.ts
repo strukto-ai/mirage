@@ -383,10 +383,12 @@ export class MountCore {
    * will later follow.
    */
   async symlink(src: string, dest: string): Promise<void> {
-    const links = this.ops.links
-    if (links === null) throw errnoError('EROFS', 'workspace has no namespace links')
+    // The write routes through the op door like every other FUSE op, so
+    // session grants and admission policies refuse a scoped kernel
+    // mount exactly like a scoped shell.
+    if (this.ops.links === null) throw errnoError('EROFS', 'workspace has no namespace links')
     const stored = src.startsWith('/') ? this.resolve(src) : src
-    await links.symlink(this.resolve(dest), stored, Date.now() / 1000)
+    await this.ops.symlink(this.resolve(dest), stored)
   }
 
   async unlink(path: string): Promise<void> {

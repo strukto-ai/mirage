@@ -17,6 +17,8 @@ import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError, gnuBasename, gnuDirname, norm } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { MountNotAllowedError } from '../../../context/session_context.ts'
+import { PolicyDenied } from '../../../policy/index.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
@@ -93,6 +95,7 @@ function errorResult(command: string, message: string): Result {
 // never dereferenced nor treated as a directory to descend into.
 export async function handleLn(
   namespace: Namespace,
+  dispatch: DispatchFn,
   session: Session,
   args: (string | PathSpec)[],
 ): Promise<Result> {
@@ -134,7 +137,19 @@ export async function handleLn(
       `ln: failed to create symbolic link '${wordText(linkArg)}': File exists\n`,
     )
   }
-  await namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
+  // The write itself is a dispatch op, so session grants and admission
+  // policies fire at the door; a refusal renders in ln's own words.
+  try {
+    await dispatch('symlink', PathSpec.fromStrPath(linkAbs), [], { target: targetTyped })
+  } catch (err) {
+    if (err instanceof PolicyDenied || err instanceof MountNotAllowedError) {
+      return errorResult(
+        'ln',
+        `ln: failed to create symbolic link '${wordText(linkArg)}': Permission denied\n`,
+      )
+    }
+    throw err
+  }
   let out: Uint8Array | null = null
   if (flags.has('v')) {
     out = new TextEncoder().encode(`'${wordText(linkArg)}' -> '${targetTyped}'\n`)

@@ -72,7 +72,7 @@ export const CP_BUILDER: Builder = {
     }
     return cpGeneric(
       paths,
-      overlayableStat(ops, accessor, idx, opts.statOverlay),
+      overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
       strategy,
       parsed,
       idx,

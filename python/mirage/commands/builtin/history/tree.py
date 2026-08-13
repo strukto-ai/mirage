@@ -23,7 +23,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import PathSpec
 
 
@@ -40,6 +40,7 @@ async def tree(
     P: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
     stat_path: StatPath | None = None,
+    ns: NamespaceView | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_tree(
@@ -53,4 +54,5 @@ async def tree(
         dirs_only=d,
         match_pattern=P,
         index=index,
+        mounts=ns.mounts if ns is not None else None,
     )

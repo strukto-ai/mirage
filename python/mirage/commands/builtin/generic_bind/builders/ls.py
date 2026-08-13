@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import ChildMounts, LinkView, StatOverlay
+from mirage.ops.types import NamespaceView
 from mirage.types import LsSortBy, PathSpec
 
 
@@ -44,11 +44,12 @@ async def ls(
     L: bool = False,
     index: IndexCacheStore = NULL_INDEX,
     cwd: PathSpec | str = "/",
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
-    child_mounts: ChildMounts | None = None,
+    ns: NamespaceView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    stat_overlay = ns.stat_overlay if ns is not None else None
+    links = ns.links if ns is not None else None
+    child_mounts = ns.child_mounts if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("ls: no resource")
     if not paths:

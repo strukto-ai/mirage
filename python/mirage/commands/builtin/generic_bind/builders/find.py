@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           overlaid_stat)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay, StatPath
+from mirage.ops.types import LinkView, NamespaceView, StatOverlay, StatPath
 from mirage.types import PathSpec
 from mirage.utils.path import respell_raw
 
@@ -45,12 +45,13 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     L: bool = False,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    stat_overlay = ns.stat_overlay if ns is not None else None
+    links = ns.links if ns is not None else None
     if not ops.is_mounted(accessor):
         raise ValueError("find: no resource")
     paths = await ops.resolve_glob(accessor, paths, index)

@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic.file import file_cmd as generic_file
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -31,9 +31,10 @@ async def file(
     b: bool = False,
     i: bool = False,
     index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("file: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)

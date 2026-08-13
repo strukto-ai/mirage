@@ -25,6 +25,7 @@ import type { RunResult } from '../../runtime/types.ts'
 import { type Policies, postExecuteGate, resolveLimit } from '../../policy/index.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Session } from '../session/session.ts'
+import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 
 /**
@@ -52,7 +53,7 @@ export async function runWholeLine(
   let result: RunResult
   try {
     result = await runWithTimeout(
-      runtime.runLine(command, data, { ...session.env }, session.cwd),
+      runtime.runLine(command, data, envSnapshot(session), session.cwd),
       guard?.timeoutSeconds ?? null,
       name,
     )

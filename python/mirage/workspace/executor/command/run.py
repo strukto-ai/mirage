@@ -23,7 +23,7 @@ from mirage.io.stream import materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
 from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import namespace_names
-from mirage.ops.types import LinkView, MountView
+from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision
 from mirage.runtime.table import VFSRuntime
@@ -38,7 +38,8 @@ from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
-from mirage.workspace.session import Session, assert_mount_allowed
+from mirage.workspace.session import (Session, assert_mount_allowed,
+                                      env_snapshot, session_view)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -210,6 +211,31 @@ def mount_view(registry: MountRegistry) -> MountView:
                      root_of=functools.partial(mount_root_of, registry))
 
 
+def namespace_view_of(registry: MountRegistry, namespace: Namespace | None,
+                      dispatch: DispatchFn | None) -> NamespaceView:
+    """The name plane's facts on offer, bundled as one view.
+
+    Which commands receive it is decided at dispatch by whether the
+    handler names an ``ns`` parameter, the opt-in ``links`` used before
+    the fold; a command that grows a new name-plane need reads another
+    field instead of threading a new keyword through ``execute_cmd``.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        namespace (Namespace | None): addressing authority holding the
+            link table and attr overlay, None outside a workspace.
+        dispatch (DispatchFn | None): op dispatcher, which answers
+            existence across mounts rather than within one backend.
+    """
+    return NamespaceView(
+        links=link_view(namespace, dispatch),
+        mounts=mount_view(registry),
+        stat_overlay=(functools.partial(namespace_stat_overlay, namespace)
+                      if namespace is not None else None),
+        child_mounts=functools.partial(registry_child_mounts, registry,
+                                       namespace))
+
+
 async def drop_service_caches(registry: MountRegistry,
                               serves: tuple[ResourceName, ...]) -> None:
     """Drop cached listings and bodies for the mounts a CLI's service backs.
@@ -344,15 +370,11 @@ async def run_on_mount(
     # A traversal command's start point is statted through the dispatcher
     # so a start point under another mount answers (`find -L` follows a
     # link across mounts before the command ever runs).
-    stat_overlay = (functools.partial(namespace_stat_overlay, namespace)
-                    if namespace is not None else None)
-    links = link_view(namespace, dispatch)
+    ns = namespace_view_of(registry, namespace, dispatch)
     stat_path = (functools.partial(path_stat, dispatch)
                  if dispatch is not None else None)
     readdir_path = (functools.partial(path_readdir, dispatch)
                     if dispatch is not None else None)
-    child_mounts = functools.partial(registry_child_mounts, registry,
-                                     namespace)
 
     line_runtime, denial = line_runtime_for(cmd_name, registry,
                                             routing_decision)
@@ -369,16 +391,14 @@ async def run_on_mount(
             cwd=session.cwd,
             dispatch=dispatch,
             session_id=session.session_id,
-            env=session.env,
+            env=env_snapshot(session),
+            session_view=session_view(session, registry.policies),
             exec_allowed=registry.is_exec_allowed(),
             runtime=line_runtime,
             runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
-            stat_overlay=stat_overlay,
-            links=links,
+            ns=ns,
             stat_path=stat_path,
             readdir_path=readdir_path,
-            child_mounts=child_mounts,
-            mounts=mount_view(registry),
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
@@ -404,7 +424,7 @@ async def run_on_mount(
             flag_kwargs,
             registry,
             session.cwd,
-            child_mounts=child_mounts,
+            child_mounts=ns.child_mounts,
             stat_path=stat_path)
         if action_err:
             existing = await materialize(io.stderr) if io.stderr else b""

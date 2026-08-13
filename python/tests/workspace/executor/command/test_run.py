@@ -106,11 +106,11 @@ def test_no_view_without_a_namespace():
 
 
 @pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
-def test_the_symlink_aware_commands_name_the_links_parameter(cmd):
+def test_the_symlink_aware_commands_name_the_ns_parameter(cmd):
     """Naming the parameter is the whole opt-in: no registry, no spec
     field, nothing that can fall out of step with the signature."""
     builder = next(b for b in _BUILDERS if b.name == cmd)
-    assert accepts_kwarg(builder.fn, "links") is True
+    assert accepts_kwarg(builder.fn, "ns") is True
 
 
 @pytest.mark.parametrize("cmd", ["cat", "grep", "wc", "head"])
@@ -118,13 +118,14 @@ def test_other_commands_are_not_handed_a_kwarg_they_cannot_take(cmd):
     """A bare **kwargs must not read as consent: wrappers forward it
     wholesale to a generic that would reject the keyword."""
     builder = next(b for b in _BUILDERS if b.name == cmd)
-    assert accepts_kwarg(builder.fn, "links") is False
+    assert accepts_kwarg(builder.fn, "ns") is False
 
 
-def test_stat_overlay_is_gated_by_the_same_rule():
-    """The overlay used to carry its own list of command names."""
-    named = {b.name for b in _BUILDERS if accepts_kwarg(b.fn, "stat_overlay")}
-    assert named == {"ls", "stat", "cp", "mv", "find"}
+def test_the_overlay_readers_all_ride_the_ns_view():
+    """The overlay used to carry its own list of command names; the
+    commands that read it now read it off the one ns view."""
+    named = {b.name for b in _BUILDERS if accepts_kwarg(b.fn, "ns")}
+    assert {"ls", "stat", "cp", "mv", "find"} <= named
 
 
 async def _cli_write_case(tmp_path) -> tuple[str, str]:

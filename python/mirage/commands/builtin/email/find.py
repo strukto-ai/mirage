@@ -31,7 +31,7 @@ from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
 from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
@@ -77,10 +77,11 @@ async def find(
     prefix: str = "",
     index: IndexCacheStore,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     paths = await resolve_glob(accessor, paths, index)
     # A pure -name search at folder level pushes the subject query down to
     # IMAP search instead of walking every message; any other predicate

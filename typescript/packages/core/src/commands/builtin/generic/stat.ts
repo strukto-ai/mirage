@@ -219,7 +219,7 @@ export async function statGeneric(
   const fmt = fl.asStr('c') ?? fl.asStr('f') ?? null
   const lines: string[] = []
   let err = ''
-  const links = fl.asBool('L') ? null : (opts.links ?? null)
+  const links = fl.asBool('L') ? null : (opts.ns?.links ?? null)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
     // its target, unless -L asks to dereference. A link has no backend

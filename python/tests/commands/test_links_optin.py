@@ -39,21 +39,22 @@ def _link_flags(name: str) -> set[str]:
 
 
 # Facts the dispatcher offers that a command only receives by naming the
-# parameter (the `offered` dict in mount.execute_cmd). `stat_overlay` is
-# offered the same way and has the same gaps, but closing those is not a
-# symlink or traversal change; see #688.
-INJECTED_FACTS = ("links", "stat_path")
+# parameter (the `offered` dict in mount.execute_cmd). `ns` bundles the
+# whole name plane (links, mounts, stat overlay, child mounts), so one
+# parameter is the opt-in for all of it.
+INJECTED_FACTS = ("ns", "stat_path")
 
 
 def _fact_aware() -> dict[str, set[str]]:
     """Command name to the injected parameters its generic builder takes.
 
     Two shapes are required: the dispatcher facts a generic reads
-    (``links`` for namespace symlinks, ``stat_path`` for the start point
-    a traversal command cannot stat through one backend), and the link
-    options. A wrapper that names none of them still runs and still
-    exits 0, it just answers as though no link existed and no start
-    point could be resolved, so every side is required here.
+    (``ns`` for the namespace's own facts, symlinks included, and
+    ``stat_path`` for the start point a traversal command cannot stat
+    through one backend), and the link options. A wrapper that names
+    none of them still runs and still exits 0, it just answers as
+    though no link existed and no start point could be resolved, so
+    every side is required here.
     """
     return {
         b.name: ({f
@@ -92,12 +93,12 @@ def _registered() -> tuple[list[RegisteredCommand], list[str]]:
     return found, failed
 
 
-def test_every_link_aware_command_accepts_links():
+def test_every_link_aware_command_accepts_ns():
     """A bespoke command may not silently opt out of symlink support.
 
     Symlinks live in the namespace, so a command only sees them when the
-    dispatcher hands it a LinkView, and it only gets one by naming a
-    ``links`` parameter. A backend that ships its own `find`/`ls`/`du`/
+    dispatcher hands it a NamespaceView, and it only gets one by naming
+    an ``ns`` parameter. A backend that ships its own `find`/`ls`/`du`/
     `stat`/`file` and forgets the parameter still runs, still exits 0,
     and simply cannot see a link. ``-L`` is the same shape: the flag is
     parsed for every command in the family, but a wrapper that does not

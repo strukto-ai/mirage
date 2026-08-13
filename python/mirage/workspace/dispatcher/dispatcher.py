@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+import os
 import time
+from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
@@ -20,6 +23,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.context import mount_allowed
 from mirage.io import IOResult, OpReport
+from mirage.observe.context import record
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
@@ -27,24 +31,19 @@ from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec, ResourceName
 from mirage.utils.key_prefix import mount_key
+from mirage.utils.path import owner_prefix
 from mirage.utils.ranges import slice_window
+from mirage.workspace.dispatcher.constants import (DISPATCH_READ_OPS,
+                                                   DISPATCH_WRITE_OPS,
+                                                   NAMESPACE_TABLE_OPS,
+                                                   POLICY_WRITE_OPS,
+                                                   SETATTR_KEYS)
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.session import assert_mount_allowed
 from mirage.workspace.snapshot.drift import DriftQueue
-
-_DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
-
-_DISPATCH_WRITE_OPS = frozenset({
-    "write", "write_bytes", "append", "unlink", "create", "truncate", "mkdir",
-    "rmdir", "rename"
-})
-# setattr mutates the mount but keeps its own overlay bookkeeping in
-# _setattr_via, so it is a write for policy admission without joining
-# the dispatcher's post-write invalidation path.
-_POLICY_WRITE_OPS = _DISPATCH_WRITE_OPS | frozenset({"setattr"})
 
 
 def _memory_answered(report: OpReport | None,
@@ -145,7 +144,7 @@ class Dispatcher:
                 the answer is in hand.
         """
         policies = self._namespace.registry.policies
-        write = op in _POLICY_WRITE_OPS
+        write = op in POLICY_WRITE_OPS
         # A pre gate refuses before the answer exists, so it is not a
         # completed op and stays before the stamp.
         await pre_ops_gate(policies, op, path, write, "")
@@ -170,7 +169,13 @@ class Dispatcher:
         # probes cannot recurse into it.
         if self._drift is not None and self._drift.pending:
             await self._drift.drain(self._namespace.registry.mount_for)
-        if op not in NO_FOLLOW_OPS:
+        if op in NAMESPACE_TABLE_OPS:
+            return (await self._namespace_table_op(op, path, kwargs,
+                                                   report), IOResult())
+        # `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts
+        # on a link entry itself (chown -h writing the link's own attrs)
+        # keeps the typed path. Consumed here, never forwarded.
+        if op not in NO_FOLLOW_OPS and not kwargs.pop("nofollow", False):
             followed = self._namespace.follow(path.virtual)
             if followed != path.virtual:
                 path = PathSpec.from_str_path(followed)
@@ -180,7 +185,16 @@ class Dispatcher:
             # No mount serves the path, but the namespace may still know
             # a directory there (a deeper mount, a link). No mount means
             # no cache to keep straight. The merged names are
-            # session-filtered individually.
+            # session-filtered individually. A setattr lands in the
+            # overlay (a link above every mount still takes chown -h),
+            # gated exactly like the mounted overlay write.
+            if op == "setattr":
+                policies = self._namespace.registry.policies
+                await pre_ops_gate(policies, op, path, True, "")
+                applied = await self._overlay_setattr(path, kwargs)
+                _memory_answered(report)
+                await post_ops_gate(policies, op, path, True, "", applied)
+                return applied, IOResult()
             fallback = self._namespace_result(op, path.virtual)
             if fallback is None:
                 raise
@@ -203,7 +217,7 @@ class Dispatcher:
         # early return below: a cached read must be refused exactly
         # like a cold one, or the cache becomes a policy bypass.
         policies = self._namespace.registry.policies
-        write = op in _POLICY_WRITE_OPS
+        write = op in POLICY_WRITE_OPS
         await pre_ops_gate(policies, op, path, write, mount.prefix)
         caches_reads = mount.resource.caches_reads
         # The file cache is keyed on the path alone, and what a command
@@ -213,7 +227,7 @@ class Dispatcher:
         # the probe is the whole fix.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
 
-        if caches_reads and not raw and op in _DISPATCH_READ_OPS:
+        if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
@@ -246,8 +260,15 @@ class Dispatcher:
                 directory=dst.virtual.rsplit("/", 1)[0] or "/",
                 resource_path=mount_key(dst.virtual, mount.prefix.rstrip("/")),
             )
+        # execute_op answers Any (each op has its own shape), and the
+        # setattr fork narrows the first assignment to its dict, so the
+        # local keeps the op contract's type explicitly.
+        result: Any
         try:
-            result = await mount.execute_op(op, path.virtual, **kwargs)
+            if op == "setattr":
+                result = await self._apply_setattr(mount, path, kwargs)
+            else:
+                result = await mount.execute_op(op, path.virtual, **kwargs)
         except FileNotFoundError:
             result = self._namespace_result(op, path.virtual)
             if result is None:
@@ -270,7 +291,7 @@ class Dispatcher:
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)
-        if op in _DISPATCH_WRITE_OPS:
+        if op in DISPATCH_WRITE_OPS:
             observed = time.time() if op in STAMP_WRITE_OPS else None
             await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -283,6 +304,124 @@ class Dispatcher:
             # report above already carries the moved count.
             result = await apply_op_limit(result, bound)
         return result, IOResult()
+
+    async def _namespace_table_op(self, op: str, path: PathSpec,
+                                  kwargs: dict[str, Any],
+                                  report: OpReport | None) -> Any:
+        """Answer a node-table op at the door itself, gated like a backend.
+
+        A symlink is namespace state with no backend behind it, so the
+        door owns both directions. Admission still fires exactly as for
+        a backend write: the link's turf is the longest mount prefix
+        above it (the same ownership rule ``_link_allowed`` reads for),
+        session grants and both gates run, and the write leaves an
+        OpRecord — a scoped kernel mount refuses exactly like a scoped
+        shell. A link above every mount is bare namespace structure and
+        clears the gates with an empty prefix.
+
+        Args:
+            op (str): ``symlink`` or ``readlink``.
+            path (PathSpec): the link's own path, never followed.
+            kwargs (dict[str, Any]): op arguments (``target`` for
+                symlink).
+            report (OpReport | None): the caller's report, stamped when
+                the answer is in hand.
+        """
+        start = int(time.monotonic() * 1000)
+        owner = owner_prefix(
+            (m.prefix for m in self._namespace.registry.mounts()),
+            path.virtual)
+        if owner is not None:
+            assert_mount_allowed(owner)
+        policies = self._namespace.registry.policies
+        write = op in POLICY_WRITE_OPS
+        await pre_ops_gate(policies, op, path, write, owner or "")
+        if op == "symlink":
+            target = str(kwargs["target"])
+            await self._namespace.symlink(path.virtual, target, time.time())
+            result: str | None = None
+        else:
+            found = self._namespace.readlink(path.virtual)
+            if found is None:
+                raise OSError(errno.EINVAL, os.strerror(errno.EINVAL),
+                              path.virtual)
+            target = found
+            result = found
+        record(op, path.virtual, ResourceName.RAM.value,
+               len(target.encode("utf-8")), start)
+        _memory_answered(report)
+        bound = await post_ops_gate(policies, op, path, write, owner or "",
+                                    result)
+        if bound is not None:
+            return await apply_op_limit(result, bound)
+        return result
+
+    async def _apply_setattr(self, mount: MountEntry, path: PathSpec,
+                             kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Apply attributes natively where the backend can, overlay the rest.
+
+        A mount with a native setattr op applies what it can and returns
+        the residual; residual fields go to the overlay and natively
+        applied ones are dropped from it, so a stale overlay never
+        shadows a fresh backend value. A mount without the op, and a
+        link path (which has no backend inode), overlay everything. The
+        overlay half is the door's own write, so it runs inside the same
+        gates as the native half.
+
+        Args:
+            mount (MountEntry): the mount owning the path.
+            path (PathSpec): target path.
+            kwargs (dict[str, Any]): the requested attribute fields.
+        """
+        requested = {key: kwargs.get(key) for key in SETATTR_KEYS}
+        if (self._namespace.is_link(path.virtual)
+                or not mount.supports_op("setattr", path.virtual)):
+            return await self._overlay_setattr(path, kwargs)
+        residual = await mount.execute_op("setattr", path.virtual, **kwargs)
+        applied = [
+            key for key, value in requested.items()
+            if value is not None and key not in residual
+        ]
+        if applied:
+            await self._namespace.drop_attrs(path.virtual, applied)
+        if residual:
+            await self._write_overlay(path.virtual, residual)
+        return dict(residual)
+
+    async def _overlay_setattr(self, path: PathSpec,
+                               kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Store every requested field in the namespace overlay.
+
+        Args:
+            path (PathSpec): target path.
+            kwargs (dict[str, Any]): the requested attribute fields.
+        """
+        start = int(time.monotonic() * 1000)
+        overlay = {
+            key: value
+            for key in SETATTR_KEYS if (value := kwargs.get(key)) is not None
+        }
+        await self._write_overlay(path.virtual, overlay)
+        record("setattr", path.virtual, ResourceName.RAM.value, 0, start)
+        return overlay
+
+    async def _write_overlay(self, virtual: str, fields: dict[str,
+                                                              Any]) -> None:
+        """Write one overlay entry, converting an ISO mtime to epoch.
+
+        Args:
+            virtual (str): absolute virtual path.
+            fields (dict[str, Any]): attribute fields to store.
+        """
+        mtime = fields.get("mtime")
+        if isinstance(mtime, str):
+            mtime = datetime.fromisoformat(mtime).timestamp()
+        await self._namespace.set_attrs(virtual,
+                                        mode=fields.get("mode"),
+                                        uid=fields.get("uid"),
+                                        gid=fields.get("gid"),
+                                        atime=fields.get("atime"),
+                                        mtime=mtime)
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(virtual=path,

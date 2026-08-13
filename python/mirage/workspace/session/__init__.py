@@ -14,13 +14,18 @@
 
 from mirage.context import (assert_mount_allowed, get_current_session,
                             reset_current_session, set_current_session)
+from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.store import SessionFields, SessionStore
 
 __all__ = [
     "RAMSessionStore",
+    "ReadonlyVariableError",
+    "env_snapshot",
+    "session_view",
     "RedisSessionStore",
     "S3SessionStore",
     "Session",

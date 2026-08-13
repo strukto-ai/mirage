@@ -28,7 +28,7 @@ from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -64,10 +64,11 @@ async def find(
     prefix: str = "",
     index: IndexCacheStore,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     # The wrapper only exists for the cross-run guard: walking every run
     # would fetch every run's logs. Filtering is the shared generic walk.
     paths = await resolve_glob(accessor, paths, index=index)

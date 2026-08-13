@@ -27,7 +27,7 @@ from mirage.context import mount_allowed
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import FileType, PathSpec, Producer
 from mirage.utils.path import respell_one
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
@@ -384,9 +384,7 @@ async def _fan_out_traversal(
     cwd: str,
     cmd_str: str,
     stdin: ByteSource | None,
-    mounts: MountView | None = None,
-    links: LinkView | None = None,
-    child_mounts: ChildMounts | None = None,
+    ns: NamespaceView | None = None,
     stat_path: StatPath | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a traversal command across the parent mount + descendant mounts.
@@ -402,13 +400,13 @@ async def _fan_out_traversal(
     directory entries (subject to depth and -type filters) because
     mirage's per-mount find doesn't emit the path argument itself.
 
-    ``mounts`` is offered to every sub-run, because a rollup total cannot
-    be repaired by line filtering: du must exclude a shadowed subtree
-    while it is accounting, not after it has rendered. ``links`` is
-    offered for the same reason the single-mount path offers it: symlinks
-    are namespace state, so a sub-run that never receives them reports a
-    tree with every link missing, and a nested mount is not a reason for
-    ``find`` to stop seeing one.
+    ``ns`` is offered to every sub-run whole. The boundary facts,
+    because a rollup total cannot be repaired by line filtering: du must
+    exclude a shadowed subtree while it is accounting, not after it has
+    rendered. The symlink facts, for the same reason the single-mount
+    path offers them: symlinks are namespace state, so a sub-run that
+    never receives them reports a tree with every link missing, and a
+    nested mount is not a reason for ``find`` to stop seeing one.
     """
     target_path = paths[0].virtual
     descendants = _allowed_descendants(registry, target_path)
@@ -488,9 +486,7 @@ async def _fan_out_traversal(
                                              sub_flags,
                                              stdin=stdin,
                                              cwd=cwd,
-                                             mounts=mounts,
-                                             links=links,
-                                             child_mounts=child_mounts,
+                                             ns=ns,
                                              stat_path=stat_path)
 
         if mount is not primary_mount and io.exit_code == 127:
@@ -575,7 +571,7 @@ async def _fan_out_traversal(
             flag_kwargs,
             registry,
             cwd,
-            child_mounts=child_mounts,
+            child_mounts=ns.child_mounts if ns is not None else None,
             stat_path=stat_path)
         if action_err:
             existing = (await materialize(merged_io.stderr)
@@ -598,9 +594,7 @@ async def run_with_fanout(
     run_single: RunSingle,
     registry: MountRegistry,
     cwd: str,
-    mounts: MountView | None,
-    links: LinkView | None,
-    child_mounts: ChildMounts | None,
+    ns: NamespaceView | None,
     stat_path: StatPath | None,
     cmd_name: str,
     paths: list[PathSpec],
@@ -625,11 +619,8 @@ async def run_with_fanout(
         run_single (RunSingle): the executor's single-mount runner.
         registry (MountRegistry): registry holding the mount table.
         cwd (str): session working directory.
-        mounts (MountView | None): the boundary facts, offered to the
-            sub-runs.
-        links (LinkView | None): the namespace's symlink facts.
-        child_mounts (ChildMounts | None): child names the namespace
-            owes a directory, for a start point no backend lists.
+        ns (NamespaceView | None): the name plane's facts, offered
+            whole to the sub-runs.
         stat_path (StatPath | None): dispatcher-backed stat of one path.
         cmd_name (str): command name.
         paths (list[PathSpec]): this operand, as a one-element list.
@@ -669,8 +660,6 @@ async def run_with_fanout(
                                              cwd,
                                              cmd_name,
                                              stdin,
-                                             mounts=mounts,
-                                             links=links,
-                                             child_mounts=child_mounts,
+                                             ns=ns,
                                              stat_path=stat_path)
     return stdout, io

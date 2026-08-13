@@ -21,7 +21,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue
 from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
+from mirage.ops.types import NamespaceView
 from mirage.types import PathSpec
 
 
@@ -35,9 +35,10 @@ async def stat(
     f: str | None = None,
     index: IndexCacheStore = NULL_INDEX,
     L: bool = False,
-    links: LinkView | None = None,
+    ns: NamespaceView | None = None,
     **_extra: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
+    links = ns.links if ns is not None else None
     if not paths:
         raise ValueError("stat: missing operand")
     return await generic_stat(list(paths),

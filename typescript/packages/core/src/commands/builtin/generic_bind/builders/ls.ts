@@ -24,7 +24,7 @@ export const LS_BUILDER: Builder = {
       resolved,
       opts,
       (p) => ops.readdir(accessor, p, idx),
-      overlaidStat((p) => ops.stat(accessor, p, idx), opts.statOverlay),
+      overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
     )
   },
 }

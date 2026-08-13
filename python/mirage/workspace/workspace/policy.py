@@ -19,7 +19,7 @@ from mirage.runtime.policy import (PolicyContext, PolicyDecision, PolicyError,
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, env_snapshot
 from mirage.workspace.workspace.runtimes import Runtimes
 
 
@@ -106,7 +106,7 @@ class PolicyRouter:
             command=commands[0].command if commands else "",
             builtin=commands[0].builtin if commands else False,
             cwd=session.cwd,
-            env=dict(session.env),
+            env=env_snapshot(session),
             session_id=session_id,
             agent_id=agent_id,
             mounts=tuple(self._resolver.prefixes()),

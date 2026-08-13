@@ -87,6 +87,9 @@ import { resolveGlobs } from '../expand/globs.ts'
 import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { preSessionGate } from '../../policy/index.ts'
+import { sessionView } from '../session/state.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -500,9 +503,27 @@ export async function executeNode(
     // globs resolve to matches before iteration starts.
     const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
     if (kind === NodeKind.SELECT) {
-      return handleSelect(recurse, variable, resolved, body, session, stdin, callStack)
+      return handleSelect(
+        recurse,
+        variable,
+        resolved,
+        body,
+        session,
+        stdin,
+        callStack,
+        registry.policies,
+      )
     }
-    return handleFor(recurse, variable, resolved, body, session, stdin, callStack)
+    return handleFor(
+      recurse,
+      variable,
+      resolved,
+      body,
+      session,
+      stdin,
+      callStack,
+      registry.policies,
+    )
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
@@ -642,22 +663,34 @@ export async function executeNode(
       // to be marked readonly. Only the `readonly` keyword owns -p /
       // illegal-option handling; `declare -r` keeps names only.
       if (keyword === 'readonly') {
-        return handleReadonly([...flagWords, ...assignments, ...arrayNames], session)
+        return handleReadonly(
+          [...flagWords, ...assignments, ...arrayNames],
+          session,
+          sessionView(session, registry.policies),
+        )
       }
-      return handleReadonly([...assignments, ...arrayNames], session)
+      return handleReadonly(
+        [...assignments, ...arrayNames],
+        session,
+        sessionView(session, registry.policies),
+      )
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly
     // handleLocal's fallback when no function scope is active.
     if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-      return handleLocal(assignments, session)
+      return handleLocal(assignments, session, sessionView(session, registry.policies))
     }
     // Pass export flags through so -p / bare print and illegal options work.
-    return handleExport([...flagWords, ...assignments], session)
+    return handleExport(
+      [...flagWords, ...assignments],
+      session,
+      sessionView(session, registry.policies),
+    )
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetArgs(node), session)
+    return handleUnset(getUnsetArgs(node), session, sessionView(session, registry.policies))
   }
 
   if (kind === NodeKind.TEST) {
@@ -779,17 +812,28 @@ export async function executeNode(
         new ExecutionNode({ command: text, exitCode: subCode }),
       ]
     }
-    if (append) {
-      const arr = session.arrays[key]
-      if (arr !== undefined) {
-        arraySet(arr, 0, arrayGet(arr, 0) + val)
-      } else {
-        session.env[key] = (session.env[key] ?? '') + val
-      }
+    const appendArr = append ? session.arrays[key] : undefined
+    if (append && appendArr !== undefined) {
+      arraySet(appendArr, 0, arrayGet(appendArr, 0) + val)
     } else {
-      session.env[key] = val
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.arrays[key]
+      // The scalar write is a session write, so it clears the same
+      // preSession gate as `export`; denial mirrors the readonly case
+      // above (a fatal variable-assignment error).
+      const newVal = append ? (session.env[key] ?? '') + val : val
+      try {
+        await preSessionGate(registry.policies, 'env', 'set', key, newVal)
+      } catch (err) {
+        if (err instanceof PolicyDenied) {
+          const denied = new TextEncoder().encode(`${err.message}\n`)
+          throw new ExitSignal(1, denied, null, 1)
+        }
+        throw err
+      }
+      session.env[key] = newVal
+      if (!append) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete session.arrays[key]
+      }
     }
     // Reassigning OPTIND (even to its current value) restarts the getopts
     // scan, matching bash's internal char pointer.
