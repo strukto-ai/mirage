@@ -14,18 +14,18 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 
 ## Compose
 
-Three Cordis plugins, mirroring dsh's own E2B provider group. `MirageService` owns the workspace; the two providers inject it. Mix any resources — here Gmail and S3 beside a scratch RAM mount:
+Three Cordis plugins, mirroring dsh's own E2B provider group. `MirageService` owns the workspace; the two providers inject it. Mix any resources — here Gmail and Slack beside a scratch RAM mount:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import { GmailResource, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { GmailResource, MountMode, RAMResource, SlackResource, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
 
 const ws = new Workspace(
   {
     '/notes': [new RAMResource(), MountMode.EXEC],
     '/mail': new GmailResource({ clientId, clientSecret, refreshToken }),
-    '/data': [new S3Resource({ bucket: 'my-bucket', region: 'us-east-1' }), MountMode.WRITE],
+    '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
   },
   { runtimes: ['monty', 'vfs'] },
 )
@@ -41,7 +41,7 @@ Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `E
 ```ts
 const shell = ctx.shell
 const sweep = await shell.run(
-  shell.resolve({ command: 'grep -rln invoice /mail/INBOX /data/reports | head' }),
+  shell.resolve({ command: 'grep -rln invoice /mail/INBOX /slack/channels | head' }),
 )
 ```
 
@@ -49,17 +49,17 @@ const sweep = await shell.run(
 
 ## Run Python with monty
 
-Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. The pattern that fits monty is: **the fs seam and the shell do the file I/O, monty does the compute** — the shell's pipes and redirections file a script's stdout back into any mount:
+Registering `runtimes: ['monty', 'vfs']` routes `python3` lines to [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, and keeps `vfs` for the shell commands. A script can live on any mount — upload `test.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`):
 
 ```ts
-await ctx.fs.writeText(
-  await ctx.fs.resolve('/notes/report.py'),
-  'import os\nwho = os.getenv("REPORT_OWNER", "nobody")\nprint("owner:", who)\nprint("total:", sum(range(100)))\n',
-)
 const ran = await shell.run(
-  shell.resolve({ command: 'REPORT_OWNER=mirage python3 /notes/report.py > /data/report.txt' }),
+  shell.resolve({
+    command: 'python3 /slack/channels/general__C0.../2026-08-13/files/test.py > /notes/report.txt',
+  }),
 )
 ```
+
+The pattern that fits monty is: **the fs seam and the shell do the file I/O, monty does the compute** — the shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`test.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/test.py).
 
 ## One execution world
 
