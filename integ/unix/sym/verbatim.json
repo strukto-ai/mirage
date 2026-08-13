@@ -27,7 +27,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/symv",
+      "command": "mkdir -p /data/symv && echo alpha > /data/symv/t.txt",
       "expect": {
         "exit": 0,
         "stdout": "",
