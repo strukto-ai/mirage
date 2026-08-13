@@ -74,14 +74,72 @@ interface FormatDirective {
   spec: string
 }
 
-// Shell-safe quoting for %N, mirroring GNU's default: a name with no
-// apostrophe is single-quoted; one containing an apostrophe (but no double
-// quote) switches to double quotes; one with both is single-quoted with each
-// apostrophe escaped as '\''.
+const SHELL_SPECIAL = new Set('!"#$&()*;<=>?[\\^`{|}~')
+
+const START_SAFE = new Set('#~')
+
+const ESCAPE_NAMES: Record<string, string> = {
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\t': '\\t',
+  '\n': '\\n',
+  '\v': '\\v',
+  '\f': '\\f',
+  '\r': '\\r',
+}
+
+// Whether GNU spells a character as a $'..' escape.
+function needsEscape(char: string): boolean {
+  return char < ' ' || char === '\x7f'
+}
+
+function escapeChar(char: string): string {
+  return ESCAPE_NAMES[char] ?? '\\' + char.charCodeAt(0).toString(8).padStart(3, '0')
+}
+
+// Whether a name holding an apostrophe still fits in double quotes. GNU only
+// reaches for them when nothing else in the name would stay live inside them,
+// so a'b renders as "a'b" but a'b$c does not. # and ~ count as special only
+// away from the front.
+function doubleQuotable(name: string): boolean {
+  for (let index = 0; index < name.length; index += 1) {
+    const char = name.charAt(index)
+    if (needsEscape(char)) return false
+    if (SHELL_SPECIAL.has(char) && !(index === 0 && START_SAFE.has(char))) return false
+  }
+  return true
+}
+
+// Single-quoted runs spliced with $'..' escape segments.
+function singleQuoted(name: string): string {
+  const parts: string[] = []
+  let index = 0
+  while (index < name.length) {
+    const escaped = needsEscape(name.charAt(index))
+    let end = index
+    while (end < name.length && needsEscape(name.charAt(end)) === escaped) end += 1
+    if (escaped) {
+      // A leading escape keeps the empty quotes GNU emits; a trailing one does not.
+      if (index === 0) parts.push("''")
+      let text = ''
+      for (let at = index; at < end; at += 1) text += escapeChar(name.charAt(at))
+      parts.push("$'" + text + "'")
+    } else {
+      parts.push("'" + name.slice(index, end).replaceAll("'", "'\\''") + "'")
+    }
+    index = end
+  }
+  return parts.length > 0 ? parts.join('') : "''"
+}
+
+// Shell-safe quoting for %N, mirroring GNU's default: single quotes are the
+// rule, with each apostrophe escaped as '\'' and every unprintable character
+// lifted into a $'..' segment. A name whose only awkward character is an
+// apostrophe reads better in double quotes, and GNU renders that one case
+// that way.
 function quoteName(name: string): string {
-  if (!name.includes("'")) return `'${name}'`
-  if (!name.includes('"')) return `"${name}"`
-  return "'" + name.replaceAll("'", "'\\''") + "'"
+  if (name.includes("'") && doubleQuotable(name)) return `"${name}"`
+  return singleQuoted(name)
 }
 
 function applyFlags(

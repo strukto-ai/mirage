@@ -617,6 +617,17 @@ describe('symlinks (namespace-backed)', () => {
     await ws.close()
   })
 
+  // A target with an apostrophe next to a live character goes back to single
+  // quotes, so replaying the line cannot expand $c.
+  it('stat %N single-quotes a target holding shell metacharacters', async () => {
+    const ws = buildWorkspace()
+    await ws.execute('ln -s "/data/a\'b\\$c" /data/meta')
+    expect(dec((await ws.execute("stat -c '%N' /data/meta")).stdout)).toBe(
+      "'/data/meta' -> '/data/a'\\''b$c'\n",
+    )
+    await ws.close()
+  })
+
   // GNU quotes %N only when the directive carries no modifier, and a width
   // or precision applies to the name and the target separately.
   it('stat %N modifiers drop the quotes and pad each side', async () => {

@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from itertools import groupby
 
 from mirage.commands.builtin.utils.formatting import _ls_mode_string
 from mirage.commands.builtin.utils.output import format_records
@@ -28,6 +29,20 @@ _TYPE_LABELS = {
 }
 
 _DEFAULT_OWNER = "user"
+
+_SHELL_SPECIAL = frozenset("!\"#$&()*;<=>?[\\^`{|}~")
+
+_START_SAFE = frozenset("#~")
+
+_ESCAPE_NAMES = {
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,21 +101,77 @@ def _epoch(iso: str | None) -> str:
         return "0"
 
 
+def _needs_escape(char: str) -> bool:
+    """Whether GNU spells a character as a ``$'..'`` escape.
+
+    Args:
+        char (str): the character to test.
+    """
+    return char < " " or char == "\x7f"
+
+
+def _escape_char(char: str) -> str:
+    """Spell one character the way bash's ``$'..'`` does.
+
+    Args:
+        char (str): the character to escape.
+    """
+    named = _ESCAPE_NAMES.get(char)
+    return named if named is not None else f"\\{ord(char):03o}"
+
+
+def _double_quotable(name: str) -> bool:
+    """Whether a name holding an apostrophe still fits in double quotes.
+
+    GNU only reaches for them when nothing else in the name would stay
+    live inside them, so ``a'b`` renders as ``"a'b"`` but ``a'b$c`` does
+    not. ``#`` and ``~`` count as special only away from the front.
+
+    Args:
+        name (str): the name to test.
+    """
+    for index, char in enumerate(name):
+        if _needs_escape(char):
+            return False
+        if char in _SHELL_SPECIAL and not (index == 0 and char in _START_SAFE):
+            return False
+    return True
+
+
+def _single_quoted(name: str) -> str:
+    """Render single-quoted runs spliced with ``$'..'`` escape segments.
+
+    Args:
+        name (str): the name to quote.
+    """
+    parts: list[str] = []
+    for index, (escaped, chars) in enumerate(groupby(name, _needs_escape)):
+        run = "".join(chars)
+        if not escaped:
+            parts.append("'" + run.replace("'", "'\\''") + "'")
+            continue
+        # A leading escape keeps the empty quotes GNU emits; a trailing
+        # one does not.
+        if index == 0:
+            parts.append("''")
+        parts.append("$'" + "".join(_escape_char(c) for c in run) + "'")
+    return "".join(parts) if parts else "''"
+
+
 def _quote_name(name: str) -> str:
     """Shell-safe quoting for %N, mirroring GNU's default.
 
-    A name with no apostrophe is single-quoted; one containing an
-    apostrophe (but no double quote) switches to double quotes; one with
-    both is single-quoted with each apostrophe escaped as ``'\\''``.
+    Single quotes are the rule, with each apostrophe escaped as
+    ``'\\''`` and every unprintable character lifted into a ``$'..'``
+    segment. A name whose only awkward character is an apostrophe reads
+    better in double quotes, and GNU renders that one case that way.
 
     Args:
         name (str): the file name to quote.
     """
-    if "'" not in name:
-        return f"'{name}'"
-    if '"' not in name:
+    if "'" in name and _double_quotable(name):
         return f'"{name}"'
-    return "'" + name.replace("'", "'\\''") + "'"
+    return _single_quoted(name)
 
 
 def _apply_flags(value: str, flags: str, width: str, precision: str | None,

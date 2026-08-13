@@ -614,6 +614,16 @@ async def test_stat_percent_n_quotes_each_side_on_its_own():
 
 
 @pytest.mark.asyncio
+async def test_stat_percent_n_target_holding_shell_metacharacters():
+    """A target with an apostrophe next to a live character goes back to
+    single quotes, so replaying the line cannot expand ``$c``."""
+    ws = _ws()
+    await ws.execute("""ln -s "/data/a'b\\$c" /data/meta""")
+    r = await ws.execute("stat -c '%N' /data/meta")
+    assert r.stdout.decode() == "'/data/meta' -> '/data/a'\\''b$c'\n"
+
+
+@pytest.mark.asyncio
 async def test_stat_percent_n_modifiers_drop_quotes_and_pad_each_side():
     """GNU quotes %N only when the directive carries no modifier, and a
     width or precision applies to the name and the target separately."""
