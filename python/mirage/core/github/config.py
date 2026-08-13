@@ -21,3 +21,16 @@ class GitHubConfig(BaseModel):
     repo: str | None = None
     ref: str = "main"
     base_url: str | None = None
+
+
+class GhConfig(BaseModel):
+    """What a `gh` install is configured with.
+
+    `repo` is what real gh reads off the current git remote to answer a line
+    that names no repository; a workspace has no remote, so the install
+    carries it.
+    """
+
+    token: SecretStr
+    base_url: str | None = None
+    repo: str | None = None
