@@ -47,26 +47,20 @@ const sweep = await shell.run(shell.resolve({ command: 'grep -rln session /redis
 
 ## Run Python with monty
 
-Registering `runtimes` on the workspace specifies who captures what: `monty` is set up as the workspace's Python and captures every `python` and `python3` invocation — a script file, inline `-c` code, or code piped on stdin — while `vfs` keeps the shell commands. [monty](https://github.com/pydantic/monty) is a sandboxed Python interpreter with no host access, so the captured code runs inside the workspace, never on the machine:
+The `runtimes: ['monty', 'vfs']` entry in the workspace above specifies who captures what: [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, is the workspace's Python and takes every `python` and `python3` invocation — a script file, inline `-c` code, or code piped on stdin — while `vfs` keeps the shell commands. A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into the RAM mount:
 
 ```ts
-const ws = new Workspace(mounts, { runtimes: ['monty', 'vfs'] })
-
 const inline = await shell.run(shell.resolve({ command: `python3 -c 'print(2 + 3)'` }))
 // inline.stdout.text === '5\n'
-```
 
-A script can live on any mount — upload `example.py` to a Slack channel and run it straight off the mount (uploads land under `<channel>__<id>/<date>/files/`, with the Slack file ID suffixed into the name):
-
-```ts
-const ran = await shell.run(
+const script = await shell.run(
   shell.resolve({
     command: 'python3 /slack/channels/general__C0.../2026-08-13/files/example__F0....py > /notes/report.txt',
   }),
 )
 ```
 
-The shell's pipes and redirections file a script's stdout back into any writable mount. [`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
+[`examples/typescript/dsh/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/slack.ts) is the runnable version, with the script in [`example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dsh/example.py).
 
 ## One execution world
 
