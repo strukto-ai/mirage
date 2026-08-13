@@ -89,14 +89,19 @@ async def _store_staged_arrays(
     view: SessionView,
     arrays: list[tuple[str, bool, list[str]]],
     mark: bool = False,
+    fatal: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
     """Store a declaration's array literals through the session door.
 
-    The builtin owns the store so a refusal speaks in its own voice:
-    readonly is the shell's rule, checked per name before the door, and
-    the door's gate covers the policy half. Names are processed in
-    order, so an earlier operand stays stored when a later one refuses,
-    as bash does.
+    The builtin owns the store; readonly is the shell's rule, checked
+    per name before the door, and the door's gate covers the policy
+    half. Names are processed in order, so an earlier operand stays
+    stored when a later one refuses, as bash does. A readonly refusal
+    of an array literal is a variable-assignment error in GNU, not a
+    builtin failure: for `export`/`readonly` (and `declare` at top
+    level) the rest of the line is abandoned, while `local` and a
+    function-scoped `declare` refuse in the builtin's voice and the
+    body keeps running (pinned on bash 5.2, debian:stable-slim).
 
     Args:
         cmd (str): builtin name for refusal rendering.
@@ -106,12 +111,20 @@ async def _store_staged_arrays(
             ``(name, append, items)`` literals from the declaration.
         mark (bool): also mark each stored name readonly (the
             ``readonly`` keyword's half).
+        fatal (bool): render a readonly refusal as the fatal
+            assignment error instead of a builtin failure.
 
     Returns:
         The refusal result, or None when every literal stored.
+
+    Raises:
+        ExitSignal: a readonly refusal under ``fatal``.
     """
     for name, append, items in arrays:
         if view.is_readonly(name):
+            if fatal:
+                err = f"bash: {name}: readonly variable\n".encode()
+                raise ExitSignal(1, stderr=err, contained_code=1)
             return _readonly_refusal(cmd, name)
         note_local_array(session, name)
         if append:
@@ -323,7 +336,11 @@ async def handle_export(
     # -f/-n accepted; name path matches prior export semantics.
     view = _view(session, state)
     if arrays:
-        refused = await _store_staged_arrays("export", session, view, arrays)
+        refused = await _store_staged_arrays("export",
+                                             session,
+                                             view,
+                                             arrays,
+                                             fatal=True)
         if refused is not None:
             return refused
     for assign in names:
@@ -379,7 +396,8 @@ async def handle_readonly(
                                              session,
                                              view,
                                              arrays,
-                                             mark=True)
+                                             mark=True,
+                                             fatal=True)
         if refused is not None:
             return refused
     for assign in names:
@@ -819,7 +837,12 @@ async def handle_local(
     local_vars = getattr(session, "_local_vars", None)
     view = _view(session, state)
     if arrays:
-        refused = await _store_staged_arrays("local", session, view, arrays)
+        refused = await _store_staged_arrays("local",
+                                             session,
+                                             view,
+                                             arrays,
+                                             fatal=session._local_arrays
+                                             is None)
         if refused is not None:
             return refused
     for assign in assignments:

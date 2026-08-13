@@ -229,6 +229,50 @@
         "stdout": "top\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sess_link_prep",
+      "seq": 920012,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "ln -s /data/sess/a.txt /data/sess/al && ln -s /data2/sess/s.txt /data2/sess/sl",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_readlink_granted_reads",
+      "seq": 920013,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "readlink /data/sess/al",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sess/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sess_readlink_ungranted_denied",
+      "seq": 920014,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "session": "reader",
+      "command": "readlink /data2/sess/sl",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -81,7 +81,12 @@ function readonlyRefusal(cmd: string, name: string): Result {
  * order, so an earlier operand stays stored when a later one refuses,
  * as bash does. Returns the refusal result, or null when every
  * literal stored. `mark` also marks each stored name readonly (the
- * `readonly` keyword's half).
+ * `readonly` keyword's half). A readonly refusal of an array literal
+ * is a variable-assignment error in GNU, not a builtin failure: for
+ * `export`/`readonly` (and `declare` at top level) `fatal` abandons
+ * the rest of the line, while `local` and a function-scoped `declare`
+ * refuse in the builtin's voice and the body keeps running (pinned on
+ * bash 5.2, debian:stable-slim).
  */
 async function storeStagedArrays(
   cmd: string,
@@ -89,9 +94,16 @@ async function storeStagedArrays(
   view: SessionView,
   arrays: { name: string; append: boolean; items: string[] }[],
   mark = false,
+  fatal = false,
 ): Promise<Result | null> {
   for (const { name, append, items } of arrays) {
-    if (view.isReadonly(name)) return readonlyRefusal(cmd, name)
+    if (view.isReadonly(name)) {
+      if (fatal) {
+        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        throw new ExitSignal(1, err, null, 1)
+      }
+      return readonlyRefusal(cmd, name)
+    }
     noteLocalArray(session, name)
     let base: ShellArray
     if (append) {
@@ -268,7 +280,7 @@ export async function handleExport(
   }
   const view = viewOf(session, state)
   if (arrays !== null && arrays.length > 0) {
-    const refused = await storeStagedArrays('export', session, view, arrays)
+    const refused = await storeStagedArrays('export', session, view, arrays, false, true)
     if (refused !== null) return refused
   }
   for (const assign of names) {
@@ -329,7 +341,7 @@ export async function handleReadonly(
   }
   const view = viewOf(session, state)
   if (arrays !== null && arrays.length > 0) {
-    const refused = await storeStagedArrays('readonly', session, view, arrays, true)
+    const refused = await storeStagedArrays('readonly', session, view, arrays, true, true)
     if (refused !== null) return refused
   }
   for (const assign of names) {
@@ -700,7 +712,14 @@ export async function handleLocal(
   const locals = session.localVars
   const view = viewOf(session, state)
   if (arrays !== null && arrays.length > 0) {
-    const refused = await storeStagedArrays('local', session, view, arrays)
+    const refused = await storeStagedArrays(
+      'local',
+      session,
+      view,
+      arrays,
+      false,
+      session.localArrays === null,
+    )
     if (refused !== null) return refused
   }
   for (const assign of assignments) {

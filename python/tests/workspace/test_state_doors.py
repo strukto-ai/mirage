@@ -490,6 +490,73 @@ def test_readonly_name_refuses_a_declaration_array_store():
     assert "LOCKED" not in sess.arrays
 
 
+def test_readonly_declaration_array_abandons_the_line():
+    # GNU treats `export LOCKED=(a)` on a readonly name as a variable
+    # assignment error, not a builtin failure: the rest of the line is
+    # dead (status 1) and the next line runs. Pinned on bash 5.2
+    # (debian:stable-slim); the scalar spelling below continues instead.
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LOCKED")
+        denied = await ws.execute("export LOCKED=(a); echo unreached")
+        out = await denied.stdout_str() if denied.stdout else ""
+        after = await ws.execute("echo after")
+        return denied, out, after
+
+    denied, out, after = asyncio.run(run())
+    assert denied.exit_code == 1
+    assert out == ""
+    assert (denied.stderr or b"") == b"bash: LOCKED: readonly variable\n"
+    assert after.exit_code == 0
+
+
+def test_readonly_declare_array_is_fatal_at_top_level():
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LOCKED")
+        denied = await ws.execute("declare LOCKED=(a); echo unreached")
+        out = await denied.stdout_str() if denied.stdout else ""
+        return denied, out
+
+    denied, out = asyncio.run(run())
+    assert denied.exit_code == 1
+    assert out == ""
+
+
+def test_readonly_scalar_export_refusal_continues_the_line():
+    # The asymmetry is GNU's: `export LOCKED=v` fails with 1 in the
+    # builtin's voice and the same line keeps going.
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LOCKED")
+        io = await ws.execute("export LOCKED=v; echo rc=$?")
+        out = await io.stdout_str() if io.stdout else ""
+        return io, out
+
+    io, out = asyncio.run(run())
+    assert io.exit_code == 0
+    assert out == "rc=1\n"
+
+
+def test_readonly_local_array_refusal_stays_in_the_function():
+    # `local LOCKED=(a)` on a readonly global refuses without killing
+    # the function body (GNU prints the refusal and runs `echo in-f`).
+    ws = _two_mounts()
+
+    async def run():
+        await ws.execute("readonly LOCKED")
+        io = await ws.execute("f() { local LOCKED=(a); echo in-f; }; f")
+        out = await io.stdout_str() if io.stdout else ""
+        return io, out
+
+    io, out = asyncio.run(run())
+    assert "in-f" in out
+    assert b"readonly variable" in (io.stderr or b"")
+
+
 def test_export_of_an_array_literal_prints_nothing():
     # `export ARR=(x y)` used to fall through to the bare-export print
     # branch because the handler never learned arrays were on the line.

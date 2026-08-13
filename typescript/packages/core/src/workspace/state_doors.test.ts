@@ -372,6 +372,49 @@ describe('the remaining session writers clear the same gate', () => {
     expect('LOCKED' in sess.arrays).toBe(false)
   })
 
+  it('a readonly declaration array abandons the line', async () => {
+    // GNU treats `export LOCKED=(a)` on a readonly name as a variable
+    // assignment error, not a builtin failure: the rest of the line is
+    // dead (status 1) and the next line runs. Pinned on bash 5.2
+    // (debian:stable-slim); the scalar spelling below continues.
+    const ws = await makeWs()
+    await ws.execute('readonly LOCKED')
+    const denied = await ws.execute('export LOCKED=(a); echo unreached')
+    expect(denied.exitCode).toBe(1)
+    expect(stdoutStr(denied)).toBe('')
+    expect(stderrStr(denied)).toBe('bash: LOCKED: readonly variable\n')
+    const after = await ws.execute('echo after')
+    expect(after.exitCode).toBe(0)
+  })
+
+  it('a readonly declare array is fatal at top level', async () => {
+    const ws = await makeWs()
+    await ws.execute('readonly LOCKED')
+    const denied = await ws.execute('declare LOCKED=(a); echo unreached')
+    expect(denied.exitCode).toBe(1)
+    expect(stdoutStr(denied)).toBe('')
+  })
+
+  it('a readonly scalar export refusal continues the line', async () => {
+    // The asymmetry is GNU's: `export LOCKED=v` fails with 1 in the
+    // builtin's voice and the same line keeps going.
+    const ws = await makeWs()
+    await ws.execute('readonly LOCKED')
+    const io = await ws.execute('export LOCKED=v; echo rc=$?')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('rc=1\n')
+  })
+
+  it('a readonly local array refusal stays in the function', async () => {
+    // `local LOCKED=(a)` on a readonly global refuses without killing
+    // the function body (GNU prints the refusal and runs `echo in-f`).
+    const ws = await makeWs()
+    await ws.execute('readonly LOCKED')
+    const io = await ws.execute('f() { local LOCKED=(a); echo in-f; }; f')
+    expect(stdoutStr(io)).toContain('in-f')
+    expect(stderrStr(io)).toContain('readonly variable')
+  })
+
   it('export of an array literal prints nothing', async () => {
     // `export ARR=(x y)` used to fall through to the bare-export print
     // branch because the handler never learned arrays were on the line.
