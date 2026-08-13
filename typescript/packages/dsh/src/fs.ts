@@ -105,9 +105,12 @@ export class MirageFileSystem extends FileSystem {
 
   // The workspace may still be building (declarative mounts resolve
   // asynchronously), so every entry point awaits the service's `ready`
-  // once and caches the op door.
-  private async ops(): Promise<Ops> {
+  // once and caches the op door. The caller's signal can fire during
+  // that wait, after its entry assertion passed, so it is asserted
+  // again here, before the op it guards dispatches.
+  private async ops(signal?: AbortSignal, operation = 'ready'): Promise<Ops> {
     this.fsOps ??= (await this.ctx.mirage.ready).fs
+    assertNotAborted(signal, operation)
     return this.fsOps
   }
 
@@ -151,7 +154,7 @@ export class MirageFileSystem extends FileSystem {
 
   async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     assertNotAborted(opts?.signal, 'resolve')
-    await this.ops()
+    await this.ops(opts?.signal, 'resolve')
     const followed = this.follow(this.normalize(path, opts?.cwd))
     return { targetKey: FsTargetKey(followed), displayPath: followed }
   }
@@ -178,7 +181,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let stat: FileStat
     try {
-      stat = await (await this.ops()).stat(key)
+      stat = await (await this.ops(signal, 'stat')).stat(key)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'stat', target.displayPath)
@@ -196,7 +199,7 @@ export class MirageFileSystem extends FileSystem {
     signal?: AbortSignal,
   ): Promise<FsPathInfo | undefined> {
     assertNotAborted(signal, 'lstat')
-    await this.ops()
+    await this.ops(signal, 'lstat')
     const normalized = this.normalize(path, opts?.cwd)
     // Follow every component except the last: the probe is about the path
     // entry itself, so a link at the leaf must report as one.
@@ -215,7 +218,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let stat: FileStat
     try {
-      stat = await (await this.ops()).stat(parentFollowed)
+      stat = await (await this.ops(signal, 'lstat')).stat(parentFollowed)
     } catch (err) {
       if (isMissingPath(err)) return undefined
       throw mapMirageError(err, 'lstat', normalized)
@@ -232,7 +235,7 @@ export class MirageFileSystem extends FileSystem {
     const key = String(target.targetKey)
     let bytes: Uint8Array
     try {
-      bytes = await (await this.ops()).readFile(key)
+      bytes = await (await this.ops(signal, 'read')).readFile(key)
     } catch (err) {
       throw mapMirageError(err, 'read', target.displayPath)
     }
@@ -261,7 +264,7 @@ export class MirageFileSystem extends FileSystem {
     }
     let children: string[]
     try {
-      children = await (await this.ops()).readdir(key)
+      children = await (await this.ops(signal, 'list')).readdir(key)
     } catch (err) {
       throw mapMirageError(err, 'list', target.displayPath)
     }
@@ -353,7 +356,7 @@ export class MirageFileSystem extends FileSystem {
       const crlf = before !== null && detectsCrlf(before)
       try {
         await (
-          await this.ops()
+          await this.ops(signal, 'write')
         ).writeFile(key, restoreLineEndings(normalizeLineEndings(content), crlf))
       } catch (err) {
         throw mapMirageError(err, 'write', target.displayPath)
@@ -423,7 +426,7 @@ export class MirageFileSystem extends FileSystem {
       }
       let bytes: Uint8Array
       try {
-        bytes = await (await this.ops()).readFile(key)
+        bytes = await (await this.ops(signal, 'edit')).readFile(key)
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)
       }
@@ -437,7 +440,9 @@ export class MirageFileSystem extends FileSystem {
         target.displayPath,
       )
       try {
-        await (await this.ops()).writeFile(key, restoreLineEndings(edited, detectsCrlf(raw)))
+        await (
+          await this.ops(signal, 'edit')
+        ).writeFile(key, restoreLineEndings(edited, detectsCrlf(raw)))
       } catch (err) {
         throw mapMirageError(err, 'edit', target.displayPath)
       }

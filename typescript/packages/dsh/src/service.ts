@@ -14,7 +14,7 @@
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import type { MountSpec, RuntimeEntry } from '@struktoai/mirage-core'
+import type { MountSpec, Runtime, RuntimeEntry } from '@struktoai/mirage-core'
 import { buildRuntime, parseMountMode } from '@struktoai/mirage-core'
 import { buildResource, Workspace } from '@struktoai/mirage-node'
 import type { Mount, NodeWorkspaceOptions } from '@struktoai/mirage-node'
@@ -89,6 +89,13 @@ function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
   return buildRuntime(entry.name, entry.captures === undefined ? {} : { captures: entry.captures })
 }
 
+// A name shorthand builds exactly as the workspace would build it; holding
+// the instance early is what lets `confined` classify the world before the
+// (asynchronous) mounts finish resolving.
+function builtEntry(entry: RuntimeEntry): Runtime {
+  return typeof entry === 'string' ? buildRuntime(entry) : entry
+}
+
 /**
  * The one mirage `Workspace` behind every mirage-backed dsh provider
  * (`ctx.mirage`, mirroring how `ctx.e2b` owns one sandbox for the E2B
@@ -108,6 +115,7 @@ export class MirageService extends Service {
   readonly ready: Promise<Workspace>
 
   private built: Workspace | null = null
+  private readonly plannedRuntimes: readonly Runtime[] | undefined
 
   constructor(ctx: Context, config: MirageConfig = {}) {
     super(ctx, 'mirage')
@@ -129,6 +137,8 @@ export class MirageService extends Service {
       }
       options.runtimes = config.runtimes.map(toRuntimeEntry)
     }
+    this.plannedRuntimes = options.runtimes?.map(builtEntry)
+    if (this.plannedRuntimes !== undefined) options.runtimes = [...this.plannedRuntimes]
     const blocks = Object.values(config.mounts).some(isMountBlock)
     if (blocks) {
       this.ready = this.open(config.mounts, options)
@@ -152,6 +162,20 @@ export class MirageService extends Service {
       throw new Error('mirage: workspace is not ready yet; await ctx.mirage.ready')
     }
     return this.built
+  }
+
+  /**
+   * True while every runtime in the world is confined to the workspace
+   * (`Runtime.confined`): the default world is, and so are the bridged
+   * engines, while the host `local` python or a remote sandbox executes
+   * beyond anything this service can vouch for. Answers before `ready`
+   * from the constructor-resolved entries (mounts resolve
+   * asynchronously, runtimes never do) and from the live workspace
+   * afterwards, so a later `addRuntime` is seen.
+   */
+  get confined(): boolean {
+    const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.runtimeEntries
+    return entries.every((entry) => entry.confined)
   }
 
   private async open(

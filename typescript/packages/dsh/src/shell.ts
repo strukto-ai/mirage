@@ -208,14 +208,18 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   /**
-   * Every command runs inside the mounted workspace and the host is
-   * unreachable by construction, so this executor confines like a
+   * With every runtime in the world confined to the workspace, a
+   * command cannot reach the host, so this executor confines like a
    * workspace-write sandbox: reads and writes land only where mounts
    * (and their modes) allow. Declaring it lets confinement-aware
-   * plugins (dsh's permission presets) compose over this executor.
+   * plugins (dsh's permission presets) compose over this executor. A
+   * world holding a runtime that executes beyond the workspace (the
+   * host `local` python, a remote sandbox) voids that claim, so this
+   * answers undefined then — the base contract's "does not confine" —
+   * and those plugins refuse to compose instead of trusting a lie.
    */
-  override get sandboxMode(): NonNullable<ShellExecutor['sandboxMode']> {
-    return 'workspace-write'
+  override get sandboxMode(): ShellExecutor['sandboxMode'] {
+    return this.ctx.mirage.confined ? 'workspace-write' : undefined
   }
 
   resolve(request: ShellExecRequest): ShellExecSpec {

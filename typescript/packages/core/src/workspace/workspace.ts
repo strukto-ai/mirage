@@ -293,6 +293,11 @@ export class Workspace {
     return this.runtimes.add(runtime)
   }
 
+  /** The ordered runtime world, as a read-only view of the live list. */
+  get runtimeEntries(): readonly Runtime[] {
+    return this.runtimes.entries
+  }
+
   /**
    * Install a CLI under a head word, fully separate from mounts. The
    * name is the dispatch key (two installs of one spec under different

@@ -95,6 +95,7 @@ function toEvalValue(value: unknown): EvalValue {
  */
 export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'monty'
+  override readonly confined = true
   // No import system to resolve a module with, so `-m` has nothing to
   // run; the refusal names this runtime rather than inventing a
   // "No module named" that would imply a search happened.

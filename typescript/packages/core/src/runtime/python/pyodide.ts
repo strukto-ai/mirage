@@ -257,6 +257,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'pyodide'
+  override readonly confined = true
   readonly [EVALUATOR] = true as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null

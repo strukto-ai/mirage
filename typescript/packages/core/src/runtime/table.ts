@@ -42,6 +42,7 @@ import type { RuntimeOptions } from './types.ts'
  */
 export class VFSRuntime extends Runtime {
   readonly name = 'vfs'
+  override readonly confined = true
   // Declaring captures (even empty) turns the catch-all off; the
   // dispatcher reads this bit, not the array's length.
   readonly restricted: boolean

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { MountMode, RAMResource } from '@struktoai/mirage-core'
-import { Workspace } from '@struktoai/mirage-node'
+import { LocalRuntime, registerResourceFactory, Workspace } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
 
 describe('MirageService', () => {
@@ -84,6 +84,40 @@ describe('MirageService', () => {
         })
         .await(),
     ).rejects.toThrow('not both')
+  })
+
+  it('reads confinement live off an adopted workspace', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    const ctx = new Context()
+    await ctx.plugin(MirageService, { workspace: ws }).await()
+    expect(ctx.mirage.confined).toBe(true)
+    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    expect(ctx.mirage.confined).toBe(false)
+    await ws.close()
+  })
+
+  it('classifies declared runtimes before the mounts resolve', async () => {
+    // The executor runs synchronously, so release is assigned by here.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registerResourceFactory('gated-ram', async () => {
+      await gate
+      return new RAMResource()
+    })
+    const ctx = new Context()
+    const fiber = ctx.plugin(MirageService, {
+      mounts: { '/scratch': { resource: 'gated-ram' } },
+      runtimes: ['local'],
+    })
+    await fiber.await()
+    expect(() => ctx.mirage.workspace).toThrow('not ready')
+    expect(ctx.mirage.confined).toBe(false)
+    release()
+    await ctx.mirage.ready
+    expect(ctx.mirage.confined).toBe(false)
+    await fiber.dispose()
   })
 
   it('refuses both and neither of workspace/mounts', async () => {

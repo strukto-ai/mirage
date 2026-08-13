@@ -14,10 +14,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import { MountMode, RAMResource } from '@struktoai/mirage-core'
-import { Workspace } from '@struktoai/mirage-node'
+import { registerResourceFactory, Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
 import type { MirageFsConfig } from './fs.ts'
 import { MirageService } from './service.ts'
@@ -353,5 +353,38 @@ describe('editText', () => {
     expect(
       await errorCode(fs.editText(missing, { oldString: 'a', newString: 'b', replaceAll: false })),
     ).toBe('FS_STALE_VERSION')
+  })
+})
+
+describe('cancellation across readiness', () => {
+  it('refuses to dispatch a write whose signal fired during the ready wait', async () => {
+    // The executor runs synchronously, so release is assigned by here.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registerResourceFactory('gated-ram-write', async () => {
+      await gate
+      return new RAMResource()
+    })
+    const ctx = new Context()
+    const fiber = ctx.plugin(MirageService, {
+      mounts: { '/data': { resource: 'gated-ram-write', mode: 'write' } },
+    })
+    await fiber.await()
+    await ctx.plugin(MirageFileSystem, {}).await()
+    const fs = ctx.fs as MirageFileSystem
+    const controller = new AbortController()
+    const target = { targetKey: FsTargetKey('/data/out.txt'), displayPath: '/data/out.txt' }
+    const pending = fs.writeText(target, 'late', undefined, controller.signal)
+    // One macrotask parks the write on the gated ready, past its entry
+    // assertion; the abort then fires inside the wait window.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+    release()
+    expect(await errorCode(pending)).toBe('FS_ABORTED')
+    const ws = await ctx.mirage.ready
+    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+    await fiber.dispose()
   })
 })

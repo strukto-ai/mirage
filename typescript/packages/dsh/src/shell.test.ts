@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { MountMode, RAMResource } from '@struktoai/mirage-core'
-import { Workspace } from '@struktoai/mirage-node'
+import { LocalRuntime, Workspace } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
 import { MirageShellExecutor } from './shell.ts'
 import type { MirageShellConfig } from './shell.ts'
@@ -49,6 +49,12 @@ describe('resolve', () => {
   it('declares workspace-write confinement', async () => {
     const { shell } = await makeShell()
     expect(shell.sandboxMode).toBe('workspace-write')
+  })
+
+  it('claims no confinement once a runtime executes beyond the workspace', async () => {
+    const { shell, ws } = await makeShell()
+    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    expect(shell.sandboxMode).toBeUndefined()
   })
 
   it('applies defaults and caps the timeout', async () => {
