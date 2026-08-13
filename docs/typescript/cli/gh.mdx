@@ -1,0 +1,153 @@
+---
+title: gh
+description: Act on GitHub in the official CLI's vocabulary, alongside a github mount that reads the repository as files.
+icon: terminal
+---
+
+Act on GitHub in the official [CLI](https://cli.github.com)'s vocabulary.
+A repository is a tree, so mirage already reads one as files: the
+[`github` mount](/typescript/setup/github) is the read half, and `ls`,
+`cat` and `grep` are how an agent explores it. `gh` is the write half,
+plus the account-level operations a filesystem has no shape for.
+
+## Install
+
+```typescript
+import { GH } from '@struktoai/mirage-core'
+import { GitHubResource, Workspace } from '@struktoai/mirage-node'
+
+const config = { token: process.env.GITHUB_TOKEN!, repo: 'acme/tools' }
+const repo = await GitHubResource.create({
+  token: config.token,
+  owner: 'acme',
+  repo: 'tools',
+  ref: 'main',
+})
+
+const ws = new Workspace({ '/repo': repo })
+ws.registerCli('gh', GH, config)
+
+await ws.execute('gh repo view')
+```
+
+In YAML the same install rides the `clis:` section; see the
+[CLI overview](/typescript/cli/index).
+
+| Field     | Meaning                                                       |
+| --------- | ------------------------------------------------------------- |
+| `token`   | the API token, as `GH_TOKEN` carries for real gh               |
+| `repo`    | the default repository, as `[HOST/]OWNER/REPO`                 |
+| `baseUrl` | the API base, for GitHub Enterprise Server                     |
+
+`repo` is what real gh reads off the current directory's git remote. A
+workspace has no remote, so the install carries it, and a line that names
+no repository uses it. Two installs under different head words are two
+accounts.
+
+## Reading is the mount, acting is the CLI
+
+```bash
+ls /repo/src              # the tree, from the mount
+cat /repo/README.md       # a blob, from the mount
+grep -r TODO /repo        # the mount again
+
+gh api repos/acme/tools/contents/README.md -X PUT \
+  -f message='docs: fix a typo' -f content="$(base64 -w0 new.md)" -f sha=<blob-sha>
+```
+
+A write through `gh` lands on the same repository the mount reads, but it
+lands **by repository name rather than by any vfs path**, so the mount has
+nothing to aim a per-path invalidation at. The spec declares which
+resource it serves, and the executor expires that mount's index after the
+line, so the next `cat` or `ls` refetches instead of serving the pre-write
+bytes. Nothing is required of the caller.
+
+## Verbs
+
+```
+gh repo view   [<REPOSITORY>]
+gh repo fork   [<REPOSITORY>]  --fork-name
+gh repo rename  <NEW-NAME>     -R/--repo
+gh api          <ENDPOINT>     -X/--method  -f/--raw-field  -F/--field
+```
+
+Every level answers `--help`, and `man gh`, `man gh repo` and
+`man gh api` render the same text from the same spec.
+
+### repo
+
+```bash
+gh repo view                        # the install's repository
+gh repo view acme/tools
+gh repo view github.com/acme/tools  # the host segment is accepted
+
+gh repo fork acme/tools
+gh repo fork acme/tools --fork-name tools-patched
+
+gh repo rename tools-v2 -R acme/tools
+```
+
+`rename` takes the **new name** as the operand and the repository to
+rename on `-R`, which is the reverse of what the shape of the line
+suggests; that is upstream's grammar, not a mirage choice.
+
+`[HOST/]OWNER/REPO` is parsed from the right, so the owner and the
+repository are the last two segments and a leading host is dropped. The
+host is accepted for compatibility with lines copied from real gh but
+does **not** route: every call goes to the install's `baseUrl`. A second
+host means a second install.
+
+### api
+
+`gh api` reaches every endpoint that has no typed verb, which is most of
+them.
+
+```bash
+gh api repos/acme/tools
+gh api /user
+gh api repos/acme/tools/issues -f title='Bug' -f body='Steps...'
+gh api -X GET search/code -f q='repo:acme/tools TODO'
+gh api repos/acme/tools/issues -F draft=false -F milestone=3
+gh api repos/acme/tools/contents/NOTES.md -X DELETE -f message=rm -f sha=<blob-sha>
+gh api graphql -f query='{viewer{login}}'
+```
+
+The rules are gh's own:
+
+- The method is `GET` with no fields and `POST` once a field is given,
+  unless `-X` says otherwise.
+- A `GET` carries its fields in the **query string**; every other method
+  carries them in a **JSON body**.
+- `-f/--raw-field` is always a string. `-F/--field` reads `true`, `false`,
+  `null` and integers as their JSON types.
+- A call with no fields sends **no body at all**, so a bare `DELETE` is a
+  bare `DELETE` rather than an empty JSON object with a content type. Some
+  endpoints read those differently.
+- The leading slash is optional.
+
+Output is JSON on stdout, so the rest of the shell composes with it:
+
+```bash
+gh api repos/acme/tools | jq -r .default_branch
+gh api repos/acme/tools/issues | jq -r '.[].title'
+```
+
+## Divergences from upstream gh
+
+`gh` is virtualized, not wrapped, so the table below is the whole of what
+differs. Everything else matches `gh` 2.85.
+
+| Divergence                                                                 | Why                                                                                            |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `gh api` pretty-prints the response; real gh prints the body verbatim       | the reader is usually an agent or `jq`, and an indented body is what a human reads              |
+| `gh repo view` prints the REST repository object, not gh's text summary     | upstream's summary is a GraphQL call with its own field set; `--json`/`-q`/`-t` are not built   |
+| `{owner}`, `{repo}` and `{branch}` are **not** substituted in an endpoint   | not built yet; write the names out, or the request 404s on the literal braces                    |
+| `--paginate`, `-q/--jq`, `-H`, `--input`, `--silent`, `-i` are not built    | not built yet; pipe to `jq` for selection, and paginate with `-f page=2`                        |
+| `-F` reads no `@file` values, and `key[sub]=` / `key[]=` nesting is flat    | not built yet                                                                                   |
+| `repo rename` has no `-y/--yes`                                             | there is no prompt to skip: nothing in a workspace is interactive                                |
+| `repo fork` has no `--clone`, `--remote`, `--org`                           | those act on a host checkout and a git remote, which a workspace has neither of                  |
+| a `HOST/` prefix is accepted but never routes                               | one install is one account on one host; a second host is a second install                        |
+
+The interactive and host-side verbs (`auth`, `gist`, `codespace`,
+`browse`, `repo clone`) are out of scope for a virtualized CLI, the same
+way they are for the other account CLIs.
