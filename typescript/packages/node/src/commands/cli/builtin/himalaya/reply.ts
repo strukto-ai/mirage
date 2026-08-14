@@ -39,6 +39,6 @@ export async function reply(inv: CLIInvocation): Promise<CommandFnResult> {
       postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
       quoteHeadline: fl.asStr('quote_headline') ?? '',
     },
-    inv.ops,
+    inv.doors,
   )
 }

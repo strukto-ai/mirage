@@ -173,7 +173,7 @@ describe('the ambient session is scoped to its workspace', () => {
         return [new Uint8Array(), new IOResult()]
       },
     })
-    wsA.registry.mountForPrefix('/ram/')?.register(rc)
+    wsA.registry.mountForPrefix('/ram/').register(rc)
     await wsA.execute('crossprobe', { cwd: '/ram/subdir' })
     expect(seen).toEqual(['/'])
   })
@@ -208,7 +208,7 @@ describe('the ambient session is scoped to its workspace', () => {
         return [new Uint8Array(), new IOResult()]
       },
     })
-    ws.registry.mountForPrefix('/ram/')?.register(rc)
+    ws.registry.mountForPrefix('/ram/').register(rc)
     await ws.execute('policyprobe', { cwd: '/ram/subdir' })
     expect(seen).toEqual(['/ram/subdir', '/ram/subdir'])
   })

@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     NoWorkspaceError, UnknownPathspecError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import remove_file, write_file
+from mirage.commands.cli.builtin.git.io import remove_file, restore_entry
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (BRANCH_PREFIX, HEAD_REF,
@@ -39,9 +39,10 @@ from mirage.commands.cli.builtin.git.reset import restored
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
-from mirage.commands.cli.builtin.git.util import HEAD, check_operands, fatal
+from mirage.commands.cli.builtin.git.util import (HEAD, check_operands, fatal,
+                                                  links_of)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -180,8 +181,9 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
                                     [after[path][1] for path in changed])
     for path in changed:
         name = path.decode("utf-8", errors="replace")
-        await write_file(dispatch, posixpath.join(location.worktree, name),
-                         blobs[after[path][1]])
+        mode, sha = after[path]
+        await restore_entry(dispatch, posixpath.join(location.worktree, name),
+                            mode, blobs[sha])
     for path in set(before) - set(after):
         name = path.decode("utf-8", errors="replace")
         await remove_file(dispatch, posixpath.join(location.worktree, name))
@@ -208,25 +210,24 @@ async def checkout(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if stat_path is None or mount_root is None or dispatch is None:
+        if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         check_operands(texts, UnknownSwitchError)
         if not texts:
             raise UnknownPathspecError("")
         target = texts[0]
-        repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, location = await opened(fl, doors)
         head = await read_head(dispatch, location.gitdir)
         creating = fl.as_bool("b")
         ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
@@ -264,7 +265,7 @@ async def checkout(
         # collision has to be decided per file. git names the file
         # inside such a directory, so the list has to hold it.
         found = await scan(dispatch, stat_path, location, tracked,
-                           UNTRACKED_ALL)
+                           UNTRACKED_ALL, links_of(doors))
         unstaged = await work_changes(dispatch, location.worktree,
                                       state.entries, found)
         # Both kinds of uncommitted change count: an edit in the working

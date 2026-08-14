@@ -27,9 +27,9 @@ from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  start_point)
+                                                  links_of, start_point)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -95,22 +95,21 @@ async def reset(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if stat_path is None or mount_root is None or dispatch is None:
+        if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         check_operands(texts, UnknownSwitchError)
-        repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, location = await opened(fl, doors)
         state = await read_index(dispatch, location.gitdir)
         tree = await asyncio.to_thread(head_entries, repo) or {}
         start = start_point(fl)
@@ -142,7 +141,7 @@ async def reset(
         found = await scan(
             dispatch, stat_path, location,
             {path.decode("utf-8", errors="replace")
-             for path in state.entries}, UNTRACKED_NO)
+             for path in state.entries}, UNTRACKED_NO, links_of(doors))
         unstaged = await work_changes(dispatch, location.worktree,
                                       state.entries, found)
     except GitError as exc:

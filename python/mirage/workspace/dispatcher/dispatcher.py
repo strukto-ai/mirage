@@ -214,7 +214,13 @@ class Dispatcher:
                 and not path_allowed(dst.virtual)):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES),
                                   dst.virtual)
-        if op in NAMESPACE_TABLE_OPS:
+        # An unlink of a link is the removal half of `symlink`, and the
+        # door owns both: a link has no backend entry, so forwarding it
+        # reaches a backend that has never heard of the name and answers
+        # ENOENT with the link still there. An unlink of anything else
+        # is an ordinary backend write.
+        if op in NAMESPACE_TABLE_OPS or (
+                op == "unlink" and self._namespace.is_link(path.virtual)):
             return (await self._namespace_table_op(op, path, kwargs,
                                                    report), IOResult())
         # `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts
@@ -368,7 +374,8 @@ class Dispatcher:
         clears the gates with an empty prefix.
 
         Args:
-            op (str): ``symlink`` or ``readlink``.
+            op (str): ``symlink``, ``readlink``, or the ``unlink`` of a
+                path the node table holds a link for.
             path (PathSpec): the link's own path, never followed.
             kwargs (dict[str, Any]): op arguments (``target`` for
                 symlink).
@@ -384,10 +391,14 @@ class Dispatcher:
         policies = self._namespace.registry.policies
         write = op in POLICY_WRITE_OPS
         await pre_ops_gate(policies, op, path, write, owner or "")
-        if op == "symlink":
+        if op == "unlink":
+            target = self._namespace.readlink(path.virtual) or ""
+            await self._namespace.unlink(path.virtual)
+            result: str | None = None
+        elif op == "symlink":
             target = str(kwargs["target"])
             await self._namespace.symlink(path.virtual, target, time.time())
-            result: str | None = None
+            result = None
         else:
             found = self._namespace.readlink(path.virtual)
             if found is None:

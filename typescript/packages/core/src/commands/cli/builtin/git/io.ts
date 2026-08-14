@@ -12,15 +12,61 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
+import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
-import type { Dispatch } from './types.ts'
+import { SYMLINK_MODE, type Dispatch } from './types.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
 export async function readFile(dispatch: Dispatch, path: string): Promise<Uint8Array> {
   const [data] = await dispatch('read', PathSpec.fromStrPath(path))
   return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+}
+
+/**
+ * The bytes git stores for one working-tree entry.
+ *
+ * A symlink's blob is its target string, not what the target holds, so reading
+ * through the link would stage a second copy of the target under mode 100644
+ * and then report the entry modified forever after (the staged blob and the
+ * bytes behind the link never match). The target is namespace state, which is
+ * why it arrives on the stat rather than from a read.
+ */
+export async function entryBytes(
+  dispatch: Dispatch,
+  path: string,
+  info: FileStat,
+): Promise<Uint8Array> {
+  if (info.type === FileType.SYMLINK) {
+    const target = info.extra[LINK_TARGET_KEY]
+    if (typeof target === 'string') return new TextEncoder().encode(target)
+  }
+  return readFile(dispatch, path)
+}
+
+/**
+ * Materialize one tree entry into the working tree.
+ *
+ * A 120000 entry is a symlink whose blob is the target string, so it is
+ * restored through the namespace rather than written as content: writing the
+ * blob would leave a regular file spelling the target. The namespace overwrites
+ * a link of the same name, which is what a checkout that changes where a link
+ * points needs.
+ */
+export async function restoreEntry(
+  dispatch: Dispatch,
+  path: string,
+  mode: string,
+  blob: Uint8Array,
+): Promise<void> {
+  if (mode === SYMLINK_MODE) {
+    await dispatch('symlink', PathSpec.fromStrPath(path), [], {
+      target: new TextDecoder().decode(blob),
+    })
+    return
+  }
+  await writeFile(dispatch, path, blob)
 }
 
 /** Read a byte range of one virtual path. */

@@ -18,6 +18,17 @@ from dulwich.index import ConflictedIndexEntry, IndexEntry
 
 from mirage.types import FileStat
 
+# The modes git records in a tree. It reads only the owner execute bit
+# to choose between the two regular ones, and a mount that reports no
+# mode at all stages the ordinary one. A symlink is its own object
+# type, and its blob is the target string rather than anything the
+# target holds; symlinks are namespace state in mirage, so that mode is
+# only ever reached through the name plane.
+REGULAR = 0o100644
+EXECUTABLE = 0o100755
+SYMLINK = 0o120000
+OWNER_EXECUTE = 0o100
+
 
 @dataclass(frozen=True, slots=True)
 class RepoLocation:

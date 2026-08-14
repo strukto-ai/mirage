@@ -170,7 +170,14 @@ export class Dispatcher {
     if (opName === 'rename' && dstArg instanceof PathSpec && !pathAllowed(dstArg.virtual)) {
       throw eacces(dstArg.virtual)
     }
-    if (NAMESPACE_TABLE_OPS.has(opName)) {
+    // An unlink of a link is the removal half of `symlink`, and the door owns
+    // both: a link has no backend entry, so forwarding it reaches a backend
+    // that has never heard of the name and answers ENOENT with the link still
+    // there. An unlink of anything else is an ordinary backend write.
+    if (
+      NAMESPACE_TABLE_OPS.has(opName) ||
+      (opName === 'unlink' && this.namespace.isLink(path.virtual))
+    ) {
       return [await this.namespaceTableOp(opName, path, kwargs ?? {}, report), new IOResult()]
     }
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW: an op that acts on
@@ -391,7 +398,8 @@ export class Dispatcher {
    * and both gates run, and the write leaves an OpRecord — a scoped
    * kernel mount refuses exactly like a scoped shell. A link above
    * every mount is bare namespace structure and clears the gates with
-   * an empty prefix. Mirrors Python's Dispatcher._namespace_table_op.
+   * an empty prefix. Also answers the `unlink` of a path the node table holds
+   * a link for. Mirrors Python's Dispatcher._namespace_table_op.
    */
   private async namespaceTableOp(
     opName: string,
@@ -406,7 +414,11 @@ export class Dispatcher {
     await preOpsGate(this.policies, opName, path, write, owner ?? '')
     let target: string
     let result: string | null
-    if (opName === 'symlink') {
+    if (opName === 'unlink') {
+      target = this.namespace.readlink(path.virtual) ?? ''
+      await this.namespace.unlink(path.virtual)
+      result = null
+    } else if (opName === 'symlink') {
       target = String(kwargs.target)
       await this.namespace.symlink(path.virtual, target, Date.now() / 1000)
       result = null

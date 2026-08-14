@@ -15,6 +15,21 @@
 import type { FileStat } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
+// The modes git records in a tree. It reads only the owner execute bit to
+// choose between the two regular ones, and a mount that reports no mode at all
+// stages the ordinary one. A symlink is its own object type, and its blob is
+// the target string rather than anything the target holds; symlinks are
+// namespace state in mirage, so that mode is only ever reached through the
+// name plane.
+export const REGULAR = 0o100644
+export const EXECUTABLE = 0o100755
+export const SYMLINK = 0o120000
+export const OWNER_EXECUTE = 0o100
+// The same mode as `SYMLINK`, in the spelling a tree entry carries. The index
+// records a number and a tree records git's octal string, so both spellings
+// are real here and neither is a stand-in for the other.
+export const SYMLINK_MODE = '120000'
+
 /**
  * The workspace op dispatcher, as every module here consumes it.
  *

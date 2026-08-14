@@ -1133,6 +1133,132 @@
         "stdout": " 1 file changed, 0 insertions(+), 0 deletions(-)\n create mode 100644 blob.bin\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_status_reports_a_symlink_the_backend_cannot_see",
+      "seq": 568240,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "ln -s numbers.txt /repo/link && git -C /repo status --porcelain && rm /repo/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? link\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_status_reports_a_broken_symlink",
+      "seq": 568241,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "ln -s nowhere /repo/broken && git -C /repo status --porcelain && rm /repo/broken",
+      "expect": {
+        "exit": 0,
+        "stdout": "?? broken\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_a_staged_symlink_is_not_reported_modified",
+      "seq": 568242,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "ln -s numbers.txt /repo/link && git -C /repo add link && git -C /repo status --porcelain && git -C /repo reset > /dev/null && rm /repo/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "A  link\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_records_a_symlink_as_120000",
+      "seq": 568243,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b linkwork > /dev/null 2>&1 && ln -s numbers.txt /repo/link && git -C /repo add link && git -C /repo commit -m linked | tail -1",
+      "expect": {
+        "exit": 0,
+        "stdout": " create mode 120000 link\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_restores_a_symlink_as_a_link",
+      "seq": 568244,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && ls /repo/link 2>&1; git -C /repo checkout linkwork > /dev/null 2>&1 && readlink /repo/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "ls: cannot access '/repo/link': No such file or directory\nnumbers.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_symlink_branch_cleanup",
+      "seq": 568245,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -D linkwork > /dev/null && rm -f /repo/link && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_takes_the_author_from_the_environment",
+      "seq": 568246,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b whowork > /dev/null 2>&1 && printf 'env\\n' > /repo/numbers.txt && git -C /repo add -A && GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@x git -C /repo commit -m env > /dev/null && git -C /repo log -n 1 | sed -n 2p",
+      "expect": {
+        "exit": 0,
+        "stdout": "Author: Ada <ada@x>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_commit_keeps_the_stated_default_with_no_environment",
+      "seq": 568247,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "printf 'plain\\n' > /repo/numbers.txt && git -C /repo add -A && git -C /repo commit -m plain > /dev/null && git -C /repo log -n 1 | sed -n 2p",
+      "expect": {
+        "exit": 0,
+        "stdout": "Author: mirage <mirage@localhost>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_identity_branch_cleanup",
+      "seq": 568248,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -D whowork > /dev/null && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

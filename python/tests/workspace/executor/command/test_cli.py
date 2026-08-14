@@ -23,9 +23,13 @@ from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.policy import Action, Deny, Policy
+from mirage.policy.types import SessionContext
+from mirage.resource.ram import RAMResource
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.types import Limit, PathSpec
+from mirage.workspace import Workspace
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import handle_cli
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -575,3 +579,52 @@ def test_an_env_value_does_not_count_as_typed():
     parsed = parse_command(spec, [], "/", env={"X_VERSION": "9"})
     assert parsed.flags["--version"] == "9"
     assert parsed.typed_dests == []
+
+
+class DenyAwsWrites(Policy):
+    """Refuses any session write naming an AWS variable."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        if ctx.key.startswith("AWS_"):
+            return Deny("not yours to set\n")
+        return None
+
+
+async def stash(inv: CLIInvocation[None]):
+    """A leaf that writes the session plane through its door."""
+    view = inv.doors.session_view if inv.doors is not None else None
+    if view is None:
+        return b"no session plane\n", IOResult(exit_code=1)
+    await view.set(inv.texts[0], inv.texts[1])
+    return f"{inv.texts[0]}={view.get(inv.texts[0])}\n".encode(), IOResult()
+
+
+STASH = CLISpec(name="stash", fn=stash, rest=Operand(type="str"))
+
+
+@pytest.mark.asyncio
+async def test_a_leaf_writes_the_session_through_its_door():
+    # The session plane's door is what a registered CLI has instead of
+    # reaching into the session: the write lands, and the shell sees it.
+    with Workspace({"/ram/": RAMResource()}) as ws:
+        ws.register_cli("stash", STASH)
+        result = await ws.execute("stash TOKEN abc")
+        assert result.exit_code == 0
+        assert result.stdout == b"TOKEN=abc\n"
+        echoed = await ws.execute("echo $TOKEN")
+        assert echoed.stdout == b"abc\n"
+
+
+@pytest.mark.asyncio
+async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
+    # A door that skipped the gate would make an installed CLI the way
+    # around every pre_session rule, which is the whole reason writes
+    # go through one door rather than to the session.
+    with Workspace({"/ram/": RAMResource()}, policies=[DenyAwsWrites()]) as ws:
+        ws.register_cli("stash", STASH)
+        denied = await ws.execute("stash AWS_PROFILE prod")
+        assert denied.exit_code != 0
+        assert b"not yours to set" in (denied.stderr or b"")
+        assert (await ws.execute("echo $AWS_PROFILE")).stdout == b"\n"
+        allowed = await ws.execute("stash OTHER fine")
+        assert allowed.exit_code == 0

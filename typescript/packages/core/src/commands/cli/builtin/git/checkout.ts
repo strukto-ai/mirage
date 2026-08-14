@@ -30,7 +30,7 @@ import {
 } from './errors.ts'
 import { short } from './format.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { removeFile, under, writeFile } from './io.ts'
+import { removeFile, restoreEntry, under } from './io.ts'
 import { record } from './reflog.ts'
 import { BRANCH_PREFIX, detachHead, loadRefs, readHead, setHead, writeRef } from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
@@ -133,7 +133,7 @@ async function switchTo(
     if (old?.oid === entry.oid && old.mode === entry.mode) continue
     if (keep.has(path)) continue
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
-    await writeFile(dispatch, under(repo.location.worktree, path), blob)
+    await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob)
   }
   for (const path of before.keys()) {
     if (after.has(path)) continue
@@ -165,23 +165,21 @@ async function switchTo(
  * changed and not staged, and there is no reflog here to get it back from.
  */
 export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let carried: string
   let note: string
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkOperands(texts, UnknownSwitchError)
     const target = texts[0]
     if (target === undefined) throw new UnknownPathspecError('')
-    const repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     const head = await readHead(dispatch, repo.location.gitdir)
     const creating = fl.asBool('b')
     const ref = `${BRANCH_PREFIX}${target}`
@@ -220,7 +218,14 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     // untracked directory to one `dir/` entry, and a collision has to be
     // decided per file. git names the file inside such a directory, so the
     // list has to hold it.
-    const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_ALL)
+    const found = await scan(
+      dispatch,
+      statPath,
+      repo.location,
+      tracked,
+      UNTRACKED_ALL,
+      doors.ns?.links ?? null,
+    )
     const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
     // Both kinds of uncommitted change count: an edit in the working tree, and
     // one already staged. Leaving the staged ones out is what silently threw

@@ -34,35 +34,59 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.status import render_report
 from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
-from mirage.commands.cli.builtin.git.util import fatal
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.builtin.git.util import fatal, links_of
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import SessionView
 
 # git tags the first commit on a branch so the reflog reads
 # "commit (initial): ..." rather than plain "commit: ...".
 ROOT_NOTE = " (initial)"
 DEFAULT_NAME = "mirage"
 DEFAULT_EMAIL = "mirage@localhost"
+# The environment git reads an identity from. There is no
+# config file behind a mount, so these are the only real source.
+AUTHOR_NAME = "GIT_AUTHOR_NAME"
+AUTHOR_EMAIL = "GIT_AUTHOR_EMAIL"
+FALLBACK_EMAIL = "EMAIL"
 UTC = 0
 
 
-def identity(fl: FlagView) -> bytes:
+def identity(fl: FlagView, session: SessionView | None = None) -> bytes:
     """Who to record as author and committer.
 
-    git reads ``user.name`` and ``user.email`` from a config file it
-    finds by walking the filesystem and the user's home directory.
-    Neither is reachable from a mount, so the identity is taken from
-    ``--author`` when given and is otherwise a stated default rather
-    than a guess at the operator's own name.
+    Three sources, in git's own order: ``--author`` outranks the
+    environment, and the environment outranks the fallback. git reads
+    ``GIT_AUTHOR_NAME`` and ``GIT_AUTHOR_EMAIL``, with ``EMAIL`` as the
+    fallback address, all pinned against git 2.50.
+
+    Two deliberate divergences, both because a config file is not
+    reachable from a mount. ``user.name``/``user.email`` are never
+    consulted, so the environment is the only place a real identity can
+    come from; and where git refuses to commit with no identity at all,
+    mirage records a stated default rather than a guess at the
+    operator's name. The committer is the author here, where git tracks
+    ``GIT_COMMITTER_*`` separately.
+
+    Read through the session plane's door rather than the frozen
+    ``inv.env`` snapshot, so a hidden name reads as unset exactly as it
+    does in the shell.
 
     Args:
         fl (FlagView): the leaf's flag bag.
+        session (SessionView | None): the session plane's door, None
+            outside a workspace.
     """
     author = fl.as_str("author")
     if author:
         return author.encode()
+    name = session.get(AUTHOR_NAME) if session is not None else None
+    if name:
+        email = (session.get(AUTHOR_EMAIL)
+                 or session.get(FALLBACK_EMAIL)) if session else None
+        return f"{name} <{email or DEFAULT_EMAIL}>".encode()
     return f"{DEFAULT_NAME} <{DEFAULT_EMAIL}>".encode()
 
 
@@ -115,23 +139,22 @@ async def commit(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if stat_path is None or mount_root is None or dispatch is None:
+        if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         message = fl.as_str("message")
         if not message:
             raise MissingMessageError()
-        repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, location = await opened(fl, doors)
         state = await read_index(dispatch, location.gitdir)
         if state.conflicts:
             raise UnmergedIndexError()
@@ -144,9 +167,10 @@ async def commit(
         if before is not None and before == after:
             raise NothingToCommitError(await
                                        render_report(dispatch, stat_path, repo,
-                                                     location, head))
+                                                     location, head,
+                                                     links_of(doors)))
         parents = [] if before is None else [repo.refs[HEAD_REF]]
-        who = identity(fl)
+        who = identity(fl, doors.session_view)
         when = int(time.time())
         written, tree = await asyncio.to_thread(build_commit, repo, state,
                                                 message, who, parents, when)

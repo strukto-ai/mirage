@@ -25,11 +25,11 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.index import read_index
-from mirage.commands.cli.builtin.git.io import read_file
+from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.types import (IndexState, RepoLocation,
                                                    StatusEntry, WorkTree)
 from mirage.commands.cli.builtin.git.worktree import scan
-from mirage.ops.types import StatPath
+from mirage.ops.types import LinkView, StatPath
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat
 from mirage.utils.errors import MISS_ERRORS
@@ -327,7 +327,8 @@ async def _differs(dispatch: DispatchFn, worktree: str, path: str,
     if info.size is not None and entry.size and info.size != entry.size:
         return True
     try:
-        data = await read_file(dispatch, posixpath.join(worktree, path))
+        data = await entry_bytes(dispatch, posixpath.join(worktree, path),
+                                 info)
     except MISS_ERRORS:
         return True
     return Blob.from_string(data).id != entry.sha
@@ -390,9 +391,14 @@ def merge(staged: dict[str, tuple[str, str | None]], unstaged: dict[str, str],
     return rows
 
 
-async def collect(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
-                  location: RepoLocation,
-                  mode: str) -> tuple[list[StatusEntry], IndexState, bool]:
+async def collect(
+    dispatch: DispatchFn,
+    stat_path: StatPath,
+    repo: BaseRepo,
+    location: RepoLocation,
+    mode: str,
+    links: LinkView | None = None
+) -> tuple[list[StatusEntry], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
     Args:
@@ -410,7 +416,7 @@ async def collect(dispatch: DispatchFn, stat_path: StatPath, repo: BaseRepo,
         path.decode("utf-8", errors="replace")
         for path in (set(state.entries) | set(state.conflicts))
     }
-    found = await scan(dispatch, stat_path, location, tracked, mode)
+    found = await scan(dispatch, stat_path, location, tracked, mode, links)
     unstaged = await work_changes(dispatch, location.worktree, state.entries,
                                   found)
     rows = merge(staged, unstaged, conflict_codes(state.conflicts),

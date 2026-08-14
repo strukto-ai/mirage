@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/policy/types.ts'
 import { CommandSpec, Operand, Option } from '../spec/types.ts'
+import type { CommandOpts } from '../config.ts'
+import type { CLIDoors } from './types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
 
 const verb: CLIVerbFn = () => null
@@ -261,5 +263,19 @@ describe('CLISpec aliases', () => {
           subcommands: [new CLISpec({ name: 'checkout', aliases: ['c o'], fn: verb })],
         }),
     ).toThrow(/alias 'c o'/)
+  })
+})
+
+describe('doors parity with the command tier', () => {
+  it('spells every door the way CommandOpts spells it', () => {
+    // A CLI leaf and a command handler reach the same planes. Spelling one
+    // fact two ways is how the two tiers end up with two vocabularies for one
+    // plane, and then with two behaviors. Checked at compile time because a
+    // TS interface has no fields to enumerate at runtime: a door CommandOpts
+    // does not declare fails to index, and a door whose type drifted fails to
+    // assign. The Python twin is tests/commands/cli/test_doors_parity.py.
+    type Shared = { [K in keyof CLIDoors]: CommandOpts[K] }
+    const parity: Shared = {} as CLIDoors
+    expect(parity).toBeDefined()
   })
 })

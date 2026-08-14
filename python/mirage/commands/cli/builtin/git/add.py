@@ -24,26 +24,21 @@ from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     UnknownPathspecError, UnknownSwitchError)
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index import read_index, write_index
-from mirage.commands.cli.builtin.git.io import read_file
+from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import store_blob
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
+from mirage.commands.cli.builtin.git.types import (EXECUTABLE, OWNER_EXECUTE,
+                                                   REGULAR, SYMLINK,
+                                                   RepoLocation, WorkTree)
 from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  start_point)
+                                                  links_of, start_point)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import StatPath
 from mirage.types import FileStat, FileType
-
-# git records one of two modes for a regular file and reads only the
-# owner execute bit to choose. A mount that reports no mode at all
-# stages the ordinary one, which is what the file will read back as.
-REGULAR = 0o100644
-EXECUTABLE = 0o100755
-OWNER_EXECUTE = 0o100
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +72,8 @@ def entry_mode(info: FileStat) -> int:
     Args:
         info (FileStat): what the mount says about the file.
     """
+    if info.type is FileType.SYMLINK:
+        return SYMLINK
     if info.mode is not None and info.mode & OWNER_EXECUTE:
         return EXECUTABLE
     return REGULAR
@@ -220,32 +217,31 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if stat_path is None or mount_root is None or dispatch is None:
+        if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         check_operands(texts, UnknownSwitchError)
         parsed = parse_flags(fl)
         if not texts and not parsed.every and not parsed.update:
             raise NothingSpecifiedError()
-        _repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        _repo, location = await opened(fl, doors)
         state = await read_index(dispatch, location.gitdir)
         tracked = {
             path.decode("utf-8", errors="replace")
             for path in state.entries
         }
         found = await scan(dispatch, stat_path, location, tracked,
-                           UNTRACKED_ALL)
+                           UNTRACKED_ALL, links_of(doors))
         ignores = await load_ignores(dispatch, location.gitdir,
                                      location.worktree)
         if parsed.update:
@@ -262,8 +258,9 @@ async def add(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
                                            start_point(fl), texts, found,
                                            tracked, ignores, parsed.force)
         for path in sorted(stage):
-            data = await read_file(dispatch,
-                                   posixpath.join(location.worktree, path))
+            data = await entry_bytes(dispatch,
+                                     posixpath.join(location.worktree, path),
+                                     found.files[path])
             sha = await store_blob(dispatch, location.commondir, data)
             state.entries[path.encode()] = staged_entry(
                 sha, found.files[path], len(data))

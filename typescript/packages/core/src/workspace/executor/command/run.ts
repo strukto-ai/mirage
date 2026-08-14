@@ -131,7 +131,7 @@ function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileS
  * mount root, the way real git stops discovery at a filesystem boundary. A path
  * under no mount answers "/" so the walk still terminates.
  */
-export function mountRootOf(registry: MountRegistry, virtual: string): string {
+function mountRootOf(registry: MountRegistry, virtual: string): string {
   return registry.tryMountFor(virtual)?.prefix ?? '/'
 }
 

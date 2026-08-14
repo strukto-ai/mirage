@@ -21,11 +21,15 @@ from dulwich import porcelain
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.types import CLIDoors
 from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.links import path_stat
-from mirage.workspace.executor.command.run import mount_root_of
+from mirage.workspace.executor.command.run import (mount_root_of,
+                                                   namespace_view_of)
+from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 
 AUTHOR = b"Test Author <test@example.com>"
 MOUNT = "/repo/"
@@ -197,3 +201,19 @@ def repo_facts(ws):
     """
     return (ws.dispatch, functools.partial(path_stat, ws.dispatch),
             functools.partial(mount_root_of, ws._registry))
+
+
+def repo_doors(ws) -> CLIDoors:
+    """The doors the dispatcher offers a git leaf inside a workspace.
+
+    Built the way ``handle_command`` builds them, so a test exercising
+    a leaf directly sees the same planes a typed line would.
+
+    Args:
+        ws (Workspace): the workspace under test.
+    """
+    return CLIDoors(dispatch=ws.dispatch,
+                    stat_path=functools.partial(path_stat, ws.dispatch),
+                    ns=namespace_view_of(ws._registry, ws._namespace,
+                                         ws.dispatch),
+                    session_view=session_view(Session(session_id="test")))

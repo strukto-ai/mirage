@@ -18,7 +18,7 @@ import {
   PathSpec,
   isMissingPath,
   type ByteSource,
-  type CLIVerbOpts,
+  type CLIDoors,
   type CommandFnResult,
   type FlagView,
 } from '@struktoai/mirage-core'
@@ -53,11 +53,11 @@ export function firstText(texts: readonly string[], label: string): string {
  * (the python executor upgrades them to PathSpec instead).
  */
 async function loadAttachments(
-  ops: CLIVerbOpts | undefined,
+  doors: CLIDoors | undefined,
   paths: readonly string[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
-  const dispatch = ops?.dispatch
+  const dispatch = doors?.dispatch
   if (dispatch === undefined) {
     throw new Error('--attach needs a workspace to read files from')
   }
@@ -95,7 +95,7 @@ export async function route(
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
-  ops: CLIVerbOpts | undefined,
+  doors: CLIDoors | undefined,
 ): Promise<CommandFnResult> {
   const raw = build(
     {
@@ -106,7 +106,7 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
-      attachments: await loadAttachments(ops, fl.asList('attach')),
+      attachments: await loadAttachments(doors, fl.asList('attach')),
     },
     source,
   )

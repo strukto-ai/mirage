@@ -22,7 +22,7 @@ from mirage.commands.cli.builtin.himalaya.builder import (Attachment, Compose,
                                                           split_addresses)
 from mirage.commands.cli.builtin.himalaya.deliver import (deliver,
                                                           save_sent_copy)
-from mirage.commands.cli.types import CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors
 from mirage.commands.spec.types import FlagView
 from mirage.core.email.config import EmailConfig
 from mirage.io.stream import yield_bytes
@@ -46,7 +46,7 @@ def first_text(texts: tuple[str, ...], label: str) -> str:
     return texts[0]
 
 
-async def load_attachments(ops: CLIVerbOpts | None,
+async def load_attachments(doors: CLIDoors | None,
                            paths: list[PathSpec]) -> tuple[Attachment, ...]:
     """Read --attach files through the workspace dispatcher.
 
@@ -56,7 +56,7 @@ async def load_attachments(ops: CLIVerbOpts | None,
     through.
 
     Args:
-        ops (CLIVerbOpts | None): the workspace doors, None outside one.
+        doors (CLIDoors | None): the workspace doors, None outside one.
         paths (list[PathSpec]): --attach values, cwd-resolved.
 
     Raises:
@@ -65,12 +65,12 @@ async def load_attachments(ops: CLIVerbOpts | None,
     """
     if not paths:
         return ()
-    if ops is None or ops.dispatch is None:
+    if doors is None or doors.dispatch is None:
         raise ValueError("--attach needs a workspace to read files from")
     attachments: list[Attachment] = []
     for spec in paths:
         try:
-            data, _ = await ops.dispatch("read", spec)
+            data, _ = await doors.dispatch("read", spec)
         except FileNotFoundError:
             raise ValueError(f"read attachment {spec.virtual}: "
                              "No such file or directory") from None
@@ -87,7 +87,7 @@ async def route(
     fl: FlagView,
     stdin: ByteSource | None,
     source: Source | None,
-    ops: CLIVerbOpts | None,
+    doors: CLIDoors | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Assemble a message, then send it or write its MIME to stdout.
 
@@ -100,7 +100,7 @@ async def route(
         fl (FlagView): the leaf's parsed flags.
         stdin (ByteSource | None): piped body, used when --body is absent.
         source (Source | None): the replied-to or forwarded message.
-        ops (CLIVerbOpts | None): the workspace doors, read only when
+        doors (CLIDoors | None): the workspace doors, read only when
             --attach names files to load.
     """
     compose = Compose(
@@ -111,7 +111,7 @@ async def route(
         subject=fl.as_str("subject"),
         body=await read_body(fl, stdin),
         signature=fl.as_str("signature"),
-        attachments=await load_attachments(ops, fl.as_paths("attach")),
+        attachments=await load_attachments(doors, fl.as_paths("attach")),
     )
     message = build(compose, source)
     # SMTP is a CRLF protocol and these bytes go straight onto the wire

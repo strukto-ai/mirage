@@ -17,7 +17,7 @@ import {
   cliSpecFor,
   enoent,
   materialize,
-  type CLIVerbOpts,
+  type CLIDoors,
   type IOResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
@@ -462,7 +462,7 @@ describe('himalaya verbs', () => {
     const files: Record<string, Uint8Array> = {
       '/scratch/note.txt': new TextEncoder().encode('the note body\n'),
     }
-    const ops: CLIVerbOpts = {
+    const doors: CLIDoors = {
       dispatch: (op: string, path: PathSpec) => {
         const data = files[path.virtual]
         if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
@@ -483,7 +483,7 @@ describe('himalaya verbs', () => {
         },
         stdin: null,
         env: {},
-        ops,
+        doors,
       }),
     )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
@@ -494,7 +494,7 @@ describe('himalaya verbs', () => {
   })
 
   it('compose --attach of a missing file names the path', async () => {
-    const ops: CLIVerbOpts = {
+    const doors: CLIDoors = {
       dispatch: (_op: string, path: PathSpec) => Promise.reject(enoent(path)),
     }
     await expect(
@@ -507,7 +507,7 @@ describe('himalaya verbs', () => {
           flags: { to: 'a@b.com', body: 'yo', attach: ['/scratch/gone.txt'] },
           stdin: null,
           env: {},
-          ops,
+          doors,
         }),
       ),
     ).rejects.toThrow('read attachment /scratch/gone.txt: No such file or directory')

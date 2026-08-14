@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -70,8 +70,9 @@ export async function renderReport(
   dispatch: Dispatch,
   statPath: StatPath,
   head: HeadRef,
+  links: LinkView | null = null,
 ): Promise<string> {
-  const [rows, state, noCommits] = await collect(repo, dispatch, statPath, UNTRACKED_NORMAL)
+  const [rows, state, noCommits] = await collect(repo, dispatch, statPath, UNTRACKED_NORMAL, links)
   const commit = head.commit === null ? null : short(head.commit, repo.abbrev)
   return longFormat(rows, head.branch, commit, noCommits, state.merging, false)
 }
@@ -85,20 +86,24 @@ export async function renderReport(
  * path neither side knows about.
  */
 export async function status(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     const parsed = parseFlags(fl)
-    const repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     const head = await readHead(dispatch, repo.location.gitdir)
-    const [rows, state, noCommits] = await collect(repo, dispatch, statPath, parsed.untracked)
+    const [rows, state, noCommits] = await collect(
+      repo,
+      dispatch,
+      statPath,
+      parsed.untracked,
+      doors.ns?.links ?? null,
+    )
     const commit = head.commit === null ? null : short(head.commit, repo.abbrev)
     const body =
       parsed.porcelain || parsed.short

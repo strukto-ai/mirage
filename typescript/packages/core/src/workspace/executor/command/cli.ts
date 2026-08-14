@@ -14,10 +14,10 @@
 
 import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
 import { CLAP_EXIT, clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
-import { CLISpec, type CLIInvocation, type CLIVerbOpts } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
 import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { MountRoot, StatPath } from '../../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle } from '../../../commands/spec/types.ts'
@@ -163,7 +163,8 @@ export interface CliFacts {
   entries?: readonly Runtime[]
   dispatch?: DispatchFn
   statPath?: StatPath
-  mountRoot?: MountRoot
+  ns?: NamespaceView
+  sessionView?: SessionView
 }
 
 /**
@@ -180,8 +181,8 @@ export interface CliFacts {
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
  * a grammar to render it from (parseSpecFor). The workspace facts in
- * `facts` reach a verb as one `inv.ops` field, so a verb that never reads
- * it cannot touch a mount.
+ * `facts` reach a verb as one `inv.doors` field, one door per state plane,
+ * so a verb that never reads it cannot touch a mount.
  */
 export async function handleCli(
   install: CLIInstall,
@@ -268,10 +269,11 @@ export async function handleCli(
   // field. Most CLIs never read it: an API client has no filesystem,
   // while `git` is nothing but one. Absent outside a workspace, so a verb
   // that needs a mount refuses there on its own.
-  const ops: CLIVerbOpts = {
+  const doors: CLIDoors = {
     ...(facts.dispatch !== undefined ? { dispatch: facts.dispatch } : {}),
     ...(facts.statPath !== undefined ? { statPath: facts.statPath } : {}),
-    ...(facts.mountRoot !== undefined ? { mountRoot: facts.mountRoot } : {}),
+    ...(facts.ns !== undefined ? { ns: facts.ns } : {}),
+    ...(facts.sessionView !== undefined ? { sessionView: facts.sessionView } : {}),
   }
   const inv: CLIInvocation = {
     config: install.config,
@@ -281,7 +283,7 @@ export async function handleCli(
     flags,
     stdin,
     env: envSnapshot(session),
-    ...(Object.keys(ops).length > 0 ? { ops } : {}),
+    ...(Object.keys(doors).length > 0 ? { doors } : {}),
   }
 
   let body: Promise<[ByteSource | null, IOResult] | null>

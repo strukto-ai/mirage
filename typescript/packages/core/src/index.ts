@@ -714,7 +714,7 @@ export {
   CLISpec,
   type CLISpecInit,
   type CLIVerbFn,
-  type CLIVerbOpts,
+  type CLIDoors,
   type CLIConfigModel,
   type CLIInvocation,
   type WalkFlagBag,

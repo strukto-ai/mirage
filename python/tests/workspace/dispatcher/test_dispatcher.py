@@ -19,7 +19,9 @@ import pytest
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (Action, Deny, GuardSpec, OpsContext, Policies,
                            Policy, PolicyDenied)
+from mirage.resource.ram import RAMResource
 from mirage.types import ConsistencyPolicy, FileType, MountMode, PathSpec
+from mirage.workspace import Workspace
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.session import Session
 
@@ -243,3 +245,29 @@ async def test_ungranted_mount_without_structure_still_denies(scoped_session):
         await dispatcher.dispatch("write",
                                   _path("/data/locked/f.txt"),
                                   data=b"x")
+
+
+@pytest.mark.asyncio
+async def test_unlink_removes_a_namespace_link():
+    # The door creates links (`symlink`), so it has to remove them too:
+    # a link has no backend entry, so forwarding the unlink reaches a
+    # backend that has never heard of the name and answers ENOENT,
+    # leaving the link in place. That is what left `git checkout` unable
+    # to drop a link the other branch does not have.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("echo hi > /ram/a.txt")
+        await ws.execute("ln -s a.txt /ram/link")
+        assert ws._namespace.is_link("/ram/link")
+        await ws.dispatch("unlink", PathSpec.from_str_path("/ram/link"))
+        assert not ws._namespace.is_link("/ram/link")
+        listing = await ws.execute("ls /ram")
+        assert b"link" not in (listing.stdout or b"")
+
+
+@pytest.mark.asyncio
+async def test_unlink_of_an_ordinary_file_still_reaches_the_backend():
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("echo hi > /ram/a.txt")
+        await ws.dispatch("unlink", PathSpec.from_str_path("/ram/a.txt"))
+        listing = await ws.execute("ls /ram")
+        assert (listing.stdout or b"").strip() == b""

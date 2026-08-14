@@ -20,7 +20,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -41,8 +41,8 @@ async def fake_dispatch(op, path, *args, **kwargs):
     return FILES[path.virtual], IOResult()
 
 
-def ops_with_files() -> CLIVerbOpts:
-    return CLIVerbOpts(dispatch=fake_dispatch)
+def doors_with_files() -> CLIDoors:
+    return CLIDoors(dispatch=fake_dispatch)
 
 
 @pytest.fixture
@@ -167,7 +167,7 @@ async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
                           "attach":
                           [PathSpec.from_str_path("/scratch/note.txt")],
                       },
-                      ops=ops_with_files()))
+                      doors=doors_with_files()))
     assert io.exit_code == 0
     message = BytesParser(policy=default_policy).parsebytes(await
                                                             materialize(out))
@@ -195,7 +195,7 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
                               "attach":
                               [PathSpec.from_str_path("/scratch/gone.txt")],
                           },
-                          ops=ops_with_files()))
+                          doors=doors_with_files()))
 
 
 @pytest.mark.asyncio

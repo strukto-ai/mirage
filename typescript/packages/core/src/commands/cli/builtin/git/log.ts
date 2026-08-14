@@ -86,15 +86,13 @@ async function startingPoints(
 
 /** Show commit logs. */
 export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
     checkOperands(texts)
     const parsed = parseFlags(fl)
-    const repo = await opened(fl, opts.statPath, opts.mountRoot, opts.dispatch)
+    const repo = await opened(fl, doors)
     const starts = await startingPoints(repo, revisionArg(texts), parsed)
     const commits = await select(repo, starts, parsed)
     const decor = needsDecorations(parsed.pretty) ? await decorations(repo) : null

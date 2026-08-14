@@ -15,8 +15,9 @@
 import logging
 import posixpath
 
+from mirage.commands.cli.builtin.git.types import SYMLINK
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,53 @@ async def read_file(dispatch: DispatchFn, path: str) -> bytes:
     """
     data, _ = await dispatch("read", PathSpec.from_str_path(path))
     return data if isinstance(data, bytes) else bytes(data)
+
+
+async def entry_bytes(dispatch: DispatchFn, path: str,
+                      info: FileStat) -> bytes:
+    """The bytes git stores for one working-tree entry.
+
+    A symlink's blob is its target string, not what the target holds, so
+    reading through the link would stage a second copy of the target
+    under mode 100644 and then report the entry modified forever after
+    (the staged blob and the bytes behind the link never match). The
+    target is namespace state, which is why it arrives on the stat
+    rather than from a read.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path.
+        info (FileStat): what the walk saw at that path, lstat-style.
+    """
+    if info.type is FileType.SYMLINK:
+        target = info.extra.get(LINK_TARGET_KEY)
+        if isinstance(target, str):
+            return target.encode()
+    return await read_file(dispatch, path)
+
+
+async def restore_entry(dispatch: DispatchFn, path: str, mode: int,
+                        blob: bytes) -> None:
+    """Materialize one tree entry into the working tree.
+
+    A 120000 entry is a symlink whose blob is the target string, so it
+    is restored through the namespace rather than written as content:
+    writing the blob would leave a regular file spelling the target.
+    The namespace overwrites a link of the same name, which is what a
+    checkout that changes where a link points needs.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path to materialize at.
+        mode (int): the tree entry's mode.
+        blob (bytes): the entry's blob content.
+    """
+    if mode == SYMLINK:
+        await dispatch("symlink",
+                       PathSpec.from_str_path(path),
+                       target=blob.decode("utf-8", errors="replace"))
+        return
+    await write_file(dispatch, path, blob)
 
 
 async def read_range(dispatch: DispatchFn, path: str, offset: int,

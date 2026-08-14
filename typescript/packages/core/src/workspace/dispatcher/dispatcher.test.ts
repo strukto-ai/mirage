@@ -106,3 +106,45 @@ describe('dispatch resolves filetype-registered ops by path extension', () => {
     }
   }, 30_000)
 })
+
+describe('unlink of a namespace link', () => {
+  it('removes the link, which no backend can see', async () => {
+    // The door creates links (`symlink`), so it has to remove them too: a
+    // link has no backend entry, so forwarding the unlink reaches a backend
+    // that has never heard of the name and answers ENOENT, leaving the link
+    // in place. That is what left `git checkout` unable to drop a link the
+    // other branch does not have.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const ws = new Workspace(
+      { '/ram': ram },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('echo hi > /ram/a.txt')
+      await ws.execute('ln -s a.txt /ram/link')
+      await ws.dispatch('unlink', '/ram/link')
+      const listing = await ws.execute('ls /ram')
+      expect(DEC.decode(listing.stdout)).not.toContain('link')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('still reaches the backend for an ordinary file', async () => {
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const ws = new Workspace(
+      { '/ram': ram },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('echo hi > /ram/a.txt')
+      await ws.dispatch('unlink', '/ram/a.txt')
+      const listing = await ws.execute('ls /ram')
+      expect(DEC.decode(listing.stdout).trim()).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+})

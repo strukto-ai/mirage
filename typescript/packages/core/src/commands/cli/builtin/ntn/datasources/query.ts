@@ -108,13 +108,13 @@ async function resolveSource(
 // mount as a second view of its own account's data.
 async function filterBody(
   fl: FlagView,
-  ops: CLIInvocation['ops'],
+  doors: CLIInvocation['doors'],
 ): Promise<Record<string, unknown> | null> {
   const inline = fl.asStr('filter')
   if (inline !== undefined && inline !== '') return parseJsonText(inline, '--filter')
   const source = fl.asStr('filter_file')
   if (source === undefined || source === '') return null
-  const dispatch = ops?.dispatch
+  const dispatch = doors?.dispatch
   if (dispatch === undefined) throw new Error('--filter-file needs a workspace to read files from')
   const [data] = await dispatch('read', PathSpec.fromStrPath(source))
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
@@ -132,7 +132,7 @@ export async function query(inv: CLIInvocation): Promise<CommandFnResult> {
     if (cursor !== undefined && cursor !== '') body.start_cursor = cursor
     const sorts = fl.asList('sort').map(parseSort)
     if (sorts.length > 0) body.sorts = sorts
-    const chosen = await filterBody(fl, inv.ops)
+    const chosen = await filterBody(fl, inv.doors)
     if (chosen !== null) body.filter = chosen
   } catch (err) {
     return usageError(err)

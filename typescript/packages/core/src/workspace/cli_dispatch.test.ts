@@ -19,6 +19,8 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { CLISpec, type CLIInvocation } from '../commands/cli/types.ts'
 import { Operand, Option } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
+import type { Policy } from '../policy/base.ts'
+import type { Action, SessionContext } from '../policy/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse.ts'
@@ -334,5 +336,62 @@ describe('policy cli fact', () => {
     expect(ok.exitCode).toBe(0)
     expect(seen.at(-1)).toBeNull()
     await ws.close()
+  })
+})
+
+class DenyAwsWrites implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    if (!ctx.key.startsWith('AWS_')) return null
+    return { kind: 'deny', message: 'not yours to set\n' }
+  }
+}
+
+/** A leaf that writes the session plane through its door. */
+async function stash(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
+  const view = inv.doors?.sessionView
+  if (view === undefined) {
+    return [new TextEncoder().encode('no session plane\n'), new IOResult({ exitCode: 1 })]
+  }
+  const [name, value] = [inv.texts[0] ?? '', inv.texts[1] ?? '']
+  await view.set(name, value)
+  return [new TextEncoder().encode(`${name}=${view.get(name) ?? ''}\n`), new IOResult()]
+}
+
+const STASH = new CLISpec({ name: 'stash', fn: stash, rest: new Operand({ type: 'str' }) })
+
+describe('the session plane reaches a CLI leaf', () => {
+  it('a leaf writes the session through its door', async () => {
+    // The session plane's door is what a registered CLI has instead of
+    // reaching into the session: the write lands, and the shell sees it.
+    const ws = buildWorkspace()
+    ws.registerCli('stash', STASH)
+    const result = await ws.execute('stash TOKEN abc')
+    expect([result.exitCode, dec.decode(result.stdout)]).toEqual([0, 'TOKEN=abc\n'])
+    const echoed = await ws.execute('echo $TOKEN')
+    expect(dec.decode(echoed.stdout)).toBe('abc\n')
+  })
+
+  it("a leaf's session write clears the same gate the shell does", async () => {
+    // A door that skipped the gate would make an installed CLI the way around
+    // every preSession rule, which is the whole reason writes go through one
+    // door rather than to the session.
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const ws = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [new DenyAwsWrites()],
+      },
+    )
+    ws.registerCli('stash', STASH)
+    const denied = await ws.execute('stash AWS_PROFILE prod')
+    expect(denied.exitCode).not.toBe(0)
+    expect(dec.decode(denied.stderr)).toContain('not yours to set')
+    expect(dec.decode((await ws.execute('echo $AWS_PROFILE')).stdout)).toBe('\n')
+    expect((await ws.execute('stash OTHER fine')).exitCode).toBe(0)
   })
 })

@@ -394,12 +394,12 @@ describe('handleEcho', () => {
 })
 
 describe('handlePrintf', () => {
-  const run = (args: string[]): [string, number] => {
-    const [out, io] = handlePrintf(args, new Session({ sessionId: 'test' }))
+  const run = async (args: string[]): Promise<[string, number]> => {
+    const [out, io] = await handlePrintf(args, new Session({ sessionId: 'test' }))
     return [decode(out as Uint8Array), io.exitCode]
   }
-  const stdout = (args: string[]): string => {
-    const [text, code] = run(args)
+  const stdout = async (args: string[]): Promise<string> => {
+    const [text, code] = await run(args)
     expect(code).toBe(0)
     return text
   }
@@ -467,116 +467,116 @@ describe('handlePrintf', () => {
     [['%d\n', '3.9'], '3\n', 1],
   ]
 
-  it.each(CASES)('printf %j → %j', (args, expected, code) => {
-    expect(run(args)).toEqual([expected, code])
+  it.each(CASES)('printf %j → %j', async (args, expected, code) => {
+    expect(await run(args)).toEqual([expected, code])
   })
 
-  it('reads \\xHH and \\NNN as bytes, \\u as a code point', () => {
+  it('reads \\xHH and \\NNN as bytes, \\u as a code point', async () => {
     // bash writes \xff as the byte 0xFF, which is not valid UTF-8 at all,
     // rather than as the code point U+00FF.
-    const bytes = (args: string[]): number[] => [
-      ...(handlePrintf(args, new Session({ sessionId: 'test' }))[0] as Uint8Array),
+    const bytes = async (args: string[]): Promise<number[]> => [
+      ...(((await handlePrintf(args, new Session({ sessionId: 'test' })))[0] ?? []) as Uint8Array),
     ]
-    expect(bytes(['\\xff'])).toEqual([0xff])
-    expect(bytes(['\\377'])).toEqual([0xff])
-    expect(bytes(['\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
-    expect(bytes(['\\x41\\x42'])).toEqual([0x41, 0x42])
-    expect(bytes(['%b', '\\xff'])).toEqual([0xff])
-    expect(bytes(['\\u00e9'])).toEqual([0xc3, 0xa9])
+    expect(await bytes(['\\xff'])).toEqual([0xff])
+    expect(await bytes(['\\377'])).toEqual([0xff])
+    expect(await bytes(['\\xc3\\xa9'])).toEqual([0xc3, 0xa9])
+    expect(await bytes(['\\x41\\x42'])).toEqual([0x41, 0x42])
+    expect(await bytes(['%b', '\\xff'])).toEqual([0xff])
+    expect(await bytes(['\\u00e9'])).toEqual([0xc3, 0xa9])
   })
 
-  it('quotes a raw byte as octal', () => {
-    expect(stdout(['%q\n', byteChar(0xff)])).toBe("$'\\377'\n")
+  it('quotes a raw byte as octal', async () => {
+    expect(await stdout(['%q\n', byteChar(0xff)])).toBe("$'\\377'\n")
   })
 
-  it('empty args → empty output', () => {
-    const [out] = handlePrintf([], new Session({ sessionId: 'test' }))
+  it('empty args → empty output', async () => {
+    const [out] = await handlePrintf([], new Session({ sessionId: 'test' }))
     expect((out as Uint8Array).byteLength).toBe(0)
   })
 
-  it('reuses the format for excess args, drops excess when no conversion', () => {
-    expect(stdout(['%s\n', 'c', 'a', 'b'])).toBe('c\na\nb\n')
-    expect(stdout(['hello\n', 'a', 'b', 'c'])).toBe('hello\n')
+  it('reuses the format for excess args, drops excess when no conversion', async () => {
+    expect(await stdout(['%s\n', 'c', 'a', 'b'])).toBe('c\na\nb\n')
+    expect(await stdout(['hello\n', 'a', 'b', 'c'])).toBe('hello\n')
   })
 
-  it('inf and nan', () => {
-    expect(stdout(['%f|%e|%g\n', 'inf', 'inf', 'inf'])).toBe('inf|inf|inf\n')
-    expect(stdout(['%f\n', '-inf'])).toBe('-inf\n')
-    expect(stdout(['%F|%G\n', 'nan', 'nan'])).toBe('NAN|NAN\n')
+  it('inf and nan', async () => {
+    expect(await stdout(['%f|%e|%g\n', 'inf', 'inf', 'inf'])).toBe('inf|inf|inf\n')
+    expect(await stdout(['%f\n', '-inf'])).toBe('-inf\n')
+    expect(await stdout(['%F|%G\n', 'nan', 'nan'])).toBe('NAN|NAN\n')
   })
 
-  it('%c of empty string is a NUL byte', () => {
-    expect(stdout(['[%c]', ''])).toBe('[\x00]')
+  it('%c of empty string is a NUL byte', async () => {
+    expect(await stdout(['[%c]', ''])).toBe('[\x00]')
   })
 
-  it('\\u / \\U unicode escapes', () => {
-    expect(stdout(['\\u00e9\n'])).toBe('é\n')
-    expect(stdout(['\\U0001F600'])).toBe('😀')
+  it('\\u / \\U unicode escapes', async () => {
+    expect(await stdout(['\\u00e9\n'])).toBe('é\n')
+    expect(await stdout(['\\U0001F600'])).toBe('😀')
   })
 
-  it('%q shell-quoting', () => {
-    expect(stdout(['%q\n', 'a b'])).toBe('a\\ b\n')
-    expect(stdout(['%q\n', ''])).toBe("''\n")
-    expect(stdout(['%q\n', "it's"])).toBe("it\\'s\n")
-    expect(stdout(['%q\n', 'ümlaut'])).toBe("$'\\303\\274mlaut'\n")
-    expect(stdout(['%q\n', 'tab\ttab'])).toBe("$'tab\\ttab'\n")
+  it('%q shell-quoting', async () => {
+    expect(await stdout(['%q\n', 'a b'])).toBe('a\\ b\n')
+    expect(await stdout(['%q\n', ''])).toBe("''\n")
+    expect(await stdout(['%q\n', "it's"])).toBe("it\\'s\n")
+    expect(await stdout(['%q\n', 'ümlaut'])).toBe("$'\\303\\274mlaut'\n")
+    expect(await stdout(['%q\n', 'tab\ttab'])).toBe("$'tab\\ttab'\n")
   })
 
-  it('%a at IEEE double precision (differs from bash long double)', () => {
-    expect(stdout(['%a\n', '1.0'])).toBe('0x1p+0\n')
-    expect(stdout(['%a\n', '0.5'])).toBe('0x1p-1\n')
-    expect(stdout(['%a\n', '3.14'])).toBe('0x1.91eb851eb851fp+1\n')
-    expect(stdout(['%A\n', '255.5'])).toBe('0X1.FFP+7\n')
+  it('%a at IEEE double precision (differs from bash long double)', async () => {
+    expect(await stdout(['%a\n', '1.0'])).toBe('0x1p+0\n')
+    expect(await stdout(['%a\n', '0.5'])).toBe('0x1p-1\n')
+    expect(await stdout(['%a\n', '3.14'])).toBe('0x1.91eb851eb851fp+1\n')
+    expect(await stdout(['%A\n', '255.5'])).toBe('0X1.FFP+7\n')
   })
 
-  it('-v assigns to a variable and prints nothing', () => {
+  it('-v assigns to a variable and prints nothing', async () => {
     const s = new Session({ sessionId: 'test' })
-    const [out, io] = handlePrintf(['-v', 'V', 'x=%d', '42'], s)
+    const [out, io] = await handlePrintf(['-v', 'V', 'x=%d', '42'], s)
     expect(out).toBeNull()
     expect(io.exitCode).toBe(0)
     expect(s.env.V).toBe('x=42')
   })
 
-  it('-v targets an array element', () => {
+  it('-v targets an array element', async () => {
     const s = new Session({ sessionId: 'test' })
-    const [, io] = handlePrintf(['-v', 'arr[2]', 'hi'], s)
+    const [, io] = await handlePrintf(['-v', 'arr[2]', 'hi'], s)
     expect(io.exitCode).toBe(0)
     // Indices 0 and 1 are holes, not empty elements.
     expect(s.arrays.arr).toEqual([null, null, 'hi'])
   })
 
-  it('-v with an invalid name errors before the format runs', () => {
+  it('-v with an invalid name errors before the format runs', async () => {
     const s = new Session({ sessionId: 'test' })
-    const [, io] = handlePrintf(['-v', '1bad', 'x'], s)
+    const [, io] = await handlePrintf(['-v', '1bad', 'x'], s)
     expect(io.exitCode).toBe(2)
     expect(decode(io.stderr as Uint8Array)).toBe("printf: `1bad': not a valid identifier\n")
-    const [, io2] = handlePrintf(['-v', '1bad', '%d', 'nope'], s)
+    const [, io2] = await handlePrintf(['-v', '1bad', '%d', 'nope'], s)
     expect(io2.exitCode).toBe(2)
     expect(decode(io2.stderr as Uint8Array)).toBe("printf: `1bad': not a valid identifier\n")
   })
 
-  it('-v rejects an empty subscript but allows a blank one', () => {
+  it('-v rejects an empty subscript but allows a blank one', async () => {
     const s = new Session({ sessionId: 'test' })
-    const [, io] = handlePrintf(['-v', 'a[]', 'x'], s)
+    const [, io] = await handlePrintf(['-v', 'a[]', 'x'], s)
     expect(io.exitCode).toBe(2)
     expect(decode(io.stderr as Uint8Array)).toBe("printf: `a[]': not a valid identifier\n")
     expect('a' in s.arrays).toBe(false)
     // `a[ ]` is a valid arithmetic 0, not an empty subscript.
-    const [, io2] = handlePrintf(['-v', 'a[ ]', 'x'], s)
+    const [, io2] = await handlePrintf(['-v', 'a[ ]', 'x'], s)
     expect(io2.exitCode).toBe(0)
     expect(s.arrays.a).toEqual(['x'])
   })
 
-  it('-v refuses a readonly scalar and a readonly array element', () => {
+  it('-v refuses a readonly scalar and a readonly array element', async () => {
     const s = new Session({ sessionId: 'test', env: { R: 'orig' } })
     s.readonlyVars.add('R')
-    const [, io] = handlePrintf(['-v', 'R', 'new'], s)
+    const [, io] = await handlePrintf(['-v', 'R', 'new'], s)
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe('bash: R: readonly variable\n')
     expect(s.env.R).toBe('orig')
     s.arrays.A = ['x', 'y']
     s.readonlyVars.add('A')
-    const [, io2] = handlePrintf(['-v', 'A[0]', '%d', 'nope'], s)
+    const [, io2] = await handlePrintf(['-v', 'A[0]', '%d', 'nope'], s)
     expect(io2.exitCode).toBe(1)
     expect(decode(io2.stderr as Uint8Array)).toBe(
       'printf: nope: invalid number\nbash: A: readonly variable\n',
@@ -584,35 +584,35 @@ describe('handlePrintf', () => {
     expect(s.arrays.A).toEqual(['x', 'y'])
   })
 
-  it('-v on a bare name keeps the other elements of an existing array', () => {
+  it('-v on a bare name keeps the other elements of an existing array', async () => {
     const s = new Session({ sessionId: 'test' })
     s.arrays.B = ['p', 'q', 'r']
-    const [, io] = handlePrintf(['-v', 'B', 'Q'], s)
+    const [, io] = await handlePrintf(['-v', 'B', 'Q'], s)
     expect(io.exitCode).toBe(0)
     expect(s.arrays.B).toEqual(['Q', 'q', 'r'])
     expect('B' in s.env).toBe(false)
   })
 
-  it('-v with an out-of-range subscript keeps the scalar', () => {
+  it('-v with an out-of-range subscript keeps the scalar', async () => {
     const s = new Session({ sessionId: 'test', env: { V: 'orig' } })
-    const [, io] = handlePrintf(['-v', 'V[-2]', 'hi'], s)
+    const [, io] = await handlePrintf(['-v', 'V[-2]', 'hi'], s)
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe('bash: V[-2]: bad array subscript\n')
     expect(s.env.V).toBe('orig')
     expect('V' in s.arrays).toBe(false)
   })
 
-  it('-v with a negative subscript wraps over the scalar', () => {
+  it('-v with a negative subscript wraps over the scalar', async () => {
     const s = new Session({ sessionId: 'test', env: { W: 'orig' } })
-    const [, io] = handlePrintf(['-v', 'W[-1]', 'hi'], s)
+    const [, io] = await handlePrintf(['-v', 'W[-1]', 'hi'], s)
     expect(io.exitCode).toBe(0)
     expect(s.arrays.W).toEqual(['hi'])
     expect('W' in s.env).toBe(false)
   })
 
-  it('-v on __proto__ makes a real variable instead of touching the prototype', () => {
+  it('-v on __proto__ makes a real variable instead of touching the prototype', async () => {
     const s = new Session({ sessionId: 'test' })
-    expect(handlePrintf(['-v', '__proto__[0]', 'hi'], s)[1].exitCode).toBe(0)
+    expect((await handlePrintf(['-v', '__proto__[0]', 'hi'], s))[1].exitCode).toBe(0)
     expect(Object.hasOwn(s.arrays, '__proto__')).toBe(true)
     // Session records are null-prototype (ownRecord), so there is no
     // prototype to corrupt in the first place.
@@ -620,9 +620,9 @@ describe('handlePrintf', () => {
     expect(({} as Record<string, unknown>)[0]).toBeUndefined()
   })
 
-  it('-v keeps exit 1 on a bad number but still assigns', () => {
+  it('-v keeps exit 1 on a bad number but still assigns', async () => {
     const s = new Session({ sessionId: 'test' })
-    const [, io] = handlePrintf(['-v', 'V', '%d', 'notanum'], s)
+    const [, io] = await handlePrintf(['-v', 'V', '%d', 'notanum'], s)
     expect(io.exitCode).toBe(1)
     expect(s.env.V).toBe('0')
   })

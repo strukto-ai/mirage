@@ -51,7 +51,8 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceCaches, mountRootOf, namespaceViewOf } from './command/run.ts'
+import { dropServiceCaches, namespaceViewOf } from './command/run.ts'
+import { sessionView } from '../session/state.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -125,8 +126,10 @@ export async function handleCommand(
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
-  // A CLI that works on files rather than an API (`git`) reaches the mount
-  // through the facts below; the rest never read them.
+  // A CLI that works on files rather than an API (`git`) reaches the planes
+  // through the facts below; the rest never read them. They are the same
+  // ones `runOnMount` puts on `CommandOpts`, built the same way, so a CLI
+  // leaf and a command handler see one plane alike.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
     return handleCli(
@@ -138,7 +141,8 @@ export async function handleCommand(
         entries: registry.runtimeEntries,
         dispatch,
         statPath: (path: string) => pathStat(dispatch, path, null),
-        mountRoot: (path: string) => mountRootOf(registry, path),
+        ns: namespaceViewOf(registry, namespace ?? null, dispatch),
+        sessionView: sessionView(session, registry.policies),
       },
       () => dropServiceCaches(registry, cliInstall.spec.serves),
     )

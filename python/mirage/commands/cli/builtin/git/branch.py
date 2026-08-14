@@ -31,7 +31,7 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
 from mirage.commands.cli.builtin.git.util import HEAD, check_operands, fatal
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -176,14 +176,13 @@ async def branch(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    doors.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
@@ -193,7 +192,7 @@ async def branch(
         if dispatch is None:
             raise NoWorkspaceError()
         check_operands(texts, UnknownSwitchError)
-        repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, location = await opened(fl, doors)
         head = await read_head(dispatch, location.gitdir)
         force = fl.as_bool("D")
         if fl.as_bool("delete") or force:

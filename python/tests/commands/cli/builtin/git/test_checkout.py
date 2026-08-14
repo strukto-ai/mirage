@@ -314,3 +314,21 @@ async def test_an_unknown_switch_is_refused(git_rw):
     code, _out, err = await run(git_rw, "checkout -Z")
     assert code == 129
     assert err == b"error: unknown switch `Z'\n"
+
+
+@pytest.mark.asyncio
+async def test_checking_out_a_symlink_restores_a_link_not_a_file(git_rw):
+    # A 120000 entry materializes as a link in the working tree, not as
+    # a regular file holding the target string. The name plane owns
+    # links, so restoring one is a namespace write rather than a
+    # content write; writing the blob would leave a 5-byte regular file
+    # spelling "a.txt".
+    assert (await run(git_rw, "checkout -b side"))[0] == 0
+    await git_rw.execute("ln -s a.txt /repo/link")
+    assert (await run(git_rw, "add link"))[0] == 0
+    assert (await run(git_rw, "commit -m linked"))[0] == 0
+    assert (await run(git_rw, "checkout main"))[0] == 0
+    assert (await run(git_rw, "checkout side"))[0] == 0
+    listing = await git_rw.execute("ls -l /repo/link")
+    assert (listing.stdout or b"").startswith(b"lrwxrwxrwx")
+    assert b"link -> a.txt" in (listing.stdout or b"")

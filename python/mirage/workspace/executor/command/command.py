@@ -52,11 +52,12 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, mount_root_of, namespace_view_of,
-    run_on_mount, scalar_find_flags)
+    drop_service_caches, exec_node, namespace_view_of, run_on_mount,
+    scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; route already narrowed the name.
 JOB_HANDLERS = {
@@ -108,7 +109,9 @@ async def handle_command(
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
     # works on files rather than an API (`git`) reads the workspace
-    # facts it needs off `inv.ops`; the rest never look.
+    # facts it needs off `inv.doors`; the rest never look. The doors are
+    # the same ones `run_on_mount` puts on `CommandOpts`, built the same
+    # way, so a CLI leaf and a command handler see one plane alike.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
         return await handle_cli(
@@ -120,7 +123,8 @@ async def handle_command(
             dispatch=dispatch,
             stat_path=(functools.partial(path_stat, dispatch)
                        if dispatch is not None else None),
-            mount_root=functools.partial(mount_root_of, registry),
+            ns=namespace_view_of(registry, namespace, dispatch),
+            session_view=session_view(session, registry.policies),
             drop_caches=functools.partial(drop_service_caches, registry,
                                           cli_install.spec.serves),
         )

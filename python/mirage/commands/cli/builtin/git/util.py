@@ -14,13 +14,29 @@
 
 from mirage.commands.cli.builtin.git.errors import (GitError,
                                                     UnrecognizedArgumentError)
+from mirage.commands.cli.types import CLIDoors
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 
 ROOT = "/"
 HEAD = "HEAD"
 STDOUT = "stdout"
+
+
+def links_of(doors: CLIDoors) -> LinkView | None:
+    """The name plane's link facts, None when no namespace is wired.
+
+    git walks the working tree itself rather than through a generic, so
+    it is one of the bespoke commands that has to ask for links or
+    silently cannot see one: without this a symlink reads as whatever
+    it points at, and a link to nothing reads as absent.
+
+    Args:
+        doors (CLIDoors): the invocation's doors, one per state plane.
+    """
+    return doors.ns.links if doors.ns is not None else None
 
 
 def start_point(fl: FlagView) -> str:

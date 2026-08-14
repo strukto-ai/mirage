@@ -77,20 +77,18 @@ export function restored(oid: string, mode: number): StagedEntry {
  * unstaged.
  */
 export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let unstaged: Map<string, string>
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkOperands(texts, UnknownSwitchError)
-    const repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     const start = startPoint(fl)
@@ -122,6 +120,7 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
       repo.location,
       new Set(after.entries.keys()),
       UNTRACKED_NO,
+      doors.ns?.links ?? null,
     )
     unstaged = await workChanges(repo, dispatch, repo.location.worktree, after.entries, found)
   } catch (err) {
