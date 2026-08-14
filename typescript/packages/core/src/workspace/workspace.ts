@@ -97,7 +97,7 @@ export class Workspace {
   private shellParserPromise: Promise<ShellParser> | null = null
   private readonly opened = new Set<Resource>()
   private readonly openOrder: Resource[] = []
-  readonly jobTable = new JobTable()
+  readonly jobTable: JobTable
   readonly agentId: string | null
   readonly cache: FileCache & Resource
   readonly namespace: Namespace
@@ -135,6 +135,7 @@ export class Workspace {
       }
     }
     this.wsId = options.workspaceId ?? newWorkspaceId()
+    this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore

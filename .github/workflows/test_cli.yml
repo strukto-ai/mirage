@@ -708,6 +708,9 @@ jobs:
           STORE_S3_ENDPOINT: http://localhost:9000
           STORE_S3_BUCKET: mirage-state
 
+      - name: Run cross-language job console interop (both directions)
+        run: bash integ/console.sh
+
       - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
         run: |
           bash integ/parity.sh \

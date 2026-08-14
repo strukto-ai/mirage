@@ -31,6 +31,9 @@ export type JobResult = [IOResult, ExecutionNode]
 /** Produces a job's output and its result. */
 export type JobRunner = (job: Job) => Promise<JobResult>
 
+/** Builds each new job's console from its job id. */
+export type ConsoleFactory = (jobId: number) => JobConsole
+
 /**
  * One background command, and everything it has printed.
  *
@@ -134,6 +137,21 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
 export class JobTable {
   private readonly jobs = new Map<number, Job>()
   private nextId = 1
+  private readonly consoleFactory: ConsoleFactory | null
+
+  /**
+   * @param consoleFactory builds each new job's console from its job
+   *   id; null means an in-memory console per job. A factory must hand
+   *   every job a fresh backing: ids restart at 1 when the table
+   *   empties (GNU numbering), so a store keyed on the id alone gets
+   *   reused, and a reused stream replays the previous job's chunks,
+   *   ending chunk included. What the factory builds stays the
+   *   embedder's to close: the table never closes a console, because a
+   *   console outlives its table entry.
+   */
+  constructor(consoleFactory: ConsoleFactory | null = null) {
+    this.consoleFactory = consoleFactory
+  }
 
   /**
    * Register a job and start it.
@@ -154,6 +172,8 @@ export class JobTable {
     // Without this, reaping after a targeted `wait` would leave a
     // later `wait %1` pointing at nothing.
     if (this.jobs.size === 0) this.nextId = 1
+    const jobConsole =
+      this.consoleFactory === null ? new JobConsole() : this.consoleFactory(this.nextId)
     const job = new Job({
       id: this.nextId,
       command: init.command,
@@ -161,6 +181,7 @@ export class JobTable {
       cwd: init.cwd,
       agent: init.agent ?? 'unknown',
       sessionId: init.sessionId ?? '',
+      console: jobConsole,
     })
     this.jobs.set(job.id, job)
     this.nextId += 1

@@ -19,6 +19,7 @@ import type { ByteSource } from '../../io/types.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
+import type { ConsoleFactory } from '../../shell/job_table.ts'
 import type { ShellParser } from '../../shell/parse.ts'
 import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
 import type { GuardSpec, Policy } from '../../policy/index.ts'
@@ -70,6 +71,15 @@ export interface WorkspaceOptions {
    */
   cache?: CacheConfig
   index?: IndexConfig
+  /**
+   * Builds each background job's console from its job id, so job
+   * output can live somewhere a reader in another process reaches
+   * (a Redis stream). Unset means an in-memory console per job. What
+   * the factory builds stays the caller's to close after the
+   * workspace closes; a console outlives its job-table entry, so the
+   * workspace never closes one.
+   */
+  consoleFactory?: ConsoleFactory
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
   sessionStore?: SessionStore

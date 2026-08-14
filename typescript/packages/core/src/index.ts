@@ -532,6 +532,7 @@ export {
   JobStatus,
   JobTable,
   KILLED_EXIT_CODE,
+  type ConsoleFactory,
   type JobResult,
   type JobRunner,
 } from './shell/job_table.ts'
