@@ -61,15 +61,22 @@ agent discovers state, the CLI is how it acts.
   subject is a repository that lives on a mount, so it reads that repository
   through the op dispatcher like any command. That is what makes `git` work on a
   RAM mount, a disk mount or an object store without knowing which. It reaches
-  the dispatcher through `CLIVerbOpts` (`dispatch`, `stat_path`, `mount_root`),
-  which `handle_cli`/`handleCli` puts on `inv.ops`; the field is None/absent
-  outside a workspace, and a verb that never reads it cannot touch a mount, so
-  this stays opt-in per verb rather than ambient. The door is one field read
-  rather than a parameter list the dispatcher inspects, because every leaf takes
-  exactly one `CLIInvocation` and nothing is threaded through keyword injection.
+  the dispatcher through `CLIDoors`, one door per state plane: `dispatch` and
+  `stat_path` for data, `ns` for the name plane (mount boundaries, links, attr
+  overlay), and `session_view` for session state. The mount prefix is
+  `ns.mounts.root_of`, not a fourth field. `handle_cli`/`handleCli` puts the
+  record on `inv.doors`; the field is None/absent outside a workspace, and a
+  verb that never reads it cannot touch a mount, so this stays opt-in per verb
+  rather than ambient. The door is one field read rather than a parameter list
+  the dispatcher inspects, because every leaf takes exactly one `CLIInvocation`
+  and nothing is threaded through keyword injection. Every field is spelled the
+  way `CommandOpts` (`commands/config.py`) spells it, so one fact reached from a
+  CLI leaf and reached from a command handler has one name; meta-tests pin that
+  (`tests/commands/cli/test_doors_parity.py`, and a compile-time mapped type in
+  `commands/cli/types.test.ts`).
   Do not give an account CLI a mount, and do not give `git` a `config_model`.
   Nuance: an account CLI verb MAY read an unrelated workspace file the user
-  named on the line through `inv.ops.dispatch` (himalaya's `--attach` reads the
+  named on the line through `inv.doors.dispatch` (himalaya's `--attach` reads the
   attachment path this way); what it must not do is treat a mount as a second
   view of its own account's data.
 
@@ -336,6 +343,13 @@ they bite:
   wrapper that delegates (as all of them now do) inherits link awareness for
   free. `exists` and `target_stat` answer through the op dispatcher, not one
   backend's stat, so a link that points into another mount resolves correctly.
+- **A CLI verb that walks a tree itself has to lstat through the same door**,
+  which on that tier is `CLIDoors.ns.links`. A walk built on `stat_path` alone
+  dereferences, so a link reads as its target and a broken one reads as absent.
+  `git`'s worktree walk did both until it opted in, which is why `git add`
+  stored a symlink as a regular file holding its target's bytes (real git
+  stores mode `120000` with the target as the blob) and why `git status` never
+  listed a broken one.
 - **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
   each have two paths: a backend with a native op (`find_core`, `du_size`/
   `du_entries`) and a backend walked by `readdir`. Link merging lives in one
@@ -625,3 +639,22 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   - a path is `str | PathSpec`, a backend handle is `accessor: Accessor` (`mirage.accessor.base`), an index is `index: IndexCacheStore | None` (`mirage.cache.index`), a stat function is `StatFn` (`mirage.types`). Ignored variadics are still typed (`*texts: str`).
   - a sentinel is a one-member `Enum`, never `object()`; that keeps it distinguishable from the real values sharing the variable.
     `tests/commands/test_no_object_annotations.py` enforces this and carries the only exemptions: four Python protocol methods (`__setattr__`, `__contains__`, `Mapping.pop`) whose signatures the language fixes, and one guard whose whole job is to catch a value the annotations already claim cannot arrive. Adding to that allowlist needs the same kind of reason.
+- **Every session write goes through `SessionView.set`.** A deployment refuses a
+  name (`AWS_*`, a credential) with a `pre_session` rule, and a writer that
+  reaches `session.env` directly makes that rule advisory. `export` and a plain
+  assignment always cleared the gate; the expansion-time writers did not, so
+  `${X:=d}`, `$((X=5))`, `(( ))`, `printf -v` and `for ((X=0; ...))` each wrote
+  past every policy. The view is threaded into expansion explicitly rather than
+  read from ambient state, and defaults to `None` (correct outside a workspace,
+  where the env is the only state there is). Reads (`$X`) stay sync; only the
+  writers await. `tests/workspace/expand/test_session_gate.py` and
+  `integ/session/writers.json` hold the line in both languages.
+- **The record client is a substrate, not a session detail.** Sessions, the
+  namespace node table and workspace metadata are three tables that persist the
+  same way, so the keyed-record clients live in `workspace/record/`
+  (`DiskRecordClient` with an `O_CREAT|O_EXCL` lockfile and `rename(2)`,
+  `S3RecordClient` with If-Match CAS) and import none of the three. They used to
+  live inside the session package, which made the other two import upward into
+  it; a layering test in each language fails if that returns. The two clients
+  deliberately do not merge: different concurrency contract, different blob
+  layout, different key shape.
