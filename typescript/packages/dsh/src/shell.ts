@@ -22,10 +22,19 @@ import type {
   ShellProcessRead,
   ShellProcessStatus,
   ShellRunResult,
+  ShellSandboxInfo,
 } from '@deepseek-ai/dsh-shell'
-import type { ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
+import {
+  Channel,
+  JobConsole,
+  RAMConsoleStore,
+  exitOutcome,
+  KILLED_OUTCOME,
+} from '@struktoai/mirage-core'
+import type { ConsoleChunk, ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tailCap } from './text.ts'
+import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 import type {} from './service.ts'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -33,6 +42,18 @@ const MAX_TIMEOUT_MS = 600_000
 const DEFAULT_STDOUT_MAX_BYTES = 200_000
 const DEFAULT_STDERR_MAX_BYTES = 64_000
 const STDERR_MARKER = '\n--- stderr ---\n'
+// What the console may hold that the drain loop has not consumed yet.
+// Capping the delta does not bound this: a reader's cursor advances but
+// frees nothing, so an uncapped store keeps every chunk of a noisy
+// command for the life of the process. Five deltas' worth, because the
+// drain awaits the spill's own writes and has to be free to fall
+// briefly behind, and bounded, so a command that outruns it forever
+// cannot grow the heap.
+const CONSOLE_RETENTION_BYTES = 5 * DEFAULT_STDOUT_MAX_BYTES
+
+// Monotonic within the process, so concurrent background commands never
+// collide on a spill filename. Not reset, so it needs no time or randomness.
+let spillCounter = 0
 
 /** Configuration for the mirage shell executor. */
 export interface MirageShellConfig {
@@ -62,6 +83,18 @@ export interface MirageShellConfig {
    * session, per mirage's `ExecuteOptions` semantics.
    */
   sessionId?: string
+  /**
+   * When set, a background command whose streamed output overruns its
+   * delta budget spills its full stdout and stderr to files under this
+   * workspace directory, and `readOutput()` points at them so a reader
+   * can recover what the delta dropped. The directory is a workspace
+   * path (e.g. `/tmp` on a ram mount), so the agent reads the spill
+   * through the same VFS as everything else; the writes go through the
+   * workspace, so they appear in history like any other write. Unset
+   * (the default) means no spill: output that overruns is simply
+   * flagged `lossy`, the honest "no safe path available" answer.
+   */
+  spillDir?: string
 }
 
 function collect(text: string, maxBytes: number): CollectedOutput {
@@ -74,6 +107,7 @@ function executeOptions(
   signal: AbortSignal,
   sessionId: string | undefined,
   fallbackWorkdir: string,
+  sink?: JobConsole,
 ): ExecuteOptions & { provision?: false } {
   const env = {
     ...(spec.env ?? {}),
@@ -91,64 +125,136 @@ function executeOptions(
     ...(cwd !== undefined ? { cwd } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(spec.stdin !== undefined ? { stdin: new TextEncoder().encode(spec.stdin) } : {}),
+    ...(sink !== undefined ? { sink } : {}),
   }
 }
 
 /**
- * A background command over the workspace executor. mirage buffers a
- * command's whole output internally, so reads deliver everything at
- * completion rather than incrementally; `kill()` aborts cooperatively (the
- * executor observes the signal between pipeline stages and inside sleep).
+ * A background command over the workspace executor, streamed through a
+ * `JobConsole`. The command runs with the console as its `sink`, so each
+ * statement of a compound line lands as it finishes rather than the whole
+ * line arriving at the end (a single command still shows up in one chunk,
+ * having nothing to emit before it completes). A background follow loop
+ * drains the console into `pending`, which `readOutput()` hands back and
+ * clears — consuming, so consecutive reads never re-deliver. Unread output
+ * is bounded to `budget` bytes: the head is dropped and `lossy` set once
+ * it overruns, keeping the tail, which is where the full stream spills to
+ * a file. Both ends of the conduit are bounded, because draining the
+ * console does not free it: the console holds a retention budget of its
+ * own, and a command that outruns this loop by that much loses chunks,
+ * which arrives here as a gap in the sequence. `kill()` aborts
+ * cooperatively (the executor observes the signal between pipeline stages
+ * and inside sleep).
  */
 class MirageShellProcess implements ShellProcess {
   status: ShellProcessStatus = 'running'
   exitCode: number | null = null
   signal: NodeJS.Signals | null = null
+  sandbox?: ShellSandboxInfo
   readonly done: Promise<void>
 
   private readonly controller: AbortController
-  private readonly stdoutMaxBytes: number
-  private readonly stderrMaxBytes: number
+  private readonly console: JobConsole
+  private readonly budget: number
+  private readonly spill: SpillSink | null
+  private readonly sandboxInfo: ShellSandboxInfo | undefined
+  private readonly consumed: Promise<void>
   private pending = ''
   private lossy = false
+  private inStderr = false
   private settled = false
+  private expectSeq = 0
 
   constructor(
     run: Promise<ExecuteResult>,
     controller: AbortController,
-    stdoutMaxBytes: number,
-    stderrMaxBytes: number,
+    console_: JobConsole,
+    budget: number,
+    spill: SpillSink | null,
+    sandboxInfo: ShellSandboxInfo | undefined,
   ) {
     this.controller = controller
-    this.stdoutMaxBytes = stdoutMaxBytes
-    this.stderrMaxBytes = stderrMaxBytes
+    this.console = console_
+    this.budget = budget
+    this.spill = spill
+    this.sandboxInfo = sandboxInfo
+    this.consumed = this.consume()
     this.done = run.then(
-      (result) => {
-        this.finish(result)
-      },
-      (err: unknown) => {
-        this.fail(err)
-      },
+      (result) => this.settle(result, null),
+      (err: unknown) => this.settle(null, err),
     )
   }
 
-  private finish(result: ExecuteResult): void {
-    this.settled = true
-    this.status = 'completed'
-    this.exitCode = result.exitCode
-    const stdout = collect(result.stdoutText, this.stdoutMaxBytes)
-    const stderr = collect(result.stderrText, this.stderrMaxBytes)
-    this.lossy = stdout.truncated || stderr.truncated
-    this.pending += stdout.text
-    if (stderr.text !== '') this.pending += STDERR_MARKER + stderr.text
+  private async consume(): Promise<void> {
+    // follow() yields every chunk in sequence and ends on the CONTROL
+    // chunk that finish() appends.
+    for await (const chunk of this.console.follow(0)) {
+      if (chunk.channel === Channel.CONTROL) return
+      // A seq that skips means the console trimmed chunks this loop had
+      // not read: the command outran the drain by a whole retention
+      // budget. Those bytes are gone for good, so say so, and stop the
+      // spill rather than let a file with a hole in it be handed back
+      // as the full stream.
+      if (chunk.seq !== this.expectSeq) {
+        this.lossy = true
+        this.spill?.disable()
+      }
+      this.expectSeq = chunk.seq + 1
+      await this.appendChunk(chunk)
+    }
   }
 
-  private fail(err: unknown): void {
+  private async appendChunk(chunk: ConsoleChunk): Promise<void> {
+    // The full, uncapped stream goes to the spill sink (if enabled)
+    // before the delta is capped, so nothing dropped from the delta is
+    // lost to a reader that follows the spill path.
+    if (this.spill !== null) await this.spill.ingest(chunk.channel, chunk.data)
+    const text = new TextDecoder().decode(chunk.data)
+    // stderr rides the same delta as stdout, opened by a marker so the
+    // reader can tell the two apart; a run of stderr chunks marks once.
+    if (chunk.channel === Channel.STDERR) {
+      if (!this.inStderr) {
+        this.pending += STDERR_MARKER
+        this.inStderr = true
+      }
+      this.pending += text
+    } else {
+      this.inStderr = false
+      this.pending += text
+    }
+    // Bound the unread backlog: a reader that never drains cannot grow
+    // `pending` without limit. The tail is kept (the freshest output),
+    // matching what the buffered path did at completion.
+    const capped = tailCap(this.pending, this.budget)
+    if (capped.truncated) {
+      this.pending = capped.text
+      this.lossy = true
+      // The delta just dropped bytes; move the full stream to files so
+      // the reader can still recover them from the spill path.
+      if (this.spill !== null) await this.spill.begin()
+    }
+  }
+
+  private async settle(result: ExecuteResult | null, err: unknown): Promise<void> {
     this.settled = true
-    this.status = 'killed'
-    this.signal = 'SIGTERM'
-    const message = err instanceof Error ? err.message : String(err)
-    this.pending += STDERR_MARKER + message
+    if (this.sandboxInfo !== undefined) this.sandbox = this.sandboxInfo
+    let outcome: string
+    if (result !== null) {
+      this.status = 'completed'
+      this.exitCode = result.exitCode
+      outcome = exitOutcome(result.exitCode)
+    } else {
+      this.status = 'killed'
+      this.signal = 'SIGTERM'
+      const message = err instanceof Error ? err.message : String(err)
+      await this.console.emit(Channel.STDERR, new TextEncoder().encode(message))
+      outcome = KILLED_OUTCOME
+    }
+    // The CONTROL chunk ends the follow loop; awaiting `consumed`
+    // guarantees every chunk (the last one included) has landed in
+    // `pending` before `done` resolves, so a read after `done` is whole.
+    await this.console.finish(outcome)
+    await this.consumed
   }
 
   readOutput(): ShellProcessRead {
@@ -156,7 +262,12 @@ class MirageShellProcess implements ShellProcess {
     this.pending = ''
     const lossy = this.lossy
     this.lossy = false
-    return { delta, lossy }
+    return {
+      delta,
+      lossy,
+      ...(this.spill?.stdoutPath !== undefined ? { stdoutSpillPath: this.spill.stdoutPath } : {}),
+      ...(this.spill?.stderrPath !== undefined ? { stderrSpillPath: this.spill.stderrPath } : {}),
+    }
   }
 
   kill(): boolean {
@@ -189,6 +300,7 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly stdoutMaxBytes: number
   private readonly stderrMaxBytes: number
   private readonly sessionId: string | undefined
+  private readonly spillDir: string | undefined
   private sessionReady: Promise<void> | null = null
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
@@ -199,6 +311,7 @@ export class MirageShellExecutor extends ShellExecutor {
     this.stdoutMaxBytes = config.stdoutMaxBytes ?? DEFAULT_STDOUT_MAX_BYTES
     this.stderrMaxBytes = config.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES
     this.sessionId = config.sessionId
+    this.spillDir = config.spillDir
   }
 
   // The workspace may still be building (declarative mounts resolve
@@ -207,19 +320,65 @@ export class MirageShellExecutor extends ShellExecutor {
     return this.ctx.mirage.ready
   }
 
+  // A spill sink for one background command, or null when no spill
+  // directory is configured. The target reaches the live workspace so
+  // the full stream lands on a mount the agent can read back.
+  private newSpill(): SpillSink | null {
+    const dir = this.spillDir
+    if (dir === undefined) return null
+    const target: SpillTarget = {
+      ensureDir: async (d) => {
+        const ws = await this.workspace()
+        await ensureDirPath({ exists: (p) => ws.fs.exists(p), mkdir: (p) => ws.fs.mkdir(p) }, d)
+      },
+      write: async (p, bytes) => {
+        const ws = await this.workspace()
+        await ws.fs.writeFile(p, bytes)
+      },
+      append: async (p, bytes) => {
+        const ws = await this.workspace()
+        await ws.fs.append(p, bytes)
+      },
+    }
+    spillCounter += 1
+    return new SpillSink(target, dir, `mirage-shell-${spillCounter.toString()}`)
+  }
+
   /**
-   * With every runtime in the world confined to the workspace, a
-   * command cannot reach the host, so this executor confines like a
+   * With every runtime in the world reaching only the vfs
+   * (`ctx.mirage.vfsOnly`), the workspace dispatch is the single gate
+   * for anything a command can do, so this executor behaves like a
    * workspace-write sandbox: reads and writes land only where mounts
-   * (and their modes) allow. Declaring it lets confinement-aware
-   * plugins (dsh's permission presets) compose over this executor. A
-   * world holding a runtime that executes beyond the workspace (the
-   * host `local` python, a remote sandbox) voids that claim, so this
-   * answers undefined then — the base contract's "does not confine" —
-   * and those plugins refuse to compose instead of trusting a lie.
+   * (and their modes) allow. Declaring it lets sandbox-aware plugins
+   * (dsh's permission presets) compose over this executor. A world
+   * holding a runtime with doors around the gate (the host `local`
+   * python, a remote sandbox) voids that claim, so this answers
+   * undefined then (the base contract's "does not sandbox") and those
+   * plugins refuse to compose instead of trusting a lie.
    */
   override get sandboxMode(): ShellExecutor['sandboxMode'] {
-    return this.ctx.mirage.confined ? 'workspace-write' : undefined
+    return this.ctx.mirage.vfsOnly ? 'workspace-write' : undefined
+  }
+
+  /**
+   * The sandbox facts to stamp on this run's result and process handle,
+   * or undefined when the world is not fully workspace-bound (no claim).
+   *
+   * `enforcement` is 'full': when every runtime reaches only the vfs, the
+   * workspace gate cannot be bypassed, so unlike an OS sandbox on an older
+   * kernel there is no promised effect it fails to govern. `denied` is
+   * false because mirage has no out-of-band denial channel: a refused write
+   * (a read-only mount) fails in-band as an ordinary command error with a
+   * nonzero exit, the way EROFS would, not as a separate sandbox verdict,
+   * so there is nothing here to distinguish from the command's own failure.
+   * `runnerFailed` is false because the workspace executor is the runner
+   * and a failure to run surfaces as a rejected/aborted execution, not a
+   * runner that never started.
+   */
+  private sandboxInfo(): ShellSandboxInfo | undefined {
+    const mode = this.sandboxMode
+    if (mode === undefined) return undefined
+    return { mode, denied: false, enforcement: 'full', runnerFailed: false }
   }
 
   resolve(request: ShellExecRequest): ShellExecSpec {
@@ -259,6 +418,7 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+    const sandbox = this.sandboxInfo()
     // An already-aborted signal never fires its listener, so answer before
     // dispatch: the command must not run at all.
     if (spec.signal?.aborted === true) {
@@ -270,6 +430,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: { text: '', truncated: false },
         stderr: { text: '', truncated: false },
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     }
     const controller = new AbortController()
@@ -301,6 +462,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: collect(result.stdoutText, spec.stdoutMaxBytes),
         stderr: collect(result.stderrText, this.stderrMaxBytes),
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     } catch (err) {
       if (!controller.signal.aborted) throw err
@@ -314,6 +476,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: { text: '', truncated: false },
         stderr: { text: '', truncated: false },
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     } finally {
       clearTimeout(timer)
@@ -322,14 +485,23 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   start(spec: ShellExecSpec): ShellProcess {
+    const sandbox = this.sandboxInfo()
     const controller = new AbortController()
+    // The console is the streaming conduit, holding what the follow loop
+    // has not drained yet (nothing, when the loop keeps up). Its own
+    // retention budget is what bounds that, since reading a chunk does
+    // not release it.
+    const console_ = new JobConsole(new RAMConsoleStore(CONSOLE_RETENTION_BYTES))
+    const spill = this.newSpill()
     if (spec.signal?.aborted === true) {
       controller.abort()
       return new MirageShellProcess(
         Promise.reject(new Error('command aborted before start')),
         controller,
+        console_,
         spec.stdoutMaxBytes,
-        this.stderrMaxBytes,
+        spill,
+        sandbox,
       )
     }
     const onAbort = (): void => {
@@ -341,10 +513,10 @@ export class MirageShellExecutor extends ShellExecutor {
       .then((ws) =>
         ws.execute(
           spec.command,
-          executeOptions(spec, controller.signal, this.sessionId, this.workdir),
+          executeOptions(spec, controller.signal, this.sessionId, this.workdir, console_),
         ),
       )
       .finally(() => spec.signal?.removeEventListener('abort', onAbort))
-    return new MirageShellProcess(run, controller, spec.stdoutMaxBytes, this.stderrMaxBytes)
+    return new MirageShellProcess(run, controller, console_, spec.stdoutMaxBytes, spill, sandbox)
   }
 }

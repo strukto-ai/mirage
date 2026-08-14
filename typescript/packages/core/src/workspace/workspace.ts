@@ -30,7 +30,7 @@ import type { CLISpec } from '../commands/cli/types.ts'
 import { runWithTimeout } from '../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from './cli/types.ts'
 import { resolveLimit } from '../policy/index.ts'
-import { JobTable } from '../shell/job_table.ts'
+import { JobTable } from '../shell/job_table/index.ts'
 import type { ShellParser } from '../shell/parse.ts'
 import { buildFileCache } from './workspace/cache.ts'
 import { DriftQueue, installDriftState } from './snapshot/drift.ts'
@@ -97,7 +97,7 @@ export class Workspace {
   private shellParserPromise: Promise<ShellParser> | null = null
   private readonly opened = new Set<Resource>()
   private readonly openOrder: Resource[] = []
-  readonly jobTable = new JobTable()
+  readonly jobTable: JobTable
   readonly agentId: string | null
   readonly cache: FileCache & Resource
   readonly namespace: Namespace
@@ -135,6 +135,7 @@ export class Workspace {
       }
     }
     this.wsId = options.workspaceId ?? newWorkspaceId()
+    this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore

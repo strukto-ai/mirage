@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../io/types.ts'
-import { ExecutionNode } from '../workspace/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { ExecutionNode } from '../../workspace/types.ts'
 import {
   Channel,
   type ConsoleChunk,
@@ -22,8 +22,9 @@ import {
   JobConsole,
   RAMConsoleStore,
   type ReadResult,
-} from './console/index.ts'
-import { Job, type JobResult, type JobRunner, JobStatus, JobTable } from './job_table.ts'
+} from '../console/index.ts'
+import { JobTable } from './table.ts'
+import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -364,5 +365,28 @@ describe('JobTable.popCompleted', () => {
     jt.popCompleted()
     expect(jt.get(j.id)).toBeNull()
     expect(dec(await console_.snapshot(Channel.STDOUT))).toBe('kept')
+  })
+
+  it('closeConsoles releases factory-built stores', async () => {
+    const stores: RAMConsoleStore[] = []
+    const factory = (): JobConsole => {
+      const store = new RAMConsoleStore()
+      stores.push(store)
+      return new JobConsole(store)
+    }
+    const jt = new JobTable(factory)
+    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    await jt.wait(j.id)
+    await jt.closeConsoles()
+    expect(stores).toHaveLength(1)
+    expect(stores.every((s) => s.closed)).toBe(true)
+  })
+
+  it('closeConsoles leaves default consoles alone', async () => {
+    const jt = new JobTable()
+    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    await jt.wait(j.id)
+    await jt.closeConsoles()
+    expect(j.console.store.closed).toBe(false)
   })
 })

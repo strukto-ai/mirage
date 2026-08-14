@@ -14,7 +14,7 @@
 
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Resource } from '../../resource/base.ts'
-import type { JobTable } from '../../shell/job_table.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { WatchManager } from './watch.ts'
@@ -52,6 +52,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // happens before any resource closes so a job cannot keep touching one
   // that is already gone.
   await deps.jobTable.killAll()
+  await deps.jobTable.closeConsoles()
   const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
   for (const task of drainTasks) {
     await task

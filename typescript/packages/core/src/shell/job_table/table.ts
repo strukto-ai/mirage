@@ -12,74 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IOResult } from '../io/types.ts'
-import type { ExecutionNode } from '../workspace/types.ts'
-import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from './console/index.ts'
-
-export const JobStatus = Object.freeze({
-  RUNNING: 'running',
-  COMPLETED: 'completed',
-  KILLED: 'killed',
-} as const)
-
-export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus]
-
-export const KILLED_EXIT_CODE = 137
-
-export type JobResult = [IOResult, ExecutionNode]
-
-/** Produces a job's output and its result. */
-export type JobRunner = (job: Job) => Promise<JobResult>
-
-/**
- * One background command, and everything it has printed.
- *
- * Output lives in `console` rather than in byte fields, so a reader can
- * watch a job while it runs instead of waiting for it to end.
- */
-export class Job {
-  readonly id: number
-  readonly command: string
-  // null for jobs restored from a snapshot (already finished, no live task).
-  task: Promise<void> | null
-  readonly abort: AbortController | null
-  readonly cwd: string
-  readonly agent: string
-  readonly sessionId: string
-  readonly createdAt: number
-  readonly console: JobConsole
-
-  status: JobStatus = JobStatus.RUNNING
-  exitCode = 0
-  executionNode: ExecutionNode | null = null
-  ioResult: IOResult | null = null
-
-  constructor(init: {
-    id: number
-    command: string
-    task?: Promise<void> | null
-    abort?: AbortController | null
-    cwd: string
-    agent?: string
-    sessionId?: string
-    createdAt?: number
-    status?: JobStatus
-    exitCode?: number
-    console?: JobConsole
-  }) {
-    this.id = init.id
-    this.command = init.command
-    this.task = init.task ?? null
-    this.abort = init.abort ?? null
-    this.cwd = init.cwd
-    this.agent = init.agent ?? 'unknown'
-    this.sessionId = init.sessionId ?? ''
-    this.createdAt = init.createdAt ?? Date.now() / 1000
-    this.console = init.console ?? new JobConsole()
-    if (init.status !== undefined) this.status = init.status
-    if (init.exitCode !== undefined) this.exitCode = init.exitCode
-  }
-}
+import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
+import { KILLED_EXIT_CODE } from './constants.ts'
+import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 
 function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true
@@ -134,6 +69,24 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
 export class JobTable {
   private readonly jobs = new Map<number, Job>()
   private nextId = 1
+  private readonly consoleFactory: ConsoleFactory | null
+  private factoryConsoles: JobConsole[] = []
+
+  /**
+   * @param consoleFactory builds each new job's console from its job
+   *   id; null means an in-memory console per job. A factory must hand
+   *   every job a fresh backing: ids restart at 1 when the table
+   *   empties (GNU numbering), so a store keyed on the id alone gets
+   *   reused, and a reused stream replays the previous job's chunks,
+   *   ending chunk included. The table tracks what the factory builds
+   *   and closeConsoles() releases it at workspace teardown, because a
+   *   config-provisioned store (a Redis client per job) is invisible
+   *   to the embedder; a console still outlives its table entry, so
+   *   reap() never closes one.
+   */
+  constructor(consoleFactory: ConsoleFactory | null = null) {
+    this.consoleFactory = consoleFactory
+  }
 
   /**
    * Register a job and start it.
@@ -154,6 +107,13 @@ export class JobTable {
     // Without this, reaping after a targeted `wait` would leave a
     // later `wait %1` pointing at nothing.
     if (this.jobs.size === 0) this.nextId = 1
+    let jobConsole: JobConsole
+    if (this.consoleFactory === null) {
+      jobConsole = new JobConsole()
+    } else {
+      jobConsole = this.consoleFactory(this.nextId)
+      this.factoryConsoles.push(jobConsole)
+    }
     const job = new Job({
       id: this.nextId,
       command: init.command,
@@ -161,6 +121,7 @@ export class JobTable {
       cwd: init.cwd,
       agent: init.agent ?? 'unknown',
       sessionId: init.sessionId ?? '',
+      console: jobConsole,
     })
     this.jobs.set(job.id, job)
     this.nextId += 1
@@ -218,6 +179,23 @@ export class JobTable {
       await this.kill(job.id)
     }
     return running
+  }
+
+  /**
+   * Close every console the factory built, releasing its store.
+   *
+   * Called by workspace teardown after killAll(). Only tracked,
+   * factory-built consoles are closed: the default in-memory ones hold
+   * nothing, while a factory-provisioned store keeps a client open per
+   * job, and in Node an open client holds the process alive. Closing
+   * also releases any reader still parked on one.
+   */
+  async closeConsoles(): Promise<void> {
+    const consoles = this.factoryConsoles
+    this.factoryConsoles = []
+    for (const jobConsole of consoles) {
+      await jobConsole.close()
+    }
   }
 
   /**

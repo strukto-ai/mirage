@@ -38,7 +38,7 @@ import {
   getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
-import { JobTable } from '../../shell/job_table.ts'
+import { JobTable } from '../../shell/job_table/index.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'

@@ -77,3 +77,10 @@ async def test_local_cancellation_kills_subprocess():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert time.monotonic() - start < 5  # killed, not waited out
+
+
+def test_reach_is_process():
+    # The subprocess sees the host filesystem and network: doors the
+    # workspace gate never sees, so a world holding this runtime may
+    # not claim a sandbox.
+    assert LocalRuntime.reach == "process"

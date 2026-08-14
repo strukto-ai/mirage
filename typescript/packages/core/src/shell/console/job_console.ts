@@ -36,7 +36,7 @@ function join(chunks: ConsoleChunk[]): Uint8Array {
  * noticing.
  */
 export class JobConsole {
-  private readonly store: ConsoleStore
+  private readonly backing: ConsoleStore
   private finishedFlag: boolean
 
   /**
@@ -46,8 +46,19 @@ export class JobConsole {
    *   rebuilding a finished console from a snapshot.
    */
   constructor(store: ConsoleStore | null = null, finished = false) {
-    this.store = store ?? new RAMConsoleStore()
+    this.backing = store ?? new RAMConsoleStore()
     this.finishedFlag = finished
+  }
+
+  /**
+   * Where this console's chunks live.
+   *
+   * Public because the store carries the console's address: a shared
+   * store (`RedisConsoleStore.keyPrefix`) is how an embedder points a
+   * reader in another process at a live console.
+   */
+  get store(): ConsoleStore {
+    return this.backing
   }
 
   /** Whether this process has seen the job end. */
@@ -64,7 +75,7 @@ export class JobConsole {
    */
   async emit(channel: Channel, data: Uint8Array): Promise<void> {
     if (this.finishedFlag) return
-    await this.store.append(channel, data)
+    await this.backing.append(channel, data)
   }
 
   /**
@@ -76,28 +87,28 @@ export class JobConsole {
   async finish(outcome: string): Promise<void> {
     if (this.finishedFlag) return
     this.finishedFlag = true
-    await this.store.append(Channel.CONTROL, new TextEncoder().encode(outcome))
+    await this.backing.append(Channel.CONTROL, new TextEncoder().encode(outcome))
   }
 
   /** Read chunks at or after a cursor. */
   readFrom(seq: number, limit?: number): Promise<ReadResult> {
-    return this.store.readFrom(seq, limit)
+    return this.backing.readFrom(seq, limit)
   }
 
   /** Yield chunks as they arrive, ending when the job does. */
   async *follow(seq = 0): AsyncGenerator<ConsoleChunk> {
     let cursor = seq
     for (;;) {
-      const [chunks, next] = await this.store.readFrom(cursor)
+      const [chunks, next] = await this.backing.readFrom(cursor)
       cursor = next
       for (const chunk of chunks) {
         yield chunk
         if (chunk.channel === Channel.CONTROL) return
       }
-      await this.store.wait(cursor)
+      await this.backing.wait(cursor)
       // A discarded console will never produce an ending chunk, and
       // releasing once would only send this loop back to waiting.
-      if (this.store.closed) return
+      if (this.backing.closed) return
     }
   }
 
@@ -110,11 +121,11 @@ export class JobConsole {
   async waitFinished(): Promise<void> {
     let cursor = 0
     for (;;) {
-      const [chunks, next] = await this.store.readFrom(cursor)
+      const [chunks, next] = await this.backing.readFrom(cursor)
       cursor = next
       if (chunks.some((c) => c.channel === Channel.CONTROL)) return
-      await this.store.wait(cursor)
-      if (this.store.closed) return
+      await this.backing.wait(cursor)
+      if (this.backing.closed) return
     }
   }
 
@@ -125,7 +136,7 @@ export class JobConsole {
    * produced and omits the CONTROL chunk, which is status not output.
    */
   async snapshot(channel: Channel | null = null): Promise<Uint8Array> {
-    const [chunks] = await this.store.readFrom(0)
+    const [chunks] = await this.backing.readFrom(0)
     if (channel === null) {
       return join(chunks.filter((c) => c.channel !== Channel.CONTROL))
     }
@@ -134,6 +145,6 @@ export class JobConsole {
 
   /** Release the underlying store. */
   close(): Promise<void> {
-    return this.store.close()
+    return this.backing.close()
   }
 }

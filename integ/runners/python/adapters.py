@@ -110,6 +110,9 @@ from mirage.resource.supabase import SupabaseConfig, SupabaseResource
 from mirage.resource.tencent import TencentConfig, TencentResource
 from mirage.resource.trello import TrelloConfig, TrelloResource
 from mirage.resource.wasabi import WasabiConfig, WasabiResource
+from mirage.shell.console import JobConsole
+from mirage.shell.console.redis import RedisConsoleStore
+from mirage.shell.job_table import ConsoleFactory
 from mirage.types import ConsistencyPolicy
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -2273,6 +2276,42 @@ async def teardown_target(
         await service.teardown()
 
 
+def _redis_console(url: str, prefix: str, job_id: int) -> JobConsole:
+    """One job's console on its own Redis stream.
+
+    The nonce beside the id matters because battery cases reap jobs and
+    ids restart at 1; a reused stream would replay the previous case's
+    chunks, ending chunk included.
+
+    Args:
+        url (str): Redis connection URL.
+        prefix (str): this run's key namespace.
+        job_id (int): the job the console is being built for.
+    """
+    key_prefix = f"{prefix}{uuid.uuid4().hex[:8]}-{job_id}:"
+    # Battery keys must not accumulate in the shared redis db.
+    return JobConsole(store=RedisConsoleStore(
+        url=url, key_prefix=key_prefix, ttl_seconds=3600))
+
+
+def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:
+    """Build the target's console factory, or None for in-memory.
+
+    A target opts in with ``"console": {"type": "redis"}``; the stream
+    keys ride REDIS_URL under a per-run namespace.
+
+    Args:
+        target (dict): the target manifest entry.
+        run_id (str): this open's unique id.
+    """
+    block = target.get("console")
+    if block is None:
+        return None
+    url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    return functools.partial(_redis_console, url,
+                             f"mirage-integ-console-{run_id}:")
+
+
 async def open_target(
     target: dict,
     consistency: ConsistencyPolicy | None = None
@@ -2281,13 +2320,18 @@ async def open_target(
     service = await make_service(target, run_id)
     mounts, cleanups = await build_mounts(target, run_id, service)
     agent_id = target.get("agentId")
+    factory = console_factory(target, run_id)
     if consistency is not None:
         ws = Workspace(mounts,
                        mode=MountMode.WRITE,
                        consistency=consistency,
-                       agent_id=agent_id)
+                       agent_id=agent_id,
+                       console_factory=factory)
     else:
-        ws = Workspace(mounts, mode=MountMode.WRITE, agent_id=agent_id)
+        ws = Workspace(mounts,
+                       mode=MountMode.WRITE,
+                       agent_id=agent_id,
+                       console_factory=factory)
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)

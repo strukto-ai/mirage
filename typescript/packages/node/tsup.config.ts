@@ -29,5 +29,7 @@ export default defineConfig({
   // Lua scripts are read at runtime relative to the emitted bundle, so
   // they must sit beside it in dist just as they sit beside their
   // module in src.
-  onSuccess: 'cp src/workspace/session/cas.lua dist/cas.lua',
+  onSuccess:
+    'cp src/workspace/session/cas.lua dist/cas.lua && ' +
+    'cp src/shell/console/redis/append.lua dist/append.lua',
 })

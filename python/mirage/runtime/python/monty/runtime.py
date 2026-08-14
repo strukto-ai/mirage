@@ -33,7 +33,7 @@ from mirage.runtime.python.monty.constants import (DEFAULT_PROG,
 from mirage.runtime.python.monty.osaccess import MirageOSAccess
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
-                                  RunResult, ScriptSource)
+                                  RunResult, RuntimeReach, ScriptSource)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,11 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     """
 
     name = "monty"
+    # The pooled worker subprocess exists for crash isolation, not
+    # host access: the interpreter inside it has no host filesystem,
+    # environment, or network door, and its file I/O is serviced only
+    # through the workspace dispatch, so nothing goes around the gate.
+    reach: RuntimeReach = "vfs"
     # No import system to resolve a module with, so `-m` has nothing to
     # run; the refusal names this runtime rather than inventing a
     # "No module named" that would imply a search happened.

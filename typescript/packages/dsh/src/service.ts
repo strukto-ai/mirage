@@ -90,7 +90,7 @@ function toRuntimeEntry(entry: string | MirageRuntimeBlock): RuntimeEntry {
 }
 
 // A name shorthand builds exactly as the workspace would build it; holding
-// the instance early is what lets `confined` classify the world before the
+// the instance early is what lets `vfsOnly` classify the world before the
 // (asynchronous) mounts finish resolving.
 function builtEntry(entry: RuntimeEntry): Runtime {
   return typeof entry === 'string' ? buildRuntime(entry) : entry
@@ -165,17 +165,20 @@ export class MirageService extends Service {
   }
 
   /**
-   * True while every runtime in the world is confined to the workspace
-   * (`Runtime.confined`): the default world is, and so are the bridged
-   * engines, while the host `local` python or a remote sandbox executes
-   * beyond anything this service can vouch for. Answers before `ready`
-   * from the constructor-resolved entries (mounts resolve
-   * asynchronously, runtimes never do) and from the live workspace
-   * afterwards, so a later `addRuntime` is seen.
+   * True while every runtime in the world reaches only the vfs
+   * (`Runtime.reach`), meaning the workspace dispatch is the single
+   * gate for anything the agent can execute: every effect passes
+   * mount modes, session grants, and policy before touching the real
+   * backend behind a mount. The default world qualifies, and so do
+   * the bridged engines, while the host `local` python or a remote
+   * sandbox can act around the gate. Answers before `ready` from the
+   * constructor-resolved entries (mounts resolve asynchronously,
+   * runtimes never do) and from the live workspace afterwards, so a
+   * later `addRuntime` is seen.
    */
-  get confined(): boolean {
+  get vfsOnly(): boolean {
     const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.runtimeEntries
-    return entries.every((entry) => entry.confined)
+    return entries.every((entry) => entry.reach === 'vfs')
   }
 
   private async open(

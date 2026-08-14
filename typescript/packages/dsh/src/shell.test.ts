@@ -286,3 +286,168 @@ describe('start', () => {
     expect(await ws.fs.exists('/data/out.txt')).toBe(false)
   })
 })
+
+describe('streaming', () => {
+  it('delivers a compound line incrementally, before it finishes', async () => {
+    const { shell } = await makeShell()
+    const proc = shell.start(shell.resolve({ command: 'echo first; sleep 0.5; echo second' }))
+    let acc = ''
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline && !acc.includes('first')) {
+      acc += proc.readOutput().delta
+      if (!acc.includes('first')) await new Promise((r) => setTimeout(r, 15))
+    }
+    expect(acc).toContain('first')
+    // The sleep is still in flight, so the second statement has not run.
+    expect(acc).not.toContain('second')
+    expect(proc.status).toBe('running')
+    await proc.done
+    acc += proc.readOutput().delta
+    expect(acc).toContain('second')
+  })
+
+  it('interleaves stdout and stderr in order, stderr marked', async () => {
+    const { shell } = await makeShell()
+    const proc = shell.start(shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2' }))
+    await proc.done
+    const delta = proc.readOutput().delta
+    expect(delta).toContain('--- stderr ---')
+    expect(delta.indexOf('out1')).toBeLessThan(delta.indexOf('err1'))
+    expect(delta.indexOf('err1')).toBeLessThan(delta.indexOf('out2'))
+  })
+
+  it('caps the unread backlog and flags lossy, keeping the tail', async () => {
+    const { shell } = await makeShell({}, { stdoutMaxBytes: 12 })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc; echo dddd' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    expect(out.delta).toContain('dddd')
+    expect(out.delta).not.toContain('aaaa')
+    expect(new TextEncoder().encode(out.delta).byteLength).toBeLessThanOrEqual(12)
+  })
+
+  it('delivers the output of a line that never reached the command tree', async () => {
+    const { shell } = await makeShell()
+    // The syntax gate answers before the walk that streams, so this
+    // arrives only because the executor drains a buffered result into
+    // the console.
+    const proc = shell.start(shell.resolve({ command: 'case x' }))
+    await proc.done
+    expect(proc.exitCode).toBe(2)
+    expect(proc.readOutput().delta).toContain('syntax error')
+  })
+})
+
+describe('spill', () => {
+  it('does not spill when no directory is configured', async () => {
+    const { shell } = await makeShell({}, { stdoutMaxBytes: 12 })
+    const proc = shell.start(shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }))
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    expect(out.stdoutSpillPath).toBeUndefined()
+  })
+
+  it('spills the full stdout to a readable workspace file when the delta overruns', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc; echo dddd' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    const stdoutPath = out.stdoutSpillPath
+    if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
+    // The delta kept only the tail; the spill file has the whole stream.
+    expect(out.delta).not.toContain('aaaa')
+    const full = await ws.fs.readFileText(stdoutPath)
+    expect(full).toContain('aaaa')
+    expect(full).toContain('dddd')
+  })
+
+  it('spills stdout and stderr to separate files', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2; echo out3' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    const stdoutPath = out.stdoutSpillPath
+    const stderrPath = out.stderrSpillPath
+    if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
+    if (stderrPath === undefined) throw new Error('expected a stderr spill path')
+    expect(await ws.fs.readFileText(stdoutPath)).toContain('out1')
+    expect(await ws.fs.readFileText(stderrPath)).toContain('err1')
+  })
+
+  it('spills both commands when two overrun into a missing directory at once', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const line = 'echo aaaa; echo bbbb; echo cccc; echo dddd'
+    const first = shell.start(shell.resolve({ command: line }))
+    const second = shell.start(shell.resolve({ command: line }))
+    await Promise.all([first.done, second.done])
+    const paths = [first.readOutput().stdoutSpillPath, second.readOutput().stdoutSpillPath]
+    // Whichever loses the mkdir race still spills, and to its own file.
+    expect(paths[0]).toBeDefined()
+    expect(paths[1]).toBeDefined()
+    expect(paths[0]).not.toBe(paths[1])
+    for (const path of paths) {
+      if (path === undefined) throw new Error('expected a stdout spill path')
+      expect(await ws.fs.readFileText(path)).toContain('aaaa')
+    }
+  })
+
+  it('creates a nested spill directory', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/runs/spill' })
+    const proc = shell.start(shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }))
+    await proc.done
+    const path = proc.readOutput().stdoutSpillPath
+    if (path === undefined) throw new Error('expected a stdout spill path')
+    expect(path.startsWith('/data/runs/spill/')).toBe(true)
+    expect(await ws.fs.readFileText(path)).toContain('aaaa')
+  })
+})
+
+describe('sandbox facts', () => {
+  it('stamps a full-enforcement workspace-write sandbox on a run result', async () => {
+    const { shell } = await makeShell({ 'a.txt': 'x' })
+    const result = await shell.run(shell.resolve({ command: 'cat /data/a.txt' }))
+    expect(result.sandbox).toEqual({
+      mode: 'workspace-write',
+      denied: false,
+      enforcement: 'full',
+      runnerFailed: false,
+    })
+  })
+
+  it('reports the sandbox independently of exit status', async () => {
+    const { shell } = await makeShell()
+    const result = await shell.run(shell.resolve({ command: 'cat /data/nope' }))
+    expect(result.exitCode).not.toBe(0)
+    expect(result.sandbox?.mode).toBe('workspace-write')
+    expect(result.sandbox?.denied).toBe(false)
+  })
+
+  it('omits the sandbox once a runtime executes beyond the workspace', async () => {
+    const { shell, ws } = await makeShell()
+    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    const result = await shell.run(shell.resolve({ command: 'true' }))
+    expect(result.sandbox).toBeUndefined()
+  })
+
+  it('stamps the sandbox on a settled background process', async () => {
+    const { shell } = await makeShell({ 'a.txt': 'bg' })
+    const proc = shell.start(shell.resolve({ command: 'cat /data/a.txt' }))
+    expect(proc.sandbox).toBeUndefined()
+    await proc.done
+    expect(proc.sandbox).toEqual({
+      mode: 'workspace-write',
+      denied: false,
+      enforcement: 'full',
+      runnerFailed: false,
+    })
+  })
+})

@@ -19,6 +19,7 @@ import {
   DiskWorkspaceStateStore,
   RAMNamespaceStore,
   RAMWorkspaceStateStore,
+  RedisConsoleStore,
   RedisFileCacheStore,
   RedisNamespaceStore,
   RedisWorkspaceStateStore,
@@ -526,6 +527,39 @@ describe('configToWorkspaceArgs', () => {
         guards: [{ reason: 'x', path: ['/data/prod/*'] }],
       }),
     ).toThrow(/unknown guard key/)
+  })
+
+  it('console redis block builds a factory that mints fresh keys', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      console: { type: 'redis', url: 'redis://localhost:6379/5', key_prefix: 'test_console:' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const factory = args.options.consoleFactory
+    expect(factory).toBeDefined()
+    const prefixOf = (jobId: number): string => {
+      const store = factory?.(jobId).store
+      if (!(store instanceof RedisConsoleStore)) throw new Error('expected a RedisConsoleStore')
+      return store.keyPrefix
+    }
+    const first = prefixOf(1)
+    const second = prefixOf(1)
+    // Fresh keys per console: job ids restart at 1 when the table
+    // empties, so two consoles built for "job 1" must not share a
+    // stream (a shared one would replay the first job's chunks). The
+    // minted prefix is public: it is the address an embedder hands to
+    // a reader in another process.
+    expect(first).not.toBe(second)
+    expect(first.startsWith('test_console:')).toBe(true)
+  })
+
+  it('console ram block leaves consoles in memory', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      console: { type: 'ram' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.consoleFactory).toBeUndefined()
   })
 })
 

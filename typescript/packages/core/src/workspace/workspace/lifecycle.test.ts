@@ -16,7 +16,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
-import { type JobRunner, JobStatus } from '../../shell/job_table.ts'
+import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse.ts'
 import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'

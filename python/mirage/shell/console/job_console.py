@@ -42,6 +42,16 @@ class JobConsole:
         self._finished = finished
 
     @property
+    def store(self) -> ConsoleStore:
+        """Where this console's chunks live.
+
+        Public because the store carries the console's address: a
+        shared store (``RedisConsoleStore.key_prefix``) is how an
+        embedder points a reader in another process at a live console.
+        """
+        return self._store
+
+    @property
     def finished(self) -> bool:
         """Whether this process has seen the job end.
 

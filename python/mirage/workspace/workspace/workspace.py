@@ -36,7 +36,7 @@ from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.policy import PolicyDecision, PolicyFn
 from mirage.runtime.resolver import PrefixResolver
-from mirage.shell.job_table import JobTable
+from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           StateKey, parse_mount_mode)
@@ -99,6 +99,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
+        console_factory: ConsoleFactory | None = None,
         runtimes: list[Runtime | str] | None = None,
         policy: PolicyFn | None = None,
         guards: list[GuardSpec] | None = None,
@@ -140,7 +141,7 @@ class Workspace:
         # resource overrides) stay open here; their origin closes them.
         self._shared_resources: set[int] = set()
         self._drift = DriftQueue()
-        self.job_table = JobTable()
+        self.job_table = JobTable(console_factory)
         self._current_agent_id: str | None = agent_id
         self._default_agent_id = agent_id
         self._session_mgr = SessionManager(session_id, store=stores.sessions)

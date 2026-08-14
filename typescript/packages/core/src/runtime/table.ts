@@ -42,7 +42,9 @@ import type { RuntimeOptions } from './types.ts'
  */
 export class VFSRuntime extends Runtime {
   readonly name = 'vfs'
-  override readonly confined = true
+  // A vfs-routed line runs on the workspace executor itself: it IS the
+  // gate, so there is no door around it.
+  override readonly reach = 'vfs'
   // Declaring captures (even empty) turns the catch-all off; the
   // dispatcher reads this bit, not the array's length.
   readonly restricted: boolean

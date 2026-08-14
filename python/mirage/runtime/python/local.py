@@ -23,7 +23,7 @@ from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.bootstrap import bootstrap
 from mirage.runtime.python.flags import init_argv
-from mirage.runtime.types import RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import RunArgs, RunResult, RuntimeReach, ScriptSource
 
 LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
@@ -42,6 +42,11 @@ class LocalRuntime(PythonRuntime):
     """
 
     name = "local"
+    # Spawns the host interpreter: a real process with the user's own
+    # filesystem and network, doors the workspace gate never sees.
+    # This is the base default; declared here so the claim is explicit
+    # at the one builtin runtime that voids a world's sandbox claim.
+    reach: RuntimeReach = "process"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

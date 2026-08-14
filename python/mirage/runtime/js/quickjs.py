@@ -25,7 +25,7 @@ from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
-                                  RunResult, ScriptSource)
+                                  RunResult, RuntimeReach, ScriptSource)
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
@@ -100,6 +100,9 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
     """
 
     name = "quickjs"
+    # The engine is a WASI guest whose `std.open`/`os.readdir` suspend
+    # into the workspace bridge: guest I/O has no door around the gate.
+    reach: RuntimeReach = "vfs"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

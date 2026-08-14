@@ -16,9 +16,11 @@ import type { CacheConfig } from '../../cache/file/config.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
+import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse.ts'
 import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
 import type { GuardSpec, Policy } from '../../policy/index.ts'
@@ -70,6 +72,15 @@ export interface WorkspaceOptions {
    */
   cache?: CacheConfig
   index?: IndexConfig
+  /**
+   * Builds each background job's console from its job id, so job
+   * output can live somewhere a reader in another process reaches
+   * (a Redis stream). Unset means an in-memory console per job. The
+   * workspace tracks what the factory builds and closes it at
+   * close(); a console still outlives its job-table entry, so a reap
+   * never closes one.
+   */
+  consoleFactory?: ConsoleFactory
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
   sessionStore?: SessionStore
@@ -191,6 +202,21 @@ export interface ExecuteOptions {
    * Throws for a name that is not a workspace entry.
    */
   runtime?: string
+  /**
+   * Stream the line's output into this console as it is produced,
+   * instead of returning it whole. Each statement of a compound line
+   * emits as it finishes (a single command still lands in one chunk,
+   * since it has nothing to show before it completes), so a reader can
+   * watch a long or compound line run. When set, the returned
+   * `ExecuteResult` carries the exit code but empty stdout/stderr,
+   * because the bytes went to the console; the caller owns the console
+   * and decides when to `finish()` it (typically once this call
+   * resolves, with the exit outcome). Every path answers this way, so
+   * the console is the line's whole output: a line a whole-line runtime
+   * (a RemoteSandbox) served, a syntax error, a policy denial and a
+   * failed line all arrive there rather than in the result.
+   */
+  sink?: JobConsole
   /**
    * @internal The typed line's routing decision, forwarded to nested
    * evals so inner lines never re-route.

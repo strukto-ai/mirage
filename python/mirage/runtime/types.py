@@ -34,6 +34,24 @@ EvalStatus: TypeAlias = Literal["complete", "incomplete", "exit"]
 # selector that silently matches nothing and reports "no runtime".
 Language: TypeAlias = Literal["python", "js"]
 
+# Which doors code executed by a runtime has to the outside world. The
+# workspace dispatch is a gate: it checks mount modes, session grants,
+# and policy, records the op, and only then touches the real backend
+# behind the mount (s3, disk, an API). Reach states whether that gate
+# is avoidable, not where bytes physically end up; a "vfs" write to an
+# s3 mount still lands in real s3, but only after the gate said yes.
+# - "vfs": the gate is the code's only door. The engine runs as an
+#   in-process guest with no syscalls, so its I/O can only travel the
+#   VFS bridge (or the workspace executor itself) and a mount-mode or
+#   policy refusal is final.
+# - "process": the code has host doors around the gate. It is, or
+#   spawns, a real process on this machine with the user's own
+#   filesystem and network, so it can reach the same backends (and
+#   everything else) without the gate seeing it.
+# - "remote": the code runs on another machine and acts on that
+#   machine's world; the gate never sees those effects.
+RuntimeReach: TypeAlias = Literal["vfs", "process", "remote"]
+
 
 class DispatchFn(Protocol):
     """The workspace op dispatch: run ``op`` against the mount owning

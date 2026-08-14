@@ -23,7 +23,8 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.bootstrap import bootstrap
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import DispatchFn, RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import (DispatchFn, RunArgs, RunResult, RuntimeReach,
+                                  ScriptSource)
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmFsConfig, WasmRuntime, WasmVFS
 
@@ -71,6 +72,11 @@ class WasiRuntime(PythonRuntime):
     """
 
     name = "wasi"
+    # Guest file I/O can only travel the workspace bridge; the one
+    # host surface is the interpreter's own build directory, served
+    # read-only (mutations raise PermissionError in WasmVFS), so
+    # nothing goes around the gate.
+    reach: RuntimeReach = "vfs"
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig

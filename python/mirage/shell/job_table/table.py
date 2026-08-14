@@ -14,52 +14,14 @@
 
 import asyncio
 import logging
-import time
-from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
 
-from mirage.io.types import IOResult
 from mirage.shell.console import (KILLED_OUTCOME, Channel, JobConsole,
                                   exit_outcome)
-from mirage.workspace.types import ExecutionNode
+from mirage.shell.job_table.constants import KILLED_EXIT_CODE
+from mirage.shell.job_table.types import (ConsoleFactory, Job, JobRunner,
+                                          JobStatus)
 
 logger = logging.getLogger(__name__)
-
-KILLED_EXIT_CODE = 137
-
-
-class JobStatus(str, Enum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    KILLED = "killed"
-
-
-@dataclass
-class Job:
-    """One background command, and everything it has printed.
-
-    Output lives in ``console`` rather than in byte fields, so a reader
-    can watch a job while it runs instead of waiting for it to end.
-    """
-
-    id: int
-    command: str
-    task: asyncio.Task[Any] | None
-    cwd: str
-    status: JobStatus = JobStatus.RUNNING
-    exit_code: int = 0
-    console: JobConsole = field(default_factory=JobConsole)
-    execution_node: ExecutionNode | None = None
-    io_result: IOResult | None = None
-    created_at: float = field(default_factory=time.time)
-    agent: str = "unknown"
-    session_id: str = ""
-
-
-JobRunner = Callable[[Job], Coroutine[Any, Any, tuple[IOResult,
-                                                      ExecutionNode]]]
 
 
 def cancel_job(job: Job) -> None:
@@ -81,6 +43,16 @@ def cancel_job(job: Job) -> None:
     except RuntimeError as exc:
         # The loop that was running this job is gone, so the job is too.
         logger.debug("job %d loop is gone: %s", job.id, exc)
+
+
+async def _mark_killed(console: JobConsole) -> None:
+    """Write the kill marker and the ending chunk.
+
+    Args:
+        console (JobConsole): the killed job's console.
+    """
+    await console.emit(Channel.STDERR, b"Killed")
+    await console.finish(KILLED_OUTCOME)
 
 
 async def _settle(run: JobRunner, job: Job) -> None:
@@ -107,10 +79,16 @@ async def _settle(run: JobRunner, job: Job) -> None:
             raise
         job.status = JobStatus.KILLED
         job.exit_code = KILLED_EXIT_CODE
-        # Awaiting while cancelled is safe only because the in-memory
-        # console never suspends. A store that does needs shielding here.
-        await job.console.emit(Channel.STDERR, b"Killed")
-        await job.console.finish(KILLED_OUTCOME)
+        # This task is already unwinding from a cancel, and a store that
+        # suspends (Redis) would take a second cancellation mid-write
+        # and lose the marker readers are parked on. The shielded task
+        # keeps running to completion even if this one is cancelled
+        # again; RAM completes without ever suspending either way.
+        marker = asyncio.ensure_future(_mark_killed(job.console))
+        try:
+            await asyncio.shield(marker)
+        except asyncio.CancelledError:
+            logger.debug("job %d cancelled again while marking killed", job.id)
         raise
     except Exception as exc:
         # Recorded as the job's output and exit status rather than
@@ -135,9 +113,27 @@ async def _settle(run: JobRunner, job: Job) -> None:
 
 class JobTable:
 
-    def __init__(self) -> None:
+    def __init__(self, console_factory: ConsoleFactory | None = None) -> None:
+        """Create a table, optionally choosing where consoles live.
+
+        Args:
+            console_factory (ConsoleFactory | None): builds each new
+                job's console from its job id. None means an in-memory
+                console per job. A factory must hand every job a fresh
+                backing: ids restart at 1 when the table empties (GNU
+                numbering), so a store keyed on the id alone gets
+                reused, and a reused stream replays the previous job's
+                chunks, ending chunk included. The table tracks what the
+                factory builds and ``close_consoles`` releases it at
+                workspace teardown, because a config-provisioned store
+                (a Redis client per job) is invisible to the embedder;
+                a console still outlives its table entry, so ``reap``
+                never closes one.
+        """
         self._jobs: dict[int, Job] = {}
         self._next_id: int = 1
+        self._console_factory = console_factory
+        self._factory_consoles: list[JobConsole] = []
 
     def submit(
         self,
@@ -165,12 +161,18 @@ class JobTable:
             # empties. Without this, reaping after a targeted `wait`
             # would leave a later `wait %1` pointing at nothing.
             self._next_id = 1
+        if self._console_factory is None:
+            console = JobConsole()
+        else:
+            console = self._console_factory(self._next_id)
+            self._factory_consoles.append(console)
         job = Job(id=self._next_id,
                   command=command,
                   task=None,
                   cwd=cwd,
                   agent=agent,
-                  session_id=session_id)
+                  session_id=session_id,
+                  console=console)
         self._jobs[job.id] = job
         self._next_id += 1
         job.task = asyncio.create_task(_settle(run, job))
@@ -239,6 +241,20 @@ class JobTable:
         for job in running:
             await self.kill(job.id)
         return running
+
+    async def close_consoles(self) -> None:
+        """Close every console the factory built, releasing its store.
+
+        Called by workspace teardown after ``kill_all``. Only tracked,
+        factory-built consoles are closed: the default in-memory ones
+        hold nothing, while a factory-provisioned store keeps a client
+        open per job (in Node an open client holds the process alive).
+        Closing also releases any reader still parked on one.
+        """
+        consoles = self._factory_consoles
+        self._factory_consoles = []
+        for console in consoles:
+            await console.close()
 
     async def wait(self, job_id: int) -> Job:
         """Block until a job ends, then return it.

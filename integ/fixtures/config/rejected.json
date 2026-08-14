@@ -101,6 +101,34 @@
         "mounts": { "/d": { "resource": "ram" } },
         "store": { "type": "ram", "observer": { "type": "s3", "bucket": "b" } }
       }
+    },
+    {
+      "name": "console block: unknown key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "prefix": "c:" }
+      }
+    },
+    {
+      "name": "console block: unknown type",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "disk" }
+      }
+    },
+    {
+      "name": "console block: url not a string",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "url": 123 }
+      }
+    },
+    {
+      "name": "console block: zero ttl",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "ttl_seconds": 0 }
+      }
     }
   ]
 }

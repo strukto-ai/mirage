@@ -14,7 +14,7 @@
 
 import { coerceRuntimeConfig, type RuntimeConfig } from './config.ts'
 import { ScriptSource, type PolicyScript } from './policy/types.ts'
-import type { RuntimeOptions } from './types.ts'
+import type { RuntimeOptions, RuntimeReach } from './types.ts'
 
 /**
  * An engine the workspace can route commands or whole lines to.
@@ -42,14 +42,19 @@ export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
-   * Whether every effect of code this runtime executes lands inside the
-   * workspace. The bridged engines (monty, pyodide, quickjs) and the vfs
-   * routing marker declare true: their I/O rides the VFS bridge or the
-   * workspace executor itself. False by default and for anything that
-   * executes elsewhere — the host `local` python, a RemoteSandbox — so a
-   * custom runtime must declare confinement rather than inherit it.
+   * Which doors this runtime's code has to the outside world (see
+   * RuntimeReach): 'vfs' when the workspace dispatch is its only one,
+   * as the bridged engines (monty, pyodide, quickjs) and the vfs
+   * routing marker declare, 'process' or 'remote' when the code can
+   * act around that gate. The default is 'process', the no-promise
+   * claim, so a custom runtime must declare a narrower reach
+   * explicitly rather than inherit it. Embedders read the aggregate:
+   * only a world in which every runtime reaches 'vfs' makes "agent
+   * code cannot bypass mount modes and policy" a true statement,
+   * which is what the dsh adapter's sandbox claim is built from; one
+   * wider runtime voids it.
    */
-  readonly confined: boolean = false
+  readonly reach: RuntimeReach = 'process'
   /** The runtime's coerced implementation knobs. */
   config: RuntimeConfig
   script?: PolicyScript

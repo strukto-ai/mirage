@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -30,6 +32,8 @@ from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
+from mirage.shell.console import JobConsole
+from mirage.shell.job_table import ConsoleFactory
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
                           MountBackend, MountMode)
 from mirage.workspace.mount.spec import Mount
@@ -47,6 +51,11 @@ try:
     from mirage.workspace.store import S3WorkspaceStateStore
 except ImportError:
     S3WorkspaceStateStore = None
+
+try:
+    from mirage.shell.console.redis import RedisConsoleStore
+except ImportError:
+    RedisConsoleStore = None  # type: ignore[assignment,misc]
 
 
 def _coerce_mount_mode(value):
@@ -155,6 +164,30 @@ class RedisIndexBlock(BaseModel):
 
 IndexBlock = Annotated[
     RamIndexBlock | RedisIndexBlock,
+    Field(discriminator="type"),
+]
+
+
+class RamConsoleBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ram"] = "ram"
+
+
+class RedisConsoleBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["redis"]
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "mirage:console:"
+    # Keys expire this long after a console's last append, so finished
+    # jobs cannot accumulate in Redis forever. null keeps them until
+    # deleted by hand.
+    ttl_seconds: int | None = Field(default=86400, gt=0)
+
+
+ConsoleBlock = Annotated[
+    RamConsoleBlock | RedisConsoleBlock,
     Field(discriminator="type"),
 ]
 
@@ -499,6 +532,10 @@ class WorkspaceConfig(BaseModel):
     cache: CacheBlock | None = None
     index: IndexBlock | None = None
     store: StoreBlock | None = None
+    # Where background-job consoles live. The redis form keys one
+    # stream per job, so a reader in another process can follow a
+    # running job; ram (the default) keeps consoles in memory.
+    console: ConsoleBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -548,6 +585,8 @@ class WorkspaceConfig(BaseModel):
         if self.store is not None:
             kwargs["store"] = _build_state_store(self.store)
             kwargs["owns_store"] = True
+        if isinstance(self.console, RedisConsoleBlock):
+            kwargs["console_factory"] = _build_console_factory(self.console)
         if self.runtimes is not None:
             kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
         if self.policy is not None:
@@ -606,6 +645,36 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
             key_prefix=block.key_prefix,
         )
     return IndexConfig(ttl=block.ttl)
+
+
+def _redis_console(block: RedisConsoleBlock, job_id: int) -> JobConsole:
+    """Build one job's console on its own Redis stream.
+
+    The key carries a fresh nonce beside the job id, because job ids
+    restart at 1 when the table empties and a reused stream would
+    replay the previous job's chunks. The minted prefix is published as
+    the store's ``key_prefix`` (reachable as ``job.console.store``), so
+    an embedder can hand a reader in another process the console's
+    address. The workspace closes what this builds at teardown
+    (``JobTable.close_consoles``).
+
+    Args:
+        block (RedisConsoleBlock): the console config.
+        job_id (int): the job the console is being built for.
+    """
+    if RedisConsoleStore is None:
+        raise ImportError("A redis console requires the 'redis' extra. "
+                          "Install with: pip install mirage-ai[redis]")
+    prefix = f"{block.key_prefix}{uuid.uuid4().hex[:12]}:{job_id}:"
+    return JobConsole(store=RedisConsoleStore(
+        url=block.url, key_prefix=prefix, ttl_seconds=block.ttl_seconds))
+
+
+def _build_console_factory(block: RedisConsoleBlock) -> ConsoleFactory:
+    if RedisConsoleStore is None:
+        raise ImportError("A redis console requires the 'redis' extra. "
+                          "Install with: pip install mirage-ai[redis]")
+    return functools.partial(_redis_console, block)
 
 
 def _build_store_group(

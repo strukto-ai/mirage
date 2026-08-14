@@ -38,6 +38,11 @@ const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
  */
 export class LocalRuntime extends PythonRuntime {
   readonly name = 'local'
+  // Spawns the host interpreter: a real process with the user's own
+  // filesystem and network, doors the workspace gate never sees. This
+  // is the base default; declared here so the claim is explicit at the
+  // one builtin runtime that voids a world's sandbox claim.
+  override readonly reach = 'process'
   private readonly python: string
   private readonly children = new Set<ChildProcess>()
 

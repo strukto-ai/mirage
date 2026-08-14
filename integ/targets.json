@@ -321,6 +321,29 @@
       }
     },
     {
+      "id": "console-redis",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "redis",
+      "console": {
+        "type": "redis"
+      },
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        },
+        {
+          "path": "/data2",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
       "id": "opfs",
       "hosts": [
         "typescript-browser"

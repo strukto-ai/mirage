@@ -103,7 +103,18 @@ export async function loadPyodideRuntime(
     envHome() ??
     (await resolveNodeIndexURL()) ??
     (isNode() ? null : PYODIDE_CDN_URL)
-  const opts: Record<string, unknown> = { stdout: noopIo, stderr: noopIo }
+  // A null-prototype jsglobals seals the guest's `js` module: `import
+  // js` still resolves, but the host globalThis (js.process, js.fetch,
+  // js.process.env) is not reachable through it, so guest code has no
+  // host-environment or network door around the workspace bridge. This
+  // is what makes the runtime's reach='vfs' claim true and matches the
+  // docstring's "no network" promise; pyodide's own internals capture
+  // the globals they need at load time, not through this object.
+  const opts: Record<string, unknown> = {
+    stdout: noopIo,
+    stderr: noopIo,
+    jsglobals: Object.create(null) as object,
+  }
   if (options.packageBaseUrl !== undefined) opts.packageBaseUrl = options.packageBaseUrl
   if (options.lockFileURL !== undefined) opts.lockFileURL = options.lockFileURL
   if (options.packages !== undefined && options.packages.length > 0) {

@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "id": "console_bg_wait_adopts_output",
+      "seq": 509000,
+      "targets": [
+        "ram",
+        "console-redis"
+      ],
+      "command": "(echo out; echo err 1>&2) & wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "out\n",
+        "stderr": "err\n"
+      }
+    },
+    {
+      "id": "console_bg_wait_exit_code",
+      "seq": 509002,
+      "targets": [
+        "ram",
+        "console-redis"
+      ],
+      "command": "(sh -c 'exit 4' & wait $!; echo rc=$?) 2>/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_kill_by_bg_id",
+      "seq": 509004,
+      "targets": [
+        "ram",
+        "console-redis"
+      ],
+      "command": "(sleep 5 & kill $! && echo killed) 2>/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "killed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_bg_write_lands",
+      "seq": 509006,
+      "targets": [
+        "ram",
+        "console-redis"
+      ],
+      "command": "(echo payload > /data/console-bg.txt & wait) 2>/dev/null; cat /data/console-bg.txt; rm /data/console-bg.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "payload\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

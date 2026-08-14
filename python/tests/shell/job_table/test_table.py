@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from functools import partial
 
 import pytest
 
 from mirage.io import IOResult
 from mirage.shell.console import Channel, JobConsole, RAMConsoleStore
 from mirage.shell.console.types import ConsoleChunk, ReadResult
-from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.job_table.table import JobTable
+from mirage.shell.job_table.types import Job, JobStatus
 from mirage.workspace.types import ExecutionNode
 
 
@@ -63,6 +65,19 @@ async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
     """
     await asyncio.Event().wait()
     return IOResult(), ExecutionNode()
+
+
+def _tracked_ram_console(stores: list[RAMConsoleStore],
+                         job_id: int) -> JobConsole:
+    """A console factory that remembers the stores it built.
+
+    Args:
+        stores (list[RAMConsoleStore]): where built stores are recorded.
+        job_id (int): the job the console is being built for.
+    """
+    store = RAMConsoleStore()
+    stores.append(store)
+    return JobConsole(store=store)
 
 
 def _submit_gated(table: JobTable, gate: asyncio.Event) -> Job:
@@ -117,4 +132,53 @@ async def test_wait_all_joins_a_killed_job_still_appending():
     gate.set()
     await asyncio.wait_for(kill_task, 2)
     await asyncio.wait_for(all_waiter, 2)
+    assert await job.console.snapshot(Channel.STDERR) == b"Killed"
+
+
+@pytest.mark.asyncio
+async def test_close_consoles_releases_factory_stores():
+    """Teardown closes what the factory built, and only that."""
+    stores: list[RAMConsoleStore] = []
+    table = JobTable(console_factory=partial(_tracked_ram_console, stores))
+    job = table.submit(command="deaf", run=_run_forever, cwd="/")
+    await table.kill(job.id)
+    await table.close_consoles()
+    assert len(stores) == 1
+    assert all(s.closed for s in stores)
+
+
+@pytest.mark.asyncio
+async def test_close_consoles_leaves_default_consoles_alone():
+    table = JobTable()
+    job = table.submit(command="deaf", run=_run_forever, cwd="/")
+    await table.kill(job.id)
+    await table.close_consoles()
+    assert job.console.store.closed is False
+
+
+@pytest.mark.asyncio
+async def test_settle_kill_marker_survives_second_cancel():
+    """A cancel landing while the marker is mid-write must not lose it.
+
+    The runner's task is cancelled directly (not via ``kill``), enters
+    the settle branch, and parks on the gated append; a second cancel
+    then hits the task. The shield keeps the marker write running, so
+    once the gate opens the console still ends with the marker and the
+    killed outcome. Without the shield the second cancel aborts the
+    emit and the ending chunk never lands, stranding every reader.
+    """
+    gate = asyncio.Event()
+    table = JobTable()
+    job = _submit_gated(table, gate)
+    await asyncio.sleep(0)
+    assert job.task is not None
+    job.task.cancel()
+    await asyncio.sleep(0.01)
+    assert job.status is JobStatus.KILLED
+    job.task.cancel()
+    await asyncio.sleep(0.01)
+    gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(job.task, 2)
+    await asyncio.wait_for(job.console.wait_finished(), 2)
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"

@@ -67,3 +67,10 @@ def test_script_stored():
 def test_unknown_config_key_fails_loud():
     with pytest.raises(TypeError):
         MarkerRuntime(config={"no_such_knob": 1})
+
+
+def test_reach_defaults_to_process():
+    # A runtime that declares nothing gets the no-promise claim: it
+    # may act around the workspace gate. Only an explicit "vfs"
+    # narrows it.
+    assert MarkerRuntime().reach == "process"

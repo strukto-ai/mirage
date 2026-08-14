@@ -283,3 +283,7 @@ async def test_eval_failures_raise_eval_error():
         await rt.eval("throw new Error('boom')")
     with pytest.raises(EvalError, match="one-shot"):
         await rt.eval("1", session="s1")
+
+
+def test_reach_is_vfs():
+    assert QuickJsRuntime.reach == "vfs"

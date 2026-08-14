@@ -73,6 +73,12 @@ async function runTarget(
   report: Report | null,
   emit: EmitRow[] | null,
 ): Promise<void> {
+  // A console block is only wired into the ram opener; refusing it
+  // anywhere else keeps a silently RAM-consoled "redis console" target
+  // from reading as covered.
+  if (target.console !== undefined && target.mounts[0].resource !== 'ram') {
+    throw new Error(`target ${target.id}: console targets ride ram mounts`)
+  }
   const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
   try {
     // A target's declared environment. A CLI whose spec reads a variable

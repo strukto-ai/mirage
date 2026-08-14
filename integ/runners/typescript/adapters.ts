@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomBytes } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -57,6 +58,7 @@ import {
   SLACK,
   HfBucketsResource,
   JaegerResource,
+  JobConsole,
   LanceDBResource,
   LangfuseResource,
   LinearResource,
@@ -74,6 +76,7 @@ import {
   QingStorResource,
   R2Resource,
   RAMResource,
+  RedisConsoleStore,
   RedisResource,
   type Resource,
   S3Resource,
@@ -87,6 +90,7 @@ import {
   TrelloResource,
   WasabiResource,
   Workspace,
+  type ConsoleFactory,
 } from '@struktoai/mirage-node'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
@@ -179,6 +183,28 @@ function installLocalClis(ws: { registerCli: (name: string, spec: unknown) => vo
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
 }
 
+// Where a target declares console: {type: 'redis'}, each job's console
+// rides its own Redis stream on REDIS_URL. The nonce beside the id
+// matters because battery cases reap jobs and ids restart at 1; a
+// reused stream would replay the previous case's chunks, ending chunk
+// included. Only the ram opener consults this (main.ts refuses a
+// console block on any other resource), and ws.close() releases the
+// clients through JobTable.closeConsoles.
+function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
+  if (target.console?.type !== 'redis') return undefined
+  const url = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
+  const prefix = `mirage-integ-console-${randomBytes(4).toString('hex')}:`
+  return (jobId: number) =>
+    new JobConsole(
+      new RedisConsoleStore({
+        url,
+        keyPrefix: `${prefix}${randomBytes(4).toString('hex')}-${jobId.toString()}:`,
+        // Battery keys must not accumulate in the shared redis db.
+        ttlSeconds: 3600,
+      }),
+    )
+}
+
 async function openRam(target: Target): Promise<Open> {
   const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
   const built: Record<string, RAMResource> = {}
@@ -194,9 +220,11 @@ async function openRam(target: Target): Promise<Open> {
     built[m.path] = resource
     mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
   }
+  const consoleFactory = consoleFactoryFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
+    ...(consoleFactory !== undefined ? { consoleFactory } : {}),
   })
   installLocalClis(ws, target)
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }

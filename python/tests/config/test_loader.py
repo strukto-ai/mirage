@@ -25,6 +25,8 @@ from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.runtime.types import ScriptSource
+from mirage.shell.console import JobConsole
+from mirage.shell.console.redis import RedisConsoleStore
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -642,6 +644,51 @@ def _shared_fixture_cases(name: str) -> list[dict]:
     cases = json.loads(fixture.read_text())["cases"]
     assert cases, f"the {name} fixture must not be empty"
     return cases
+
+
+@pytest.mark.asyncio
+async def test_console_redis_block_builds_factory():
+    cfg = load_config({
+        "console": {
+            "type": "redis",
+            "url": "redis://localhost:6379/5",
+            "key_prefix": "test_console:",
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    kwargs = await cfg.to_workspace_kwargs()
+    factory = kwargs["console_factory"]
+    first = factory(1)
+    second = factory(1)
+    assert isinstance(first, JobConsole)
+    assert isinstance(first.store, RedisConsoleStore)
+    assert isinstance(second.store, RedisConsoleStore)
+    # Fresh keys per console: job ids restart at 1 when the table
+    # empties, so two consoles built for "job 1" must not share a
+    # stream (a shared one would replay the first job's chunks). The
+    # minted prefix is public: it is the address an embedder hands to
+    # a reader in another process.
+    assert first.store.key_prefix != second.store.key_prefix
+    assert first.store.key_prefix.startswith("test_console:")
+
+
+@pytest.mark.asyncio
+async def test_console_ram_block_emits_no_factory():
+    cfg = load_config({
+        "console": {
+            "type": "ram"
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert "console_factory" not in await cfg.to_workspace_kwargs()
 
 
 def test_shared_rejection_fixture_is_refused():
