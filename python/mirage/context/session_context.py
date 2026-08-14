@@ -13,23 +13,52 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mirage.types import MountMode, weaker_mode
 from mirage.utils.hidden import path_hidden
 
 if TYPE_CHECKING:
+    from mirage.workspace.session.manager import SessionManager
     from mirage.workspace.session.session import Session
 
-_current_session: ContextVar["Session | None"] = ContextVar(
+
+@dataclass(frozen=True, slots=True)
+class SessionBinding:
+    """The session bound to one async context, and whose it is.
+
+    Args:
+        session (Session | None): the live session.
+        owner (SessionManager | None): the session manager the session
+            belongs to, which is one per workspace. None when the
+            binder did not name one.
+    """
+    session: "Session | None"
+    owner: "SessionManager | None"
+
+
+_current_session: ContextVar[SessionBinding | None] = ContextVar(
     "mirage_current_session",
     default=None,
 )
 
 
-def set_current_session(session: "Session | None") -> Token[Any]:
-    """Bind ``session`` to the current async context."""
-    return _current_session.set(session)
+def set_current_session(session: "Session | None",
+                        owner: "SessionManager | None" = None) -> Token[Any]:
+    """Bind ``session`` to the current async context.
+
+    Args:
+        session (Session | None): the session to bind.
+        owner (SessionManager | None): the manager the session belongs
+            to. None keeps the owner already bound, so a nested bind
+            inside a line (a background job's fork) stays attributed to
+            the workspace running it.
+    """
+    if owner is None:
+        current = _current_session.get()
+        owner = current.owner if current is not None else None
+    return _current_session.set(SessionBinding(session=session, owner=owner))
 
 
 def reset_current_session(token: Token[Any]) -> None:
@@ -39,7 +68,24 @@ def reset_current_session(token: Token[Any]) -> None:
 
 def get_current_session() -> "Session | None":
     """Return the session bound to the current async context, if any."""
-    return _current_session.get()
+    binding = _current_session.get()
+    return binding.session if binding is not None else None
+
+
+def get_current_session_for(owner: "SessionManager") -> "Session | None":
+    """Return the bound session only when ``owner`` published it.
+
+    A session carries one workspace's cwd, env and mount grants, so a
+    second workspace re-entered mid-line must resolve its own session
+    rather than adopt this one.
+
+    Args:
+        owner (SessionManager): the asking workspace's session manager.
+    """
+    binding = _current_session.get()
+    if binding is None or binding.owner is not owner:
+        return None
+    return binding.session
 
 
 def _norm_prefix(mount_prefix: str) -> str:
@@ -57,7 +103,7 @@ def _session_mode(mount_prefix: str) -> "MountMode | None":
     Args:
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
     """
-    sess = _current_session.get()
+    sess = get_current_session()
     if sess is None or sess.mount_modes is None:
         return MountMode.EXEC
     return sess.mount_modes.get(_norm_prefix(mount_prefix))
@@ -72,7 +118,7 @@ def hidden_paths_active() -> bool:
     Args:
         None
     """
-    sess = _current_session.get()
+    sess = get_current_session()
     return sess is not None and sess.hidden_paths is not None
 
 
@@ -89,7 +135,7 @@ def path_allowed(virtual: str) -> bool:
     Args:
         virtual (str): absolute virtual path.
     """
-    sess = _current_session.get()
+    sess = get_current_session()
     if sess is None or sess.hidden_paths is None:
         return True
     return not path_hidden(sess.hidden_paths, virtual)
@@ -128,7 +174,7 @@ def assert_mount_allowed(mount_prefix: str) -> None:
     """
     if _session_mode(mount_prefix) is not None:
         return
-    sess = _current_session.get()
+    sess = get_current_session()
     sid = sess.session_id if sess is not None else "<none>"
     raise PermissionError(f"session {sid!r} not allowed to "
                           f"access mount {_norm_prefix(mount_prefix)!r}")

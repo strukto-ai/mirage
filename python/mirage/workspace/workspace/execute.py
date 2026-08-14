@@ -29,7 +29,7 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse)
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.node import provision_node, run_command_tree
-from mirage.workspace.session import (get_current_session,
+from mirage.workspace.session import (get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
@@ -144,7 +144,10 @@ async def execute_line(
     # names a registered session, never the ephemeral per-call fork the
     # outer line actually runs in, and re-resolving through the manager
     # is how a nested line used to escape the fork and its confinement.
-    ambient = get_current_session()
+    # Only this workspace's own binding counts: a session carries one
+    # workspace's cwd, env and mount grants, so a callback reaching a
+    # second workspace must resolve that workspace's session instead.
+    ambient = get_current_session_for(ws._session_mgr)
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
@@ -166,7 +169,8 @@ async def execute_line(
         effective_session._stdin_buffer = None
     scope = RecordingScope(active=is_line)
 
-    session_token = set_current_session(effective_session)
+    session_token = set_current_session(effective_session,
+                                        owner=ws._session_mgr)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and

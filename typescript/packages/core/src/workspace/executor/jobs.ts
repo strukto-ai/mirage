@@ -19,6 +19,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { runWithSession } from '../../context/session_context.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -55,42 +56,51 @@ export async function handleBackground(
   // context, and the fork keeps its parent's id, so without this
   // rebind a nested eval inside the job resolves the ambient outer
   // session and escapes the fork.
-  const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = runWithSession(
-    bgSession,
-    async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
-      let stdout: ByteSource | null
-      let io: IOResult
-      let execNode: ExecutionNode
-      try {
-        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack)
-      } catch (err) {
-        if (err instanceof CommandTimeoutError) {
-          const msg = new TextEncoder().encode(`${err.message}\n`)
-          return [
-            new Uint8Array(),
-            new IOResult({ exitCode: 124, stderr: msg }),
-            new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
-          ]
-        }
-        if (err instanceof ExitSignal) {
-          // A background job is its own shell: exit ends the job only.
-          return [
-            err.stdout ?? new Uint8Array(),
-            new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
-            new ExecutionNode({
-              command: cmdStrInner,
-              stderr: err.stderr,
-              exitCode: err.containedCode,
-            }),
-          ]
-        }
-        throw err
+  //
+  // A job runs concurrently with the rest of the line, so the bind is
+  // only safe where the async context isolates tasks. On the fallback
+  // storage (a browser with no AsyncLocalStorage) it is one global
+  // slot that would stay set while the foreground continues, showing
+  // the job's fork to the rest of the line. There the job's inner
+  // evals resolve by id instead, which is what they did before
+  // ambient sessions existed: a job that leaks into its own nested
+  // eval is narrower than a job that leaks into the whole line.
+  const body = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+    let stdout: ByteSource | null
+    let io: IOResult
+    let execNode: ExecutionNode
+    try {
+      ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack)
+    } catch (err) {
+      if (err instanceof CommandTimeoutError) {
+        const msg = new TextEncoder().encode(`${err.message}\n`)
+        return [
+          new Uint8Array(),
+          new IOResult({ exitCode: 124, stderr: msg }),
+          new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 }),
+        ]
       }
-      const materialized = await materialize(stdout)
-      io.syncExitCode()
-      return [materialized, io, execNode]
-    },
-  )
+      if (err instanceof ExitSignal) {
+        // A background job is its own shell: exit ends the job only.
+        return [
+          err.stdout ?? new Uint8Array(),
+          new IOResult({ exitCode: err.containedCode, stderr: err.stderr }),
+          new ExecutionNode({
+            command: cmdStrInner,
+            stderr: err.stderr,
+            exitCode: err.containedCode,
+          }),
+        ]
+      }
+      throw err
+    }
+    const materialized = await materialize(stdout)
+    io.syncExitCode()
+    return [materialized, io, execNode]
+  }
+  const task: Promise<[ByteSource | null, IOResult, ExecutionNode]> = asyncContextIsolatesTasks
+    ? runWithSession(bgSession, body)
+    : body()
   task.catch(() => {
     // unhandled rejections silenced here; callers use jobTable.wait()
   })

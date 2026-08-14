@@ -13,19 +13,57 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import type { SessionManager } from '../workspace/session/manager.ts'
 import type { Session } from '../workspace/session/session.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { pathHidden } from '../utils/hidden.ts'
 import { MountMode, weakerMode } from '../types.ts'
 
-const sessionStorage = createAsyncContext<Session>()
+/**
+ * The session bound to one async context, and whose it is: `owner` is
+ * the session manager it belongs to, which is one per workspace.
+ */
+interface SessionBinding {
+  session: Session
+  owner: SessionManager | null
+}
 
-export function runWithSession<T>(session: Session, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(sessionStorage.run(session, fn))
+const sessionStorage = createAsyncContext<SessionBinding>()
+
+/**
+ * Bind `session` for the duration of `fn`.
+ *
+ * `owner` names the manager the session belongs to; omitting it keeps
+ * the owner already bound, so a nested bind inside a line (a
+ * background job's fork) stays attributed to the workspace running it.
+ */
+export function runWithSession<T>(
+  session: Session,
+  fn: () => Promise<T>,
+  owner?: SessionManager,
+): Promise<T> {
+  const binding: SessionBinding = {
+    session,
+    owner: owner ?? sessionStorage.getStore()?.owner ?? null,
+  }
+  return Promise.resolve(sessionStorage.run(binding, fn))
 }
 
 export function getCurrentSession(): Session | null {
-  return sessionStorage.getStore() ?? null
+  return sessionStorage.getStore()?.session ?? null
+}
+
+/**
+ * The bound session, but only when `owner` published it.
+ *
+ * A session carries one workspace's cwd, env and mount grants, so a
+ * second workspace re-entered mid-line must resolve its own session
+ * rather than adopt this one.
+ */
+export function getCurrentSessionFor(owner: SessionManager): Session | null {
+  const binding = sessionStorage.getStore()
+  if (binding?.owner !== owner) return null
+  return binding.session
 }
 
 /**

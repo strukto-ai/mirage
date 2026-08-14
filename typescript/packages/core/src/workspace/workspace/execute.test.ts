@@ -13,12 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { RegisteredCommand } from '../../commands/config.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, ResourceName } from '../../types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace.ts'
 
 const ENC = new TextEncoder()
+
+const PROBE_SPEC = new CommandSpec({})
 
 const open: Workspace[] = []
 
@@ -146,5 +151,65 @@ describe('command substitution runs its whole body', () => {
     const ws = await makeWs()
     const io = await ws.execute('echo $(export Y=7; echo $Y)')
     expect(stdoutStr(io).trim()).toBe('7')
+  })
+})
+
+// The ambient session belongs to the workspace that published it. A
+// callback fired mid-line reaching a SECOND workspace must not adopt
+// it: that workspace's own session owns its cwd, env and mount grants,
+// and an unrestricted session must never stand in for a restricted one.
+describe('the ambient session is scoped to its workspace', () => {
+  it('another workspace resolves its own session', async () => {
+    const wsA = await makeWs()
+    const wsB = await makeTwoMounts()
+    const seen: string[] = []
+    const rc = new RegisteredCommand({
+      name: 'crossprobe',
+      spec: PROBE_SPEC,
+      resource: ResourceName.RAM,
+      fn: async () => {
+        const io = await wsB.execute('pwd')
+        seen.push(stdoutStr(io).trim())
+        return [new Uint8Array(), new IOResult()]
+      },
+    })
+    wsA.registry.mountForPrefix('/ram/')?.register(rc)
+    await wsA.execute('crossprobe', { cwd: '/ram/subdir' })
+    expect(seen).toEqual(['/'])
+  })
+
+  it('the policy reads the ambient session cwd', async () => {
+    // The policy decides about the line the session actually runs, so
+    // it reads the resolved session's cwd, not the registered
+    // session's: a re-entrant line runs in the live ambient fork.
+    const seen: string[] = []
+    const parser = await getTestParser()
+    const r = new RAMResource()
+    r.store.dirs.add('/')
+    r.store.dirs.add('/subdir')
+    const ws = new Workspace(
+      { '/ram/': r },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        policy: (ctx) => {
+          seen.push(ctx.cwd)
+          return null
+        },
+      },
+    )
+    open.push(ws)
+    const rc = new RegisteredCommand({
+      name: 'policyprobe',
+      spec: PROBE_SPEC,
+      resource: ResourceName.RAM,
+      fn: async () => {
+        await ws.execute('pwd')
+        return [new Uint8Array(), new IOResult()]
+      },
+    })
+    ws.registry.mountForPrefix('/ram/')?.register(rc)
+    await ws.execute('policyprobe', { cwd: '/ram/subdir' })
+    expect(seen).toEqual(['/ram/subdir', '/ram/subdir'])
   })
 })

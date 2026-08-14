@@ -15,7 +15,16 @@
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.registry import command
+from mirage.commands.spec import CommandSpec
+from mirage.io.types import IOResult
 from mirage.resource.ram import RAMResource
+
+
+def _register(ws: Workspace, prefix: str, fn) -> None:
+    mount = ws._registry.mount_for(prefix)
+    for registered in fn._registered_commands:
+        mount.register(registered)
 
 
 def _make_ws() -> Workspace:
@@ -152,3 +161,53 @@ async def test_cmdsub_runs_declarations():
     ws = _make_ws()
     r = await ws.execute("echo $(export Y=7; echo $Y)")
     assert (await r.stdout_str()).strip() == "7"
+
+
+# The ambient session belongs to the workspace that published it. A
+# callback fired mid-line reaching a SECOND workspace must not adopt
+# it: that workspace's own session owns its cwd, env and mount grants,
+# and an unrestricted session must never stand in for a restricted one.
+
+
+@pytest.mark.asyncio
+async def test_another_workspace_resolves_its_own_session():
+    ws_a = _make_ws()
+    ws_b = _two_mounts()
+    seen: list[str] = []
+
+    @command("crossprobe", resource="ram", spec=CommandSpec())
+    async def crossprobe(accessor, paths, texts, opts):
+        result = await ws_b.execute("pwd")
+        seen.append((await result.stdout_str()).strip())
+        return b"", IOResult()
+
+    _register(ws_a, "/ram/", crossprobe)
+    await ws_a.execute("crossprobe", cwd="/ram/subdir")
+    assert seen == ["/"]
+
+
+@pytest.mark.asyncio
+async def test_policy_reads_the_ambient_sessions_cwd():
+    # The policy decides about the line the session actually runs, so
+    # it reads the resolved session's cwd, not the registered
+    # session's: a re-entrant line runs in the live ambient fork.
+    seen: list[str] = []
+
+    def policy(ctx):
+        seen.append(ctx.cwd)
+        return None
+
+    resource = RAMResource()
+    store = resource._store
+    store.dirs.add("/")
+    store.dirs.add("/subdir")
+    ws = Workspace({"/ram/": resource}, mode=MountMode.WRITE, policy=policy)
+
+    @command("policyprobe", resource="ram", spec=CommandSpec())
+    async def policyprobe(accessor, paths, texts, opts):
+        await ws.execute("pwd")
+        return b"", IOResult()
+
+    _register(ws, "/ram/", policyprobe)
+    await ws.execute("policyprobe", cwd="/ram/subdir")
+    assert seen == ["/ram/subdir", "/ram/subdir"]

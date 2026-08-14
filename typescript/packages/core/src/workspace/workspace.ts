@@ -181,7 +181,6 @@ export class Workspace {
       this.registry,
       this.runtimes,
       this.policy,
-      this.sessionManager,
       this.agentId,
       sandboxResolver,
     )

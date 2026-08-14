@@ -18,7 +18,7 @@ import { runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { Resource } from '../../resource/base.ts'
-import { getCurrentSession, runWithSession } from '../../context/session_context.ts'
+import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../../shell/parse.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
@@ -156,14 +156,17 @@ export async function executeLine(
   // names a registered session, never the ephemeral per-call fork the
   // outer line actually runs in, and re-resolving through the manager
   // is how a nested line used to escape the fork and its confinement.
-  const ambient = getCurrentSession()
+  // Only this workspace's own binding counts: a session carries one
+  // workspace's cwd, env and mount grants, so a callback reaching a
+  // second workspace must resolve that workspace's session instead.
+  const ambient = getCurrentSessionFor(env.sessions)
   const targetSession =
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
       ? ambient
       : env.sessions.get(options.sessionId ?? env.sessions.defaultId)
   let routingDecision: PolicyDecision | null
   try {
-    routingDecision = await env.policyRouter.decide(rootNode, command, options)
+    routingDecision = await env.policyRouter.decide(rootNode, command, options, targetSession)
   } catch (caught) {
     if (caught instanceof PolicyDeny) {
       return deniedResult(env, command, options, targetSession, caught.reason)
@@ -274,7 +277,11 @@ async function runParsedLine(
     return new ExecuteResult(result.stdout, result.stderr ?? new Uint8Array(), result.exitCode)
   }
   const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-    runWithSession(effectiveSession, () => runCommandTree(deps, rootNode, effectiveSession, stdin))
+    runWithSession(
+      effectiveSession,
+      () => runCommandTree(deps, rootNode, effectiveSession, stdin),
+      env.sessions,
+    )
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   try {
     execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]

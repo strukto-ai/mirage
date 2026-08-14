@@ -14,13 +14,14 @@
 
 from mirage.context.session_context import (  # isort: skip
     assert_mount_allowed, effective_mount_mode, get_current_session,
-    hidden_paths_active, mount_allowed, path_allowed, reset_current_session,
-    set_current_session)
+    get_current_session_for, hidden_paths_active, mount_allowed, path_allowed,
+    reset_current_session, set_current_session)
 
 __all__ = [
     "assert_mount_allowed",
     "effective_mount_mode",
     "get_current_session",
+    "get_current_session_for",
     "hidden_paths_active",
     "mount_allowed",
     "path_allowed",
