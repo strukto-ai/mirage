@@ -18,8 +18,8 @@ from typing import Any
 
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore
-from mirage.workspace.session.store import (CAS_MAX_RETRIES, SessionStore,
-                                            generation_of)
+from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
+from mirage.workspace.session.store import SessionStore
 
 # One workspace's metadata record: the JSON-able discovery payload
 # (workspace_id, default_session_id, created_at, generation). This is

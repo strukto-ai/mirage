@@ -512,9 +512,11 @@ export {
 } from './workspace/types.ts'
 export { Session, type SessionInit } from './workspace/session/session.ts'
 export { SessionManager } from './workspace/session/manager.ts'
-export { SessionStore, generationOf, type SessionFields } from './workspace/session/store.ts'
+export { SessionStore, type SessionFields } from './workspace/session/store.ts'
 export { RAMSessionStore } from './workspace/session/ram.ts'
-export { S3RecordClient, S3SessionStore, isConditionLostError } from './workspace/session/s3.ts'
+export { S3RecordClient, isConditionLostError } from './workspace/record/s3.ts'
+export { S3SessionStore } from './workspace/session/s3.ts'
+export { CAS_MAX_RETRIES, generationOf, type RecordFields } from './workspace/record/types.ts'
 export {
   WorkspaceStateStore,
   type WorkspaceFields,

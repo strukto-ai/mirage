@@ -24,7 +24,8 @@ import {
 } from '@struktoai/mirage-core'
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../namespace/disk.ts'
-import { DiskRecordClient, DiskSessionStore } from '../session/disk.ts'
+import { DiskRecordClient } from '../record/disk.ts'
+import { DiskSessionStore } from '../session/disk.ts'
 
 export const DEFAULT_STATE_ROOT = '~/.mirage/state'
 

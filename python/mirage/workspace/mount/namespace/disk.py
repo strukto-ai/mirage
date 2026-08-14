@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
-from mirage.workspace.session.disk import DiskRecordClient
+from mirage.workspace.record.disk import DiskRecordClient
 
 NAMESPACE_RECORD = "namespace"
 

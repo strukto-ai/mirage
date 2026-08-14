@@ -16,11 +16,11 @@ import asyncio
 import copy
 
 from mirage.types import MountMode
+from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
 from mirage.workspace.session.shell_dirs import set_cwd
-from mirage.workspace.session.store import (CAS_MAX_RETRIES, SessionFields,
-                                            SessionStore, generation_of)
+from mirage.workspace.session.store import SessionFields, SessionStore
 
 
 class SessionManager:

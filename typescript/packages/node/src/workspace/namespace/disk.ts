@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NamespaceStore, type NodeFields } from '@struktoai/mirage-core'
-import { DiskRecordClient } from '../session/disk.ts'
+import { DiskRecordClient } from '../record/disk.ts'
 
 const NAMESPACE_RECORD = 'namespace'
 

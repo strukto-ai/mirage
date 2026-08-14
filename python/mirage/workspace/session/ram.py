@@ -14,8 +14,8 @@
 
 from collections.abc import Iterable
 
-from mirage.workspace.session.store import (SessionFields, SessionStore,
-                                            generation_of)
+from mirage.workspace.record.types import generation_of
+from mirage.workspace.session.store import SessionFields, SessionStore
 
 
 class RAMSessionStore(SessionStore):

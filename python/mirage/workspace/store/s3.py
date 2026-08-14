@@ -15,7 +15,8 @@
 from mirage.accessor.s3 import S3Config
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore
-from mirage.workspace.session.s3 import S3RecordClient, S3SessionStore
+from mirage.workspace.record.s3 import S3RecordClient
+from mirage.workspace.session.s3 import S3SessionStore
 from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
