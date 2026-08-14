@@ -17,8 +17,8 @@ import threading
 
 import pytest
 
-from mirage.shell.console.config import Channel
 from mirage.shell.console.ram import RAMConsoleStore
+from mirage.shell.console.types import Channel
 
 
 @pytest.mark.asyncio

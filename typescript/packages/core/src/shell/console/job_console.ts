@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Channel, type ConsoleChunk, type ReadResult } from './config.ts'
+import { Channel, type ConsoleChunk, type ReadResult } from './types.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
 

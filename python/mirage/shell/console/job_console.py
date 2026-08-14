@@ -14,9 +14,9 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.shell.console.config import Channel, ConsoleChunk
 from mirage.shell.console.ram import RAMConsoleStore
-from mirage.shell.console.store import ConsoleStore, ReadResult
+from mirage.shell.console.store import ConsoleStore
+from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
 
 
 class JobConsole:

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const KILLED_OUTCOME = 'killed'
-
 export const Channel = Object.freeze({
   STDOUT: 'stdout',
   STDERR: 'stderr',
@@ -41,8 +39,3 @@ export interface ConsoleChunk {
 
 /** Chunks read, the cursor to pass next time, and whether retention dropped the old one. */
 export type ReadResult = [ConsoleChunk[], number, boolean]
-
-/** Outcome text for a job that ran to completion. */
-export function exitOutcome(exitCode: number): string {
-  return `exit:${exitCode.toString()}`
-}

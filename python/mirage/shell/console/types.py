@@ -15,8 +15,6 @@
 from dataclasses import dataclass
 from enum import Enum
 
-KILLED_OUTCOME = "killed"
-
 
 class Channel(str, Enum):
     STDOUT = "stdout"
@@ -47,10 +45,6 @@ class ConsoleChunk:
     data: bytes
 
 
-def exit_outcome(exit_code: int) -> str:
-    """Outcome text for a job that ran to completion.
-
-    Args:
-        exit_code (int): the job's exit status.
-    """
-    return f"exit:{exit_code}"
+# Chunks read, the cursor to pass next time, and whether retention
+# dropped the requested one.
+ReadResult = tuple[list[ConsoleChunk], int, bool]

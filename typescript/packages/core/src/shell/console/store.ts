@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Channel, ConsoleChunk, ReadResult } from './config.ts'
+import type { Channel, ConsoleChunk, ReadResult } from './types.ts'
 
 /**
  * Storage for one job's console.

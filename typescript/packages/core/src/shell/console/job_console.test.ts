@@ -14,7 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Channel, KILLED_OUTCOME, exitOutcome } from './config.ts'
+import { KILLED_OUTCOME } from './constants.ts'
+import { Channel } from './types.ts'
+import { exitOutcome } from './utils.ts'
 import { JobConsole } from './job_console.ts'
 import { RAMConsoleStore } from './ram.ts'
 

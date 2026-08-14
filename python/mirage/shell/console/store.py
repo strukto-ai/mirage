@@ -14,9 +14,7 @@
 
 from typing import Protocol
 
-from mirage.shell.console.config import Channel, ConsoleChunk
-
-ReadResult = tuple[list[ConsoleChunk], int, bool]
+from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
 
 
 class ConsoleStore(Protocol):

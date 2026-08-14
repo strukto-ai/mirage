@@ -17,8 +17,7 @@ import logging
 import threading
 import time
 
-from mirage.shell.console.config import Channel, ConsoleChunk
-from mirage.shell.console.store import ReadResult
+from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
 
 logger = logging.getLogger(__name__)
 

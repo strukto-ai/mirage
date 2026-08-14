@@ -16,9 +16,11 @@ import asyncio
 
 import pytest
 
-from mirage.shell.console.config import KILLED_OUTCOME, Channel, exit_outcome
+from mirage.shell.console.constants import KILLED_OUTCOME
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.ram import RAMConsoleStore
+from mirage.shell.console.types import Channel
+from mirage.shell.console.utils import exit_outcome
 
 
 @pytest.fixture

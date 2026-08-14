@@ -12,20 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.shell.console.constants import KILLED_OUTCOME
-from mirage.shell.console.job_console import JobConsole
-from mirage.shell.console.ram import RAMConsoleStore
-from mirage.shell.console.store import ConsoleStore
-from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
-from mirage.shell.console.utils import exit_outcome
-
-__all__ = [
-    "KILLED_OUTCOME",
-    "Channel",
-    "ConsoleChunk",
-    "ConsoleStore",
-    "JobConsole",
-    "RAMConsoleStore",
-    "ReadResult",
-    "exit_outcome",
-]
+# The CONTROL payload for a killed job; a job that ran to completion
+# carries "exit:<code>" instead (utils.exit_outcome).
+KILLED_OUTCOME = "killed"

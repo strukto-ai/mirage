@@ -12,10 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { KILLED_OUTCOME } from './constants.ts'
-export { Channel } from './types.ts'
-export type { ConsoleChunk, ReadResult } from './types.ts'
-export { exitOutcome } from './utils.ts'
-export { JobConsole } from './job_console.ts'
-export { RAMConsoleStore } from './ram.ts'
-export type { ConsoleStore } from './store.ts'
+/** Outcome text for a job that ran to completion. */
+export function exitOutcome(exitCode: number): string {
+  return `exit:${exitCode.toString()}`
+}
