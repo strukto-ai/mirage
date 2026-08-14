@@ -34,7 +34,7 @@ import {
 import type { ConsoleChunk, ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tailCap } from './text.ts'
-import { SpillSink, type SpillTarget } from './spill.ts'
+import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 import type {} from './service.ts'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -42,6 +42,14 @@ const MAX_TIMEOUT_MS = 600_000
 const DEFAULT_STDOUT_MAX_BYTES = 200_000
 const DEFAULT_STDERR_MAX_BYTES = 64_000
 const STDERR_MARKER = '\n--- stderr ---\n'
+// What the console may hold that the drain loop has not consumed yet.
+// Capping the delta does not bound this: a reader's cursor advances but
+// frees nothing, so an uncapped store keeps every chunk of a noisy
+// command for the life of the process. Five deltas' worth, because the
+// drain awaits the spill's own writes and has to be free to fall
+// briefly behind, and bounded, so a command that outruns it forever
+// cannot grow the heap.
+const CONSOLE_RETENTION_BYTES = 5 * DEFAULT_STDOUT_MAX_BYTES
 
 // Monotonic within the process, so concurrent background commands never
 // collide on a spill filename. Not reset, so it needs no time or randomness.
@@ -131,8 +139,12 @@ function executeOptions(
  * clears — consuming, so consecutive reads never re-deliver. Unread output
  * is bounded to `budget` bytes: the head is dropped and `lossy` set once
  * it overruns, keeping the tail, which is where the full stream spills to
- * a file. `kill()` aborts cooperatively (the executor observes the signal
- * between pipeline stages and inside sleep).
+ * a file. Both ends of the conduit are bounded, because draining the
+ * console does not free it: the console holds a retention budget of its
+ * own, and a command that outruns this loop by that much loses chunks,
+ * which arrives here as a gap in the sequence. `kill()` aborts
+ * cooperatively (the executor observes the signal between pipeline stages
+ * and inside sleep).
  */
 class MirageShellProcess implements ShellProcess {
   status: ShellProcessStatus = 'running'
@@ -151,6 +163,7 @@ class MirageShellProcess implements ShellProcess {
   private lossy = false
   private inStderr = false
   private settled = false
+  private expectSeq = 0
 
   constructor(
     run: Promise<ExecuteResult>,
@@ -177,6 +190,16 @@ class MirageShellProcess implements ShellProcess {
     // chunk that finish() appends.
     for await (const chunk of this.console.follow(0)) {
       if (chunk.channel === Channel.CONTROL) return
+      // A seq that skips means the console trimmed chunks this loop had
+      // not read: the command outran the drain by a whole retention
+      // budget. Those bytes are gone for good, so say so, and stop the
+      // spill rather than let a file with a hole in it be handed back
+      // as the full stream.
+      if (chunk.seq !== this.expectSeq) {
+        this.lossy = true
+        this.spill?.disable()
+      }
+      this.expectSeq = chunk.seq + 1
       await this.appendChunk(chunk)
     }
   }
@@ -306,7 +329,7 @@ export class MirageShellExecutor extends ShellExecutor {
     const target: SpillTarget = {
       ensureDir: async (d) => {
         const ws = await this.workspace()
-        if (!(await ws.fs.exists(d))) await ws.fs.mkdir(d)
+        await ensureDirPath({ exists: (p) => ws.fs.exists(p), mkdir: (p) => ws.fs.mkdir(p) }, d)
       },
       write: async (p, bytes) => {
         const ws = await this.workspace()
@@ -464,10 +487,11 @@ export class MirageShellExecutor extends ShellExecutor {
   start(spec: ShellExecSpec): ShellProcess {
     const sandbox = this.sandboxInfo()
     const controller = new AbortController()
-    // The console is the streaming conduit; the process bounds the unread
-    // backlog itself, so the store keeps everything the follow loop has
-    // not drained yet (which stays small when a reader keeps up).
-    const console_ = new JobConsole(new RAMConsoleStore())
+    // The console is the streaming conduit, holding what the follow loop
+    // has not drained yet (nothing, when the loop keeps up). Its own
+    // retention budget is what bounds that, since reading a chunk does
+    // not release it.
+    const console_ = new JobConsole(new RAMConsoleStore(CONSOLE_RETENTION_BYTES))
     const spill = this.newSpill()
     if (spec.signal?.aborted === true) {
       controller.abort()

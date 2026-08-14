@@ -21,6 +21,40 @@ export interface SpillTarget {
   append(path: string, bytes: Uint8Array): Promise<void>
 }
 
+/** The two directory facts `ensureDirPath` needs from a workspace. */
+export interface DirMaker {
+  exists(path: string): Promise<boolean>
+  mkdir(path: string): Promise<void>
+}
+
+/**
+ * Create `dir` and any missing ancestor, treating an existing one as
+ * done.
+ *
+ * `mkdir` is one level and is not idempotent, so a probe alone is not
+ * enough: two commands that first overrun at the same moment both see
+ * the spill directory missing, one creates it and the other is refused
+ * for a directory that is now exactly what it wanted. Losing that race
+ * must not cost a command its spill, so the refusal is re-checked
+ * against existence and only a directory that is still missing is a
+ * real failure.
+ *
+ * @param dirs the workspace's `exists`/`mkdir`.
+ * @param dir absolute workspace path to create.
+ */
+export async function ensureDirPath(dirs: DirMaker, dir: string): Promise<void> {
+  let path = ''
+  for (const part of dir.split('/').filter((p) => p !== '')) {
+    path += `/${part}`
+    if (await dirs.exists(path)) continue
+    try {
+      await dirs.mkdir(path)
+    } catch (err) {
+      if (!(await dirs.exists(path))) throw err
+    }
+  }
+}
+
 function totalLength(parts: Uint8Array[]): number {
   return parts.reduce((sum, p) => sum + p.byteLength, 0)
 }
@@ -119,7 +153,15 @@ export class SpillSink {
     }
   }
 
-  private disable(): void {
+  /**
+   * Give up on spilling and report no path.
+   *
+   * Called on a write failure, and by a reader that discovers it lost
+   * bytes before they ever reached here: a file missing the middle of
+   * the stream is worse than no file, because the path presents it as
+   * the whole one.
+   */
+  disable(): void {
     this.failed = true
     this.stdoutPath = undefined
     this.stderrPath = undefined

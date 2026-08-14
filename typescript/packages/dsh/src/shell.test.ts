@@ -328,6 +328,17 @@ describe('streaming', () => {
     expect(out.delta).not.toContain('aaaa')
     expect(new TextEncoder().encode(out.delta).byteLength).toBeLessThanOrEqual(12)
   })
+
+  it('delivers the output of a line that never reached the command tree', async () => {
+    const { shell } = await makeShell()
+    // The syntax gate answers before the walk that streams, so this
+    // arrives only because the executor drains a buffered result into
+    // the console.
+    const proc = shell.start(shell.resolve({ command: 'case x' }))
+    await proc.done
+    expect(proc.exitCode).toBe(2)
+    expect(proc.readOutput().delta).toContain('syntax error')
+  })
 })
 
 describe('spill', () => {
@@ -370,6 +381,33 @@ describe('spill', () => {
     if (stderrPath === undefined) throw new Error('expected a stderr spill path')
     expect(await ws.fs.readFileText(stdoutPath)).toContain('out1')
     expect(await ws.fs.readFileText(stderrPath)).toContain('err1')
+  })
+
+  it('spills both commands when two overrun into a missing directory at once', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const line = 'echo aaaa; echo bbbb; echo cccc; echo dddd'
+    const first = shell.start(shell.resolve({ command: line }))
+    const second = shell.start(shell.resolve({ command: line }))
+    await Promise.all([first.done, second.done])
+    const paths = [first.readOutput().stdoutSpillPath, second.readOutput().stdoutSpillPath]
+    // Whichever loses the mkdir race still spills, and to its own file.
+    expect(paths[0]).toBeDefined()
+    expect(paths[1]).toBeDefined()
+    expect(paths[0]).not.toBe(paths[1])
+    for (const path of paths) {
+      if (path === undefined) throw new Error('expected a stdout spill path')
+      expect(await ws.fs.readFileText(path)).toContain('aaaa')
+    }
+  })
+
+  it('creates a nested spill directory', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/runs/spill' })
+    const proc = shell.start(shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }))
+    await proc.done
+    const path = proc.readOutput().stdoutSpillPath
+    if (path === undefined) throw new Error('expected a stdout spill path')
+    expect(path.startsWith('/data/runs/spill/')).toBe(true)
+    expect(await ws.fs.readFileText(path)).toContain('aaaa')
   })
 })
 
