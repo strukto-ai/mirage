@@ -443,8 +443,212 @@
       }
     },
     {
-      "id": "symx_readlink_plain",
+      "id": "symx_stat_percent_n_link",
       "seq": 810,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/flink",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/flink' -> '/data/symx/real.txt'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_dirlink",
+      "seq": 811,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/dlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/dlink' -> '/data/symx/sub'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_dangling",
+      "seq": 812,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/dangle",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/dangle' -> '/data/symx/none'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_plain",
+      "seq": 813,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/real.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/real.txt'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_deref",
+      "seq": 814,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/flink -L",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/flink'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_width",
+      "seq": 815,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '[%25N]' /data/symx/flink",
+      "expect": {
+        "exit": 0,
+        "stdout": "[         /data/symx/flink ->       /data/symx/real.txt]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_readlink_plain",
+      "seq": 816,
       "targets": [
         "ram",
         "disk",
@@ -478,7 +682,7 @@
     },
     {
       "id": "symx_readlink_e_dangling",
-      "seq": 811,
+      "seq": 817,
       "targets": [
         "ram",
         "disk",
@@ -512,7 +716,7 @@
     },
     {
       "id": "symx_readlink_f_dangling",
-      "seq": 812,
+      "seq": 818,
       "targets": [
         "ram",
         "disk",
@@ -546,7 +750,7 @@
     },
     {
       "id": "symx_readlink_e_live",
-      "seq": 813,
+      "seq": 819,
       "targets": [
         "ram",
         "disk",
@@ -580,7 +784,7 @@
     },
     {
       "id": "symx_file_link",
-      "seq": 814,
+      "seq": 820,
       "targets": [
         "ram",
         "disk",
@@ -614,7 +818,7 @@
     },
     {
       "id": "symx_file_broken",
-      "seq": 815,
+      "seq": 821,
       "targets": [
         "ram",
         "disk",
@@ -648,7 +852,7 @@
     },
     {
       "id": "symx_file_deref",
-      "seq": 816,
+      "seq": 822,
       "targets": [
         "ram",
         "disk",
@@ -682,7 +886,7 @@
     },
     {
       "id": "symx_du_link_operand",
-      "seq": 817,
+      "seq": 823,
       "targets": [
         "ram",
         "disk",
@@ -716,7 +920,7 @@
     },
     {
       "id": "symx_du_a_lists_links",
-      "seq": 818,
+      "seq": 824,
       "targets": [
         "ram",
         "disk",
@@ -749,8 +953,8 @@
       }
     },
     {
-      "id": "symx_cleanup",
-      "seq": 819,
+      "id": "symx_link_metachar_target",
+      "seq": 825,
       "targets": [
         "ram",
         "disk",
@@ -775,7 +979,75 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rm /data/symx/flink /data/symx/dlink /data/symx/dangle && rm -r /data/symx",
+      "command": "ln -s \"/data/symx/a'b\\$c\" /data/symx/qlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_stat_percent_n_metachar_target",
+      "seq": 826,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "stat -c '%N' /data/symx/qlink",
+      "expect": {
+        "exit": 0,
+        "stdout": "'/data/symx/qlink' -> '/data/symx/a'\\''b$c'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "symx_cleanup",
+      "seq": 827,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rm /data/symx/flink /data/symx/dlink /data/symx/dangle /data/symx/qlink && rm -r /data/symx",
       "expect": {
         "exit": 0,
         "stdout": "",

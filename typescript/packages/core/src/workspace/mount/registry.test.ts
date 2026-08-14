@@ -20,6 +20,7 @@ import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
+import { isNoMount } from '../../utils/errors.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
 class StubResource implements Resource {
@@ -185,7 +186,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    if (b === null) throw new Error('missing /b mount')
     const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepB === undefined) throw new Error('missing grep cmd')
     b.register(grepB)
@@ -199,7 +199,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    if (b === null) throw new Error('missing /b mount')
     const [seqB] = command({ name: 'seq', resource: null, spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (seqB === undefined) throw new Error('missing seq cmd')
     b.registerGeneral(seqB)
@@ -213,7 +212,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const linear = reg.mountForPrefix('/home/zecheng/linear')
-    if (linear === null) throw new Error('missing /home/zecheng/linear mount')
     const [linearSearch] = command({
       name: 'linear-search',
       resource: 'ram',
@@ -248,7 +246,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     )
     const a = reg.mountForPrefix('/a')
     const b = reg.mountForPrefix('/b')
-    if (a === null || b === null) throw new Error('missing mount')
     const [grepA] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepA === undefined || grepB === undefined) throw new Error('missing grep cmd')
@@ -264,7 +261,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    if (b === null) throw new Error('missing /b mount')
     const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepB === undefined) throw new Error('missing grep cmd')
     b.register(grepB)
@@ -283,7 +279,6 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    if (b === null) throw new Error('missing /b mount')
     const [writeCmd] = command({
       name: 'mutate',
       resource: 'ram',
@@ -319,7 +314,6 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
     const reg = new MountRegistry({ '/limited/': new LimitedResource() }, MountMode.WRITE)
     reg.mount('/', new RAMStubResource(), MountMode.WRITE)
     const root = reg.mountForPrefix('/')
-    if (root === null) throw new Error('missing / mount')
     const [fallbackOnly] = command({
       name: 'fallback-only',
       resource: 'ram',
@@ -358,7 +352,6 @@ describe('MountRegistry.matchCommandPrefix', () => {
   function regWith(names: string[]): MountRegistry {
     const reg = new MountRegistry({ '/data': new RAMStubResource() }, MountMode.WRITE)
     const mount = reg.mountForPrefix('/data')
-    if (mount === null) throw new Error('missing /data mount')
     for (const name of names) {
       const [rc] = command({ name, resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
       if (rc === undefined) throw new Error(`missing cmd ${name}`)
@@ -400,5 +393,55 @@ describe('MountRegistry.matchCommandPrefix', () => {
     const reg = regWith([])
     expect(reg.matchCommandPrefix(['nope', 'x'])).toBe(1)
     expect(reg.matchCommandPrefix([])).toBe(0)
+  })
+})
+
+describe('MountRegistry mount lookup contract', () => {
+  it('mountFor throws the typed noMount for a path outside every mount', () => {
+    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    let thrown: unknown = null
+    try {
+      reg.mountFor('/unknown/file.txt')
+    } catch (err) {
+      thrown = err
+    }
+    expect(isNoMount(thrown)).toBe(true)
+  })
+
+  it('tryMountFor returns null on a miss and the mount on a hit', () => {
+    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    expect(reg.tryMountFor('/unknown/file.txt')).toBeNull()
+    expect(reg.tryMountFor('/data/file.txt')?.prefix).toBe('/data/')
+  })
+
+  it('mountForPrefix throws the typed noMount; tryMountForPrefix returns null', () => {
+    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    let thrown: unknown = null
+    try {
+      reg.mountForPrefix('/unknown/')
+    } catch (err) {
+      thrown = err
+    }
+    expect(isNoMount(thrown)).toBe(true)
+    expect(reg.tryMountForPrefix('/unknown/')).toBeNull()
+    expect(reg.tryMountForPrefix('/data/')?.prefix).toBe('/data/')
+  })
+
+  it('tryMountForPrefix normalizes the registration spelling', () => {
+    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    for (const spelling of ['/data', 'data/', '/data/']) {
+      expect(reg.tryMountForPrefix(spelling)?.prefix).toBe('/data/')
+    }
+  })
+
+  it('groupByMount propagates the miss instead of dropping the path', () => {
+    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    let thrown: unknown = null
+    try {
+      reg.groupByMount(['/data/a.txt', '/unknown/b.txt'])
+    } catch (err) {
+      thrown = err
+    }
+    expect(isNoMount(thrown)).toBe(true)
   })
 })

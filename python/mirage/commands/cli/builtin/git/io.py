@@ -14,31 +14,100 @@
 
 import logging
 import posixpath
-from typing import Any, Callable
 
-from mirage.types import PathSpec
+from mirage.commands.cli.builtin.git.types import SYMLINK
+from mirage.ops.types import LinkView
+from mirage.runtime.types import DispatchFn
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
 
 logger = logging.getLogger(__name__)
 
 
-async def read_file(dispatch: Callable[..., Any], path: str) -> bytes:
+async def read_file(dispatch: DispatchFn, path: str) -> bytes:
     """Read one virtual path through the workspace dispatcher.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
     """
     data, _ = await dispatch("read", PathSpec.from_str_path(path))
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def read_range(dispatch: Callable[..., Any], path: str, offset: int,
+async def entry_bytes(dispatch: DispatchFn, path: str,
+                      info: FileStat) -> bytes:
+    """The bytes git stores for one working-tree entry.
+
+    A symlink's blob is its target string, not what the target holds, so
+    reading through the link would stage a second copy of the target
+    under mode 100644 and then report the entry modified forever after
+    (the staged blob and the bytes behind the link never match). The
+    target is namespace state, which is why it arrives on the stat
+    rather than from a read.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path.
+        info (FileStat): what the walk saw at that path, lstat-style.
+    """
+    if info.type is FileType.SYMLINK:
+        target = info.extra.get(LINK_TARGET_KEY)
+        if isinstance(target, str):
+            return target.encode()
+    return await read_file(dispatch, path)
+
+
+async def restore_entry(dispatch: DispatchFn,
+                        path: str,
+                        mode: int,
+                        blob: bytes,
+                        links: LinkView | None = None) -> None:
+    """Materialize one tree entry into the working tree.
+
+    A 120000 entry is a symlink whose blob is the target string, so it
+    is restored through the namespace rather than written as content:
+    writing the blob would leave a regular file spelling the target.
+    The namespace overwrites a link of the same name, which is what a
+    checkout that changes where a link points needs.
+
+    Whatever is already there goes first when it is the other kind,
+    because the two live on different planes and neither replaces the
+    other. Writing a regular blob at a path the namespace holds a link
+    for follows the link and lands the content in the file it points
+    at, corrupting a path no branch touched while the link stays; and
+    linking over a regular file leaves that file behind the link, ready
+    to reappear when the link goes. git replaces the entry in both
+    directions. The check is a namespace lookup, so the ordinary
+    file-for-file case costs nothing.
+
+    Args:
+        dispatch (DispatchFn): workspace op dispatcher.
+        path (str): absolute virtual path to materialize at.
+        mode (int): the tree entry's mode.
+        blob (bytes): the entry's blob content.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
+    """
+    linked = links is not None and links.stat_at(path) is not None
+    if mode == SYMLINK:
+        if not linked:
+            await remove_file(dispatch, path)
+        await dispatch("symlink",
+                       PathSpec.from_str_path(path),
+                       target=blob.decode("utf-8", errors="replace"))
+        return
+    if linked:
+        await remove_file(dispatch, path)
+    await write_file(dispatch, path, blob)
+
+
+async def read_range(dispatch: DispatchFn, path: str, offset: int,
                      size: int) -> bytes:
     """Read a byte range of one virtual path.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
         offset (int): first byte to read.
         size (int): how many bytes to read.
@@ -50,26 +119,25 @@ async def read_range(dispatch: Callable[..., Any], path: str, offset: int,
     return data if isinstance(data, bytes) else bytes(data)
 
 
-async def file_size(dispatch: Callable[..., Any], path: str) -> int | None:
+async def file_size(dispatch: DispatchFn, path: str) -> int | None:
     """A path's byte length, or None when the backend does not know it.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
     """
     stat, _ = await dispatch("stat", PathSpec.from_str_path(path))
     return getattr(stat, "size", None)
 
 
-async def read_optional(dispatch: Callable[..., Any],
-                        path: str) -> bytes | None:
+async def read_optional(dispatch: DispatchFn, path: str) -> bytes | None:
     """Read a path that a repository may legitimately not have.
 
     ``packed-refs`` and ``HEAD``-adjacent files are absent in perfectly
     valid repositories, so a miss is an answer rather than an error.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
     """
     try:
@@ -78,11 +146,11 @@ async def read_optional(dispatch: Callable[..., Any],
         return None
 
 
-async def read_names(dispatch: Callable[..., Any], path: str) -> list[str]:
+async def read_names(dispatch: DispatchFn, path: str) -> list[str]:
     """List a directory, empty when it does not exist.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path of the directory.
     """
     try:
@@ -92,7 +160,7 @@ async def read_names(dispatch: Callable[..., Any], path: str) -> list[str]:
     return list(entries or [])
 
 
-async def ensure_dir(dispatch: Callable[..., Any], path: str) -> None:
+async def ensure_dir(dispatch: DispatchFn, path: str) -> None:
     """Create a directory and every missing directory above it.
 
     Written out rather than delegated to ``mkdir -p`` because the
@@ -107,7 +175,7 @@ async def ensure_dir(dispatch: Callable[..., Any], path: str) -> None:
     creating one again costs a no-op rather than an error.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path of the directory.
     """
     missing: list[str] = []
@@ -123,11 +191,11 @@ async def ensure_dir(dispatch: Callable[..., Any], path: str) -> None:
         await dispatch("mkdir", PathSpec.from_str_path(target))
 
 
-async def exists(dispatch: Callable[..., Any], path: str) -> bool:
+async def exists(dispatch: DispatchFn, path: str) -> bool:
     """Whether a point lookup finds anything at a path.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
     """
     try:
@@ -137,12 +205,11 @@ async def exists(dispatch: Callable[..., Any], path: str) -> bool:
     return True
 
 
-async def write_file(dispatch: Callable[..., Any], path: str,
-                     data: bytes) -> None:
+async def write_file(dispatch: DispatchFn, path: str, data: bytes) -> None:
     """Write one virtual path, creating the directories above it.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
         data (bytes): the whole contents.
     """
@@ -150,8 +217,7 @@ async def write_file(dispatch: Callable[..., Any], path: str,
     await dispatch("write", PathSpec.from_str_path(path), data=data)
 
 
-async def write_once(dispatch: Callable[..., Any], path: str,
-                     data: bytes) -> None:
+async def write_once(dispatch: DispatchFn, path: str, data: bytes) -> None:
     """Write a path only if nothing is there yet.
 
     For content-addressed files, which is every object in the database:
@@ -162,7 +228,7 @@ async def write_once(dispatch: Callable[..., Any], path: str,
     unchanged file hits that on the first try.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
         data (bytes): the whole contents.
     """
@@ -171,7 +237,7 @@ async def write_once(dispatch: Callable[..., Any], path: str,
     await write_file(dispatch, path, data)
 
 
-async def remove_file(dispatch: Callable[..., Any], path: str) -> None:
+async def remove_file(dispatch: DispatchFn, path: str) -> None:
     """Delete one virtual path, tolerating one that is already gone.
 
     A miss is an answer rather than an error for every caller here:
@@ -179,7 +245,7 @@ async def remove_file(dispatch: Callable[..., Any], path: str) -> None:
     and a checkout removes files the other branch does not have.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path.
     """
     try:

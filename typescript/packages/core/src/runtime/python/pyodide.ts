@@ -257,6 +257,7 @@ const EVAL_INTERRUPT_SECONDS = 10
 
 export class PyodideRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'pyodide'
+  override readonly confined = true
   readonly [EVALUATOR] = true as const
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
@@ -491,7 +492,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
    * that impossible without JSPI, which no shipping Node has and Safari
    * does not implement.
    *
-   * The cost is one LIST plus one READ per file per run. Narrowing that
+   * The cost is one readdir plus one read per file per run. Narrowing that
    * to what actually changed needs a per-entry change stamp the bridge
    * does not carry yet; until it does, correctness is the side to err on.
    *
@@ -523,7 +524,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       this.mounted.delete(prefix)
     }
     for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
-      // Collect before touching the mount table: a failed LIST then
+      // Collect before touching the mount table: a failed readdir then
       // leaves the previous snapshot serving rather than an empty mount,
       // and the prefix retries on the next run.
       const seed = new MirageFsSeed()

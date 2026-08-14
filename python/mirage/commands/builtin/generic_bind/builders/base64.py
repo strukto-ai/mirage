@@ -13,39 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.base64_cmd import \
-    base64_cmd as generic_base64
+from mirage.commands.builtin.generic.base64_cmd import base64_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def base64(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    D: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["base64"])
-    wrap_value = fl.as_str("wrap")
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_base64(
-        paths,
-        read_stream=bound_op(ops.read_stream, accessor, index),
-        stdin=stdin,
-        decode=D or fl.as_bool("decode"),
-        wrap=int(wrap_value) if wrap_value is not None else None,
-        ignore_garbage=fl.as_bool("ignore_garbage"))
+async def base64(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await base64_generic(
+        resolved, list(texts), opts,
+        bound_op(ops.read_stream, accessor, opts.index))
 
 
 BUILDER = Builder('base64', base64, None, False, None, read=True)

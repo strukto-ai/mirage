@@ -17,6 +17,5 @@ import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
 import { SSH_IO } from '../../commands/builtin/ssh/io.ts'
 
 export const SSH_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.SSH, SSH_IO, {
-  forwardIndex: false,
   mkdirParents: true,
 })

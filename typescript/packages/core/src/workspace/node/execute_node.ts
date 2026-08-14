@@ -68,7 +68,7 @@ import {
   handleUntil,
   handleWhile,
 } from '../executor/control.ts'
-import type { DispatchFn } from '../executor/cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import {
   handleExport,
   handleLocal,
@@ -87,6 +87,9 @@ import { resolveGlobs } from '../expand/globs.ts'
 import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import type { SessionView } from '../../ops/types.ts'
+import { ensureVarVisible, sessionView, visibleEnv } from '../session/state.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { type ExecuteNodeOpts, pump } from '../executor/jobs.ts'
@@ -129,9 +132,31 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   return next
 }
 
-// Array-literal elements behave like any other shell word list: command
-// substitutions word-split and globs resolve to matches
-// (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
+/**
+ * One assignment through the session door; denial is fatal.
+ *
+ * Every assignment spelling (scalar, array literal, subscript, append)
+ * computes its resulting value and stores through `view.set`, so the
+ * gate and the storage invariant live in the door, not here. Denial
+ * mirrors the readonly case: a fatal variable-assignment error that
+ * abandons the rest of the line.
+ */
+async function assignVar(
+  view: SessionView,
+  key: string,
+  value: string | ShellArray,
+): Promise<void> {
+  try {
+    await view.set(key, value)
+  } catch (err) {
+    if (err instanceof PolicyDenied) {
+      const denied = new TextEncoder().encode(`${err.message}\n`)
+      throw new ExitSignal(1, denied, null, 1)
+    }
+    throw err
+  }
+}
+
 /**
  * Evaluate one C-style for expression slot: the slot's integer value,
  * or the default for an empty slot (1 for the condition so `for
@@ -146,29 +171,43 @@ async function evalCforExpr(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<number> {
   if (expr === null) return dflt
-  const text = await expandArith(expr, session, executeFn, callStack)
+  const text = await expandArith(expr, session, executeFn, callStack, view)
   let value: bigint
   let updates: Record<string, string>
   try {
-    ;({ value, updates } = evaluateArith(text, session.env))
+    // Reads resolve against the visible env so a hidden name counts as
+    // unset; a hidden write refuses through the session door
+    // (ensureVarVisible), caught by the loop beside ReadonlyError.
+    ;({ value, updates } = evaluateArith(text, visibleEnv(session)))
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
     throw new ArithError(`${text}: ${err.message}`)
   }
   for (const name of Object.keys(updates)) {
+    ensureVarVisible(session, name)
     if (session.readonlyVars.has(name)) throw new ReadonlyError(name)
   }
-  Object.assign(session.env, updates)
+  // Through the door, so a preSession rule governs an arithmetic assignment
+  // exactly as it governs `X=1`.
+  for (const [name, updated] of Object.entries(updates)) {
+    if (view === undefined) session.env[name] = updated
+    else await view.set(name, updated)
+  }
   return Number(value)
 }
 
+// Array-literal elements behave like any other shell word list: command
+// substitutions word-split and globs resolve to matches
+// (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
 async function expandArrayItems(
   arrayNode: TSNodeLike,
   session: Session,
   executeFn: ExecuteFn,
   registry: MountRegistry,
+  namespace: Namespace,
   callStack: CallStack | null,
 ): Promise<string[]> {
   const classified = await expandAndClassify(
@@ -178,8 +217,14 @@ async function expandArrayItems(
     registry,
     session.cwd,
     callStack,
+    sessionView(session, registry.policies),
   )
-  const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
+  const resolved = await resolveGlobs(
+    classified,
+    registry,
+    session.shellOptions.noglob === true,
+    namespace,
+  )
   return resolved.map((w) => wordText(w))
 }
 
@@ -202,6 +247,7 @@ async function recurseReassociated(
     executeFn,
     registry,
     callStack,
+    sessionView(session, registry.policies),
   )
   let [stdout, io, execNode] = await handleRedirect(
     recurse,
@@ -243,6 +289,7 @@ async function recursePipeStderr(
     executeFn,
     registry,
     callStack,
+    sessionView(session, registry.policies),
   )
   let [stdout, io, execNode] = await handleRedirect(
     recurse,
@@ -445,6 +492,7 @@ export async function executeNode(
       executeFn,
       registry,
       callStack,
+      sessionView(session, registry.policies),
     )
     let [stdout, io, execNode] = await handleRedirect(
       recurse,
@@ -488,11 +536,20 @@ export async function executeNode(
 
   if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
     const text = getText(node)
-    const expr = await expandArith(node, session, executeFn, callStack)
+    const expr = await expandArith(
+      node,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     let value: bigint
     let updates: Record<string, string>
     try {
-      ;({ value, updates } = evaluateArith(expr, session.env))
+      // Reads resolve against the visible env so a hidden name counts
+      // as unset; a hidden write refuses below, in this command's own
+      // voice like the readonly refusal.
+      ;({ value, updates } = evaluateArith(expr, visibleEnv(session)))
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
       const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
@@ -503,6 +560,17 @@ export async function executeNode(
       ]
     }
     for (const name of Object.keys(updates)) {
+      try {
+        ensureVarVisible(session, name)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+        ]
+      }
       if (session.readonlyVars.has(name)) {
         const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
         return [
@@ -512,7 +580,19 @@ export async function executeNode(
         ]
       }
     }
-    Object.assign(session.env, updates)
+    try {
+      for (const [name, updated] of Object.entries(updates)) {
+        await sessionView(session, registry.policies).set(name, updated)
+      }
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
     const code = value !== 0n ? 0 : 1
     return [
       null,
@@ -557,7 +637,8 @@ export async function executeNode(
 
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
-    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, session, executeFn, callStack)
+    const evalExpr: CforEval = (e, d) =>
+      evalCforExpr(e, d, session, executeFn, callStack, sessionView(session, registry.policies))
     return handleCfor(stream, exprs, body, evalExpr, session, stdin, callStack)
   }
 
@@ -570,14 +651,29 @@ export async function executeNode(
       registry,
       session.cwd,
       callStack,
+      sessionView(session, registry.policies),
     )
     // The loop word list is consumed by the shell (WordPolicy.SHELL):
     // globs resolve to matches before iteration starts.
-    const resolved = await resolveGlobs(classified, registry, session.shellOptions.noglob === true)
+    const resolved = await resolveGlobs(
+      classified,
+      registry,
+      session.shellOptions.noglob === true,
+      deps.namespace,
+    )
     if (kind === NodeKind.SELECT) {
-      return handleSelect(stream, variable, resolved, body, session, stdin, callStack)
+      return handleSelect(
+        stream,
+        variable,
+        resolved,
+        body,
+        session,
+        stdin,
+        callStack,
+        registry.policies,
+      )
     }
-    return handleFor(stream, variable, resolved, body, session, stdin, callStack)
+    return handleFor(stream, variable, resolved, body, session, stdin, callStack, registry.policies)
   }
 
   if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
@@ -590,12 +686,26 @@ export async function executeNode(
 
   if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
-    const word = await expandNode(wordNode, session, executeFn, callStack)
+    const word = await expandNode(
+      wordNode,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     const items: [string[], TSNodeLike[], string][] = []
     for (const [patternNodes, body, terminator] of getCaseItems(node)) {
       const patterns: string[] = []
       for (const patternNode of patternNodes) {
-        patterns.push(await expandPattern(patternNode, session, executeFn, callStack))
+        patterns.push(
+          await expandPattern(
+            patternNode,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          ),
+        )
       }
       items.push([patterns, body, terminator])
     }
@@ -633,11 +743,26 @@ export async function executeNode(
           staged.push({
             name: append ? key.slice(0, -1) : key,
             append,
-            items: await expandArrayItems(firstVal, session, executeFn, registry, callStack),
+            items: await expandArrayItems(
+              firstVal,
+              session,
+              executeFn,
+              registry,
+              deps.namespace,
+              callStack,
+            ),
           })
           continue
         }
-        assignments.push(await expandNode(child, session, executeFn, callStack))
+        assignments.push(
+          await expandNode(
+            child,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          ),
+        )
       } else if (
         child.type === NT.SIMPLE_EXPANSION ||
         child.type === NT.EXPANSION ||
@@ -652,7 +777,13 @@ export async function executeNode(
         child.type === NT.ANSI_C_STRING ||
         child.type === NT.TRANSLATED_STRING
       ) {
-        const expanded = await expandNode(child, session, executeFn, callStack)
+        const expanded = await expandNode(
+          child,
+          session,
+          executeFn,
+          callStack,
+          sessionView(session, registry.policies),
+        )
         if (expanded === '') continue
         if (!optsDone && expanded.startsWith('-') && expanded.length > 1) {
           flagWords.push(expanded)
@@ -663,42 +794,22 @@ export async function executeNode(
         }
       }
     }
-    const arrayNames = staged.map((entry) => entry.name)
     const isReadonly = keyword === 'readonly' || flagChars.has('r')
-    for (const name of arrayNames) {
-      if (isReadonly && session.readonlyVars.has(name)) {
-        const err = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: err }),
-          new ExecutionNode({ command: keyword, exitCode: 1, stderr: err }),
-        ]
-      }
-    }
-    for (const { name, append, items } of staged) {
-      noteLocalArray(session, name)
-      let base: ShellArray
-      if (append) {
-        const existing = session.arrays[name]
-        if (existing === undefined) {
-          const scalar = session.env[name]
-          base = scalar === undefined ? [] : [scalar]
-        } else {
-          base = existing
-        }
-        arrayAppend(base, items)
-      } else {
-        base = makeArray(items)
-      }
-      session.arrays[name] = base
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.env[name]
-    }
     if (flagChars.has('a')) {
       // `declare -a NAME` with no value declares an empty array, so
       // ${#NAME[@]} is 0 and NAME[3]=x leaves index 0 unassigned.
       for (const bare of assignments) {
         if (bare.includes('=')) continue
+        // Both branches below write array storage raw (the top-level
+        // one migrates an existing scalar into element 0), so a hidden
+        // name refuses like any assignment spelling before either
+        // lands.
+        try {
+          ensureVarVisible(session, bare)
+        } catch (err) {
+          if (!(err instanceof PolicyDenied)) throw err
+          throw new ExitSignal(1, new TextEncoder().encode(`${err.message}\n`), null, 1)
+        }
         if (noteLocalArray(session, bare)) {
           // Inside a function this shadows whatever the caller had with a
           // fresh empty array.
@@ -712,36 +823,60 @@ export async function executeNode(
         }
       }
     }
+    // Array literals travel as data: the handler stores them through
+    // the session door and owns both refusal voices, so the executor
+    // only expands and stages.
     if (isReadonly) {
-      // An array assignment stores itself above, but the name still has
-      // to be marked readonly. Only the `readonly` keyword owns -p /
-      // illegal-option handling; `declare -r` keeps names only.
+      // Only the `readonly` keyword owns -p / illegal-option handling;
+      // `declare -r` keeps names only.
       if (keyword === 'readonly') {
-        return handleReadonly([...flagWords, ...assignments, ...arrayNames], session)
+        return handleReadonly(
+          [...flagWords, ...assignments],
+          session,
+          sessionView(session, registry.policies),
+          staged,
+        )
       }
-      return handleReadonly([...assignments, ...arrayNames], session)
+      return handleReadonly(assignments, session, sessionView(session, registry.policies), staged)
     }
     // declare/typeset scope like `local` inside a function (bash
     // semantics) and assign globally at top level, which is exactly
     // handleLocal's fallback when no function scope is active.
     if (keyword === NT.LOCAL || keyword === 'declare' || keyword === 'typeset') {
-      return handleLocal(assignments, session)
+      return handleLocal(assignments, session, sessionView(session, registry.policies), staged)
     }
     // Pass export flags through so -p / bare print and illegal options work.
-    return handleExport([...flagWords, ...assignments], session)
+    return handleExport(
+      [...flagWords, ...assignments],
+      session,
+      sessionView(session, registry.policies),
+      staged,
+    )
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(getUnsetArgs(node), session)
+    return handleUnset(getUnsetArgs(node), session, sessionView(session, registry.policies))
   }
 
   if (kind === NodeKind.TEST) {
     const opener = node.children[0]?.type ?? '['
     if (opener === '[[') {
-      const tree = await expandDoubleBracket(node, session, executeFn, callStack)
+      const tree = await expandDoubleBracket(
+        node,
+        session,
+        executeFn,
+        callStack,
+        sessionView(session, registry.policies),
+      )
       return handleTest(dispatch, deps.namespace, tree, session, '[[')
     }
-    const expanded = await expandTestExpr(node, session, executeFn, callStack)
+    const expanded = await expandTestExpr(
+      node,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     return handleTest(dispatch, deps.namespace, expanded, session, '[')
   }
 
@@ -786,26 +921,36 @@ export async function executeNode(
     const valNodes = node.namedChildren.filter(
       (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
     )
+    // Every branch below computes its resulting value with bash's own
+    // mechanics on a copy, then stores through the one session door,
+    // which owns the gate and the scalar/array invariant.
+    const view = sessionView(session, registry.policies)
     const firstVal = valNodes[0]
     if (firstVal?.type === NT.ARRAY) {
-      const items = await expandArrayItems(firstVal, session, executeFn, registry, callStack)
+      const items = await expandArrayItems(
+        firstVal,
+        session,
+        executeFn,
+        registry,
+        deps.namespace,
+        callStack,
+      )
+      let base: ShellArray
       if (append) {
-        let base = session.arrays[key]
-        if (base === undefined) {
+        const existing = session.arrays[key]
+        if (existing === undefined) {
           const scalar = session.env[key]
-          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-          delete session.env[key]
           base = scalar === undefined ? [] : [scalar]
+        } else {
+          base = [...existing]
         }
         // `arr+=(...)` starts at the extent, so it fills the hole a
         // trailing `unset arr[last]` left but skips interior ones.
         arrayAppend(base, items)
-        session.arrays[key] = base
       } else {
-        session.arrays[key] = makeArray(items)
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.env[key]
+        base = makeArray(items)
       }
+      await assignVar(view, key, base)
       const arrCode = assignmentStatus(session, subSeq)
       return [
         null,
@@ -815,7 +960,13 @@ export async function executeNode(
     }
     let val = text.slice(eq + 1)
     if (firstVal !== undefined) {
-      val = await expandNode(firstVal, session, executeFn, callStack)
+      val = await expandNode(
+        firstVal,
+        session,
+        executeFn,
+        callStack,
+        sessionView(session, registry.policies),
+      )
     }
     if (subscriptNode !== null) {
       let idxText = ''
@@ -825,14 +976,15 @@ export async function executeNode(
           break
         }
       }
-      let arr = session.arrays[key]
-      if (arr === undefined) {
+      const existing = session.arrays[key]
+      let arr: ShellArray
+      if (existing === undefined) {
         const scalar = session.env[key]
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.env[key]
         arr = scalar === undefined ? [] : [scalar]
+      } else {
+        arr = [...existing]
       }
-      let idx = arrayIndex(idxText, session.env)
+      let idx = arrayIndex(idxText, visibleEnv(session))
       if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) {
         // bash aborts the whole line on a bad assignment subscript
@@ -846,7 +998,7 @@ export async function executeNode(
         )
       }
       arraySet(arr, idx, append ? arrayGet(arr, idx) + val : val)
-      session.arrays[key] = arr
+      await assignVar(view, key, arr)
       const subCode = assignmentStatus(session, subSeq)
       return [
         null,
@@ -854,17 +1006,15 @@ export async function executeNode(
         new ExecutionNode({ command: text, exitCode: subCode }),
       ]
     }
-    if (append) {
-      const arr = session.arrays[key]
-      if (arr !== undefined) {
-        arraySet(arr, 0, arrayGet(arr, 0) + val)
-      } else {
-        session.env[key] = (session.env[key] ?? '') + val
-      }
+    const appendArr = append ? session.arrays[key] : undefined
+    if (append && appendArr !== undefined) {
+      // `arr+=x` appends to element 0.
+      const newArr = [...appendArr]
+      arraySet(newArr, 0, arrayGet(newArr, 0) + val)
+      await assignVar(view, key, newArr)
     } else {
-      session.env[key] = val
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete session.arrays[key]
+      const newVal = append ? (session.env[key] ?? '') + val : val
+      await assignVar(view, key, newVal)
     }
     // Reassigning OPTIND (even to its current value) restarts the getopts
     // scan, matching bash's internal char pointer.

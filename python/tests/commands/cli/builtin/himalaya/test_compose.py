@@ -20,7 +20,7 @@ import pytest
 
 from mirage.commands.cli.builtin.himalaya import compose
 from mirage.commands.cli.builtin.himalaya import util as util_module
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
@@ -41,19 +41,27 @@ async def fake_dispatch(op, path, *args, **kwargs):
     return FILES[path.virtual], IOResult()
 
 
-def ops_with_files() -> CLIVerbOpts:
-    return CLIVerbOpts(dispatch=fake_dispatch)
+def doors_with_files() -> CLIDoors:
+    return CLIDoors(dispatch=fake_dispatch)
 
 
 @pytest.fixture
 def sent(monkeypatch):
     seen: dict = {}
 
-    async def fake_send_raw(config, raw):
+    async def fake_deliver(config, raw, save=None):
         seen["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw)
+        seen["save"] = save
+        return BytesParser(policy=default_policy).parsebytes(raw), ""
 
-    monkeypatch.setattr(util_module, "send_raw", fake_send_raw)
+    async def fake_save(config, raw, folder=None):
+        if seen.get("refuse"):
+            raise ValueError(f"{folder}: [TRYCREATE] No such mailbox")
+        seen["saved"] = (raw, folder)
+        return folder or "Sent"
+
+    monkeypatch.setattr(util_module, "deliver", fake_deliver)
+    monkeypatch.setattr(util_module, "save_sent_copy", fake_save)
     return seen
 
 
@@ -159,7 +167,7 @@ async def test_attach_reads_through_the_dispatcher_into_multipart(sent):
                           "attach":
                           [PathSpec.from_str_path("/scratch/note.txt")],
                       },
-                      ops=ops_with_files()))
+                      doors=doors_with_files()))
     assert io.exit_code == 0
     message = BytesParser(policy=default_policy).parsebytes(await
                                                             materialize(out))
@@ -187,7 +195,7 @@ async def test_attach_of_a_missing_file_names_the_path(sent):
                               "attach":
                               [PathSpec.from_str_path("/scratch/gone.txt")],
                           },
-                          ops=ops_with_files()))
+                          doors=doors_with_files()))
 
 
 @pytest.mark.asyncio
@@ -202,4 +210,53 @@ async def test_attach_outside_a_workspace_is_refused(sent):
                               "yo",
                               "attach":
                               [PathSpec.from_str_path("/scratch/note.txt")],
+                          }))
+
+
+@pytest.mark.asyncio
+async def test_save_rides_along_to_the_delivery(sent):
+    await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@b.com",
+                          "body": "yo",
+                          "send": True,
+                          "save": "Drafts",
+                      }))
+    assert sent["save"] == "Drafts"
+
+
+@pytest.mark.asyncio
+async def test_save_without_send_files_the_message_and_sends_nothing(sent):
+    out, io = await compose(
+        CLIInvocation(CONFIG,
+                      flags={
+                          "to": "a@b.com",
+                          "subject": "Draft it",
+                          "body": "yo",
+                          "save": "Drafts",
+                      }))
+    assert io.exit_code == 0
+    assert "raw" not in sent
+    assert sent["saved"][1] == "Drafts"
+    assert json.loads(await materialize(out)) == {
+        "status": "saved",
+        "mailbox": "Drafts",
+        "to": "a@b.com",
+        "subject": "Draft it",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_refused_save_without_send_fails_loudly(sent):
+    # Nothing was sent, so there is no delivered message a retry could
+    # duplicate: this one is an error, not a warning.
+    sent["refuse"] = True
+    with pytest.raises(ValueError, match="Drafts: .*TRYCREATE"):
+        await compose(
+            CLIInvocation(CONFIG,
+                          flags={
+                              "to": "a@b.com",
+                              "body": "yo",
+                              "save": "Drafts",
                           }))

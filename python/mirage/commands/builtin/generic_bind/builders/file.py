@@ -13,37 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.file import file_cmd as generic_file
+from mirage.commands.builtin.generic.file import file_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
 from mirage.types import PathSpec
 
 
-async def file(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    b: bool = False,
-    i: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    links: LinkView | None = None,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def file(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("file: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_file(paths,
-                              read_bytes=bound_op(ops.read_bytes, accessor,
-                                                  index),
-                              stat_fn=bound_op(ops.stat, accessor, index),
-                              b=b,
-                              i=i,
-                              links=links)
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await file_generic(resolved, list(texts), opts,
+                              bound_op(ops.read_bytes, accessor, opts.index),
+                              bound_op(ops.stat, accessor, opts.index))
 
 
 BUILDER = Builder('file', file, None, False, None, read=True)

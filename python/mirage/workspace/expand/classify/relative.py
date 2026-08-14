@@ -36,9 +36,8 @@ def relative_spec(word: str, registry: MountRegistry,
         cwd (str): working directory the word was typed under.
     """
     path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-    try:
-        mount = registry.mount_for(path)
-    except ValueError:
+    mount = registry.try_mount_for(path)
+    if mount is None:
         return word
     resource_path = mount_key(path, mount.prefix.rstrip("/"))
     last_slash = path.rfind("/")

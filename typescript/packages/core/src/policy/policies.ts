@@ -24,6 +24,7 @@ import {
   type GuardSpec,
   type OpsContext,
   type OpsResultContext,
+  type SessionContext,
 } from './types.ts'
 
 type Hook = keyof typeof VALIDITY
@@ -84,6 +85,24 @@ export async function postExecuteGate(
 }
 
 /**
+ * Fire preSession on the session plane; a Deny becomes a PolicyDenied.
+ * The one seam helper the session plane's writers call, so a refusal
+ * is identical however the state is reached: shell builtin, command
+ * view, or a later tier. Null policies (a view constructed outside a
+ * workspace) gate nothing.
+ */
+export async function preSessionGate(
+  policies: Policies | null,
+  ctx: SessionContext,
+): Promise<void> {
+  if (!policies?.wants('preSession')) return
+  const deny = await policies.preSession(ctx)
+  if (deny !== null) {
+    throw new PolicyDenied(deny.message.replace(/\n$/, ''), ctx.key)
+  }
+}
+
+/**
  * Ordered policies; on a pre hook the first Deny wins.
  *
  * Built-ins are seeded first (MountRegistry registers
@@ -136,7 +155,8 @@ export class Policies {
       typeof candidate.preCommand === 'function' ||
       typeof candidate.preOps === 'function' ||
       typeof candidate.postOps === 'function' ||
-      typeof candidate.postExecute === 'function'
+      typeof candidate.postExecute === 'function' ||
+      typeof candidate.preSession === 'function'
     if (!hooked && 'reason' in entry) {
       this.policies.push(new SpecPolicy(entry))
     } else {
@@ -152,7 +172,7 @@ export class Policies {
    */
   private async fire(
     hook: Hook,
-    ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext,
+    ctx: CommandContext | OpsContext | OpsResultContext | ExecuteResultContext | SessionContext,
     subject: string,
   ): Promise<[Deny | null, Limit | null]> {
     const limits: Limit[] = []
@@ -164,7 +184,11 @@ export class Policies {
       try {
         action = await fn.call(
           policy,
-          ctx as CommandContext & OpsContext & OpsResultContext & ExecuteResultContext,
+          ctx as CommandContext &
+            OpsContext &
+            OpsResultContext &
+            ExecuteResultContext &
+            SessionContext,
         )
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err)
@@ -211,5 +235,11 @@ export class Policies {
   /** Fire postExecute; Limits merge to the boundary bound. */
   async postExecute(ctx: ExecuteResultContext): Promise<[Deny | null, Limit | null]> {
     return this.fire('postExecute', ctx, ctx.producer.command || 'line')
+  }
+
+  /** Fire preSession across the policies; the first Deny wins. */
+  async preSession(ctx: SessionContext): Promise<Deny | null> {
+    const [deny] = await this.fire('preSession', ctx, ctx.key)
+    return deny
   }
 }

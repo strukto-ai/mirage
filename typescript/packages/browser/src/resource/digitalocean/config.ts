@@ -12,24 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface DigitalOceanConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  region?: string
-  endpoint?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface DigitalOceanConfigRedacted extends Omit<
-  DigitalOceanConfig,
-  'presignedUrlProvider'
-> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const DigitalOceanConfigSchema = z.object({
   bucket: z.string(),
@@ -41,6 +31,10 @@ const DigitalOceanConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type DigitalOceanConfig = ConfigOf<typeof DigitalOceanConfigSchema>
+
+export type DigitalOceanConfigRedacted = RedactedConfig<DigitalOceanConfig, 'presignedUrlProvider'>
 
 export function resolvedDigitalOceanEndpoint(config: DigitalOceanConfig): string | undefined {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

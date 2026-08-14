@@ -15,7 +15,7 @@
 import { SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { ShellArray } from '../../shell/array.ts'
-import type { MountMode } from '../../types.ts'
+import type { HiddenPaths, HiddenVars, MountMode } from '../../types.ts'
 
 /**
  * What a child shell gets its own copy of, and the parent gets back
@@ -29,6 +29,7 @@ import type { MountMode } from '../../types.ts'
  */
 export interface ChildShellState {
   cwd: string
+  logicalCwd: string | undefined
   sourceDepth: number
   env: Record<string, string>
   functions: Record<string, unknown>
@@ -84,6 +85,7 @@ export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
 export interface SessionInit {
   sessionId: string
   cwd?: string
+  logicalCwd?: string | undefined
   env?: Record<string, string>
   createdAt?: number
   functions?: Record<string, unknown>
@@ -103,6 +105,13 @@ export interface SessionInit {
    * infrastructure mounts (implicit scratch root, observer, /dev).
    */
   mountModes?: ReadonlyMap<string, MountMode> | null
+  /**
+   * Per-session visibility narrowing, siblings of mountModes: null
+   * means unrestricted, the doors enforce (data door for paths, the
+   * session door for vars), fork carries them, toJSON serializes.
+   */
+  hiddenPaths?: HiddenPaths | null
+  hiddenVars?: HiddenVars | null
   generation?: number
   pipelineTimeoutSeconds?: number | null
   lastBgJobId?: number | null
@@ -111,6 +120,12 @@ export interface SessionInit {
 export class Session {
   sessionId: string
   cwd: string
+  // The spelling `cd` arrived at: `..` simplified textually, symlinks
+  // left alone. bash reports it as $PWD and `pwd -L`, and applies the
+  // next `cd`'s `..` to it. Undefined whenever it would equal `cwd`,
+  // which is every session that has not walked through a symlink. `cwd`
+  // stays physical because it is what every operand resolves against.
+  logicalCwd: string | undefined
   env: Record<string, string>
   createdAt: number
   functions: Record<string, unknown>
@@ -158,6 +173,8 @@ export class Session {
   cmdsubSeq = 0
   cmdsubStatus = 0
   mountModes: ReadonlyMap<string, MountMode> | null
+  hiddenPaths: HiddenPaths | null
+  hiddenVars: HiddenVars | null
   generation: number
   pipelineTimeoutSeconds: number | null
   lastBgJobId: number | null
@@ -166,6 +183,7 @@ export class Session {
     this.sessionId = init.sessionId
     this.errexitImmune = false
     this.cwd = init.cwd ?? '/'
+    this.logicalCwd = init.logicalCwd
     this.env = ownRecord(init.env)
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = ownRecord(init.functions)
@@ -176,9 +194,16 @@ export class Session {
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = ownRecord(init.arrays)
     this.mountModes = init.mountModes ?? null
+    this.hiddenPaths = init.hiddenPaths ?? null
+    this.hiddenVars = init.hiddenVars ?? null
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
     this.lastBgJobId = init.lastBgJobId ?? null
+    // bash exports $PWD from startup, so a session that has never run
+    // `cd` still has one. Seeding here rather than at lookup time is what
+    // makes it an ordinary variable: assignable, unsettable, and listed
+    // by `env`.
+    if (!('PWD' in this.env)) this.env.PWD = this.cwd
   }
 
   /**
@@ -188,12 +213,26 @@ export class Session {
    * the source. Every field — including capability fields like
    * `mountModes` — is propagated, so callers cannot accidentally
    * forget one when adding new fields.
+   *
+   * A caller that moves the fork with `cwd` supplies a physical path
+   * with no typed spelling behind it, so the source's logical name is
+   * dropped rather than left describing where the fork is not — the same
+   * reasoning as `shell_dirs.setCwd`. Deciding it here rather than at
+   * each call site is what keeps `execute({cwd})` from reporting the
+   * persistent session's old directory from `pwd`. `??` cannot express
+   * this, since the value being chosen is `undefined`.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
+    const movedTo = 'logicalCwd' in overrides ? undefined : overrides.cwd
+    const env = overrides.env ?? { ...this.env }
+    // $PWD names where the session is, so it follows the move even when
+    // the caller also supplied an env to layer on.
+    if (movedTo !== undefined) env.PWD = movedTo
     const forked = new Session({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
-      env: overrides.env ?? { ...this.env },
+      logicalCwd: movedTo !== undefined ? undefined : (overrides.logicalCwd ?? this.logicalCwd),
+      env,
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       lastExitCode: overrides.lastExitCode ?? this.lastExitCode,
@@ -205,6 +244,8 @@ export class Session {
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
       mountModes: overrides.mountModes ?? this.mountModes,
+      hiddenPaths: overrides.hiddenPaths ?? this.hiddenPaths,
+      hiddenVars: overrides.hiddenVars ?? this.hiddenVars,
       generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
@@ -237,6 +278,7 @@ export class Session {
     for (const [name, value] of Object.entries(this.arrays)) arrays[name] = [...value]
     return {
       cwd: this.cwd,
+      logicalCwd: this.logicalCwd,
       sourceDepth: this.sourceDepth,
       env: ownRecord(this.env),
       functions: ownRecord(this.functions),
@@ -254,6 +296,7 @@ export class Session {
   /** Put back a snapshot, ending a child shell. */
   restore(state: ChildShellState): void {
     this.cwd = state.cwd
+    this.logicalCwd = state.logicalCwd
     this.sourceDepth = state.sourceDepth
     this.env = state.env
     this.functions = state.functions
@@ -284,6 +327,18 @@ export class Session {
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
+    if (this.hiddenPaths !== null) {
+      data.hidden_paths = {
+        paths: [...(this.hiddenPaths.paths ?? [])],
+        patterns: [...(this.hiddenPaths.patterns ?? [])],
+      }
+    }
+    if (this.hiddenVars !== null) {
+      data.hidden_vars = {
+        names: [...(this.hiddenVars.names ?? [])],
+        patterns: [...(this.hiddenVars.patterns ?? [])],
+      }
+    }
     return data
   }
 
@@ -293,6 +348,8 @@ export class Session {
     env?: Record<string, string>
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
+    hidden_paths?: { paths?: string[]; patterns?: string[] } | null
+    hidden_vars?: { names?: string[]; patterns?: string[] } | null
     generation?: number
   }): Session {
     return new Session({
@@ -302,6 +359,14 @@ export class Session {
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),
       mountModes: data.mount_modes != null ? new Map(Object.entries(data.mount_modes)) : null,
+      hiddenPaths:
+        data.hidden_paths != null
+          ? { paths: data.hidden_paths.paths ?? [], patterns: data.hidden_paths.patterns ?? [] }
+          : null,
+      hiddenVars:
+        data.hidden_vars != null
+          ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
+          : null,
     })
   }
 }

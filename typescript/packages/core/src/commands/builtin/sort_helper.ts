@@ -1,4 +1,5 @@
 import type { FlagValue } from '../spec/types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -342,7 +343,7 @@ function cmpVals(a: SortVal, b: SortVal): number {
   if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0
   const sa = String(a)
   const sb = String(b)
-  return sa < sb ? -1 : sa > sb ? 1 : 0
+  return compareCodePoints(sa, sb)
 }
 
 export function compareLines(a: string, b: string, cfg: SortConfig): number {
@@ -356,7 +357,7 @@ export function compareLines(a: string, b: string, cfg: SortConfig): number {
     if (c !== 0) return c
   }
   if (cfg.stable) return 0
-  let c = a < b ? -1 : a > b ? 1 : 0
+  let c = compareCodePoints(a, b)
   if (cfg.reverse) c = -c
   return c
 }

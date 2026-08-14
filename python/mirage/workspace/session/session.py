@@ -21,7 +21,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.array import ShellArray
 from mirage.shell.constants import SHELL_ARGV0
 from mirage.shell.types import FunctionBody
-from mirage.types import MountMode
+from mirage.types import HiddenPaths, HiddenVars, MountMode
 
 # What a fork of this session carries over. Written down once because
 # `fork` builds a copy from it and `tests/workspace/session/test_session.py`
@@ -31,6 +31,7 @@ from mirage.types import MountMode
 INHERITED_FIELDS: tuple[str, ...] = (
     "session_id",
     "cwd",
+    "logical_cwd",
     "env",
     "created_at",
     "functions",
@@ -39,6 +40,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "readonly_vars",
     "arrays",
     "mount_modes",
+    "hidden_paths",
+    "hidden_vars",
     "generation",
     "pipeline_timeout_seconds",
     "last_bg_job_id",
@@ -70,6 +73,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
 # reports back.
 CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "cwd",
+    "logical_cwd",
     "source_depth",
     "env",
     "functions",
@@ -103,6 +107,12 @@ def copy_state(value: Any) -> Any:
 class Session:
     session_id: str
     cwd: str = "/"
+    # The spelling `cd` arrived at: `..` simplified textually, symlinks
+    # left alone. bash reports it as `$PWD` and `pwd -L`, and applies the
+    # next `cd`'s `..` to it. None whenever it would equal `cwd`, which is
+    # every session that has not walked through a symlink. `cwd` stays
+    # physical because it is what every operand resolves against.
+    logical_cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     functions: dict[str, FunctionBody] = field(default_factory=dict)
@@ -111,6 +121,11 @@ class Session:
     readonly_vars: set[str] = field(default_factory=set)
     arrays: dict[str, ShellArray] = field(default_factory=dict)
     mount_modes: dict[str, MountMode] | None = None
+    # Per-session visibility narrowing, siblings of mount_modes: None
+    # means unrestricted, the doors enforce (data door for paths, the
+    # session door for vars), fork carries them, to_dict serializes.
+    hidden_paths: HiddenPaths | None = None
+    hidden_vars: HiddenVars | None = None
     generation: int = 0
     pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
@@ -161,17 +176,38 @@ class Session:
                 prefix: mode.value
                 for prefix, mode in self.mount_modes.items()
             }
+        if self.hidden_paths is not None:
+            data["hidden_paths"] = {
+                "paths": list(self.hidden_paths.paths),
+                "patterns": list(self.hidden_paths.patterns),
+            }
+        if self.hidden_vars is not None:
+            data["hidden_vars"] = {
+                "names": list(self.hidden_vars.names),
+                "patterns": list(self.hidden_vars.patterns),
+            }
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
         modes = data.get("mount_modes")
-        if modes is not None:
+        paths = data.get("hidden_paths")
+        vars_ = data.get("hidden_vars")
+        if modes is not None or paths is not None or vars_ is not None:
             data = dict(data)
+        if modes is not None:
             data["mount_modes"] = {
                 prefix: MountMode(mode)
                 for prefix, mode in modes.items()
             }
+        if paths is not None:
+            data["hidden_paths"] = HiddenPaths(
+                paths=tuple(paths.get("paths", ())),
+                patterns=tuple(paths.get("patterns", ())))
+        if vars_ is not None:
+            data["hidden_vars"] = HiddenVars(
+                names=tuple(vars_.get("names", ())),
+                patterns=tuple(vars_.get("patterns", ())))
         return cls(**data)
 
     @property
@@ -185,6 +221,13 @@ class Session:
         """
         return SHELL_ARGV0 if self.script_name is None else self.script_name
 
+    def __post_init__(self) -> None:
+        # bash exports `$PWD` from startup, so a session that has never
+        # run `cd` still has one. Seeding here rather than at lookup time
+        # is what makes it an ordinary variable: assignable, unsettable,
+        # and listed by `env`.
+        self.env.setdefault("PWD", self.cwd)
+
     def fork(self, **overrides: Any) -> "Session":
         """Return a copy of this session with overrides applied.
 
@@ -192,6 +235,14 @@ class Session:
         the fork do not leak back into the source. The field list is
         INHERITED_FIELDS rather than a literal written out here, so a
         field added to the dataclass is propagated by construction.
+
+        A caller that moves the fork with ``cwd`` supplies a physical
+        path with no typed spelling behind it, so the source's logical
+        name is dropped rather than left describing where the fork is
+        not -- the same reasoning as `shell_dirs.set_cwd`. Deciding it
+        here rather than at each call site is what keeps
+        ``execute(cwd=...)`` from reporting the persistent session's old
+        directory from ``pwd``.
 
         Args:
             **overrides: Field-name kwargs to override on the copy.
@@ -201,6 +252,11 @@ class Session:
             for name in INHERITED_FIELDS
         }
         defaults.update(overrides)
+        if "cwd" in overrides and "logical_cwd" not in overrides:
+            defaults["logical_cwd"] = None
+            # `$PWD` names where the session is, so it follows the move
+            # even when the caller also supplied an env to layer on.
+            defaults["env"] = {**defaults["env"], "PWD": overrides["cwd"]}
         return Session(**defaults)
 
     def snapshot(self) -> dict[str, Any]:

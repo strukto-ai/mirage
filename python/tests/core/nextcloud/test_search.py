@@ -117,6 +117,31 @@ def test_query_accepts_fully_representable_boolean_tree():
     assert supports_query(FilesSearchQuery(tree=tree))
 
 
+@pytest.mark.parametrize(
+    "tree",
+    [
+        Not(Or([Name("*.txt"), Name("*.csv")])),
+        Not(And([Name("*.txt"), Type("d")])),
+        Not(Not(Name("*.txt"))),
+        Not(Type("f")),
+    ],
+)
+def test_query_rejects_negated_compound(tree):
+    assert not supports_query(FilesSearchQuery(tree=tree))
+
+
+@pytest.mark.parametrize(
+    "tree",
+    [
+        Not(Name("*.txt")),
+        Not(Type("d")),
+        Not(Or([Name("*.txt")])),
+    ],
+)
+def test_query_accepts_negated_comparison(tree):
+    assert supports_query(FilesSearchQuery(tree=tree))
+
+
 def test_positive_size_query_excludes_directories():
     target = search_target("https://cloud.example/remote.php/dav/files/alice/")
     assert target is not None

@@ -146,10 +146,16 @@ async def test_sed_n_suppress_with_p():
 
 
 @pytest.mark.asyncio
-async def test_sed_no_paths_no_stdin_raises():
+async def test_sed_no_paths_no_stdin_reports_no_input_files():
+    # GNU's spelling and exit code for `sed -i` with no operands; mirage
+    # reuses them when there is no stdin either, having no terminal to
+    # read. This used to raise on the Python side and return exit 1 with a
+    # different message on the TypeScript side.
     rb, wb, _ = _make_backend({})
-    with pytest.raises(ValueError, match="usage"):
-        await sed([], "s/a/b/", read_bytes=rb, write_bytes=wb)
+    out, io = await sed([], "s/a/b/", read_bytes=rb, write_bytes=wb)
+    assert out is None
+    assert io.exit_code == 4
+    assert io.stderr == b"sed: no input files\n"
 
 
 @pytest.mark.asyncio

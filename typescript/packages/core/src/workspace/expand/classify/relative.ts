@@ -33,7 +33,7 @@ export function relativeSpec(
   cwd: string,
 ): string | PathSpec {
   const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
-  if (registry.mountFor(path) === null) return word
+  if (registry.tryMountFor(path) === null) return word
   const lastSlash = path.lastIndexOf('/')
   if (hasGlob(word)) {
     return new PathSpec({

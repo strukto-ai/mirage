@@ -13,48 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.nl import nl as generic_nl
+from mirage.commands.builtin.generic.nl import nl_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def nl(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["nl"])
-    paths, err = await resolve_readable(ops, accessor, paths, index, "nl")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_nl(
-            paths,
-            read_stream=bound_op(ops.read_stream, accessor, index),
-            stdin=stdin,
-            body_numbering_raw=fl.as_str("body_numbering"),
-            start_raw=fl.as_str("starting_line_number"),
-            increment_raw=fl.as_str("line_increment"),
-            width_raw=fl.as_str("number_width"),
-            separator=fl.as_str("number_separator"),
-            footer_numbering_raw=fl.as_str("footer_numbering"),
-            header_numbering_raw=fl.as_str("header_numbering"),
-            join_blank_lines_raw=fl.as_str("join_blank_lines"),
-            number_format=fl.as_str("number_format") or "rn",
-            delimiter=fl.as_str("section_delimiter") or "\\:",
-            no_renumber=fl.as_bool("no_renumber"),
-        ), err)
+async def nl(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await nl_generic(resolved, list(texts), opts,
+                            dir_aware_stat(ops, accessor, opts.index),
+                            bound_op(ops.read_stream, accessor, opts.index))
 
 
 BUILDER = Builder('nl', nl, None, False, None, read=True)

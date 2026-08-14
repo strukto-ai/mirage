@@ -36,7 +36,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
     const next = entry.path.endsWith('/') ? entry.path : entry.path + '/'
     if (vfs.mountOf(entry.path) === next) {
       // A nested mount served through its parent keeps the failure
-      // boundary it had as a top-level prefix: its root LIST failing
+      // boundary it had as a top-level prefix: its root readdir failing
       // must fail the whole collection, so syncMounts keeps the
       // previous healthy snapshot instead of replacing it with one
       // where this subtree reads as empty.

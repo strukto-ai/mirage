@@ -89,6 +89,28 @@ def test_find_ignore_tokens_classified_as_text():
     assert kinds[4] == TEXT
 
 
+def test_find_bare_bang_is_text_in_every_expression_position():
+    """GNU's `!` carries no dash, so the rest slot's PATH kind claimed it.
+
+    It reads as an expression token wherever an expression may start:
+    first word on the line, straight after the start points, or between
+    two predicates.
+    """
+    assert spec_word_kinds(SPECS["find"],
+                           ["/data", "!", "-empty"]) == [PATH, TEXT, None]
+    assert spec_word_kinds(SPECS["find"],
+                           ["/data", "-empty", "!", "-name", "x"]) == [
+                               PATH, None, TEXT, None, TEXT
+                           ]
+    assert spec_word_kinds(SPECS["find"], ["!", "-empty"]) == [TEXT, None]
+
+
+def test_find_bang_as_a_name_pattern_keeps_its_slot():
+    """A `!` filling an option's value slot is that value, not grammar."""
+    assert spec_word_kinds(SPECS["find"],
+                           ["/data", "-name", "!"]) == [PATH, None, TEXT]
+
+
 def test_duplicate_word_text_and_path_slots():
     # F8: the same word is the pattern (TEXT) and a file glob (PATH);
     # value sets could not tell the two slots apart.

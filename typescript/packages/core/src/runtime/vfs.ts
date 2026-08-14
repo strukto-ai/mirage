@@ -15,15 +15,9 @@
 import { isMissingOp, isMissingPath } from '../utils/errors.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir } from '../utils/slash.ts'
+import { planFlush } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
-
-export type FlushKind = 'append' | 'write'
-
-// The lowest offset a handle has written at, before it writes anything.
-// A sentinel rather than a null because every write takes the minimum of
-// it and the new offset, and "nothing yet" has to lose that comparison.
-export const NO_WRITE = Number.MAX_SAFE_INTEGER
 
 /** One directory entry as the mounts report it. */
 export interface VFSEntry {
@@ -51,41 +45,11 @@ export function concatBytes(head: Uint8Array, tail: Uint8Array): Uint8Array {
 }
 
 /**
- * Decide what a closing whole-file buffer owes the mount.
- *
- * Every encoder buffers a whole file and has to answer the same
- * question at close: did this handle only add to the end, or did it
- * rewrite what was already there? Only the first can travel as a
- * delta, and answering "write" always is what makes an append loop
- * quadratic.
- *
- * Args:
- *   baseLen: length the file had when the handle opened.
- *   lowWrite: lowest offset this handle wrote at, or the base length
- *     when it never wrote below the end.
- *   buf: the handle's whole buffer.
- *
- * Returns:
- *   ['append', tail] when the handle only extended the file, else
- *   ['write', whole buffer].
- */
-export function planFlush(
-  baseLen: number,
-  lowWrite: number,
-  buf: Uint8Array,
-): [FlushKind, Uint8Array] {
-  if (baseLen > 0 && lowWrite >= baseLen && buf.length >= baseLen) {
-    return ['append', buf.slice(baseLen)]
-  }
-  return ['write', buf.slice()]
-}
-
-/**
  * The mount-facing op vocabulary a sandboxed runtime encodes into.
  *
- * One instruction set (read/write/append/stat/readdir/unlink/mkdir/
- * rmdir/rename), one routing table, one place that knows an append may
- * have to become a whole-file write. Encoders hold one of these; they
+ * One instruction set (read/write/append/stat/readdir/create/truncate/
+ * unlink/mkdir/rmdir/rename), one routing table, one place that knows
+ * an append may have to become a whole-file write. Encoders hold one of these; they
  * never inherit it, because a monty encoder is the binding's own `os`
  * callback and a quickjs encoder is a table of host functions.
  *
@@ -131,22 +95,22 @@ export class RuntimeVFS {
   }
 
   async read(path: string): Promise<Uint8Array> {
-    const out = await this.dispatch('READ', path)
+    const out = await this.dispatch('read', path)
     if (!(out instanceof Uint8Array)) {
-      throw new TypeError(`runtime vfs: READ ${path} expected Uint8Array, got ${typeof out}`)
+      throw new TypeError(`runtime vfs: read ${path} expected Uint8Array, got ${typeof out}`)
     }
     return out
   }
 
   async write(path: string, bytes: Uint8Array): Promise<void> {
-    const out = await this.dispatch('WRITE', path, bytes)
+    const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
-      throw new TypeError(`runtime vfs: WRITE ${path} expected void, got ${typeof out}`)
+      throw new TypeError(`runtime vfs: write ${path} expected void, got ${typeof out}`)
     }
   }
 
   async stat(path: string): Promise<VFSStat> {
-    const out = await this.dispatch('STAT', path)
+    const out = await this.dispatch('stat', path)
     const st = out as VFSStat | null
     if (
       st === null ||
@@ -155,15 +119,15 @@ export class RuntimeVFS {
       typeof st.isDir !== 'boolean' ||
       typeof st.mtimeMs !== 'number'
     ) {
-      throw new TypeError(`runtime vfs: STAT ${path} bad shape`)
+      throw new TypeError(`runtime vfs: stat ${path} bad shape`)
     }
     return st
   }
 
   async readdir(path: string): Promise<VFSEntry[]> {
-    const out = await this.dispatch('LIST', path)
+    const out = await this.dispatch('readdir', path)
     if (!Array.isArray(out)) {
-      throw new TypeError(`runtime vfs: LIST ${path} expected array`)
+      throw new TypeError(`runtime vfs: readdir ${path} expected array`)
     }
     for (const e of out) {
       if (
@@ -173,22 +137,40 @@ export class RuntimeVFS {
         typeof (e as VFSEntry).size !== 'number' ||
         typeof (e as VFSEntry).isDir !== 'boolean'
       ) {
-        throw new TypeError(`runtime vfs: LIST ${path} bad entry shape`)
+        throw new TypeError(`runtime vfs: readdir ${path} bad entry shape`)
       }
     }
     return out as VFSEntry[]
   }
 
+  /**
+   * Establish an empty file at `path` through the mount, so write
+   * modes and a missing parent answer at open time and the ledger
+   * records the op a create is.
+   */
+  async create(path: string): Promise<void> {
+    await this.dispatch('create', path)
+  }
+
+  /**
+   * Discard `path`'s content. Only ever a truncate-to-zero: the guest
+   * surfaces that reach this are fopen-style opens, and a guest
+   * ftruncate to a length operates on its open handle's buffer.
+   */
+  async truncate(path: string): Promise<void> {
+    await this.dispatch('truncate', path)
+  }
+
   async unlink(path: string): Promise<void> {
-    await this.dispatch('UNLINK', path)
+    await this.dispatch('unlink', path)
   }
 
   async mkdir(path: string): Promise<void> {
-    await this.dispatch('MKDIR', path)
+    await this.dispatch('mkdir', path)
   }
 
   async rmdir(path: string): Promise<void> {
-    await this.dispatch('RMDIR', path)
+    await this.dispatch('rmdir', path)
   }
 
   /**
@@ -203,7 +185,7 @@ export class RuntimeVFS {
    */
   async rename(src: string, dst: string): Promise<void> {
     if (this.mountOf(src) !== this.mountOf(dst)) throw new CrossMountError(src, dst)
-    await this.dispatch('RENAME', src, undefined, dst)
+    await this.dispatch('rename', src, undefined, dst)
   }
 
   /**
@@ -247,7 +229,7 @@ export class RuntimeVFS {
     const mount = this.mountOf(path) ?? path
     if (this.noAppend.has(mount)) return false
     try {
-      await this.dispatch('APPEND', path, tail)
+      await this.dispatch('append', path, tail)
     } catch (err) {
       if (!isMissingOp(err, 'append')) throw err
       this.noAppend.add(mount)

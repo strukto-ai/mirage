@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
-
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.discover import discover
@@ -21,31 +19,37 @@ from mirage.commands.cli.builtin.git.errors import NoWorkspaceError
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import start_point
+from mirage.commands.cli.types import CLIDoors
 from mirage.commands.spec.types import FlagView
-from mirage.ops.types import MountRoot, StatPath
 
 
-async def opened(
-    fl: FlagView,
-    stat_path: StatPath | None,
-    mount_root: MountRoot | None,
-    dispatch: Callable[..., Any] | None,
-) -> tuple[BaseRepo, RepoLocation]:
+async def opened(fl: FlagView,
+                 doors: CLIDoors) -> tuple[BaseRepo, RepoLocation]:
     """Discover and open the repository a verb was invoked against.
 
     Every verb starts the same way: honor ``-C``, walk up to the mount
     root looking for a ``.git``, then pull the object database across
     the dispatcher. Kept in one place so a new verb inherits the
-    discovery rules rather than restating them.
+    discovery rules rather than restating them, and so the refusal a
+    verb owes outside a workspace is written once.
+
+    The mount root comes from the name plane rather than a door of its
+    own: ``ns.mounts.root_of`` is the same fact the command tier reads,
+    and a second field holding the same callable is a second thing to
+    keep in step.
 
     Args:
         fl (FlagView): the leaf's flag bag, read for ``-C``.
-        stat_path (StatPath | None): dispatcher-backed stat, both
-            channels.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-        dispatch (Callable | None): workspace op dispatcher.
+        doors (CLIDoors): the invocation's doors, one per state plane.
+
+    Raises:
+        NoWorkspaceError: a plane this verb needs is not wired.
     """
-    if stat_path is None or mount_root is None or dispatch is None:
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
+    mounts = doors.ns.mounts if doors.ns is not None else None
+    if stat_path is None or mounts is None or dispatch is None:
         raise NoWorkspaceError()
-    location = await discover(dispatch, stat_path, mount_root, start_point(fl))
+    location = await discover(dispatch, stat_path, mounts.root_of,
+                              start_point(fl))
     return await open_repo(dispatch, location), location

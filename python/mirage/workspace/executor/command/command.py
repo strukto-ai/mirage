@@ -52,11 +52,12 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
+from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, link_view, mount_root_of, mount_view,
-    registry_child_mounts, run_on_mount, scalar_find_flags)
+    drop_service_caches, exec_node, namespace_view_of, run_on_mount,
+    scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; route already narrowed the name.
 JOB_HANDLERS = {
@@ -108,7 +109,9 @@ async def handle_command(
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
     # works on files rather than an API (`git`) reads the workspace
-    # facts it needs off `inv.ops`; the rest never look.
+    # facts it needs off `inv.doors`; the rest never look. The doors are
+    # the same ones `run_on_mount` puts on `CommandOpts`, built the same
+    # way, so a CLI leaf and a command handler see one plane alike.
     cli_install = registry.clis.get(cmd_name)
     if cli_install is not None:
         return await handle_cli(
@@ -120,7 +123,8 @@ async def handle_command(
             dispatch=dispatch,
             stat_path=(functools.partial(path_stat, dispatch)
                        if dispatch is not None else None),
-            mount_root=functools.partial(mount_root_of, registry),
+            ns=namespace_view_of(registry, namespace, dispatch),
+            session_view=session_view(session, registry.policies),
             drop_caches=functools.partial(drop_service_caches, registry,
                                           cli_install.spec.serves),
         )
@@ -213,7 +217,9 @@ async def handle_command(
             # expands the operand's glob. RELAY bypasses the mount command
             # wrappers entirely, so its glob operands must expand here; an
             # unmatched glob stays the literal word, like bash.
-            expanded = await resolve_globs(list(path_scopes), registry)
+            expanded = await resolve_globs(list(path_scopes),
+                                           registry,
+                                           links=namespace)
             cross_scopes = [p for p in expanded if isinstance(p, PathSpec)]
         run_single = functools.partial(run_on_mount,
                                        registry,
@@ -226,8 +232,7 @@ async def handle_command(
         # it, exactly as the same operand would on a line of its own.
         run_operand = functools.partial(
             run_with_fanout, run_single, registry, session.cwd,
-            mount_view(registry), link_view(namespace, dispatch),
-            functools.partial(registry_child_mounts, registry, namespace),
+            namespace_view_of(registry, namespace, dispatch),
             functools.partial(path_stat, dispatch)
             if dispatch is not None else None)
         stdout, io = await handle_cross_mount(
@@ -250,11 +255,10 @@ async def handle_command(
         # merged last.
         mounts = []
         for s in path_scopes:
-            try:
-                mounts.append(registry.mount_for(s.virtual))
-            except ValueError:
-                # a scope outside any mount contributes nothing here
-                pass
+            m = registry.try_mount_for(s.virtual)
+            # a scope outside any mount contributes nothing here
+            if m is not None:
+                mounts.append(m)
         io.producer = Producer(command=cmd_name,
                                prefixes=tuple(m.prefix for m in mounts))
         stdout = maybe_with_timeout(stdout, resolve_limit(cmd_name, mounts),
@@ -266,11 +270,10 @@ async def handle_command(
     if len(routing_scopes) >= 2:
         mount_prefixes = set()
         for s in routing_scopes:
-            try:
-                mount_prefixes.add(registry.mount_for(s.virtual).prefix)
-            except ValueError:
-                # a scope outside any mount contributes nothing here
-                pass
+            m = registry.try_mount_for(s.virtual)
+            # a scope outside any mount contributes nothing here
+            if m is not None:
+                mount_prefixes.add(m.prefix)
         if len(mount_prefixes) > 1:
             prefixes_str = ", ".join(sorted(mount_prefixes))
             span_err = (f"{cmd_name}: paths span multiple mounts "
@@ -298,8 +301,9 @@ async def handle_command(
     try:
         assert_mount_allowed(mount.prefix)
         for ps in routing_scopes:
-            target = registry.mount_for(ps.virtual)
-            assert_mount_allowed(target.prefix)
+            target = registry.try_mount_for(ps.virtual)
+            if target is not None:
+                assert_mount_allowed(target.prefix)
     except PermissionError as exc:
         err = f"{cmd_name}: {exc}\n".encode()
         return None, IOResult(exit_code=1,
@@ -332,13 +336,10 @@ async def handle_command(
         for w in parse_warnings).encode() if parse_warnings else b"")
 
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
-        # The child-mount names and the dispatcher-backed start-point
+        # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the
-        # primary run reports the operand missing. The stat overlay is
-        # still dropped here, a known seam of the fan-out.
-        child_mounts = functools.partial(registry_child_mounts, registry,
-                                         namespace)
+        # primary run reports the operand missing.
         stdout, io, node = await _fan_out_traversal(
             cmd_name,
             paths,
@@ -349,9 +350,7 @@ async def handle_command(
             session.cwd,
             cmd_str,
             stdin,
-            mounts=mount_view(registry),
-            links=link_view(namespace, dispatch),
-            child_mounts=child_mounts,
+            ns=namespace_view_of(registry, namespace, dispatch),
             stat_path=(functools.partial(path_stat, dispatch)
                        if dispatch is not None else None))
         if warn_bytes:

@@ -15,6 +15,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from mirage.shell.array import ShellArray
 from mirage.types import FileStat
 
 StatOverlay = Callable[[str, FileStat], FileStat]
@@ -53,12 +54,53 @@ LinkResolve = Callable[[str], str]
 LinkExists = Callable[[str], Awaitable[bool]]
 # The stat of what a link points at, None when it dangles or loops.
 LinkTargetStat = Callable[[str], Awaitable["FileStat | None"]]
-# Immediate child-mount names under a directory, session-filtered. The
-# other half of namespace structure beside links: a nested mount is
-# invisible to the parent mount's backend, so a listing command is
-# handed the names from above, the same names the door merges into its
-# own readdir.
+# Child names the namespace owes a directory: nested mounts AND links,
+# session-filtered. A nested mount is invisible to the parent mount's
+# backend and a link is invisible to every backend, so a listing command
+# is handed the names from above, the same names the ops surface merges
+# into its own readdir.
 ChildMounts = Callable[[str], list[str]]
+# One session variable's value, None when unset. Sync: expansion-grade
+# reads must stay dict lookups.
+EnvGet = Callable[[str], "str | None"]
+# A process-view copy of the whole environment.
+EnvSnapshot = Callable[[], dict[str, str]]
+# Write one variable through the session plane (readonly + pre_session).
+# General over variable shapes: a string stores a scalar, a ShellArray
+# stores a whole array, and the door keeps the two storages exclusive.
+# Writers with richer mechanics (subscripts, appends, holes) compute the
+# resulting value on a copy and hand it here, so a denial never leaves a
+# half-applied write.
+EnvSet = Callable[[str, str | ShellArray], Awaitable[None]]
+# Drop one variable through the session plane; a missing name is quiet.
+EnvUnset = Callable[[str], Awaitable[None]]
+# Whether `readonly` has marked the name.
+EnvIsReadonly = Callable[[str], bool]
+
+
+@dataclass(frozen=True)
+class SessionView:
+    """The session-plane facts a command may consult, as one injected object.
+
+    The ``LinkView`` pattern on the session plane: every field answers
+    through the plane's own writers (``workspace/session/state``), so
+    reads arrive exactly as the shell sees them and writes clear
+    readonly plus the ``pre_session`` policy gate. The plain ``env``
+    kwarg every command already receives stays the frozen process-view
+    snapshot; this view is the live, gated handle for the command that
+    needs one, and it is the whole capability: no field reaches the raw
+    session behind it.
+
+    A command opts in by naming a ``session_view`` parameter (``env``
+    is taken by the snapshot), which is what makes the dispatcher hand
+    it one.
+    """
+
+    get: EnvGet
+    snapshot: EnvSnapshot
+    set: EnvSet
+    unset: EnvUnset
+    is_readonly: EnvIsReadonly
 
 
 @dataclass(frozen=True)
@@ -81,8 +123,8 @@ class MountView:
     line filter runs, so it reads the boundaries here too and excludes a
     descendant's subtree while accounting.
 
-    A command opts in by naming a ``mounts`` parameter, which is what
-    makes the dispatcher hand it one.
+    Delivered as the ``mounts`` field of ``NamespaceView``; a command
+    opts in by naming an ``ns`` parameter.
     """
 
     # Mount roots strictly under a path (a walker: tar, zip).
@@ -105,8 +147,8 @@ class LinkView:
     builder in the chain, and the generic; it reads another field off
     the view it already receives.
 
-    A command opts in by naming a ``links`` parameter, which is what
-    makes the dispatcher hand it one.
+    Delivered as the ``links`` field of ``NamespaceView``; a command
+    opts in by naming an ``ns`` parameter.
     """
 
     # lstat one path (a link operand: `ls -l link`, `stat link`).
@@ -123,3 +165,32 @@ class LinkView:
     # link's), resolved through the workspace so a link that crosses
     # mounts still answers.
     target_stat: LinkTargetStat
+
+
+@dataclass(frozen=True)
+class NamespaceView:
+    """The name plane's facts a command may consult, as one injected object.
+
+    Everything here answers from the workspace's addressing authority
+    (the namespace node table plus the mount table), which no backend
+    can see: symlinks, mount boundaries, the chmod/chown/touch attr
+    overlay, and the child names the namespace owes a directory. One
+    view per plane means a command that grows a new name-plane need
+    adds a field read, not a new keyword threaded through
+    ``execute_cmd``, every builder, and the generic.
+
+    A command opts in by naming an ``ns`` parameter, which is what
+    makes the dispatcher hand it one. Fields default to None so a unit
+    test constructs only what it exercises; inside a workspace the
+    dispatcher fills all four.
+    """
+
+    # The symlink facts; None when the namespace holds no links, which
+    # is the fast path a walker checks before merging.
+    links: LinkView | None = None
+    # Where the mount boundaries are (tar, zip, du).
+    mounts: MountView | None = None
+    # The namespace attr merge for stat-rendering commands (ls).
+    stat_overlay: StatOverlay | None = None
+    # Child names the namespace owes a directory (mounts and links).
+    child_mounts: ChildMounts | None = None

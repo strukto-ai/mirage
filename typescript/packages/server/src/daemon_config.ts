@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'url',
@@ -46,7 +47,7 @@ export class DaemonConfigError extends Error {
 export function validateDaemonTable(table: Record<string, string>): void {
   const unknown = Object.keys(table)
     .filter((k) => !ALLOWED_KEYS.has(k))
-    .sort()
+    .sort(compareCodePoints)
   if (unknown.length > 0) {
     throw new DaemonConfigError(
       "config.toml: the following [daemon] keys don't match any " +
@@ -56,7 +57,7 @@ export function validateDaemonTable(table: Record<string, string>): void {
   const badTypes = Object.entries(table)
     .filter(([k, v]) => NUMERIC_KEYS.has(k) && !Number.isFinite(Number(v)))
     .map(([k]) => k)
-    .sort()
+    .sort(compareCodePoints)
   if (badTypes.length > 0) {
     throw new DaemonConfigError(
       'config.toml: the following [daemon] keys have the wrong ' + `type: ${badTypes.join(', ')}`,

@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 
 export interface BoxConfig {
   // API origin override (e.g. an integ fake). Defaults to api.box.com.
@@ -43,16 +50,6 @@ export interface BoxConfig {
   onRefreshTokenRotated?: (newRefreshToken: string) => void | Promise<void>
 }
 
-export interface BoxConfigRedacted {
-  endpoint?: string
-  rootFolderId?: string
-  clientId?: string
-  clientSecret?: '<REDACTED>'
-  refreshToken?: '<REDACTED>'
-  enterpriseId?: string
-  accessToken?: '<REDACTED>'
-}
-
 const BoxConfigSchema = z.object({
   endpoint: z.string().optional(),
   rootFolderId: z.string().optional(),
@@ -63,6 +60,13 @@ const BoxConfigSchema = z.object({
   enterpriseId: z.string().optional(),
   accessToken: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema deliberately omits the
+// callbacks, which no snapshot can carry.
+export type BoxConfigRedacted = RedactedConfig<
+  ConfigOf<typeof BoxConfigSchema>,
+  'clientSecret' | 'refreshToken' | 'accessToken'
+>
 
 export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
   return redactConfigWithSchema(BoxConfigSchema, config) as unknown as BoxConfigRedacted

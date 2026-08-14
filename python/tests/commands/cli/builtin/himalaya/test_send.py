@@ -31,11 +31,13 @@ RAW = b"From: me@example.com\nTo: a@b.com\nSubject: Hi\n\nyo"
 def sent(monkeypatch):
     seen: dict = {}
 
-    async def fake_send_raw(config, raw):
+    async def fake_deliver(config, raw, save=None):
         seen["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw)
+        seen["save"] = save
+        message = BytesParser(policy=default_policy).parsebytes(raw)
+        return message, seen.get("warning", "")
 
-    monkeypatch.setitem(send.__globals__, "send_raw", fake_send_raw)
+    monkeypatch.setitem(send.__globals__, "deliver", fake_deliver)
     return seen
 
 
@@ -69,3 +71,30 @@ async def test_an_empty_message_is_refused_before_smtp(sent):
     with pytest.raises(ValueError, match="no message provided"):
         await send(CLIInvocation(CONFIG, stdin=b"   \n "))
     assert "raw" not in sent
+
+
+@pytest.mark.asyncio
+async def test_a_clean_send_writes_nothing_to_stderr(sent):
+    _, io = await send(CLIInvocation(CONFIG, stdin=RAW))
+    assert io.stderr is None
+
+
+@pytest.mark.asyncio
+async def test_an_unsaved_copy_reaches_stderr_without_failing_the_verb(sent):
+    sent["warning"] = "himalaya: sent copy not saved: Sent: NO\n"
+    out, io = await send(CLIInvocation(CONFIG, stdin=RAW))
+    assert io.exit_code == 0
+    assert await materialize(io.stderr) == sent["warning"].encode()
+    assert json.loads(await materialize(out))["status"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_save_names_the_mailbox_for_the_copy(sent):
+    await send(CLIInvocation(CONFIG, stdin=RAW, flags={"save": "Drafts"}))
+    assert sent["save"] == "Drafts"
+
+
+@pytest.mark.asyncio
+async def test_without_save_the_account_resolves_its_own_mailbox(sent):
+    await send(CLIInvocation(CONFIG, stdin=RAW))
+    assert sent["save"] is None

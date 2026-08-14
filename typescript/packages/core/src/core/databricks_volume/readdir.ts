@@ -21,6 +21,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './_client.ts'
 import { isNotFound, notFoundError } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface DbxDirectoryEntry {
   path: string
@@ -78,7 +79,7 @@ export async function readdir(
           entry,
         ] as [string, DbxDirectoryEntry],
     )
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .sort((a, b) => compareCodePoints(a[0], b[0]))
   const names: string[] = []
   const indexEntries: [string, IndexEntry][] = []
   for (const [fullPath, entry] of pairs) {

@@ -76,7 +76,7 @@ async def _tr_stream(
 
 async def tr(
     paths: list[PathSpec],
-    texts: tuple[str, ...],
+    texts: list[str],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,

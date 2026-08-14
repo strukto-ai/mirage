@@ -15,39 +15,24 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
+from mirage.commands.builtin.generic.gunzip import gunzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def gunzip(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    k: bool = False,
-    f: bool = False,
-    c: bool = False,
-    t: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags,
-) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_gunzip(
-        paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        write_bytes=partial(ops.require(Operation.WRITE), accessor),
-        unlink=partial(ops.require(Operation.UNLINK), accessor),
-        stdin=stdin,
-        keep=k,
-        force=f,
-        to_stdout=c,
-        test_only=t)
+async def gunzip(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await ops.resolve_glob(accessor, paths,
+                                      opts.index) if paths else []
+    return await gunzip_generic(
+        resolved, list(texts), opts,
+        bound_op(ops.read_bytes, accessor, opts.index),
+        partial(ops.require(Operation.WRITE), accessor),
+        partial(ops.require(Operation.UNLINK), accessor))
 
 
 BUILDER = Builder('gunzip',

@@ -21,11 +21,15 @@ import {
   arrayIndices,
   arraySlice,
   arrayValues,
+  arrayWith,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import type { Session } from '../session/session.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import type { SessionView } from '../../ops/types.ts'
+import { type Session, sessionEntry, setSessionEntry } from '../session/session.ts'
+import { ensureVarVisible, visibleArrays, visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -104,6 +108,25 @@ function unbound(name: string): ExitSignal {
 }
 
 /**
+ * Refuse expansion-time writes that name hidden variables.
+ *
+ * `${X:=d}` and `$((X=5))` land on the raw session env rather than the
+ * async session door, so the hidden half of that door
+ * (`ensureVarVisible`) is applied here, and the refusal takes the
+ * fatal expansion-error shape `${var:?}` uses.
+ */
+function guardExpansionWrite(session: Session, ...names: string[]): void {
+  for (const name of names) {
+    try {
+      ensureVarVisible(session, name)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+    }
+  }
+}
+
+/**
  * Resolve one variable name to its value.
  *
  * `strict` honors `set -u`: an unset plain name or positional raises;
@@ -117,7 +140,7 @@ export function lookupVar(
   callStack: CallStack | null,
   strict = true,
 ): string {
-  const env = session.env
+  const env = visibleEnv(session)
   const lastExitCode = session.lastExitCode
   const positional = session.positionalArgs
   const nounset = strict && session.shellOptions.nounset === true
@@ -161,11 +184,14 @@ export function lookupVar(
     const localVal = callStack.getLocal(name)
     if (localVal !== null) return localVal
   }
-  const fromArray = session.arrays[name]
+  const fromArray = visibleArrays(session)[name]
   if (fromArray !== undefined) {
     return arrayGet(fromArray, 0)
   }
-  if (name === 'PWD') return session.cwd
+  // $PWD is deliberately absent here: `cd` writes it into the env like any
+  // exported variable, so it can be assigned, unset and printed by `env`,
+  // exactly as bash allows. Resolving it here instead would make `PWD=/x`
+  // and `unset PWD` silently do nothing.
   if (name === 'HOME') return homeDir(session) ?? ''
   if (!(name in env)) {
     if (nounset) throw unbound(name)
@@ -581,7 +607,7 @@ export async function expandArrayAt(
 ): Promise<string[]> {
   if (node.type === NT.SIMPLE_EXPANSION) return positionalArgs(session, callStack)
   const p = parseBraces(node)
-  const env = session.env
+  const env = visibleEnv(session)
   let arr: ShellArray | undefined
   if (p.subscript === null && p.varName === '@') {
     // "${@}" splats the positional parameters; every op below then
@@ -593,7 +619,7 @@ export async function expandArrayAt(
     const params = positionalArgs(session, callStack)
     arr = p.op === ':' ? [session.argv0, ...params] : params
   } else {
-    arr = session.arrays[p.varName ?? '']
+    arr = visibleArrays(session)[p.varName ?? '']
   }
   if (arr === undefined) {
     const scalar = env[p.varName ?? '']
@@ -641,11 +667,51 @@ function valueOp(op: string, val: string, groups: string[], env: Record<string, 
   return val
 }
 
+/**
+ * One expansion-time write, through the session plane's door.
+ *
+ * `${X:=d}` and `$((X=5))` are assignments the shell performs while expanding
+ * a word rather than while running a command, and they used to land on the raw
+ * session env. That made a `preSession` rule one `${X:=d}` away from
+ * irrelevant: a deployment refusing `AWS_*` still had `${AWS_PROFILE:=prod}`
+ * write it. They go through the door now, so one rule covers every spelling.
+ *
+ * Without a door (a unit test outside a workspace) the write lands directly,
+ * with the hidden half still applied: skipping that would let the write-back
+ * clobber a value the host's wiring reads.
+ */
+export async function expansionWrite(
+  session: Session,
+  view: SessionView | undefined,
+  name: string,
+  value: string,
+): Promise<void> {
+  guardExpansionWrite(session, name)
+  // A name already holding an array takes the write at element 0 and
+  // keeps its other elements, which is bash: `a=(1 2 3)` then
+  // `$((a=5))` leaves `5 2 3`. Storing the value as a scalar instead
+  // would discard every element after the first.
+  const held = sessionEntry(session.arrays, name)
+  const stored: string | ShellArray = held === undefined ? value : arrayWith(held, 0, value)
+  if (view === undefined) {
+    if (typeof stored === 'string') setSessionEntry(session.env, name, stored)
+    else setSessionEntry(session.arrays, name, stored)
+    return
+  }
+  try {
+    await view.set(name, stored)
+  } catch (err) {
+    if (!(err instanceof PolicyDenied)) throw err
+    throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+  }
+}
+
 export async function expandBraces(
   node: TSNodeLike,
   session: Session,
   callStack: CallStack | null,
   expandChild: ExpandChild,
+  view?: SessionView,
 ): Promise<string> {
   const p = parseBraces(node)
   if (node.children.some((c) => c.type === '}' && c.isMissing)) {
@@ -662,8 +728,8 @@ export async function expandBraces(
       2,
     )
   }
-  const env = session.env
-  const arrays = session.arrays
+  const env = visibleEnv(session)
+  const arrays = visibleArrays(session)
 
   const groups: string[] = []
   for (let gi = 0; gi < p.groups.length; gi++) {
@@ -762,7 +828,13 @@ export async function expandBraces(
     if (callStack !== null && callStack.getLocal(p.varName ?? '') !== null) {
       callStack.setLocal(p.varName ?? '', defaultVal)
     } else if (p.varName !== null) {
-      env[p.varName] = defaultVal
+      // ${X:=} writes the raw session env, not the visible view (a
+      // filtered copy under hidden vars, where the write would be
+      // silently lost): the known policy-ungated session write, same
+      // as $((X=5)) and printf -v. The hidden gate still applies, or
+      // the write-back would clobber the value the host's wiring
+      // reads.
+      await expansionWrite(session, view, p.varName, defaultVal)
     }
     return defaultVal
   }

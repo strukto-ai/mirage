@@ -37,12 +37,6 @@ export class Watcher implements WatchRuntime {
     this.queueFactory = queueFactory
   }
 
-  private mountFor(path: string): WatchMount {
-    const mount = this.registry.mountFor(path)
-    if (mount === null) throw new Error(`no mount matches path: ${path}`)
-    return mount
-  }
-
   private frame(mount: WatchMount, virtual: string): PathSpec {
     const normalized = `/${stripSlash(virtual)}`
     const resourcePath = normalized.startsWith(mount.prefix)
@@ -91,14 +85,14 @@ export class Watcher implements WatchRuntime {
   private async invalidate(mount: WatchMount, change: FileEvent): Promise<void> {
     await this.evict(mount, change.path, change.kind === FileChangeKind.DELETE)
     if (change.kind === FileChangeKind.MOVE && change.previousPath !== null) {
-      const previousMount = this.mountFor(change.previousPath.virtual)
+      const previousMount = this.registry.mountFor(change.previousPath.virtual)
       await this.evict(previousMount, this.frame(previousMount, change.previousPath.virtual), true)
     }
   }
 
   async notify(change: FileEvent): Promise<void> {
     if (this.closed) return
-    const mount = this.mountFor(change.path.virtual)
+    const mount = this.registry.mountFor(change.path.virtual)
     const framed = new FileEvent({
       kind: change.kind,
       path: this.frame(mount, change.path.virtual),
@@ -119,7 +113,9 @@ export class Watcher implements WatchRuntime {
     if (this.closed) throw new Error('watcher is closed')
     const paths = path instanceof PathSpec ? [path] : [...path]
     if (paths.length === 0) throw new Error('watch requires at least one path')
-    const roots = paths.map((item) => this.frame(this.mountFor(item.virtual), item.virtual))
+    const roots = paths.map((item) =>
+      this.frame(this.registry.mountFor(item.virtual), item.virtual),
+    )
     const scopes = paths.map((item) => {
       const stripped = stripSlash(item.virtual)
       const trailing = item.virtual.endsWith('/') && stripped !== '' ? '/' : ''

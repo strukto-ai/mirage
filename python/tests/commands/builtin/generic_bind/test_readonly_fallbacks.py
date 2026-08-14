@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.builders.find import \
 from mirage.commands.builtin.generic_bind.builders.shuf import \
     shuf as shuf_builder
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -80,7 +81,8 @@ def _spec(original: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_find_walks_tree_without_native_find_op():
-    out, io = await find_builder(_ops(), object(), [_spec("/g")], type="f")
+    out, io = await find_builder(_ops(), object(), [_spec('/g')], [],
+                                 CommandOpts(flags={'type': 'f'}))
     text = (await materialize(out)).decode()
     assert "/g/a.txt" in text
     assert "/g/sub/b.txt" in text
@@ -89,7 +91,8 @@ async def test_find_walks_tree_without_native_find_op():
 
 @pytest.mark.asyncio
 async def test_du_walks_tree_without_native_du_op():
-    out, _ = await du_builder(_ops(), object(), [_spec("/g")], s=True)
+    out, _ = await du_builder(_ops(), object(), [_spec('/g')], [],
+                              CommandOpts(flags={'s': True}))
     text = (await materialize(out)).decode()
     # alpha\n (6) + bravo\n (6) = 12 bytes summed by the readdir walk.
     assert "12" in text
@@ -98,7 +101,8 @@ async def test_du_walks_tree_without_native_du_op():
 
 @pytest.mark.asyncio
 async def test_shuf_reads_without_a_write_op():
-    out, io = await shuf_builder(_ops(), object(), [_spec("/g/a.txt")])
+    out, io = await shuf_builder(_ops(), object(), [_spec('/g/a.txt')], [],
+                                 CommandOpts())
     assert (await materialize(out)).decode() == "alpha\n"
     assert io.exit_code == 0
 
@@ -106,6 +110,5 @@ async def test_shuf_reads_without_a_write_op():
 @pytest.mark.asyncio
 async def test_shuf_output_flag_names_the_missing_write_op():
     with pytest.raises(ValueError, match="backend provides no write op"):
-        await shuf_builder(_ops(),
-                           object(), [_spec("/g/a.txt")],
-                           output=_spec("/g/out.txt"))
+        await shuf_builder(_ops(), object(), [_spec('/g/a.txt')], [],
+                           CommandOpts(flags={'output': _spec('/g/out.txt')}))

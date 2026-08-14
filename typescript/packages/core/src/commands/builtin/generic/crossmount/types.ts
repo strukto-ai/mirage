@@ -76,12 +76,7 @@ export enum Cmd {
   JOIN = 'join',
 }
 
-export type DispatchFn = (
-  op: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-) => Promise<[unknown, IOResult]>
+export type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CrossResult = [ByteSource | null, IOResult]
 

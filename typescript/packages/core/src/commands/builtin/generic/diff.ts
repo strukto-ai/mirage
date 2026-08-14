@@ -25,6 +25,7 @@ import { formatFsError, isFsError } from '../../../utils/errors.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -111,7 +112,7 @@ async function diffDirs(
   const rawB = await readdir(dirB)
   const namesA = new Set(rawA.map((e) => gnuBasename(e)))
   const namesB = new Set(rawB.map((e) => gnuBasename(e)))
-  const names = [...new Set([...namesA, ...namesB])].sort()
+  const names = [...new Set([...namesA, ...namesB])].sort(compareCodePoints)
   const left = rstripSlash(dirA.virtual)
   const right = rstripSlash(dirB.virtual)
   const parts: Uint8Array[] = []

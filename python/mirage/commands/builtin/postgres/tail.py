@@ -15,17 +15,17 @@
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tail import parse_flags
 from mirage.commands.builtin.generic.tail import tail as generic_tail
-from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic.tail import tail_generic
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.postgres.io import resolve_glob
-from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.postgres.io import IO
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.postgres import _client
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import PostgresEntityRowsScope, detect_scope
@@ -34,33 +34,23 @@ from mirage.types import PathSpec
 
 
 @command("tail", resource="postgres", spec=SPECS["tail"])
-async def tail(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
-    index: IndexCacheStore,
-    **_extra: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    n_int: int | None = None
-    from_line: int | None = None
-    if n is not None:
-        lines, plus_mode = _parse_n(n)
-        if plus_mode:
-            from_line = lines
-        else:
-            n_int = lines
-    c_int = int(c) if c is not None else None
+async def tail(accessor: PostgresAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    try:
+        parsed = parse_flags(opts.flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+    counts = parsed.counts
     if paths:
         scope = detect_scope(paths[0])
+        # Row scopes fetch only the last N rows server-side (COUNT then
+        # OFFSET) instead of reading the whole relation.
         if (len(paths) == 1 and not has_unresolved_glob(paths)
                 and isinstance(scope, PostgresEntityRowsScope)
-                and c_int is None and n_int is not None):
-            limit = min(n_int, accessor.config.default_row_limit)
+                and counts.byte_count is None and counts.from_byte is None
+                and counts.lines is not None):
+            limit = min(counts.lines, accessor.config.default_row_limit)
             pool = await accessor.pool()
             async with pool.acquire() as conn:
                 total = await _client.count_rows(conn, scope.schema,
@@ -71,24 +61,17 @@ async def tail(
                                                 scope.entity,
                                                 limit=limit,
                                                 offset=offset)
-            if not rows:
-                return generic_tail(b"", n=n_int, c=c_int,
-                                    from_line=from_line), IOResult()
-            jsonl = "\n".join(
-                orjson.dumps(r, default=str).decode() for r in rows) + "\n"
-            return generic_tail(jsonl.encode(),
-                                n=n_int,
-                                c=c_int,
-                                from_line=from_line), IOResult()
-
-        paths = await resolve_glob(accessor, paths, index=index)
-        show_headers = (v or len(paths) > 1) and not q
-        return tail_multi(paths,
-                          read=bound_op(postgres_read, accessor, index),
-                          n=n_int,
-                          c=c_int,
-                          from_line=from_line,
-                          show_headers=show_headers), IOResult()
-    source = _resolve_source(stdin, "tail: missing operand")
-    return generic_tail(source, n=n_int, c=c_int,
-                        from_line=from_line), IOResult()
+            data = b""
+            if rows:
+                data = ("\n".join(
+                    orjson.dumps(r, default=str).decode()
+                    for r in rows) + "\n").encode()
+            return generic_tail(data,
+                                n=counts.lines,
+                                c=counts.byte_count,
+                                from_line=counts.from_line,
+                                from_byte=counts.from_byte), IOResult()
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await tail_generic(resolved, list(texts), opts,
+                              bound_op(IO.stat, accessor, opts.index),
+                              bound_op(postgres_read, accessor, opts.index))

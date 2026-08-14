@@ -10,7 +10,7 @@
       "command": "ls /mail",
       "expect": {
         "exit": 0,
-        "stdout": "Archive\nINBOX\n",
+        "stdout": "Archive\nINBOX\nSent\n",
         "stderr": ""
       }
     },
@@ -389,6 +389,20 @@
       ],
       "clear_cache": true,
       "command": "find /mail/INBOX -name 'Fwd_*' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_send_keeps_a_copy_in_sent",
+      "seq": 540027,
+      "targets": [
+        "email"
+      ],
+      "clear_cache": true,
+      "command": "find /mail/Sent -name 'Ship_update*' | wc -l",
       "expect": {
         "exit": 0,
         "stdout": "1\n",

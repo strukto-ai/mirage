@@ -35,6 +35,8 @@ import {
   type PredNode,
 } from '../findEval.ts'
 import type { LinkView } from '../../../ops/types.ts'
+import { pathAllowed } from '../../../context/session_context.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -201,7 +203,11 @@ export async function linkResults(
     if (minSize !== null && size < minSize) continue
     if (maxSize !== null && size > maxSize) continue
     if (mtimeMin !== null || mtimeMax !== null) {
-      const ts = st.modified !== null ? Date.parse(st.modified) / 1000 : null
+      // `modifiedTs` is the helper the rest of this file uses. A bare
+      // Date.parse gives NaN for a date-only or malformed stamp, which the
+      // `=== null` guard below does not catch, so every comparison came out
+      // false and the entry was kept -- where Python drops it.
+      const ts = modifiedTs(st.modified)
       if (ts === null) continue
       if (mtimeMin !== null && ts < mtimeMin) continue
       if (mtimeMax !== null && ts > mtimeMax) continue
@@ -395,7 +401,7 @@ export async function findGeneric(
       ...options,
       tree: prefixPathNodes(optionsTree(options), prefix),
     }
-    const rootIsLink = (opts.links ?? null)?.statAt(root.virtual) != null
+    const rootIsLink = (opts.ns?.links ?? null)?.statAt(root.virtual) != null
     // What the start point is decides which walk is even possible, so it
     // is resolved once, ahead of all of them: a symlink has no backend
     // inode (linkResults reports it), a non-directory has no subtree, and
@@ -417,6 +423,13 @@ export async function findGeneric(
         // back to the resolved path for a synthesized root.
         const label = root.rawPath !== '' ? root.rawPath : root.virtual
         missing.push(`find: '${label}': No such file or directory`)
+        continue
+      }
+      if (start.type !== FileType.DIRECTORY && root.rawPath.endsWith('/')) {
+        // POSIX reads `x/` as `x/.`, so an operand typed with a trailing
+        // slash has to name a directory; GNU refuses the rest with
+        // ENOTDIR rather than reporting the entry itself.
+        missing.push(`find: '${root.rawPath}': Not a directory`)
         continue
       }
       if (start.type !== FileType.DIRECTORY) {
@@ -477,7 +490,7 @@ export async function findGeneric(
       // A symlink is namespace state no backend readdir can see, so a
       // directory holding only one would read as empty. GNU counts the
       // link as an entry.
-      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.links, root.virtual)
+      if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.ns?.links, root.virtual)
       rows = withRootRow(
         rootMatches,
         root.virtual === '/' ? '/' : rstripSlash(root.virtual),
@@ -491,7 +504,7 @@ export async function findGeneric(
     const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
     const withLinks = filtered.concat(
       await linkResults(
-        opts.links ?? null,
+        opts.ns?.links ?? null,
         rootPath,
         prefix,
         stripSlash(rootKey),
@@ -505,8 +518,12 @@ export async function findGeneric(
         fl.asBool('L'),
       ),
     )
-    withLinks.sort()
-    matches.push(...respellRaw(withLinks, root.virtual, root.rawPath))
+    withLinks.sort(compareCodePoints)
+    // Hidden rows drop here, above the native-op/walk fork and after
+    // the link merge, so a mount's visibility behavior cannot depend
+    // on whether its backend ships a native find op.
+    const visibleRows = withLinks.filter((row) => pathAllowed(row))
+    matches.push(...respellRaw(visibleRows, root.virtual, root.rawPath))
   }
   // Start points print in operand order (GNU); each root's rows were
   // sorted above, and a global sort here would interleave them.

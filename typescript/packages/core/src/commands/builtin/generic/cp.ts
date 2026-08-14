@@ -42,6 +42,7 @@ import {
 import { fsStrerror, isFsError, isMissingPath } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { norm, parent } from '../../../utils/path.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -501,7 +502,7 @@ async function treeLines(
 ): Promise<string[]> {
   const dirs = await strategy.find(src, { type: 'd' })
   const files = await strategy.find(src, { type: 'f' })
-  const unique = [...new Set([srcBase, ...dirs, ...files])].sort()
+  const unique = [...new Set([srcBase, ...dirs, ...files])].sort(compareCodePoints)
   return unique.map((entryMount) => {
     const entry = mountedPath(src, entryMount)
     const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
@@ -527,7 +528,11 @@ async function mirrorDirs(
 ): Promise<boolean> {
   if (strategy.mkdir === undefined) return true
   const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))]
-  const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length)
+  // Shortest first so a parent is created before its children, then by name:
+  // sorting on length alone leaves equal-length siblings in whatever order
+  // the Set happened to hold, which is insertion order here and hash order in
+  // Python. Same key on both sides, same output.
+  const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length || compareCodePoints(a, b))
   for (const entryMount of unique) {
     const entryDst = mountedPath(target, dstBase + entryMount.slice(srcBase.length))
     if (lines !== undefined) {

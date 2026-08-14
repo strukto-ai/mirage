@@ -224,10 +224,13 @@ describe('treeGeneric across a nested mount', () => {
   function crossOpts(): CommandOpts {
     return {
       ...opts({}),
-      mounts: {
-        descendants: (path: string) => [ROOT].filter((r) => r.startsWith(rstripSlash(path) + '/')),
-        isRoot: (path: string) => rstripSlash(path) === ROOT,
-        rootOf: () => '/',
+      ns: {
+        mounts: {
+          descendants: (path: string) =>
+            [ROOT].filter((r) => r.startsWith(rstripSlash(path) + '/')),
+          isRoot: (path: string) => rstripSlash(path) === ROOT,
+          rootOf: () => '/',
+        },
       },
       readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
       statPath: (virtual: string) => {

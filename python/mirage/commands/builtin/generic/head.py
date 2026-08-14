@@ -6,9 +6,13 @@ from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.tail_helper import number_flag_error
+from mirage.commands.builtin.utils.operands import operands_io, split_readable
+from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
-from mirage.types import PathSpec
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.stream import ensure_stream
 
 
@@ -163,3 +167,51 @@ async def _head_multi(
                                 c=c,
                                 zero_terminated=zero_terminated):
             yield chunk
+
+
+async def head_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run head over resolved operands, GNU semantics; mirrors headGeneric.
+
+    The wiring resolves globs and binds the backend ops (including any
+    push-down, like postgres routing row reads through a LIMIT query);
+    everything else lives here so factory builders and bespoke backend
+    commands agree: flag parsing, the header rule, the per-operand
+    report-and-continue split, and the stdin fallback. Headers count the
+    operands as given (GNU heads on operand count, so a failed operand
+    still forces headers on the survivors).
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by head.
+        opts (CommandOpts): Flags and stdin from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+    """
+    try:
+        parsed = parse_flags(opts.flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=str(exc).encode())
+    if paths:
+        show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
+        readable, err = await split_readable(paths, stat, "head")
+        io = operands_io(err)
+        if not readable:
+            return None, io
+        return head_multi(readable,
+                          read=stream,
+                          n=parsed.lines,
+                          c=parsed.bytes_,
+                          show_headers=show_headers,
+                          zero_terminated=parsed.zero_terminated), io
+    source = _resolve_source(opts.stdin, "head: missing operand")
+    return head(source,
+                n=parsed.lines,
+                c=parsed.bytes_,
+                zero_terminated=parsed.zero_terminated), IOResult()

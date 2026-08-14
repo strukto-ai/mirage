@@ -73,7 +73,8 @@ describe('handleCli', () => {
     expect(inv?.flags.to).toBe('#eng')
     expect(inv?.flags.verbose).toBe(2)
     expect(inv?.argv).toEqual(['-vv', 'message', 'send', '-t', '#eng', 'hello', 'world'])
-    expect(inv?.env).toEqual({ EDITOR: 'vi' })
+    // $PWD is exported, so a CLI subprocess inherits it as bash's would.
+    expect(inv?.env).toEqual({ EDITOR: 'vi', PWD: '/' })
     expect(node.command).toBe('prog -vv message send -t #eng hello world')
   })
 
@@ -325,7 +326,11 @@ describe('handleCli script arm', () => {
       { entries: [py] },
     )
     expect(io.exitCode).toBe(0)
-    expect(py.seen.pop()?.env).toEqual({ EDITOR: 'vi', MIRAGE_CLI_CONFIG: '{"apiKey":"k1"}' })
+    expect(py.seen.pop()?.env).toEqual({
+      EDITOR: 'vi',
+      PWD: '/',
+      MIRAGE_CLI_CONFIG: '{"apiKey":"k1"}',
+    })
   })
 
   it('the env omits MIRAGE_CLI_CONFIG without config', async () => {

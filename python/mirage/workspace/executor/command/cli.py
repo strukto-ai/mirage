@@ -24,7 +24,7 @@ from mirage.commands.builtin.utils.limit import (CommandTimeoutError,
 from mirage.commands.cli.constants import CLI_CONFIG_ENV
 from mirage.commands.cli.refusal import (CLAP_EXIT, clap_missing_operands,
                                          leaf_refusal)
-from mirage.commands.cli.types import CLIInvocation, CLISpec, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation, CLISpec
 from mirage.commands.cli.walk import owns_argv, walk
 from mirage.commands.config import HELP_OPTION
 from mirage.commands.errors import UsageError
@@ -34,7 +34,7 @@ from mirage.commands.spec.types import FlagValue, Operand, UsageStyle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
-from mirage.ops.types import MountRoot, StatPath
+from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
@@ -44,7 +44,7 @@ from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 # A textual rest operand is the spec's pass-through form: the parser
@@ -164,7 +164,8 @@ async def handle_cli(
     entries: list[Runtime] | None = None,
     dispatch: DispatchFn | None = None,
     stat_path: StatPath | None = None,
-    mount_root: MountRoot | None = None,
+    ns: NamespaceView | None = None,
+    session_view: SessionView | None = None,
     drop_caches: Callable[[], Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a line whose head word is an installed CLI.
@@ -197,10 +198,15 @@ async def handle_cli(
             whose subject is files rather than an API.
         stat_path (StatPath | None): dispatcher-backed stat asking both
             channels a backend can answer on.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-            These three ride ``inv.ops`` as one CLIVerbOpts; a verb that
-            never reads it cannot touch a mount, and outside a workspace
-            the field is None.
+        ns (NamespaceView | None): the name plane's facts, which no
+            backend can see, for a verb that walks a tree itself. The
+            mount prefix serving a path is one of them
+            (``ns.mounts.root_of``), so it needs no door of its own.
+        session_view (SessionView | None): the session plane's live,
+            gated handle; ``inv.env`` stays the frozen process view.
+            These four ride ``inv.doors`` as one CLIDoors, one door per
+            state plane; a verb that never reads it cannot touch a
+            mount, and outside a workspace the field is None.
         drop_caches (Callable | None): drop cached listings and bodies
             for the mounts this CLI's service serves. Called after a
             write verb succeeds, because an account CLI mutates its
@@ -241,7 +247,7 @@ async def handle_cli(
                          parse_spec,
                          prog,
                          session.cwd,
-                         env=session.env)
+                         env=env_snapshot(session))
     if mirage_help and parsed.flag_kwargs.get("help") is True:
         help_text = render_help(prog, parse_spec, style=style).encode()
         return help_text, IOResult(), ExecutionNode(command=cmd_str,
@@ -280,22 +286,24 @@ async def handle_cli(
         # --help itself is handed the value it asked for.
         kw.pop("help", None)
 
-    # The workspace doors a mount-reading verb needs ride the record as
-    # one field. Most CLIs never read it: an API client has no
-    # filesystem, while `git` is nothing but one. None outside a
-    # workspace, so a verb that needs a mount refuses there on its own.
-    ops = (CLIVerbOpts(dispatch=dispatch,
-                       stat_path=stat_path,
-                       mount_root=mount_root) if dispatch is not None
-           or stat_path is not None or mount_root is not None else None)
+    # One door per state plane, riding the record as one field. Most
+    # CLIs never read it: an API client has no filesystem, while `git`
+    # is nothing but one. None outside a workspace, so a verb that needs
+    # a plane refuses there on its own.
+    opened = (dispatch, stat_path, ns, session_view)
+    doors = (CLIDoors(dispatch=dispatch,
+                      stat_path=stat_path,
+                      ns=ns,
+                      session_view=session_view) if any(
+                          door is not None for door in opened) else None)
     inv = CLIInvocation(install.config,
                         argv=tuple(argv),
                         paths=tuple(parsed.paths),
                         texts=tuple(parsed.texts),
                         flags=kw,
                         stdin=stdin,
-                        env=dict(session.env),
-                        ops=ops)
+                        env=env_snapshot(session),
+                        doors=doors)
 
     if leaf.script is not None:
         runtime, refused = _select_runtime(prog, leaf, entries or [])
@@ -346,12 +354,16 @@ async def handle_cli(
         return None, err_io, ExecutionNode(command=cmd_str,
                                            exit_code=1,
                                            stderr=err_stderr)
-    if leaf.write and drop_caches is not None:
-        await drop_caches()
     if out is None:
         stdout, io = None, IOResult()
     else:
         stdout, io = out
+    # The spec's `write` is the static answer, which is the only one most
+    # verbs have; a handler that knows better says so on its result, so a
+    # read-only `gh api` does not expire every github mount.
+    mutated = leaf.write if io.mutated is None else io.mutated
+    if mutated and drop_caches is not None:
+        await drop_caches()
     io.producer = Producer(command=prog, declared=leaf.limit)
 
     if parsed.warnings:

@@ -51,5 +51,27 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // JavaScript's default comparator orders by UTF-16 code unit, so an
+    // astral filename (U+10000 and up, stored as a surrogate pair in
+    // 0xD800-0xDFFF) sorts before every BMP name from U+E000 up, while
+    // Python's `sorted` puts it after -- issue #370. It is also wrong for
+    // numbers and tuples, which it compares as strings. Pass an explicit
+    // comparator: `compareCodePoints` for anything a user sees the order
+    // of. Tests are exempt, as they are for the flag rule above: a test
+    // sorts its own expectation, so it stays self-consistent either way.
+    files: ['packages/*/src/**/*.ts'],
+    ignores: ['packages/*/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.property.name='sort'][arguments.length=0]",
+          message:
+            'Pass a comparator to .sort(); the default orders by UTF-16 code unit and diverges from Python on astral characters (#370). Use compareCodePoints for strings.',
+        },
+      ],
+    },
+  },
   prettierConfig,
 )

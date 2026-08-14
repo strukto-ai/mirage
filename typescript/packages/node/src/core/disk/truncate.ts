@@ -14,7 +14,7 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { readFile, writeFile } from 'node:fs/promises'
-import { type PathSpec, invalidateAfterWrite } from '@struktoai/mirage-core'
+import { ResourceName, invalidateAfterWrite, record, type PathSpec } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function truncate(
@@ -22,6 +22,7 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
+  const start = performance.now()
   const full = resolveSafe(accessor.root, path.mountPath)
   let data: Buffer
   try {
@@ -36,5 +37,6 @@ export async function truncate(
   const out = new Uint8Array(length)
   out.set(data.subarray(0, Math.min(data.byteLength, length)))
   await writeFile(full, out)
+  record('truncate', path.mountPath, ResourceName.DISK, 0, start)
   await invalidateAfterWrite(path)
 }

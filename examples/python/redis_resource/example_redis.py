@@ -22,6 +22,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.builtin.redis._provision import (file_read_provision,
                                                       head_tail_provision,
                                                       metadata_provision)
+from mirage.commands.config import CommandOpts
 from mirage.resource.redis import RedisResource
 from mirage.types import PathSpec
 
@@ -196,17 +197,20 @@ async def main() -> None:
     ]
     accessor = resource.accessor
 
-    read_cost = await file_read_provision(accessor, paths, command="cat")
+    read_cost = await file_read_provision(accessor, paths, [],
+                                          CommandOpts(command="cat"))
     print("  file_read_provision(accessor, [hello.txt, user.json]):")
     print(f"    network_read   = {read_cost.network_read} bytes "
           f"({read_cost.read_ops} reads)")
     print(f"    precision      = {read_cost.precision}")
 
-    head_cost = await head_tail_provision(accessor, paths, command="head -n 1")
+    head_cost = await head_tail_provision(accessor, paths, [],
+                                          CommandOpts(command="head -n 1"))
     print("  head_tail_provision(...) — Redis fetches full value regardless:")
     print(f"    network_read   = {head_cost.network_read} bytes")
 
-    meta_cost = await metadata_provision(accessor, paths, command="stat")
+    meta_cost = await metadata_provision(accessor, paths, [],
+                                         CommandOpts(command="stat"))
     print("  metadata_provision(...) — stat/ls/find cost zero network bytes:")
     print(f"    network_read   = {meta_cost.network_read} bytes")
     print(f"    read_ops       = {meta_cost.read_ops}")

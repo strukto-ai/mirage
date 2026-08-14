@@ -24,6 +24,7 @@ import { gnuStrerror, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { CycleError, respellOne } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -139,7 +140,7 @@ function compareStats(a: FileStat, b: FileStat, sortBy: SortBy): number {
     if (av < bv) return 1
     if (av > bv) return -1
   }
-  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+  return compareCodePoints(a.name, b.name)
 }
 
 function sortStats(stats: readonly FileStat[], sortBy: SortBy, reverse: boolean): FileStat[] {
@@ -423,7 +424,7 @@ export async function lsGeneric(
   const recursive = fl.asBool('R')
   const listDirItself = fl.asBool('d')
   const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
-  const links = opts.links ?? null
+  const links = opts.ns?.links ?? null
   const deref = fl.asBool('L')
   const warnings: LsWarning[] = []
   const lines: string[] = []
@@ -443,7 +444,7 @@ export async function lsGeneric(
         collected.push(asOperand(await stat(p), p))
       } catch (err) {
         if (!isWalkError(err)) throw err
-        if ((opts.childMounts?.(p.virtual) ?? []).length > 0) {
+        if ((opts.ns?.childMounts?.(p.virtual) ?? []).length > 0) {
           // No backend serves it, but the namespace owes it children,
           // so the door stats it as a directory and -d must print the
           // same row.
@@ -468,7 +469,7 @@ export async function lsGeneric(
     recursive,
     links,
     deref,
-    childMounts: opts.childMounts ?? null,
+    childMounts: opts.ns?.childMounts ?? null,
   }
   const probed: Operand[] = []
   for (const p of targets) {

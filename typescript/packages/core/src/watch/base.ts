@@ -25,8 +25,11 @@ export interface WatchMount {
   readonly cacheManager: CacheInvalidator | null
 }
 
+// The raising lookup: a watch path or change event outside every mount
+// is a caller error, so the miss propagates (mirrors the Python
+// watcher calling the registry's raising mount_for directly).
 export interface WatchRegistry {
-  mountFor(path: string): WatchMount | null
+  mountFor(path: string): WatchMount
 }
 
 export interface DeltaHook {

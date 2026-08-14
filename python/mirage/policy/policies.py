@@ -21,13 +21,13 @@ from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.spec import SpecPolicy
 from mirage.policy.types import (VALIDITY, CommandContext, Deny,
                                  ExecuteResultContext, GuardSpec, OpsContext,
-                                 OpsResultContext)
+                                 OpsResultContext, SessionContext)
 from mirage.types import Limit, PathSpec
 
 logger = logging.getLogger(__name__)
 
 HookContext = (CommandContext | OpsContext | OpsResultContext
-               | ExecuteResultContext)
+               | ExecuteResultContext | SessionContext)
 
 
 async def pre_ops_gate(policies: "Policies", op: str, path: PathSpec,
@@ -84,6 +84,28 @@ async def post_ops_gate(policies: "Policies", op: str, path: PathSpec,
         raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"),
                            path.virtual)
     return bound
+
+
+async def pre_session_gate(policies: "Policies | None",
+                           ctx: SessionContext) -> None:
+    """Fire pre_session on the session plane; a Deny becomes EACCES.
+
+    The one seam helper the session plane's door calls, so a refusal
+    is identical however the state is reached: shell builtin, command
+    view, or a later tier. None policies (a view constructed outside a
+    workspace) gate nothing.
+
+    Args:
+        policies (Policies | None): the workspace's admission policies.
+        ctx (SessionContext): the mutation, built by the door so the
+            plane, verb, rendering and session identity are stated in
+            exactly one place.
+    """
+    if policies is None or not policies.wants("pre_session"):
+        return
+    deny = await policies.pre_session(ctx)
+    if deny is not None:
+        raise PolicyDenied(errno.EACCES, deny.message.rstrip("\n"), ctx.key)
 
 
 async def post_execute_gate(
@@ -208,6 +230,15 @@ class Policies:
             ctx (OpsContext): the op about to run.
         """
         deny, _ = await self._fire("pre_ops", ctx, ctx.op)
+        return deny
+
+    async def pre_session(self, ctx: SessionContext) -> Deny | None:
+        """Fire pre_session across the policies; first Deny wins.
+
+        Args:
+            ctx (SessionContext): the mutation about to land.
+        """
+        deny, _ = await self._fire("pre_session", ctx, ctx.key)
         return deny
 
     async def post_ops(

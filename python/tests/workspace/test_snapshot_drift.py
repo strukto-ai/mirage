@@ -89,6 +89,29 @@ def test_strict_load_raises_when_s3_etag_drifts(tmp_path):
         assert live != recorded
 
 
+def test_strict_load_checks_drift_before_an_ops_write(tmp_path):
+    """The ops facade (the FUSE path) reaches the dispatcher without
+    passing Workspace.dispatch, so the pending checks must run at the
+    door itself: a first write may not clobber drifted remote state
+    before ContentDriftError fires.
+    """
+    store = {"data.csv": b"version 1 bytes\n"}
+    with ExitStack() as stack:
+        stack.enter_context(patch_s3_multi({"test-bucket": store}))
+        src = Workspace({"/s3": (S3Resource(_config()), MountMode.WRITE)},
+                        mode=MountMode.WRITE)
+        asyncio.run(src.execute("cat /s3/data.csv"))
+
+        snap = tmp_path / "snap.tar"
+        asyncio.run(src.snapshot(snap))
+        store["data.csv"] = b"VERSION 2 DRIFTED\n"
+
+        dst = _load(snap, resources={"/s3": S3Resource(_config())})
+        with pytest.raises(ContentDriftError):
+            asyncio.run(dst.ops.write("/s3/data.csv", b"CLOBBERED\n"))
+        assert store["data.csv"] == b"VERSION 2 DRIFTED\n"
+
+
 def test_off_load_serves_drifted_bytes_silently(tmp_path):
     """drift_policy=OFF disables the check: the load returns the new
     bytes with no error. This is the only opt-out from drift detection.

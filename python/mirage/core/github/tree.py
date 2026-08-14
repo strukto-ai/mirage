@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.github._client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
@@ -95,3 +98,79 @@ async def fetch_dir_tree(
                 size=item.get("size"),
             ))
     return result
+
+
+def index_rows(
+    tree: dict[str, TreeEntry]
+) -> tuple[dict[str, IndexEntry], dict[str, list[str]]]:
+    """Turn a git tree into the index's entry and children tables.
+
+    Shared so the mount's initial seed and a later refill build the same
+    rows; TypeScript keeps its twin in this module too (`populateIndex`).
+
+    Args:
+        tree (dict[str, TreeEntry]): the recursive tree, keyed by
+            repo-relative path.
+
+    Returns:
+        tuple[dict[str, IndexEntry], dict[str, list[str]]]: entries keyed
+        by absolute path, and each directory's sorted children.
+    """
+    dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
+    for path, entry in tree.items():
+        parts = path.rsplit("/", 1)
+        if len(parts) == 2:
+            parent, name = "/" + parts[0], parts[1]
+        else:
+            parent, name = "/", parts[0]
+        dirs[parent].append(
+            (name,
+             IndexEntry(
+                 id=entry.sha,
+                 name=name,
+                 resource_type=("folder" if entry.type == "tree" else "file"),
+                 size=entry.size,
+             )))
+    entries = {
+        ("/" + parent.strip("/") + "/" + name).replace("//", "/"): entry
+        for parent, rows in dirs.items()
+        for name, entry in rows
+    }
+    children = {
+        parent:
+        sorted(("/" + parent.strip("/") + "/" + name).replace("//", "/")
+               for name, _ in rows)
+        for parent, rows in dirs.items()
+    }
+    return entries, children
+
+
+async def refill_index(accessor, index: IndexCacheStore) -> bool:
+    """Refetch the recursive tree and re-seed the index from it.
+
+    The mount fetches the whole tree once and seeds the index with it, so
+    the index is the listing rather than a cache in front of one. That
+    makes a cleared or expired index indistinguishable from an empty
+    repository -- `ls` reported the mount root missing after an
+    invalidation, and reported nothing at all once the day-long TTL
+    lapsed. This is the refill that makes dropping the index mean
+    "refetch", which is what invalidating it was always supposed to mean.
+
+    Args:
+        accessor (GitHubAccessor): the mount's accessor, holding the
+            config and the ref to refetch.
+        index (IndexCacheStore): the index to re-seed.
+
+    Returns:
+        bool: whether a refill happened; False when there is no index to
+        seed, so a caller does not retry a lookup that cannot change.
+    """
+    if index is NULL_INDEX:
+        return False
+    tree, truncated = await fetch_tree(accessor.config, accessor.owner,
+                                       accessor.repo, accessor.ref)
+    accessor.truncated = truncated
+    entries, children = index_rows(tree)
+    index.seed(entries, children,
+               datetime.now(timezone.utc) + timedelta(days=365))
+    return True

@@ -13,18 +13,57 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import type { SessionManager } from '../workspace/session/manager.ts'
 import type { Session } from '../workspace/session/session.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { pathHidden } from '../utils/hidden.ts'
 import { MountMode, weakerMode } from '../types.ts'
 
-const sessionStorage = createAsyncContext<Session>()
-
-export function runWithSession<T>(session: Session, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(sessionStorage.run(session, fn))
+/**
+ * The session bound to one async context, and whose it is: `owner` is
+ * the session manager it belongs to, which is one per workspace.
+ */
+interface SessionBinding {
+  session: Session
+  owner: SessionManager | null
 }
 
-function getCurrentSession(): Session | null {
-  return sessionStorage.getStore() ?? null
+const sessionStorage = createAsyncContext<SessionBinding>()
+
+/**
+ * Bind `session` for the duration of `fn`.
+ *
+ * `owner` names the manager the session belongs to; omitting it keeps
+ * the owner already bound, so a nested bind inside a line (a
+ * background job's fork) stays attributed to the workspace running it.
+ */
+export function runWithSession<T>(
+  session: Session,
+  fn: () => Promise<T>,
+  owner?: SessionManager,
+): Promise<T> {
+  const binding: SessionBinding = {
+    session,
+    owner: owner ?? sessionStorage.getStore()?.owner ?? null,
+  }
+  return Promise.resolve(sessionStorage.run(binding, fn))
+}
+
+export function getCurrentSession(): Session | null {
+  return sessionStorage.getStore()?.session ?? null
+}
+
+/**
+ * The bound session, but only when `owner` published it.
+ *
+ * A session carries one workspace's cwd, env and mount grants, so a
+ * second workspace re-entered mid-line must resolve its own session
+ * rather than adopt this one.
+ */
+export function getCurrentSessionFor(owner: SessionManager): Session | null {
+  const binding = sessionStorage.getStore()
+  if (binding?.owner !== owner) return null
+  return binding.session
 }
 
 /**
@@ -78,6 +117,33 @@ function sessionMode(mountPrefix: string): MountMode | undefined {
  */
 export function mountAllowed(mountPrefix: string): boolean {
   return sessionMode(mountPrefix) !== undefined
+}
+
+/**
+ * Whether the current session hides any paths at all.
+ *
+ * For a summarizing fast path (du -s asks the backend for one total)
+ * that must not be trusted when hidden leaves could be inside it.
+ */
+export function hiddenPathsActive(): boolean {
+  const sess = getCurrentSession()
+  return sess?.hiddenPaths != null
+}
+
+/**
+ * Whether the current session's hidden-paths spec leaves this path
+ * visible.
+ *
+ * The path twin of `mountAllowed`: enumeration surfaces filter names
+ * through it and the doors answer ENOENT (EACCES for creates) when it
+ * says no, so hiding reads as nonexistence, never as a denial that
+ * leaks the name. True when no session is bound or the session hides
+ * nothing.
+ */
+export function pathAllowed(virtual: string): boolean {
+  const sess = getCurrentSession()
+  if (sess?.hiddenPaths == null) return true
+  return !pathHidden(sess.hiddenPaths, virtual)
 }
 
 /**

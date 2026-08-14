@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Any, Callable
 
 from dulwich.repo import BaseRepo
 
@@ -26,15 +25,16 @@ from mirage.commands.cli.builtin.git.render import (branch_line, long_format,
                                                     short_format)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
-from mirage.commands.cli.builtin.git.util import fatal
+from mirage.commands.cli.builtin.git.util import fatal, links_of
 from mirage.commands.cli.builtin.git.worktree import (UNTRACKED_ALL,
                                                       UNTRACKED_NO,
                                                       UNTRACKED_NORMAL)
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import StatPath
+from mirage.ops.types import LinkView, StatPath
+from mirage.runtime.types import DispatchFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +73,12 @@ def parse_flags(fl: FlagView) -> StatusFlags:
                        untracked=mode)
 
 
-async def render_report(dispatch: Callable[..., Any], stat_path: StatPath,
-                        repo: BaseRepo, location: RepoLocation,
-                        head: HeadRef) -> str:
+async def render_report(dispatch: DispatchFn,
+                        stat_path: StatPath,
+                        repo: BaseRepo,
+                        location: RepoLocation,
+                        head: HeadRef,
+                        links: LinkView | None = None) -> str:
     """The default status report, as a string.
 
     Split out so ``commit`` can print it when it has nothing to commit:
@@ -83,14 +86,16 @@ async def render_report(dispatch: Callable[..., Any], stat_path: StatPath,
     two renderings of the same thing would drift.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         head (HeadRef): what HEAD points at.
+        links (LinkView | None): the name plane's link facts, so the
+            walk lstats as git does.
     """
     rows, state, no_commits = await collect(dispatch, stat_path, repo,
-                                            location, UNTRACKED_NORMAL)
+                                            location, UNTRACKED_NORMAL, links)
     commit = None if head.commit is None else short(head.commit.encode(),
                                                     abbrev_for(repo))
     return long_format(rows, head.branch, commit, no_commits, state.merging,
@@ -108,24 +113,24 @@ async def status(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    stat_path = doors.stat_path
     flags = inv.flags
     fl = FlagView(flags)
     try:
-        if stat_path is None or mount_root is None or dispatch is None:
+        if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
         parsed = parse_flags(fl)
-        repo, location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, location = await opened(fl, doors)
         head = await read_head(dispatch, location.gitdir)
         rows, state, no_commits = await collect(dispatch, stat_path, repo,
-                                                location, parsed.untracked)
+                                                location, parsed.untracked,
+                                                links_of(doors))
     except GitError as exc:
         return fatal(exc)
     commit = None if head.commit is None else short(head.commit.encode(),

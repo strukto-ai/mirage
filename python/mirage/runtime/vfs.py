@@ -13,40 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from typing import Any, Callable, Literal
+from collections.abc import Awaitable
+from typing import Any
 
+from mirage.context import (get_current_session, reset_current_session,
+                            set_current_session)
+from mirage.observe.context import (active_recorder, reset_active_recorder,
+                                    set_active_recorder)
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import plan_flush
 from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import DispatchFn, VFSEntry
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
-
-FlushKind = Literal["append", "write"]
-
-
-def plan_flush(base_len: int, low_write: int,
-               buf: bytes | bytearray) -> tuple[FlushKind, bytes]:
-    """Decide what a closing whole-file buffer owes the mount.
-
-    Every encoder buffers a whole file and has to answer the same
-    question at close: did this handle only add to the end, or did it
-    rewrite what was already there? Only the first can travel as a
-    delta, and answering "write" always is what makes an append loop
-    quadratic.
-
-    Args:
-        base_len (int): length the file had when the handle opened.
-        low_write (int): lowest offset this handle wrote at, or the
-            base length when it never wrote below the end.
-        buf (bytes | bytearray): the handle's whole buffer.
-
-    Returns:
-        tuple[FlushKind, bytes]: ("append", tail) when the handle only
-        extended the file, else ("write", whole buffer).
-    """
-    if base_len > 0 and low_write >= base_len and len(buf) >= base_len:
-        return "append", bytes(buf[base_len:])
-    return "write", bytes(buf)
+from mirage.utils.stat_view import content_size, is_dir
 
 
 class RuntimeVFS:
@@ -62,30 +43,65 @@ class RuntimeVFS:
     The surface is sync on purpose: guest calls arrive on a worker
     thread (wasm) or the binding's own thread (monty), so every op hops
     to the workspace loop with `run_coroutine_threadsafe` and blocks
-    that caller. The hop carries the launching task's contextvars, so
-    session mount modes are enforced inside the op exactly as they are
-    for a shell command.
+    that caller. The hop cannot carry the launching task's contextvars:
+    what travels is the calling thread's context, and the threads guest
+    calls arrive on (monty's tokio workers, wasmtime's run thread) never
+    had the session bound. So the VFS captures the session and the op
+    recorder on the launching task at construction — every runtime
+    builds one per run, and monty builds one per eval — and re-binds
+    both around each dispatched op, the same bracket FUSE's
+    ``MountCore`` puts around its ops. Session mount modes are then
+    enforced inside the op exactly as they are for a shell command, and
+    a guest's file I/O lands on the typed line's ledger exactly as a
+    shell command's does.
 
     Args:
-        dispatch (Callable): the workspace dispatch coroutine function.
+        dispatch (DispatchFn): the workspace dispatch coroutine function.
         loop (asyncio.AbstractEventLoop): the loop dispatch belongs to.
         resolver (MountResolver | None): the workspace mount routing
             table; None means routing questions answer None.
     """
 
     def __init__(self,
-                 dispatch: Callable[..., Any],
+                 dispatch: DispatchFn,
                  loop: asyncio.AbstractEventLoop,
                  resolver: MountResolver | None = None) -> None:
         self._dispatch = dispatch
         self._loop = loop
         self._resolver = resolver
         self._no_append: set[str] = set()
+        self._session = get_current_session()
+        self._recorder = active_recorder()
 
     def _raw(self, op: str, path: str, **kwargs: Any) -> Any:
         coro = self._dispatch(op, PathSpec.from_str_path(path), **kwargs)
-        result, _ = asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+        result, _ = asyncio.run_coroutine_threadsafe(self._bind_session(coro),
+                                                     self._loop).result()
         return result
+
+    async def _bind_session(self, coro: Awaitable[Any]) -> Any:
+        """Run one dispatched op under the captured launch context.
+
+        Set inside the coroutine so the tokens land on the event-loop
+        task that executes the op, mirroring ``MountCore._bind_session``.
+        Binds the session (mount modes) and the op recorder (the typed
+        line's ledger) together: both were captured on the launching
+        task and both are invisible to the thread the guest called from.
+
+        Args:
+            coro (Coroutine): the dispatch coroutine to run under the
+                session and recorder.
+
+        Returns:
+            Any: whatever the wrapped coroutine returns.
+        """
+        token = set_current_session(self._session)
+        rec_token = set_active_recorder(self._recorder)
+        try:
+            return await coro
+        finally:
+            reset_active_recorder(rec_token)
+            reset_current_session(token)
 
     def call(self, op: str, path: str, **kwargs: Any) -> Any:
         """Run one workspace op and return its result.
@@ -145,8 +161,32 @@ class RuntimeVFS:
     def stat(self, path: str) -> FileStat:
         return self.call("stat", path)
 
-    def readdir(self, path: str) -> list[str]:
-        return list(self.call("readdir", path))
+    def readdir(self, path: str) -> list[VFSEntry]:
+        """List a directory as resolved entries (the TS bridge's shape).
+
+        A backend that slash-marks directories skips the stat; every
+        other entry is classified by the stat the readdir just
+        populated the index with, so the lookup is RAM, not another
+        API call. An entry that vanished between list and stat (or a
+        dangling link) rides as a size-0 file instead of failing the
+        whole listing: the guest's own open reports the miss.
+
+        Args:
+            path (str): guest-absolute virtual path.
+        """
+        entries: list[VFSEntry] = []
+        for raw in self.call("readdir", path):
+            if raw.endswith("/"):
+                entries.append(VFSEntry(path=raw, size=0, is_dir=True))
+                continue
+            try:
+                st = self.call("stat", raw)
+            except FileNotFoundError:
+                entries.append(VFSEntry(path=raw, size=0, is_dir=False))
+                continue
+            entries.append(
+                VFSEntry(path=raw, size=content_size(st), is_dir=is_dir(st)))
+        return entries
 
     def create(self, path: str) -> None:
         self.call("create", path)

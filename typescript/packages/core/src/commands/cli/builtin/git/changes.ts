@@ -14,11 +14,11 @@
 
 import git from 'isomorphic-git'
 
-import type { StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import type { FileStat } from '../../../../types.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
 import { readIndex } from './index_file.ts'
-import { readFile, under } from './io.ts'
+import { entryBytes, under } from './io.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { similarityScore } from './similarity.ts'
@@ -32,6 +32,7 @@ import type {
   WorkTree,
 } from './types.ts'
 import { scan } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const UNCHANGED = ' '
 const MODIFIED = 'M'
@@ -163,7 +164,13 @@ async function contentRenames(
       if (score >= RENAME_THRESHOLD) candidates.push([-score, fresh, old])
     }
   }
-  candidates.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]) || a[2].localeCompare(b[2]))
+  // Python is `candidates.sort()`, a code-point tuple sort, so the paths
+  // tie-break by code point rather than ICU collation. The comment above
+  // promises the same resolution on every run; that only holds if both
+  // trees break the tie the same way.
+  candidates.sort(
+    (a, b) => a[0] - b[0] || compareCodePoints(a[1], b[1]) || compareCodePoints(a[2], b[2]),
+  )
   const takenNew = new Set<string>()
   const takenOld = new Set<string>()
   const pairs: [string, string][] = []
@@ -192,7 +199,7 @@ async function pairRenames(
     [...staged.entries()]
       .filter(([path, held]) => held === letter && regular.has(path))
       .map(([path]) => path)
-      .sort()
+      .sort(compareCodePoints)
   const adds = pick(ADDED)
   const deletes = pick(DELETED)
   const pairs = exactRenames(adds, deletes, oids)
@@ -306,7 +313,7 @@ async function differs(
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
   let data: Uint8Array
   try {
-    data = await readFile(dispatch, under(worktree, path))
+    data = await entryBytes(dispatch, under(worktree, path), info)
   } catch (err) {
     if (isMissingPath(err)) return true
     throw err
@@ -352,7 +359,9 @@ function merge(
   untracked: readonly string[],
 ): StatusEntry[] {
   const rows: StatusEntry[] = []
-  const paths = [...new Set([...staged.keys(), ...unstaged.keys(), ...conflicts.keys()])].sort()
+  const paths = [...new Set([...staged.keys(), ...unstaged.keys(), ...conflicts.keys()])].sort(
+    compareCodePoints,
+  )
   for (const path of paths) {
     const code = conflicts.get(path)
     if (code !== undefined) {
@@ -372,7 +381,7 @@ function merge(
       original: origin,
     })
   }
-  for (const path of [...untracked].sort()) {
+  for (const path of [...untracked].sort(compareCodePoints)) {
     rows.push({ path, indexStatus: UNTRACKED, treeStatus: UNTRACKED, original: null })
   }
   return rows
@@ -384,12 +393,13 @@ export async function collect(
   dispatch: Dispatch,
   statPath: StatPath,
   mode: string,
+  links: LinkView | null = null,
 ): Promise<[StatusEntry[], IndexState, boolean]> {
   const state = await readIndex(repo, dispatch)
   const head = await headEntries(repo)
   const staged = await stageChanges(repo, head, state.entries, new Set(state.conflicts.keys()))
   const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
-  const found = await scan(dispatch, statPath, repo.location, tracked, mode)
+  const found = await scan(dispatch, statPath, repo.location, tracked, mode, links)
   const unstaged = await workChanges(repo, dispatch, repo.location.worktree, state.entries, found)
   const rows = merge(staged, unstaged, conflictCodes(state.conflicts), found.untracked)
   return [rows, state, head === null]

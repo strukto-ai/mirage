@@ -18,15 +18,23 @@ import {
   PathSpec,
   isMissingPath,
   type ByteSource,
-  type CLIVerbOpts,
+  type CLIDoors,
   type CommandFnResult,
   type FlagView,
 } from '@struktoai/mirage-core'
+import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
-import { sendRaw } from './smtp.ts'
+import { deliver, saveSentCopy } from './deliver.ts'
 
 const ENC = new TextEncoder()
+
+/** The `to` field both outcomes report, spelled as the header reads. */
+function addressList(addresses: ParsedRfc822['to']): string {
+  return addresses
+    .map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`))
+    .join(', ')
+}
 
 /** The command's first operand, or a usage error. */
 export function firstText(texts: readonly string[], label: string): string {
@@ -45,11 +53,11 @@ export function firstText(texts: readonly string[], label: string): string {
  * (the python executor upgrades them to PathSpec instead).
  */
 async function loadAttachments(
-  ops: CLIVerbOpts | undefined,
+  doors: CLIDoors | undefined,
   paths: readonly string[],
 ): Promise<Attachment[]> {
   if (paths.length === 0) return []
-  const dispatch = ops?.dispatch
+  const dispatch = doors?.dispatch
   if (dispatch === undefined) {
     throw new Error('--attach needs a workspace to read files from')
   }
@@ -87,7 +95,7 @@ export async function route(
   fl: FlagView,
   stdin: ByteSource | null,
   source: Source | null,
-  ops: CLIVerbOpts | undefined,
+  doors: CLIDoors | undefined,
 ): Promise<CommandFnResult> {
   const raw = build(
     {
@@ -98,18 +106,34 @@ export async function route(
       subject: fl.asStr('subject') ?? null,
       body: await readBody(fl, stdin),
       signature: fl.asStr('signature') ?? null,
-      attachments: await loadAttachments(ops, fl.asList('attach')),
+      attachments: await loadAttachments(doors, fl.asList('attach')),
     },
     source,
   )
-  if (!fl.asBool('send')) return [raw as ByteSource, new IOResult()]
-  const parsed = await sendRaw(config, raw)
+  const save = fl.asStr('save') ?? null
+  if (!fl.asBool('send')) {
+    if (save === null) return [raw as ByteSource, new IOResult()]
+    // --save without --send files the message and sends nothing, so a
+    // refused APPEND means nothing happened at all and may fail loudly:
+    // there is no delivered message a retry could duplicate.
+    const folder = await saveSentCopy(config, raw, save)
+    const filed = await parseRfc822(raw)
+    const saved = {
+      status: 'saved',
+      mailbox: folder,
+      to: addressList(filed.to),
+      subject: filed.subject,
+    }
+    return [ENC.encode(JSON.stringify(saved)) as ByteSource, new IOResult()]
+  }
+  const { parsed, warning } = await deliver(config, raw, save)
   const result = {
     status: 'sent',
-    to: parsed.to
-      .map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`))
-      .join(', '),
+    to: addressList(parsed.to),
     subject: parsed.subject,
   }
-  return [ENC.encode(JSON.stringify(result)) as ByteSource, new IOResult()]
+  return [
+    ENC.encode(JSON.stringify(result)) as ByteSource,
+    new IOResult({ stderr: warning === '' ? null : ENC.encode(warning) }),
+  ]
 }

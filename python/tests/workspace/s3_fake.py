@@ -111,5 +111,5 @@ class FakeSession:
 def patch_record_s3(client: FakeConditionalS3Client):
     """Patch the record stores' session factory to serve ``client``."""
     session = FakeSession(client)
-    return patch("mirage.workspace.session.s3.async_session",
+    return patch("mirage.workspace.record.s3.async_session",
                  lambda config: session)

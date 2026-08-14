@@ -1,19 +1,14 @@
 import { z } from 'zod'
 import { normalizeFields } from '../../utils/normalize.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { redactConfigWithSchema, secretStr } from '../secrets.ts'
+import {
+  type ConfigOf,
+  redactConfigWithSchema,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
 export type Mem0ScopeKind = 'user' | 'agent' | 'run'
-
-export interface Mem0Config {
-  apiKey: string
-  host?: string
-  userId?: string
-  agentId?: string
-  runId?: string
-  defaultPageSize?: number
-  defaultSearchLimit?: number
-}
 
 export interface Mem0ConfigResolved {
   apiKey: string
@@ -27,16 +22,6 @@ export interface Mem0ConfigResolved {
   scopeFilter: Record<string, string>
 }
 
-export interface Mem0ConfigRedacted {
-  apiKey: '<REDACTED>'
-  host?: string
-  userId?: string
-  agentId?: string
-  runId?: string
-  defaultPageSize?: number
-  defaultSearchLimit?: number
-}
-
 export const Mem0ConfigSchema = z.object({
   apiKey: secretStr(),
   host: z.string().optional(),
@@ -46,6 +31,10 @@ export const Mem0ConfigSchema = z.object({
   defaultPageSize: z.number().optional(),
   defaultSearchLimit: z.number().optional(),
 })
+
+export type Mem0Config = ConfigOf<typeof Mem0ConfigSchema>
+
+export type Mem0ConfigRedacted = RedactedConfig<Mem0Config, 'apiKey'>
 
 export function redactMem0Config(config: Mem0Config): Mem0ConfigRedacted {
   return redactConfigWithSchema(Mem0ConfigSchema, config) as unknown as Mem0ConfigRedacted

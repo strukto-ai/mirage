@@ -36,7 +36,6 @@ async function runRealpath(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return ''
   const [out] = result

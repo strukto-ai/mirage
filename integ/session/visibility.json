@@ -1,0 +1,118 @@
+{
+  "cases": [
+    {
+      "id": "vis_prep",
+      "seq": 921001,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "command": "mkdir -p /data/sessvis/vault && echo public > /data/sessvis/pub.txt && echo top-secret > /data/sessvis/vault/token.txt && echo keyval > /data/sessvis/note.key",
+      "expect": { "exit": 0, "stdout": "", "stderr": "" }
+    },
+    {
+      "id": "vis_ls_drops_hidden_names",
+      "seq": 921002,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "ls /data/sessvis",
+      "expect": { "exit": 0, "stdout": "pub.txt\n", "stderr": "" }
+    },
+    {
+      "id": "vis_cat_hidden_subtree_is_enoent",
+      "seq": 921003,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "cat /data/sessvis/vault/token.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sessvis/vault/token.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_cat_pattern_hidden_is_enoent",
+      "seq": 921004,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "cat /data/sessvis/note.key",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sessvis/note.key: No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_find_never_reports_hidden_rows",
+      "seq": 921005,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "find /data/sessvis",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sessvis\n/data/sessvis/pub.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vis_glob_never_matches_hidden",
+      "seq": 921006,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "cat /data/sessvis/*.key",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: '/data/sessvis/*.key': No such file or directory\n"
+      }
+    },
+    {
+      "id": "vis_write_into_hidden_space_refused",
+      "seq": 921007,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "echo hi > /data/sessvis/vault/new.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/sessvis/vault/new.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "vis_hidden_var_expands_empty",
+      "seq": 921008,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "echo \"[$SLACK_TOKEN][$ROLE]\"",
+      "expect": { "exit": 0, "stdout": "[][analyst]\n", "stderr": "" }
+    },
+    {
+      "id": "vis_env_omits_hidden_var",
+      "seq": 921009,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "env | grep SLACK_TOKEN",
+      "expect": { "exit": 1, "stdout": "", "stderr": "" }
+    },
+    {
+      "id": "vis_export_hidden_var_refused",
+      "seq": 921010,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "session": "narrowed",
+      "command": "export SLACK_TOKEN=fake",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "vis_unscoped_session_sees_everything",
+      "seq": 921011,
+      "targets": ["ram", "disk", "redis", "s3", "s3-prefix", "gridfs"],
+      "command": "ls /data/sessvis && cat /data/sessvis/vault/token.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "note.key\npub.txt\nvault\ntop-secret\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

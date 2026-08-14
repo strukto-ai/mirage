@@ -16,7 +16,7 @@ import type { FileEntryWithStats } from 'ssh2'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isDirectoryAttrs, joinRoot, stripPrefix } from './utils.ts'
-import { norm } from '@struktoai/mirage-core'
+import { compareCodePoints, norm } from '@struktoai/mirage-core'
 import {
   buildTree,
   emitStartPath,
@@ -195,6 +195,6 @@ export async function find(
     })
   }
   await walk({ accessor, options, results, baseDepth, tree }, virtual, 0)
-  results.sort()
+  results.sort(compareCodePoints)
   return results
 }

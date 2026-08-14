@@ -16,6 +16,7 @@ import type { DiskAccessor } from '../../../accessor/disk.ts'
 import type { PathSpec } from '@struktoai/mirage-core'
 import { norm, resolveSafe } from '../utils.ts'
 import { walkAll } from './walk.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 export async function entries(
   accessor: DiskAccessor,
@@ -25,6 +26,6 @@ export async function entries(
   const full = resolveSafe(accessor.root, virtual)
   const entries: [string, number][] = []
   const total = await walkAll(accessor, full, entries)
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }

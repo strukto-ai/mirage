@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from typing import Any, Callable
 
 from mirage.commands.cli.builtin.git.ignore import (GITIGNORE, IgnoreStack,
                                                     load_ignores)
 from mirage.commands.cli.builtin.git.io import read_names, read_optional
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
-from mirage.ops.types import StatPath
-from mirage.types import FileType
+from mirage.ops.types import LinkView, StatPath
+from mirage.runtime.types import DispatchFn
+from mirage.types import FileStat, FileType
 
 GIT_DIR = ".git"
 
@@ -66,22 +66,26 @@ class Scanner:
     """One walk of the working tree, carrying what the walk needs.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         worktree (str): absolute virtual path of the working tree root.
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
+        links (LinkView | None): the name plane's link facts, None
+            outside a workspace.
     """
 
-    def __init__(self, dispatch: Callable[..., Any], stat_path: StatPath,
-                 worktree: str, tracked: set[str], mode: str) -> None:
+    def __init__(self, dispatch: DispatchFn, stat_path: StatPath,
+                 worktree: str, tracked: set[str], mode: str,
+                 links: LinkView | None) -> None:
         self._dispatch = dispatch
         self._stat_path = stat_path
         self._worktree = worktree
         self._tracked = tracked
         self._directories = tracked_directories(tracked)
         self._mode = mode
+        self._links = links
         self.found = WorkTree()
 
     def _absolute(self, relative: str) -> str:
@@ -92,6 +96,27 @@ class Scanner:
         """
         return posixpath.join(self._worktree,
                               relative) if relative else self._worktree
+
+    async def _entry_stat(self, relative: str) -> FileStat | None:
+        """What the walk sees at one path, without following a link.
+
+        git lstats the working tree, so a symlink is an entry in its own
+        right: real git records mode 120000 and the target string, and
+        reports a link to nothing as untracked rather than as absent.
+        Symlinks are namespace state, so the backend stat behind
+        ``stat_path`` cannot see one and answers about the target
+        instead (None when the target is missing). Asking the name plane
+        first is what makes this an lstat.
+
+        Args:
+            relative (str): repository-relative path of the entry.
+        """
+        absolute = self._absolute(relative)
+        if self._links is not None:
+            link = self._links.stat_at(absolute)
+            if link is not None:
+                return link
+        return await self._stat_path(absolute)
 
     async def _holds_a_file(self, relative: str, ignores: IgnoreStack) -> bool:
         """Whether a directory holds anything git would call untracked.
@@ -111,7 +136,7 @@ class Scanner:
             if not name:
                 continue
             child = f"{relative}/{name}" if relative else name
-            info = await self._stat_path(self._absolute(child))
+            info = await self._entry_stat(child)
             if info is None:
                 continue
             directory = info.type is FileType.DIRECTORY
@@ -181,7 +206,7 @@ class Scanner:
             if not name or (not relative and name == GIT_DIR):
                 continue
             child = f"{relative}/{name}" if relative else name
-            info = await self._stat_path(self._absolute(child))
+            info = await self._entry_stat(child)
             if info is None:
                 continue
             if info.type is FileType.DIRECTORY:
@@ -195,9 +220,12 @@ class Scanner:
                 self.found.untracked.append(child)
 
 
-async def scan(dispatch: Callable[..., Any], stat_path: StatPath,
-               location: RepoLocation, tracked: set[str],
-               mode: str) -> WorkTree:
+async def scan(dispatch: DispatchFn,
+               stat_path: StatPath,
+               location: RepoLocation,
+               tracked: set[str],
+               mode: str,
+               links: LinkView | None = None) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
     One walk answers two questions, which is why they are not asked
@@ -207,14 +235,18 @@ async def scan(dispatch: Callable[..., Any], stat_path: StatPath,
     alone would leave the deletions unfound.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         location (RepoLocation): the discovered repository.
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
+        links (LinkView | None): the name plane's link facts, so the
+            walk lstats as git does. None outside a workspace, where
+            there is no namespace to hold a link.
     """
     ignores = await load_ignores(dispatch, location.gitdir, location.worktree)
-    scanner = Scanner(dispatch, stat_path, location.worktree, tracked, mode)
+    scanner = Scanner(dispatch, stat_path, location.worktree, tracked, mode,
+                      links)
     await scanner.walk("", False, ignores)
     return scanner.found

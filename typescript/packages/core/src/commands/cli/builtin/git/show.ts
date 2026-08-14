@@ -36,6 +36,7 @@ import { diffstat, statTable } from './summary.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
 import { checkOperands, fatal, revisionArg } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const MERGE_PARENTS = 1
 
@@ -119,7 +120,7 @@ async function diffSection(repo: Repo, commit: CommitFacts, flags: ShowFlags): P
             before.get(path)?.oid !== after.get(path)?.oid ||
             before.get(path)?.mode !== after.get(path)?.mode,
         )
-        .sort()
+        .sort(compareCodePoints)
       return changed.map((path) => `${path}\n`).join('')
     }
     const lines = statTable(await diffstat(repo, before, after))
@@ -130,15 +131,13 @@ async function diffSection(repo: Repo, commit: CommitFacts, flags: ShowFlags): P
 
 /** Show one commit: its log entry, then its diff against its parent. */
 export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
     checkOperands(texts)
     const parsed = parseShowFlags(fl)
-    const repo = await opened(fl, opts.statPath, opts.mountRoot, opts.dispatch)
+    const repo = await opened(fl, doors)
     const oid = await resolveCommit(repo, revisionArg(texts))
     const facts = await commitFacts(repo, oid)
     const decor = needsDecorations(parsed.pretty) ? await decorations(repo) : null

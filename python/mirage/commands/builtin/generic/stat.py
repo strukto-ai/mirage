@@ -1,12 +1,16 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from itertools import groupby
 
 from mirage.commands.builtin.utils.formatting import _ls_mode_string
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.core.timeutil import iso_to_epoch
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 _STR_DIRECTIVES = frozenset("nNF")
@@ -25,6 +29,20 @@ _TYPE_LABELS = {
 }
 
 _DEFAULT_OWNER = "user"
+
+_SHELL_SPECIAL = frozenset("!\"#$&()*;<=>?[\\^`{|}~")
+
+_START_SAFE = frozenset("#~")
+
+_ESCAPE_NAMES = {
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,21 +101,77 @@ def _epoch(iso: str | None) -> str:
         return "0"
 
 
+def _needs_escape(char: str) -> bool:
+    """Whether GNU spells a character as a ``$'..'`` escape.
+
+    Args:
+        char (str): the character to test.
+    """
+    return char < " " or char == "\x7f"
+
+
+def _escape_char(char: str) -> str:
+    """Spell one character the way bash's ``$'..'`` does.
+
+    Args:
+        char (str): the character to escape.
+    """
+    named = _ESCAPE_NAMES.get(char)
+    return named if named is not None else f"\\{ord(char):03o}"
+
+
+def _double_quotable(name: str) -> bool:
+    """Whether a name holding an apostrophe still fits in double quotes.
+
+    GNU only reaches for them when nothing else in the name would stay
+    live inside them, so ``a'b`` renders as ``"a'b"`` but ``a'b$c`` does
+    not. ``#`` and ``~`` count as special only away from the front.
+
+    Args:
+        name (str): the name to test.
+    """
+    for index, char in enumerate(name):
+        if _needs_escape(char):
+            return False
+        if char in _SHELL_SPECIAL and not (index == 0 and char in _START_SAFE):
+            return False
+    return True
+
+
+def _single_quoted(name: str) -> str:
+    """Render single-quoted runs spliced with ``$'..'`` escape segments.
+
+    Args:
+        name (str): the name to quote.
+    """
+    parts: list[str] = []
+    for index, (escaped, chars) in enumerate(groupby(name, _needs_escape)):
+        run = "".join(chars)
+        if not escaped:
+            parts.append("'" + run.replace("'", "'\\''") + "'")
+            continue
+        # A leading escape keeps the empty quotes GNU emits; a trailing
+        # one does not.
+        if index == 0:
+            parts.append("''")
+        parts.append("$'" + "".join(_escape_char(c) for c in run) + "'")
+    return "".join(parts) if parts else "''"
+
+
 def _quote_name(name: str) -> str:
     """Shell-safe quoting for %N, mirroring GNU's default.
 
-    A name with no apostrophe is single-quoted; one containing an
-    apostrophe (but no double quote) switches to double quotes; one with
-    both is single-quoted with each apostrophe escaped as ``'\\''``.
+    Single quotes are the rule, with each apostrophe escaped as
+    ``'\\''`` and every unprintable character lifted into a ``$'..'``
+    segment. A name whose only awkward character is an apostrophe reads
+    better in double quotes, and GNU renders that one case that way.
 
     Args:
         name (str): the file name to quote.
     """
-    if "'" not in name:
-        return f"'{name}'"
-    if '"' not in name:
+    if "'" in name and _double_quotable(name):
         return f'"{name}"'
-    return "'" + name.replace("'", "'\\''") + "'"
+    return _single_quoted(name)
 
 
 def _apply_flags(value: str, flags: str, width: str, precision: str | None,
@@ -131,8 +205,6 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
         return "%"
     if spec == "n":
         return name
-    if spec == "N":
-        return _quote_name(name)
     if spec == "s":
         return str(s.size if s.size is not None else 0)
     if spec == "F":
@@ -168,6 +240,42 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
         # major/minor, which a VFS has no truthful value for.
         return "0" if spec[1] in "rR" else "?"
     return "?"
+
+
+def _name_parts(s: FileStat, name: str, quoted: bool) -> list[str]:
+    """The fields ``%N`` renders: the name, plus a symlink's target.
+
+    Args:
+        s (FileStat): the stat being rendered.
+        name (str): the operand as it was typed.
+        quoted (bool): shell-quote each field. GNU only does so for a bare
+            ``%N``; any flag, width or precision drops the quotes.
+    """
+    parts = [name]
+    if s.type == FileType.SYMLINK:
+        target = s.extra.get(LINK_TARGET_KEY)
+        if target:
+            parts.append(str(target))
+    return [_quote_name(p) for p in parts] if quoted else parts
+
+
+def _render_directive(d: _FormatDirective, s: FileStat, name: str) -> str:
+    """Render one directive with its flags, width and precision applied.
+
+    Args:
+        d (_FormatDirective): the parsed directive.
+        s (FileStat): the stat being rendered.
+        name (str): the operand as it was typed.
+    """
+    if d.spec == "N":
+        # GNU formats the name and a symlink's target as two separate
+        # fields, so a width pads each one rather than the joined line.
+        bare = not d.flags and not d.width and d.precision is None
+        return " -> ".join(
+            _apply_flags(part, d.flags, d.width, d.precision, d.spec)
+            for part in _name_parts(s, name, bare))
+    return _apply_flags(_directive_value(d.spec, s, name), d.flags, d.width,
+                        d.precision, d.spec)
 
 
 def _is_conversion(char: str) -> bool:
@@ -233,10 +341,7 @@ def _format_stat(fmt: str, s: FileStat, name: str) -> str:
             parts.append("%")
             cursor = start + 1
             continue
-        parts.append(
-            _apply_flags(_directive_value(directive.spec, s,
-                                          name), directive.flags,
-                         directive.width, directive.precision, directive.spec))
+        parts.append(_render_directive(directive, s, name))
         cursor = directive.end
     return "".join(parts)
 
@@ -304,3 +409,29 @@ async def stat(
 
 
 __all__ = ["stat"]
+
+
+@dataclass(frozen=True, slots=True)
+class StatFlags:
+    format: str | None = None
+    file_system: str | None = None
+    deref: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> StatFlags:
+    fl = FlagView(flags, spec=SPECS["stat"])
+    return StatFlags(
+        format=fl.as_str("c"),
+        file_system=fl.as_str("f"),
+        deref=fl.as_bool("L"),
+    )
+
+
+async def stat_generic(paths, texts, opts: CommandOpts, stat_fn):
+    parsed = parse_flags(opts.flags)
+    return await stat(paths,
+                      stat_fn=stat_fn,
+                      c=parsed.format,
+                      f=parsed.file_system,
+                      L=parsed.deref,
+                      links=opts.ns.links if opts.ns is not None else None)

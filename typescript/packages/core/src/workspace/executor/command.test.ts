@@ -71,7 +71,6 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     const ram = new StubResource('ram')
     const reg = new MountRegistry({ '/ram': ram }, MountMode.WRITE)
     const mount = reg.mountFor('/ram/x')
-    if (mount === null) throw new Error('mount missing')
     const [cmd] = command({
       name: 'cat',
       resource: 'ram',
@@ -97,7 +96,6 @@ describe('handleCommand — dispatches to mount that has the command', () => {
     const ram = new StubResource('ram')
     const reg = new MountRegistry({ '/ram': ram }, MountMode.WRITE)
     const mount = reg.mountFor('/ram')
-    if (mount === null) throw new Error('mount missing')
     const spec = new CommandSpec({
       options: [new Option({ short: '-n', type: 'str' })],
       rest: new Operand({ type: 'path' }),
@@ -133,7 +131,6 @@ describe('handleCommand — cross-mount', () => {
       MountMode.WRITE,
     )
     const mount = reg.mountFor('/ram')
-    if (mount === null) throw new Error('mount missing')
     const [cmd] = command({
       name: 'mycmd',
       resource: 'ram',

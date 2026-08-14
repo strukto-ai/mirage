@@ -17,9 +17,11 @@ import pytest
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.table import (DEFAULT_ENTRIES, RUNTIMES, VFSRuntime,
-                                  bind_commands, build_runtime,
-                                  runtime_bindings_for, whole_line_runtime)
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.table import (DEFAULT_ENTRIES, DEFAULT_PYTHON, NAMED,
+                                  RUNTIMES, VFSRuntime, bind_commands,
+                                  build_runtime, runtime_bindings_for,
+                                  whole_line_runtime)
 from mirage.runtime.types import RunArgs, RunResult
 
 
@@ -34,6 +36,17 @@ class FakeRuntime(Runtime):
 def test_default_entries_never_include_local():
     assert "local" not in DEFAULT_ENTRIES
     assert DEFAULT_ENTRIES[-1] == "vfs"
+
+
+def test_default_python_is_monty_and_leads_the_default_world():
+    # The one entry TypeScript disagrees on, so it is named rather than
+    # left to a slot: TypeScript registers pyodide.
+    assert DEFAULT_PYTHON == "monty"
+    assert DEFAULT_ENTRIES[0] == DEFAULT_PYTHON
+
+
+def test_default_python_is_a_registered_python_engine():
+    assert issubclass(NAMED[DEFAULT_PYTHON], PythonRuntime)
 
 
 def test_build_runtime_unknown_name_fails_loud():

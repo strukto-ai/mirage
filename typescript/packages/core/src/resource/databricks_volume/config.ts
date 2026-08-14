@@ -13,30 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretStr } from '../secrets.ts'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
-
-export interface DatabricksVolumeConfig {
-  catalog: string
-  schema: string
-  volume: string
-  rootPath: string
-  host?: string
-  token?: string
-  profile?: string
-  timeout: number
-}
-
-export interface DatabricksVolumeConfigRedacted {
-  catalog: string
-  schema: string
-  volume: string
-  rootPath: string
-  host?: string
-  token?: '<REDACTED>'
-  profile?: string
-  timeout: number
-}
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -61,6 +44,10 @@ export const DatabricksVolumeConfigSchema = z.object({
   profile: z.string().optional(),
   timeout: z.number().default(30),
 })
+
+export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>
+
+export type DatabricksVolumeConfigRedacted = RedactedConfig<DatabricksVolumeConfig, 'token'>
 
 export function redactDatabricksVolumeConfig(
   config: DatabricksVolumeConfig,

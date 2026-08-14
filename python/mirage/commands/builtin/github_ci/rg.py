@@ -13,13 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github_ci.io import resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.github_ci.read import read as ci_read
 from mirage.core.github_ci.readdir import is_cross_run_root
 from mirage.core.github_ci.readdir import readdir as _readdir
@@ -29,25 +28,20 @@ from mirage.types import PathSpec
 
 
 @command("rg", resource="github_ci", spec=SPECS["rg"])
-async def rg(
-    accessor: GitHubCIAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = await resolve_glob(accessor, paths, index) if paths else []
+async def rg(accessor: GitHubCIAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     if any(is_cross_run_root(p) for p in resolved):
         raise ValueError("rg: recursive search across runs is disabled; "
                          "target a specific run (e.g. /ci/runs/<run>/jobs)")
     return await generic_rg(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(ci_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(ci_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )

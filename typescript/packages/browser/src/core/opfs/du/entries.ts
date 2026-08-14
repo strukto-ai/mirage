@@ -16,6 +16,7 @@ import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { isNotFound, norm, resolveDirHandle, resolveParentDirHandle } from '../utils.ts'
 import { walkAll } from './walk.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 export async function entries(
   accessor: OPFSAccessor,
@@ -38,7 +39,7 @@ export async function entries(
     }
     const dir = await parentDir.getDirectoryHandle(name, { create: false })
     const total = await walkAll(dir, virtual, entries)
-    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    entries.sort((a, b) => compareCodePoints(a[0], b[0]))
     return [entries, total]
   } catch (err) {
     if (isNotFound(err)) return [entries, 0]
@@ -46,7 +47,7 @@ export async function entries(
       try {
         const rootDir = await resolveDirHandle(root, virtual, { create: false })
         const total = await walkAll(rootDir, virtual, entries)
-        entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+        entries.sort((a, b) => compareCodePoints(a[0], b[0]))
         return [entries, total]
       } catch {
         return [entries, 0]

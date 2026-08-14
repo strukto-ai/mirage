@@ -23,7 +23,7 @@ export const STAT_BUILDER: Builder = {
     return statGeneric(
       resolved,
       opts,
-      overlaidStat((p) => ops.stat(accessor, p, idx), opts.statOverlay),
+      overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
     )
   },
 }

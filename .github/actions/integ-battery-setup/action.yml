@@ -134,6 +134,7 @@ runs:
         nohup ./python/.venv/bin/python integ/server/github_server.py \
           --port 5098 --repo integ/repo-v1=github/repo-v1 \
           --repo integ/repo-trunc=github/repo-v1:truncated \
+          --repo integ/repo-cli=github/repo-v1 \
           > /tmp/ghsrv.log 2>&1 &
         for i in $(seq 1 30); do
           grep -q "GITHUB_ENDPOINT=" /tmp/ghsrv.log && break

@@ -161,6 +161,22 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
 # -l and -d suppress that and show the link's own row instead.
 NO_FOLLOW_FLAGS = {"ls": ("ld", ())}
 
+# Commands the router must not resolve the last component for, even
+# under a trailing slash, because none of them acts on the link's
+# target and each says so in its own words. GNU tar strips the slash
+# and archives the link (`tar -cf a.tar dlink/` == `tar -cf a.tar
+# dlink`; only -h descends). The four destructive ones refuse outright:
+# `rm dlink/` is "Is a directory", `rm -r dlink/` and `mv dlink/ d` and
+# `unlink dlink/` are "Not a directory", and `rmdir dlink/` has a
+# message of its own, "Symbolic link not followed". Probed on GNU
+# coreutils 9.4 / tar 1.35. mkdir is here for the same reason it is in
+# SELF_RESOLVING: it lstats the name it is creating, so `mkdir -p
+# dangle/` collides with the link exactly as `mkdir -p dangle` does.
+# Info-ZIP is the counter-example and is
+# deliberately absent: `zip -y -r a.zip dlink/` descends where
+# `zip -y -r a.zip dlink` stores the link.
+SLASH_KEEPS_LAST = {"tar", "rm", "rmdir", "mv", "unlink", "mkdir"}
+
 
 def _has_option(words: list[str | PathSpec], shorts: str,
                 longs: tuple[str, ...]) -> bool:
@@ -232,3 +248,38 @@ def reports_link(name: str, words: list[str | PathSpec]) -> bool:
         return False
     spec = NO_FOLLOW_FLAGS.get(name)
     return spec is not None and _has_option(words, spec[0], spec[1])
+
+
+# Commands that decide the last component for themselves, so the router
+# resolves only the prefix for them. chmod/chown/chgrp read -h off their
+# own line (GNU `chgrp -h ops link` writes the link, not its target),
+# touch reads -h the same way, ln is creating the name in its second
+# operand, readlink's whole subject is the link it was handed, and
+# mkdir is naming something that must not exist yet -- resolving its
+# last component would make `mkdir -p dangle` create the link's missing
+# target where GNU answers "File exists".
+# A trailing slash still applies: these are lstat-by-default, not
+# slash-proof (`touch dlink/` succeeds against the target directory,
+# `touch flink/` is "Not a directory"), which is why they are separate
+# from SLASH_KEEPS_LAST.
+SELF_RESOLVING = {
+    "chmod", "chown", "chgrp", "touch", "ln", "readlink", "mkdir"
+}
+
+
+def follows_last_component(name: str, words: list[str | PathSpec]) -> bool:
+    """Whether a command resolves its operand's final component itself.
+
+    The directory prefix is resolved for every command, so this is only
+    about the last one: open(2) semantics (True) against lstat(2)
+    (False). A trailing slash overrides a False per operand, which is
+    ``follow_paths``' job because the slash is a property of the operand
+    rather than of the command.
+
+    Args:
+        name (str): command name.
+        words (list[str | PathSpec]): the command's raw words.
+    """
+    if reports_link(name, words) or name in SELF_RESOLVING:
+        return False
+    return name not in NO_FOLLOW_COMMANDS or dereferences(name, words)

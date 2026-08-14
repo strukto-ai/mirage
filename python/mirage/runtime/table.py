@@ -81,12 +81,24 @@ SANDBOX_MODULES: dict[str, str] = {
     "e2b": "mirage.runtime.sandbox.e2b:E2BRuntime",
 }
 
-# The default world when no runtimes list is given: today's behavior
-# exactly. Defaults build gracefully (a missing extra leaves the
-# command reporting its install hint per invocation); an explicitly
-# listed name still fails loud. `local` is deliberately absent: a
-# sandboxed default must never silently escalate to host execution.
-DEFAULT_ENTRIES: tuple[str, ...] = ("monty", "quickjs", VFSRuntime.name)
+# The python engine a default world registers, named rather than left
+# to a slot in DEFAULT_ENTRIES because it is the one entry the two
+# implementations disagree on: Python registers monty, TypeScript
+# registers pyodide (`DEFAULT_PYTHON` in runtime/table.ts), because
+# `@pydantic/monty` cannot answer builtin `open()` calls yet while
+# `pydantic-monty` can. Both are sandboxed; neither reaches the host.
+# Pinned by integ/runtime/defaults.json, which reads the split back
+# out of a default world on each host.
+DEFAULT_PYTHON: str = MontyRuntime.name
+
+# The default world when no runtimes list is given: one python engine,
+# one js engine, and the builtin command engine. Defaults build
+# gracefully (a missing extra leaves the command reporting its install
+# hint per invocation); an explicitly listed name still fails loud.
+# `local` is deliberately absent: a sandboxed default must never
+# silently escalate to host execution.
+DEFAULT_ENTRIES: tuple[str, ...] = (DEFAULT_PYTHON, QuickJsRuntime.name,
+                                    VFSRuntime.name)
 
 # TypeScript-only runtime names a cross-language config may carry.
 TS_ONLY_HINTS: dict[str, str] = {

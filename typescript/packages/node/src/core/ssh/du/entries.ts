@@ -15,7 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 import { stripPrefix } from '../utils.ts'
-import { norm } from '@struktoai/mirage-core'
+import { compareCodePoints, norm } from '@struktoai/mirage-core'
 import { walkAll } from './walk.ts'
 
 export async function entries(
@@ -25,6 +25,6 @@ export async function entries(
   const virtual = norm(stripPrefix(p))
   const entries: [string, number][] = []
   const total = await walkAll(accessor, virtual, entries)
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }

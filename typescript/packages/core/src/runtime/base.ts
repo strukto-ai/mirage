@@ -41,6 +41,15 @@ import type { RuntimeOptions } from './types.ts'
 export abstract class Runtime {
   abstract readonly name: string
   readonly captures: readonly string[]
+  /**
+   * Whether every effect of code this runtime executes lands inside the
+   * workspace. The bridged engines (monty, pyodide, quickjs) and the vfs
+   * routing marker declare true: their I/O rides the VFS bridge or the
+   * workspace executor itself. False by default and for anything that
+   * executes elsewhere — the host `local` python, a RemoteSandbox — so a
+   * custom runtime must declare confinement rather than inherit it.
+   */
+  readonly confined: boolean = false
   /** The runtime's coerced implementation knobs. */
   config: RuntimeConfig
   script?: PolicyScript

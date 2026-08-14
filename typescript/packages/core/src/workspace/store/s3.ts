@@ -15,7 +15,8 @@
 import type { ObserverStore } from '../../observe/store.ts'
 import { normalizeKeyPrefix, type S3Config } from '../../resource/s3/config.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { S3RecordClient, S3SessionStore } from '../session/s3.ts'
+import { S3RecordClient } from '../record/s3.ts'
+import { S3SessionStore } from '../session/s3.ts'
 import type { SessionStore } from '../session/store.ts'
 import {
   WorkspaceStateStore,

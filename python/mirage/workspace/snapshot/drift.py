@@ -14,9 +14,12 @@
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from mirage.types import DriftPolicy, FingerprintKey
+from mirage.workspace.mount.mount import MountEntry
+
+TryMountFor = Callable[[str], MountEntry | None]
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,7 @@ class DriftQueue:
         self._entries.append((path, fingerprint))
         self._pending = True
 
-    async def drain(self, ws) -> None:
+    async def drain(self, mount_for: TryMountFor) -> None:
         """Stat every queued path in parallel; raise on the first drift.
 
         Subsequent calls are no-ops. Stats are issued with
@@ -89,7 +92,8 @@ class DriftQueue:
         with the number of recorded reads.
 
         Args:
-            ws: Workspace whose registry resolves the paths.
+            mount_for (TryMountFor): resolves a virtual path to its
+                owning mount, None for none.
 
         Raises:
             ContentDriftError: a live fingerprint differs from the
@@ -99,7 +103,7 @@ class DriftQueue:
         if not self._entries:
             return
         checks = [
-            check_drift(ws, path, fingerprint)
+            check_drift(mount_for, path, fingerprint)
             for path, fingerprint in self._entries
         ]
         self._entries.clear()
@@ -140,9 +144,8 @@ def capture_fingerprints(ws) -> list[dict[str, Any]]:
         if rec.fingerprint is None and rec.revision is None:
             continue
         seen.add(rec.path)
-        try:
-            mount = ws._registry.mount_for(rec.path)
-        except ValueError:
+        mount = ws._registry.try_mount_for(rec.path)
+        if mount is None:
             continue
         if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
             continue
@@ -178,9 +181,8 @@ def install_fingerprints(ws, fingerprint_entries: list[dict[str, Any]],
         return
     for f in fingerprint_entries:
         path = f[FingerprintKey.PATH]
-        try:
-            mount = ws._registry.mount_for(path)
-        except ValueError:
+        mount = ws._registry.try_mount_for(path)
+        if mount is None:
             continue
         revision = f.get(FingerprintKey.REVISION)
         if revision is not None:
@@ -207,7 +209,8 @@ def live_only_mount_prefixes(ws) -> list[str]:
     return out
 
 
-async def check_drift(ws, path: str, recorded: str) -> None:
+async def check_drift(mount_for: TryMountFor, path: str,
+                      recorded: str) -> None:
     """Stat `path` against its mount and raise ContentDriftError if the
     live fingerprint does not match `recorded`.
 
@@ -215,16 +218,16 @@ async def check_drift(ws, path: str, recorded: str) -> None:
     fingerprint (raises only on a real, observable mismatch).
 
     Args:
-        ws: Workspace whose registry to consult.
+        mount_for (TryMountFor): resolves a virtual path to its owning
+            mount, None for none.
         path (str): Virtual path to check.
         recorded (str): Fingerprint recorded at snapshot time.
 
     Raises:
         ContentDriftError: live fingerprint differs from recorded.
     """
-    try:
-        mount = ws._registry.mount_for(path)
-    except ValueError:
+    mount = mount_for(path)
+    if mount is None:
         return
     if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
         return

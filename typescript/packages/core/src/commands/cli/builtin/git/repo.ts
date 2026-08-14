@@ -14,7 +14,6 @@
 
 import git from 'isomorphic-git'
 
-import type { MountRoot, StatPath } from '../../../../ops/types.ts'
 import type { FlagView } from '../../../spec/types.ts'
 import { discover } from './discover.ts'
 import { NoWorkspaceError } from './errors.ts'
@@ -22,6 +21,7 @@ import { abbrevLength, type CommitFacts } from './format.ts'
 import { gitFs } from './fs.ts'
 import { readNames, readRange, under } from './io.ts'
 import { basename } from './path.ts'
+import type { CLIDoors } from '../../types.ts'
 import { startPoint } from './util.ts'
 import type { Dispatch, RepoLocation } from './types.ts'
 
@@ -108,16 +108,22 @@ async function openRepo(dispatch: Dispatch, location: RepoLocation): Promise<Rep
  * @param mountRoot the mount prefix serving a path
  * @param dispatch workspace op dispatcher
  */
-export async function opened(
-  fl: FlagView,
-  statPath: StatPath | undefined,
-  mountRoot: MountRoot | undefined,
-  dispatch: Dispatch | undefined,
-): Promise<Repo> {
-  if (statPath === undefined || mountRoot === undefined || dispatch === undefined) {
+export async function opened(fl: FlagView, doors: CLIDoors): Promise<Repo> {
+  const dispatch = doors.dispatch
+  const statPath = doors.statPath
+  // The mount root comes from the name plane rather than a door of its own:
+  // `ns.mounts.rootOf` is the same fact the command tier reads, and a second
+  // field holding the same callable is a second thing to keep in step.
+  const mounts = doors.ns?.mounts
+  if (statPath === undefined || mounts === undefined || dispatch === undefined) {
     throw new NoWorkspaceError()
   }
-  const location = await discover(dispatch, statPath, mountRoot, startPoint(fl))
+  const location = await discover(
+    dispatch,
+    statPath,
+    (path: string) => mounts.rootOf(path),
+    startPoint(fl),
+  )
   return openRepo(dispatch, location)
 }
 

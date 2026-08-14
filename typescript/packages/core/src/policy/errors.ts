@@ -32,6 +32,11 @@ export class PolicyError extends Error {
  * classifies it to -EACCES; the distinct class lets handlers that
  * special-case mount-mode refusals (the read-only wording) tell a
  * policy deny apart.
+ *
+ * It carries no accounting: a postOps refusal suppresses the result,
+ * not the effect, and the door reports the completed op through the
+ * caller's `OpReport`, which covers this error and any foreign one the
+ * same way.
  */
 export class PolicyDenied extends Error {
   readonly code = 'EACCES'

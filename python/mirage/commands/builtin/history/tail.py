@@ -13,17 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.tail import tail as generic_tail
-from mirage.commands.builtin.generic.tail import tail_multi
-from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.tail_helper import _parse_n
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.tail import tail_generic
+from mirage.commands.builtin.generic_bind.adapter import (bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.history.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
-from mirage.core.history.read import read as history_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,35 +31,10 @@ from mirage.types import PathSpec
          resource="history",
          spec=SPECS["tail"],
          aggregate=header_aggregate)
-async def tail(
-    accessor: HistoryAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    n: str | None = None,
-    c: str | None = None,
-    q: bool = False,
-    v: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **_extra: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    n_int: int | None = None
-    from_line: int | None = None
-    if n is not None:
-        lines, plus_mode = _parse_n(n)
-        if plus_mode:
-            from_line = lines
-        else:
-            n_int = lines
-    c_int = int(c) if c is not None else None
-    if paths:
-        show_headers = (v or len(paths) > 1) and not q
-        return tail_multi(paths,
-                          read=bound_op(history_read, accessor, index),
-                          n=n_int,
-                          c=c_int,
-                          from_line=from_line,
-                          show_headers=show_headers), IOResult()
-    source = _resolve_source(stdin, "tail: missing operand")
-    return generic_tail(source, n=n_int, c=c_int,
-                        from_line=from_line), IOResult()
+async def tail(accessor: HistoryAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await tail_generic(resolved, list(texts), opts,
+                              dir_aware_stat(IO, accessor, opts.index),
+                              bound_op(IO.read_stream, accessor, opts.index))

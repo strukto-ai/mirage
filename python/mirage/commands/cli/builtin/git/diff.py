@@ -18,11 +18,13 @@ from io import BytesIO
 from dulwich.patch import write_tree_diff
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.errors import GitError, InvalidOptionError
+from mirage.commands.cli.builtin.git.errors import (GitError,
+                                                    InvalidOptionError,
+                                                    NoWorkspaceError)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
-from mirage.commands.cli.types import CLIInvocation, CLIVerbOpts
+from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -75,22 +77,23 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model, and the workspace doors
-            it reads (dispatch, stat_path, mount_root) ride
-            ``inv.ops``.
+            git declares no config_model; the planes it reads
+            (data through ``dispatch``, names through ``ns``) ride
+            ``inv.doors``.
     """
-    ops = inv.ops or CLIVerbOpts()
-    dispatch = ops.dispatch
-    stat_path = ops.stat_path
-    mount_root = ops.mount_root
+    doors = inv.doors or CLIDoors()
+    dispatch = doors.dispatch
+    doors.stat_path
     texts = inv.texts
     flags = inv.flags
     fl = FlagView(flags)
     if not texts:
         return None, IOResult()
     try:
+        if dispatch is None:
+            raise NoWorkspaceError()
         check_operands(texts, InvalidOptionError)
-        repo, _location = await opened(fl, stat_path, mount_root, dispatch)
+        repo, _location = await opened(fl, doors)
         new_rev = texts[1] if len(texts) >= 2 else HEAD
         body = await asyncio.to_thread(_render, repo, texts[0], new_rev)
     except GitError as exc:

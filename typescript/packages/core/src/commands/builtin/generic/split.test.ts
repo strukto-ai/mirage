@@ -90,6 +90,37 @@ describe('split flag values', () => {
     expect(hex.xf0).toBeUndefined()
   })
 
+  it('reads -t as one byte and keeps it on every record', async () => {
+    // `\0` is the only escape GNU reads, and it is two characters on the
+    // command line; everything else is literal, so a lone backslash and a
+    // digit zero are ordinary separators. Each record keeps its terminator.
+    const nul = await runSplit({ separator: '\\0', lines: '2' }, 'a\0b\0c\0')
+    expect(nul.xaa).toBe('a\0b\0')
+    expect(nul.xab).toBe('c\0')
+    const digit = await runSplit({ separator: '0', lines: '2' }, 'a0b0c0')
+    expect(digit.xaa).toBe('a0b0')
+    const backslash = await runSplit({ separator: '\\', lines: '2' }, 'a\\b\\c\\')
+    expect(backslash.xaa).toBe('a\\b\\')
+  })
+
+  it.each([['XY'], ['abc'], ['\\n'], ['\\t'], ['é']])(
+    'refuses the multi-byte separator %j instead of taking its first byte',
+    async (separator) => {
+      // This used to encode the value and keep byte 0, so `-t XY` split on
+      // 'X' where GNU refuses to run at all. 'é' is one character but two
+      // UTF-8 bytes, and GNU counts bytes.
+      await expect(runSplit({ separator })).rejects.toThrow(
+        new UsageError(`split: multi-character separator '${separator}'`, 1),
+      )
+    },
+  )
+
+  it('refuses an empty separator', async () => {
+    await expect(runSplit({ separator: '' })).rejects.toThrow(
+      new UsageError('split: empty record separator', 1),
+    )
+  })
+
   it('exhausts an explicit width instead of wrapping onto earlier chunks', async () => {
     // GNU keeps the chunks already written and fails on the next name.
     const sink: Record<string, string> = {}

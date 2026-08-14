@@ -30,6 +30,7 @@ import { modifiedTs } from '../generic/find.ts'
 import { resolvePath } from './path.ts'
 import { stat } from './stat.ts'
 import { walk } from './walk.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 function relativeDepth(item: string, root: string): number {
   const rootNorm = rstripSlash(root) !== '' ? rstripSlash(root) : '/'
@@ -139,5 +140,5 @@ export async function find(
       filtered.push(item)
     }
   }
-  return filtered.sort()
+  return filtered.sort(compareCodePoints)
 }

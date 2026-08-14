@@ -15,46 +15,28 @@
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
-import type { Resource } from '../resource/base.ts'
 import type { Limit, PathSpec } from '../types.ts'
 import type { Runtime } from '../runtime/base.ts'
-import type {
-  ChildMounts,
-  LinkView,
-  MountView,
-  ReaddirPath,
-  StatOverlay,
-  StatPath,
-} from '../ops/types.ts'
+import type { DispatchFn } from '../runtime/types.ts'
+import type { NamespaceView, ReaddirPath, SessionView, StatPath } from '../ops/types.ts'
 import { VERSION } from '../version.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
 import { CommandSpec, Option, type FlagValue } from './spec/types.ts'
 
 /**
- * Options bag passed to command functions. Mirrors Python's keyword arguments
- * (`command="", stdin=None, index=None, prefix="", **_extra`) collected into
- * a single typed object.
- *
- * Parity note: Python's `handle_command_provision` passes `command`, `prefix`,
- * and `index` as keyword arguments directly. TS surfaces them here so
- * provision functions can read them via `opts.command`, `opts.mountPrefix`,
- * and `opts.index` (matching Python's `command=`, `prefix=`, `index=`).
+ * The dispatcher context of one command invocation, as one value.
+ * `Mount.executeCmd` constructs it once and hands it to every handler
+ * as the fourth argument; the provision path builds the same bag with
+ * `command`/`spec` set. Mirrors Python's `CommandOpts`
+ * (commands/config.py) field for field.
  */
-export type CommandDispatch = (
-  op: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-) => Promise<[unknown, IOResult]>
-
 export interface CommandOpts {
   stdin: ByteSource | null
   flags: Record<string, FlagValue>
   filetypeFns: Record<string, CommandFn> | null
   mountPrefix?: string
   cwd: string
-  resource: Resource
   command?: string
   // The invoked command's spec, set on the provision path. A provision
   // function is shared across commands, so it cannot name a dest the way a
@@ -63,17 +45,20 @@ export interface CommandOpts {
   // keyword (`workspace/provision/command.py`).
   spec?: CommandSpec
   index?: IndexCacheStore | null
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   sessionId?: string
   env?: Record<string, string>
+  // The session plane's live, gated handle (reads and gate-cleared
+  // writes); `env` above stays the frozen process-view snapshot. A
+  // command that does not read this simply ignores it.
+  sessionView?: SessionView
   execAllowed?: boolean
   runtime?: Runtime
-  statOverlay?: StatOverlay
-  // The namespace's symlink facts. Symlinks are namespace state no
-  // backend readdir or stat can see; a command that does not read this
-  // simply ignores it, so there is no allowlist of symlink-aware
-  // commands anywhere.
-  links?: LinkView
+  // The name plane's facts (symlinks, mount boundaries, attr overlay,
+  // child names the namespace owes a directory), which no backend can
+  // see. A command that does not read this simply ignores it, so there
+  // is no allowlist of name-plane-aware commands anywhere.
+  ns?: NamespaceView
   // Dispatcher-backed stat of one path, for a traversal command's start
   // point: only a directory has a subtree to walk, and a start point the
   // router resolved into another mount answers there, not on this mount.
@@ -81,14 +66,6 @@ export interface CommandOpts {
   // Dispatcher-backed readdir of one path, for a walker that has to read
   // past a mount boundary (tree).
   readdirPath?: ReaddirPath
-  // Child names the namespace owes a directory (mounts and links): the
-  // other half of namespace structure beside link rows, merged into
-  // listings the same way they are.
-  childMounts?: ChildMounts
-  // Where the mount boundaries are, for a walker whose output cannot be
-  // fanned out and concatenated (tar, zip). A nested mount's keys live
-  // in another resource, so this backend's readdir cannot see it.
-  mounts?: MountView
   signal?: AbortSignal
   timeoutSeconds?: number
 }

@@ -14,7 +14,7 @@
 
 from collections.abc import Iterable
 
-from mirage.context import mount_allowed
+from mirage.context import mount_allowed, path_allowed
 from mirage.ops.config import NamespaceLinks
 from mirage.types import FileStat, FileType
 from mirage.utils.path import norm_dir, owner_prefix
@@ -40,7 +40,7 @@ def child_mount_names(prefixes: Iterable[str], parent: str) -> list[str]:
         if p == norm or not p.startswith(norm):
             continue
         name = p[len(norm):].split("/", 1)[0]
-        if not name or not mount_allowed(p):
+        if not name or not mount_allowed(p) or not path_allowed(norm + name):
             continue
         out.add(name)
     return sorted(out)
@@ -89,7 +89,8 @@ def _link_names(prefixes: Iterable[str], links: NamespaceLinks | None,
         if not link.startswith(norm):
             continue
         name = link[len(norm):].split("/", 1)[0]
-        if name and _link_allowed(prefixes, link):
+        if (name and _link_allowed(prefixes, link)
+                and path_allowed(norm + name)):
             out.add(name)
     return sorted(out)
 

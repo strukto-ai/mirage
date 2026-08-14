@@ -13,18 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import CommandContext, resolve_limit
+from mirage.policy import CommandContext, PolicyDenied, resolve_limit
 from mirage.runtime.policy import PolicyDecision
 from mirage.shell.bytes import encode_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
+from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.command.routing import (path_flag_scopes,
@@ -33,23 +35,25 @@ from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.route import (NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS,
-                                    dereferences, reports_link)
-from mirage.workspace.session.shell_dirs import home_dir
+from mirage.workspace.expand.globs import expand_boundary_globs
+from mirage.workspace.route import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
+                                    follows_last_component)
+from mirage.workspace.session.shell_dirs import home_dir, logical_cwd
+from mirage.workspace.session.state import ensure_var_visible, session_view
 from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts, get_process_sub_body,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    follow_paths, handle_bash, handle_cd, handle_chgrp, handle_chmod,
-    handle_chown, handle_command_builtin, handle_df, handle_echo, handle_env,
-    handle_eval, handle_exit, handle_export, handle_getopts, handle_history,
-    handle_ln, handle_local, handle_man, handle_printenv, handle_printf,
-    handle_read, handle_readlink, handle_return, handle_set, handle_shift,
-    handle_sleep, handle_source, handle_test, handle_timeout, handle_touch,
-    handle_trap, handle_type, handle_unset, handle_which, handle_whoami,
-    handle_xargs, link_flags, prepare_mv, strip_link_operands)
+    accepts_line, follow_paths, handle_bash, handle_cd, handle_chgrp,
+    handle_chmod, handle_chown, handle_command_builtin, handle_df, handle_echo,
+    handle_env, handle_eval, handle_exit, handle_export, handle_getopts,
+    handle_history, handle_ln, handle_local, handle_man, handle_printenv,
+    handle_printf, handle_read, handle_readlink, handle_return, handle_set,
+    handle_shift, handle_sleep, handle_source, handle_test, handle_timeout,
+    handle_touch, handle_trap, handle_type, handle_unset, handle_which,
+    handle_whoami, handle_xargs, link_flags, prepare_mv, strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -65,15 +69,23 @@ def _loop_levels(args: list[str]) -> int:
     return 1
 
 
-def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
-    """Split leading ``cd`` option flags from the directory operand.
+def _split_mode_options(
+        args: _CdArgs,
+        letters: str = "LPe@",
+        default: bool = False) -> tuple[_CdArgs, str | None, bool]:
+    """Split leading ``-L``/``-P`` option flags from the operands.
 
-    Accepts the GNU ``cd`` options ``-L -P -e -@`` (and clusters such as
-    ``-LP``) plus a ``--`` end-of-options marker; a bare ``-`` is the
-    OLDPWD operand, not an option.
+    Shared by ``cd`` (which also takes ``-e -@``) and ``pwd``, so the
+    last-wins rule -- ``pwd -L -P`` is physical, ``pwd -P -L`` logical --
+    has one implementation. Accepts clusters such as ``-LP`` plus a
+    ``--`` end-of-options marker; a bare ``-`` is an operand (``cd``'s
+    OLDPWD shorthand), not an option.
 
     Args:
-        args: The classified arguments after the ``cd`` command name.
+        args: The classified arguments after the command name.
+        letters: The accepted option characters.
+        default: The mode to assume when the line names neither, which
+            is what ``set -P`` changes for the whole session.
 
     Returns:
         ``(operands, bad, physical)`` where ``operands`` are the non-option
@@ -83,7 +95,7 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
     """
     operands: _CdArgs = []
     parsing = True
-    physical = False
+    physical = default
     for arg in args:
         s = arg.virtual if isinstance(arg, PathSpec) else str(arg)
         if parsing:
@@ -91,7 +103,7 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
                 parsing = False
                 continue
             if s != "-" and len(s) >= 2 and s.startswith("-"):
-                bad = next((c for c in s[1:] if c not in "LPe@"), None)
+                bad = next((c for c in s[1:] if c not in letters), None)
                 if bad is None:
                     for c in s[1:]:
                         if c == "P":
@@ -131,13 +143,30 @@ async def execute_command(
         key, _, raw_val = atext.partition("=")
         val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
         if val_nodes:
-            v = await expand_node(val_nodes[0], session, execute_fn,
-                                  call_stack)
+            v = await expand_node(val_nodes[0],
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=session_view(session,
+                                                    registry.policies))
         else:
             v = raw_val
         prefix_assignments.append((key, v))
 
     for k, _ in prefix_assignments:
+        # The hidden gate runs first, as in set_var: calling a hidden
+        # name "readonly" would leak that it exists. Both branches
+        # below write session.env raw (a function-call prefix on
+        # purpose never restores), so ungated they would let a
+        # narrowed session clobber the host's value.
+        try:
+            ensure_var_visible(session, k)
+        except PolicyDenied as exc:
+            err = f"bash: {exc.strerror}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=name or k,
+                                                             exit_code=1,
+                                                             stderr=err)
         if k in session.readonly_vars:
             err = f"bash: {k}: readonly variable\n".encode()
             return None, IOResult(exit_code=1,
@@ -194,8 +223,13 @@ async def _dispatch_command_body(
         for child in node.named_children:
             if child.type == NT.HERESTRING_REDIRECT:
                 for sc in child.named_children:
-                    content = await expand_node(sc, session, execute_fn,
-                                                call_stack)
+                    content = await expand_node(sc,
+                                                session,
+                                                execute_fn,
+                                                call_stack,
+                                                view=session_view(
+                                                    session,
+                                                    registry.policies))
                     stdin = encode_text(content) + b"\n"
                     break
 
@@ -224,7 +258,13 @@ async def _dispatch_command_body(
         stdin = b"".join(proc_sub_parts)
     parts = clean_parts
 
-    argv = await expand_argv(parts, session, execute_fn, call_stack, registry)
+    argv = await expand_argv(parts,
+                             session,
+                             execute_fn,
+                             call_stack,
+                             registry,
+                             namespace,
+                             view=session_view(session, registry.policies))
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
@@ -268,6 +308,30 @@ async def _run_argv(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler."""
     name = argv.name
+
+    # ── boundary globs ──────────────────────────
+    # A glob whose directory holds a child mount cannot be pushed down
+    # to one backend: the mount root is a child of that directory but
+    # its keys live in another resource, so the backend reports "no such
+    # file" for a name its own listing shows. Expanding such a word here
+    # lets the matches route per mount. It has to happen before the
+    # admission policies below, not just before the follow policy: a
+    # word left unexpanded reaches `pre_command` as the literal pattern,
+    # and `MountRootPolicy` cannot recognize a mount root inside one, so
+    # `tar -cf out.tar /base/*` would archive a whole backend the same
+    # operand typed by hand is refused for.
+    boundary = await expand_boundary_globs(list(argv.operands), registry,
+                                           namespace)
+    expanded = [word_text(w) for w in boundary]
+    # Compared as words, not as a count: a glob that matches exactly one
+    # name (`du /base/i*` where only the mount root matches) is still an
+    # expansion, and dropping it routes the pattern to a backend that
+    # cannot serve the child mount's keys.
+    if expanded != [word_text(w) for w in argv.operands]:
+        argv = dataclasses.replace(argv,
+                                   operands=tuple(boundary),
+                                   args=tuple(expanded))
+
     args = list(argv.args)
     operands = list(argv.operands)
 
@@ -311,12 +375,28 @@ async def _run_argv(
                                                          stderr=err)
 
     # ── shell builtins ──────────────────────────
+    # `set -P` (`set -o physical`) is the session-wide version of the
+    # per-command flag, and GNU applies it to both `cd` and `pwd`.
+    shell_physical = bool(session.shell_options.get("physical"))
+
     if name == SB.PWD:
-        out = (session.cwd + "\n").encode()
+        _, bad_opt, physical = _split_mode_options(operands, "LP",
+                                                   shell_physical)
+        if bad_opt is not None:
+            err = (f"pwd: -{bad_opt}: invalid option\n"
+                   f"pwd: usage: pwd [-LP]\n").encode()
+            return None, IOResult(exit_code=2,
+                                  stderr=err), ExecutionNode(command="pwd",
+                                                             exit_code=2,
+                                                             stderr=err)
+        # GNU ignores operands entirely: `pwd extra` still prints the cwd.
+        cwd = session.cwd if physical else logical_cwd(session)
+        out = (cwd + "\n").encode()
         return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
     if name == SB.CD:
-        cd_operands, bad_opt, physical = _split_cd_options(operands)
+        cd_operands, bad_opt, physical = _split_mode_options(
+            operands, default=shell_physical)
         if bad_opt is not None:
             err = (f"cd: -{bad_opt}: invalid option\n"
                    f"cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n").encode()
@@ -403,13 +483,16 @@ async def _run_argv(
                                  str(name))
 
     if name == SB.EXPORT:
-        return await handle_export(args, session)
+        return await handle_export(
+            args, session, session_view(session, namespace.registry.policies))
 
     if name == SB.UNSET:
-        return await handle_unset(args, session)
+        return await handle_unset(
+            args, session, session_view(session, namespace.registry.policies))
 
     if name == SB.LOCAL:
-        return await handle_local(args, session)
+        return await handle_local(
+            args, session, session_view(session, namespace.registry.policies))
 
     if name == SB.PRINTENV:
         var_name = args[0] if args else None
@@ -425,7 +508,9 @@ async def _run_argv(
         return await handle_man(args, session, registry)
 
     if name == SB.READ:
-        return await handle_read(args, session, stdin)
+        return await handle_read(
+            args, session, stdin,
+            session_view(session, namespace.registry.policies))
 
     if name == SB.SET:
         return await handle_set(args, session, call_stack=call_stack)
@@ -434,7 +519,9 @@ async def _run_argv(
         return await handle_shift(args, call_stack, session=session)
 
     if name == SB.GETOPTS:
-        return await handle_getopts(args, session, call_stack)
+        return await handle_getopts(
+            args, session, call_stack,
+            session_view(session, namespace.registry.policies))
 
     if name == SB.TRAP:
         return await handle_trap(session)
@@ -461,7 +548,8 @@ async def _run_argv(
         return await handle_echo(args)
 
     if name == SB.PRINTF:
-        return await handle_printf(args, session)
+        return await handle_printf(
+            args, session, session_view(session, namespace.registry.policies))
 
     if name == SB.SLEEP:
         return await handle_sleep(args, cancel=cancel)
@@ -494,10 +582,32 @@ async def _run_argv(
     if name == SB.CONTINUE:
         raise ContinueSignal(levels=_loop_levels(args))
 
+    # ── pathname resolution (POSIX): every component of an operand but
+    #    the last resolves for every command, so `stat dlink/f2` reports
+    #    f2 the way GNU does. The last one resolves only for a command
+    #    that follows (open(2) rather than lstat(2)) or an operand typed
+    #    with a trailing slash, which POSIX reads as `dlink/.`. This runs
+    #    ahead of every handler below because the kernel resolves a path
+    #    before the syscall, not inside it.
+    if namespace.nodes and operands:
+        try:
+            operands = follow_paths(namespace,
+                                    operands,
+                                    follows_last_component(name, argv.words),
+                                    slash_follows=name not in SLASH_KEEPS_LAST)
+        except CycleError as exc:
+            err = (f"{name}: {exc}: "
+                   f"Too many levels of symbolic links\n").encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=name,
+                                                             exit_code=1,
+                                                             stderr=err)
+        argv = argv.with_operands(operands)
+
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
     if name == "ln" and "s" in link_flags(operands, "sfnvrT"):
-        return await handle_ln(namespace, session, operands)
+        return await handle_ln(namespace, dispatch, session, operands)
 
     if name == "readlink":
         return await handle_readlink(namespace, dispatch, session, operands)
@@ -516,16 +626,6 @@ async def _run_argv(
     # ── capacity (registry-routed: enumerates mounts, reports per-mount
     #    statfs; never fabricates numbers) ──
     if name == "df":
-        if namespace.nodes:
-            try:
-                operands = follow_paths(namespace, operands)
-            except CycleError as exc:
-                err = (f"df: {exc}: "
-                       f"Too many levels of symbolic links\n").encode()
-                return None, IOResult(exit_code=1,
-                                      stderr=err), ExecutionNode(command="df",
-                                                                 exit_code=1,
-                                                                 stderr=err)
         return await handle_df(registry, session, dispatch, operands)
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
@@ -534,7 +634,14 @@ async def _run_argv(
     post_rename: tuple[str, str] | None = None
     if namespace.nodes:
         try:
-            if name == "rm":
+            # Both remove the link entry itself, which no backend can
+            # see; unlink(1) is rm(1) restricted to one non-directory.
+            # Gated on the line being one the command layer accepts,
+            # because this removal happens before that layer parses and
+            # it cannot be taken back (GNU refuses `rm --bogus dlink`
+            # and `unlink dlink other` with the link still there).
+            if name in ("rm", "unlink") and accepts_line(
+                    name, argv.args, operands, session.cwd):
                 operands, removed = await strip_link_operands(
                     namespace, operands)
                 if removed and not any(
@@ -546,10 +653,6 @@ async def _run_argv(
                     namespace, dispatch, operands)
                 if early is not None:
                     return early
-            elif not reports_link(
-                    name, argv.words) and (name not in NO_FOLLOW_COMMANDS
-                                           or dereferences(name, argv.words)):
-                operands = follow_paths(namespace, operands)
         except CycleError as exc:
             err = (f"{name}: {exc}: "
                    f"Too many levels of symbolic links\n").encode()
@@ -581,8 +684,18 @@ async def _run_argv(
             for item in operands:
                 if not isinstance(item, PathSpec):
                     continue
+                if item.raw_path.endswith("/"):
+                    # A trailing slash asked for the directory, and rm
+                    # refused (or -f silenced the refusal). Nothing was
+                    # removed, so nothing may be purged: dropping the
+                    # node here deleted the very link the slash
+                    # protects (GNU keeps it through `rm -rf dlink/`).
+                    continue
                 if item.pattern:
-                    await namespace.unlink_glob(item.virtual)
+                    # A quoted metacharacter is a literal here too,
+                    # so the node table is matched with the same
+                    # pattern the backend resolved with.
+                    await namespace.unlink_glob(glob_pattern(item.virtual))
                 else:
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)

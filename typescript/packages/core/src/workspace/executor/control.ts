@@ -16,6 +16,8 @@ import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { type Policies } from '../../policy/index.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { finishStatement } from './statement.ts'
@@ -25,6 +27,7 @@ import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { Session } from '../session/session.ts'
+import { sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -164,9 +167,18 @@ export async function handleFor(
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  policies: Policies | null = null,
 ): Promise<Result> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
+  const view = sessionView(session, policies)
+  // The loop variable is the shell's own write: readonly is bash's
+  // rule, checked up front so the loop never starts, exactly as bash
+  // refuses `for x` on a readonly x before the first iteration.
+  if (view.isReadonly(variable)) {
+    const err = new TextEncoder().encode(`bash: ${variable}: readonly variable\n`)
+    return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
+  }
   const savedValue = session.env[variable]
   const hadKey = variable in session.env
   const [prevBuffer, bodyStdin] = installStdinBuffer(session, stdin)
@@ -175,8 +187,19 @@ export async function handleFor(
   try {
     for (const val of values) {
       // env stores strings only; bash keeps `for f in sub/*.txt`
-      // matches relative, so the loop variable takes the typed form
-      session.env[variable] = wordText(val)
+      // matches relative, so the loop variable takes the typed form.
+      // The write goes through the session door; a policy denial
+      // aborts the loop before its body runs.
+      const textVal = wordText(val)
+      try {
+        await view.set(variable, textVal)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        mergedIo = await mergedIo.merge(
+          new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${err.message}\n`) }),
+        )
+        break
+      }
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
         allStdout.push(stdout)
@@ -351,8 +374,16 @@ export async function handleCfor(
         await evalExpr(exprs[2] ?? null, 0)
       }
     } catch (err) {
-      if (!(err instanceof ArithError) && !(err instanceof ReadonlyError)) throw err
-      const prefix = err instanceof ReadonlyError ? 'bash: ' : 'bash: ((: '
+      // PolicyDenied is a header expression assigning a hidden name,
+      // refused by the same door as any denied assignment.
+      if (
+        !(err instanceof ArithError) &&
+        !(err instanceof ReadonlyError) &&
+        !(err instanceof PolicyDenied)
+      ) {
+        throw err
+      }
+      const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
       const errBytes = new TextEncoder().encode(`${prefix}${err.message}\n`)
       mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
       mergedIo.exitCode = 1
@@ -458,9 +489,11 @@ export async function handleSelect(
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  policies: Policies | null = null,
 ): Promise<Result> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
+  const view = sessionView(session, policies)
   const savedValue = session.env[variable]
   const hadKey = variable in session.env
   const [prevBuffer, bodyStdin] = installStdinBuffer(session, stdin)
@@ -485,7 +518,6 @@ export async function handleSelect(
         mergedIo = await mergedIo.merge(new IOResult({ stderr: menu }))
         continue
       }
-      session.env.REPLY = reply
       let choice = ''
       if (/^\d+$/.test(reply.trim())) {
         const idx = parseInt(reply.trim(), 10)
@@ -493,7 +525,27 @@ export async function handleSelect(
           choice = wordText(values[idx - 1] ?? '')
         }
       }
-      session.env[variable] = choice
+      // REPLY and the select variable are session writes, so they clear
+      // the preSession gate like the for-loop variable.
+      // REPLY and the select variable go through the session door like
+      // the for-loop variable; readonly is the shell's own rule,
+      // checked before the door is asked.
+      const frozen = ['REPLY', variable].find((n) => view.isReadonly(n))
+      if (frozen !== undefined) {
+        const err = new TextEncoder().encode(`bash: ${frozen}: readonly variable\n`)
+        mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: err }))
+        break
+      }
+      try {
+        await view.set('REPLY', reply)
+        await view.set(variable, choice)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        mergedIo = await mergedIo.merge(
+          new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${err.message}\n`) }),
+        )
+        break
+      }
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, null, callStack)
         allStdout.push(stdout)

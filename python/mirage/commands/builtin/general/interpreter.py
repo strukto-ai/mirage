@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -21,7 +21,7 @@ from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.types import RunArgs, RunResult
+from mirage.runtime.types import DispatchFn, RunArgs, RunResult
 from mirage.types import PathSpec
 
 
@@ -159,11 +159,11 @@ class Source:
 async def resolve_source(
     label: str,
     paths: list[PathSpec] | None,
-    texts: tuple[str, ...],
+    texts: list[str],
     payload: str | None,
     stdin: ByteSource | None,
-    dispatch: Callable[..., Any] | None,
-    cwd: PathSpec | None,
+    dispatch: DispatchFn | None,
+    cwd: PathSpec | str | None,
     exec_allowed: bool,
     module: str | None = None,
     argv0_rules: Argv0Rules = Argv0Rules(),
@@ -179,12 +179,13 @@ async def resolve_source(
     Args:
         label (str): the command name used in error messages.
         paths (list[PathSpec] | None): positional path operands.
-        texts (tuple[str, ...]): positional text operands.
+        texts (list[str]): positional text operands.
         payload (str | None): the -c/-e flag value, if given.
         stdin (ByteSource | None): piped stdin.
-        dispatch (Callable[..., Any] | None): workspace dispatch for
+        dispatch (DispatchFn | None): workspace dispatch for
             reading the script operand.
-        cwd (PathSpec | None): the session cwd for script resolution.
+        cwd (PathSpec | str | None): the session cwd for script
+            resolution, as ``CommandOpts.cwd`` carries it.
         exec_allowed (bool): whether the root mount is in EXEC mode.
         module (str | None): the -m module name, if given.
         argv0_rules (Argv0Rules): what this interpreter calls itself in

@@ -24,9 +24,7 @@ function enoent(path: string): Error {
 }
 
 function mountOf(ws: Workspace, path: string): MountEntry {
-  const m = ws.namespace.mountFor(path)
-  if (m === null) throw new Error(`no mount for ${path}`)
-  return m
+  return ws.namespace.mountFor(path)
 }
 
 async function wsWithOverlay(): Promise<Workspace> {

@@ -255,6 +255,41 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     await loaded.close()
   })
 
+  it('STRICT load checks drift on the fs facade too, not only Workspace.dispatch', async () => {
+    // The fs facade (the FUSE path) reaches the dispatcher without
+    // passing Workspace.dispatch, so the pending fingerprint checks
+    // must run at the door itself or a first op through FUSE touches
+    // drifted state unchecked.
+    const accessor = new FakeRemoteAccessor()
+    accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))
+    const ws = build(accessor)
+    await recordedDispatch(ws, 'read', '/remote/a.txt')
+    const state = await toStateDict(ws)
+    state.fingerprints = (state.fingerprints ?? []).map((e) => ({
+      path: e.path,
+      mount_prefix: e.mount_prefix,
+      fingerprint: e.fingerprint ?? null,
+    }))
+    const snap = join(tempDir, 'drift-facade.tar')
+    const [manifest, blobs] = splitManifestAndBlobs(state as unknown as Record<string, unknown>)
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
+
+    accessor.put('/remote/a.txt', new TextEncoder().encode('v2'))
+
+    const ops = new OpsRegistry()
+    ops.register(readOp)
+    ops.register(statOp)
+    const loaded = await Workspace.load(
+      snap,
+      { mode: MountMode.WRITE, ops, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { '/remote/': new FakeRemoteResource(accessor) },
+    )
+    await expect(loaded.fs.readFile('/remote/a.txt')).rejects.toBeInstanceOf(ContentDriftError)
+    await ws.close()
+    await loaded.close()
+  })
+
   it('OFF load skips drift check and leaves revision pins empty', async () => {
     const accessor = new FakeRemoteAccessor()
     accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))

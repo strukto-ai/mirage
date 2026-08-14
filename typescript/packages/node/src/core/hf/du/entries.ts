@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type PathSpec, stripSlash } from '@struktoai/mirage-core'
+import { compareCodePoints, FileType, type PathSpec, stripSlash } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { isNotFound, rawPathOf } from '../util.ts'
 import { lstrip, statOrNull } from './walk.ts'
@@ -41,6 +41,6 @@ export async function entries(
   } catch (err) {
     if (!isNotFound(err)) throw err
   }
-  results.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  results.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [results, total]
 }

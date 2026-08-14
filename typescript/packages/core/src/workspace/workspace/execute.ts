@@ -18,14 +18,14 @@ import { runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { Resource } from '../../resource/base.ts'
-import { runWithSession } from '../../context/session_context.ts'
+import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../../shell/parse.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { makeAbortError } from '../abort.ts'
-import type { Dispatcher } from '../dispatcher.ts'
-import type { DispatchFn } from '../executor/cross_mount.ts'
+import type { Dispatcher } from '../dispatcher/index.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { PolicyDeny, type PolicyDecision } from '../../runtime/policy/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
@@ -94,12 +94,11 @@ async function deniedResult(
   env: ExecuteEnv,
   command: string,
   options: ExecuteOptions,
+  session: Session,
   reason: string,
 ): Promise<ExecuteResult> {
   const cmdName = commandName(command) || command
   const msg = new TextEncoder().encode(`${cmdName}: policy denied: ${reason}\n`)
-  const sessionId = options.sessionId ?? env.sessions.defaultId
-  const session = env.sessions.get(sessionId)
   session.lastExitCode = 126
   if (options.record !== false) {
     await env.observer.logExecution(
@@ -107,7 +106,7 @@ async function deniedResult(
       new IOResult({ exitCode: 126, stderr: msg }),
       [],
       options.agentId ?? env.agentId ?? '',
-      sessionId,
+      session.sessionId,
       options.cwd ?? session.cwd,
     )
   }
@@ -151,12 +150,26 @@ export async function executeLine(
   }
   if (options.provision === true) return env.provision(command)
   const rootNode = root as unknown as TSNodeLike
+  // A re-entrant execute (the evaluator's $(), eval, source, xargs, or
+  // an embedder callback fired mid-line) continues in the live ambient
+  // session unless it names a different one. An id cannot say that: it
+  // names a registered session, never the ephemeral per-call fork the
+  // outer line actually runs in, and re-resolving through the manager
+  // is how a nested line used to escape the fork and its confinement.
+  // Only this workspace's own binding counts: a session carries one
+  // workspace's cwd, env and mount grants, so a callback reaching a
+  // second workspace must resolve that workspace's session instead.
+  const ambient = getCurrentSessionFor(env.sessions)
+  const targetSession =
+    ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+      ? ambient
+      : env.sessions.get(options.sessionId ?? env.sessions.defaultId)
   let routingDecision: PolicyDecision | null
   try {
-    routingDecision = await env.policyRouter.decide(rootNode, command, options)
+    routingDecision = await env.policyRouter.decide(rootNode, command, options, targetSession)
   } catch (caught) {
     if (caught instanceof PolicyDeny) {
-      return deniedResult(env, command, options, caught.reason)
+      return deniedResult(env, command, options, targetSession, caught.reason)
     }
     throw caught
   }
@@ -168,7 +181,10 @@ export async function executeLine(
     // never a typed line: they must not record a history entry or open
     // their own recording context, so their ops flow into this line's
     // recorder (GNU: history is appended by the line reader).
-    const innerOpts: ExecuteOptions & { provision?: false } = { record: false }
+    const innerOpts: ExecuteOptions & { provision?: false } = {
+      record: false,
+      sessionId: opts.sessionId,
+    }
     if (options.signal !== undefined) innerOpts.signal = options.signal
     // Nested lines never re-route: the evaluator's inner lines keep
     // the typed line's decision (runtime argument, policy, or scripts).
@@ -201,8 +217,6 @@ export async function executeLine(
     ...(routingDecision !== null ? { routingDecision } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),
   }
-  const targetSessionId = options.sessionId ?? env.sessions.defaultId
-  const targetSession = env.sessions.get(targetSessionId)
   try {
     return await runParsedLine(env, command, options, rootNode, deps, targetSession, stdin)
   } finally {
@@ -263,7 +277,11 @@ async function runParsedLine(
     return new ExecuteResult(result.stdout, result.stderr ?? new Uint8Array(), result.exitCode)
   }
   const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-    runWithSession(effectiveSession, () => runCommandTree(deps, rootNode, effectiveSession, stdin))
+    runWithSession(
+      effectiveSession,
+      () => runCommandTree(deps, rootNode, effectiveSession, stdin),
+      env.sessions,
+    )
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
   try {
     execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]

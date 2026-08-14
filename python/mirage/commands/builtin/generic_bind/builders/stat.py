@@ -15,45 +15,29 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.stat import stat as generic_stat
+from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op,
                                                           overlaid_stat)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 
 
-async def stat(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    c: str | None = None,
-    f: str | None = None,
-    L: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def stat(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("stat: no resource")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    stat_fn = bound_op(ops.stat, accessor, index)
-    if stat_overlay is not None:
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    stat_fn = bound_op(ops.stat, accessor, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
         stat_fn = partial(overlaid_stat,
                           partial(ops.stat, accessor),
-                          stat_overlay,
-                          index=index)
-    return await generic_stat(paths,
-                              stat_fn=stat_fn,
-                              c=c,
-                              f=f,
-                              L=L,
-                              links=links)
+                          overlay,
+                          index=opts.index)
+    return await stat_generic(resolved, list(texts), opts, stat_fn)
 
 
 BUILDER = Builder('stat', stat, None, False, None)

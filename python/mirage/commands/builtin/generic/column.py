@@ -1,7 +1,11 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -61,3 +65,29 @@ async def column(
 
 
 __all__ = ["column"]
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnFlags:
+    table: bool = False
+    separator: str | None = None
+    output_separator: str | None = None
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> ColumnFlags:
+    fl = FlagView(flags, spec=SPECS["column"])
+    return ColumnFlags(
+        table=fl.as_bool("t"),
+        separator=fl.as_str("s"),
+        output_separator=fl.as_str("o"),
+    )
+
+
+async def column_generic(paths, texts, opts: CommandOpts, read_bytes):
+    parsed = parse_flags(opts.flags)
+    return await column(paths,
+                        read_bytes=read_bytes,
+                        stdin=opts.stdin,
+                        table=parsed.table,
+                        separator=parsed.separator,
+                        output_separator=parsed.output_separator)

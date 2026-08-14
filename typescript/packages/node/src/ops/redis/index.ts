@@ -16,6 +16,4 @@ import type { RegisteredOp } from '@struktoai/mirage-core'
 import { ResourceName, makeGenericOps } from '@struktoai/mirage-core'
 import { REDIS_IO } from '../../commands/builtin/redis/io.ts'
 
-export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.REDIS, REDIS_IO, {
-  forwardIndex: false,
-})
+export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.REDIS, REDIS_IO)

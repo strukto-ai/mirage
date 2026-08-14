@@ -1,10 +1,14 @@
-import { PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, type PredNode } from '@struktoai/mirage-core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { searchFiles, supportsQuery } from './search/index.ts'
 import { SEARCH_PAGE_SIZE } from './search/constants.ts'
 import { globToLike, requestBody } from './search/query.ts'
 import { relativePath, searchTarget } from './search/target.ts'
+
+const NAME_TXT: PredNode = { op: 'name', pattern: '*.txt', icase: false }
+const NAME_CSV: PredNode = { op: 'name', pattern: '*.csv', icase: false }
+const DIRECTORY: PredNode = { op: 'type', kind: 'd' }
 
 function multistatus(paths: { href: string; directory?: boolean }[]): string {
   const responses = paths
@@ -86,6 +90,23 @@ describe('Nextcloud Files Search query', () => {
         },
       }),
     ).toBe(true)
+  })
+
+  it.each<[string, PredNode]>([
+    ['not of an or', { op: 'not', kid: { op: 'or', kids: [NAME_TXT, NAME_CSV] } }],
+    ['not of an and', { op: 'not', kid: { op: 'and', kids: [NAME_TXT, DIRECTORY] } }],
+    ['not of a not', { op: 'not', kid: { op: 'not', kid: NAME_TXT } }],
+    ['not of -type f', { op: 'not', kid: { op: 'type', kind: 'f' } }],
+  ])('refuses to push down a negated compound: %s', (_label, tree) => {
+    expect(supportsQuery({ tree })).toBe(false)
+  })
+
+  it.each<[string, PredNode]>([
+    ['not of a name', { op: 'not', kid: NAME_TXT }],
+    ['not of -type d', { op: 'not', kid: DIRECTORY }],
+    ['not of a one-armed group', { op: 'not', kid: { op: 'or', kids: [NAME_TXT] } }],
+  ])('pushes down a negated comparison: %s', (_label, tree) => {
+    expect(supportsQuery({ tree })).toBe(true)
   })
 
   it('broadens SQL wildcard and backslash literals safely', () => {

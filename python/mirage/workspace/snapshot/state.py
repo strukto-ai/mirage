@@ -34,6 +34,7 @@ from mirage.types import (CacheKey, CLIKey, ConsistencyPolicy, JobKey,
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
@@ -289,9 +290,8 @@ async def apply_state_dict(ws, state: dict[str, Any]) -> None:
     # is written into the new root, redis content into the new URL, etc.
     # Cred-only resources (S3 et al.) define load_state as no-op.
     for m in state[StateKey.MOUNTS]:
-        try:
-            mount = ws._registry.mount_for_prefix(m[MountKey.PREFIX])
-        except ValueError:
+        mount = ws._registry.try_mount_for_prefix(m[MountKey.PREFIX])
+        if mount is None:
             continue
         mount.resource.load_state(m[MountKey.RESOURCE_STATE])
 
@@ -339,7 +339,7 @@ async def _restore_sessions(ws, state: dict[str, Any]) -> None:
                 # the replace_from_snapshot contract below.
                 session = ws._session_mgr.get(sid)
         fields = Session.from_dict(s_data)
-        session.cwd = fields.cwd
+        set_cwd(session, fields.cwd)
         session.env = fields.env
         session.mount_modes = fields.mount_modes
         restored.append(session)

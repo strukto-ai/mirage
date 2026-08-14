@@ -31,11 +31,11 @@ class _Registry:
     def __init__(self, prefixes: dict[str, str]):
         self._prefixes = prefixes
 
-    def mount_for(self, virtual: str) -> _Mount:
+    def try_mount_for(self, virtual: str) -> _Mount | None:
         for prefix in self._prefixes.values():
             if virtual.startswith(prefix.rstrip("/") + "/"):
                 return _Mount(prefix)
-        raise ValueError(virtual)
+        return None
 
 
 def _scope(virtual: str) -> PathSpec:

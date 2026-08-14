@@ -18,10 +18,12 @@ from typing import Any
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.brace import (expand_template, make_inert,
                                            substitute)
@@ -29,7 +31,8 @@ from mirage.workspace.expand.classify import classify_word
 from mirage.workspace.expand.constants import (BRACE_LITERAL_TYPES,
                                                BRACE_WORD_TYPES, SPLIT_TYPES)
 from mirage.workspace.expand.node import (_folded_whitespace,
-                                          _unescape_unquoted, expand_node)
+                                          _unescape_unquoted, expand_node,
+                                          expand_node_marked)
 from mirage.workspace.expand.variable import expand_array_at, is_multiword_at
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -45,6 +48,7 @@ async def _expand_string_with_array(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> list[str]:
     """Expand a string containing one or more "${a[@]...}" into words.
 
@@ -80,7 +84,11 @@ async def _expand_string_with_array(
                 fragments.extend(words[1:-1])
                 fragments.append(words[-1])
             continue
-        text = await expand_node(child, session, execute_fn, call_stack)
+        text = await expand_node(child,
+                                 session,
+                                 execute_fn,
+                                 call_stack,
+                                 view=view)
         fragments[-1] = fragments[-1] + text
     if fragments == [""] and not splat_yielded:
         # A splat that yielded nothing, with no text around it, is no word
@@ -89,7 +97,9 @@ async def _expand_string_with_array(
         # the element count can. An empty expansion beside it does not
         # rescue the word either: with no parameters, "$u$@" is nothing.
         return []
-    return fragments
+    # Every fragment came from inside the quotes, so its glob characters
+    # are literal.
+    return [mark_globs(f) for f in fragments]
 
 
 async def _expand_brace_word(
@@ -97,6 +107,7 @@ async def _expand_brace_word(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> list[str] | None:
     """Brace-expand a concatenation or brace_expression into words.
 
@@ -107,6 +118,11 @@ async def _expand_brace_word(
     ordering. Deliberate divergence: bash rewrites `$v{a,b}` to
     `$va $vb` before parameter expansion; here the prefix keeps its
     own expansion (`prea preb`), which is the useful reading.
+
+    Quoting rides along per character: an atom keeps whatever marks its
+    own expansion produced, and the template's escapes are marked
+    before quote removal drops them, so `{'*',x}` stays literal while
+    `{$p,x}` keeps the value live.
 
     Args:
         node (tree_sitter.Node): concatenation or brace_expression.
@@ -120,41 +136,69 @@ async def _expand_brace_word(
         if not child.is_named or child.type in BRACE_LITERAL_TYPES:
             pieces.append(get_text(child))
         else:
-            values.append(await expand_node(child, session, execute_fn,
-                                            call_stack))
+            values.append(await expand_node_marked(child,
+                                                   session,
+                                                   execute_fn,
+                                                   call_stack,
+                                                   view=view))
             pieces.append(make_inert(len(values) - 1))
     words = expand_template("".join(pieces))
     if words is None:
         return None
     home = home_dir(session)
     return [
-        substitute(expand_tilde(_unescape_unquoted(w), home), values)
-        for w in words
+        substitute(
+            expand_tilde(_unescape_unquoted(mark_escaped_globs(w)), home),
+            values) for w in words
     ]
 
 
-async def expand_parts(
+async def expand_words(
     parts: list[Any],
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> list[str]:
-    """Expand a list of tree-sitter child nodes to strings."""
-    result = []
+    """Expand tree-sitter child nodes to words that still know their quoting.
+
+    The words are exactly expand_parts', except that a glob character
+    quoting made literal travels under its own mark, so
+    `"/data/"*.txt` still globs while `'/data/*'.txt` does not and
+    `'/data/*'?.txt` globs on the `?` alone. Only pathname expansion
+    reads these; everything else takes the unmarked ``expand_parts``.
+
+    Args:
+        parts (list[Any]): the word nodes to expand.
+        session (Session): shell session state.
+        execute_fn (Callable): evaluator for command substitutions.
+        call_stack (CallStack | None): shell call stack.
+    """
+    result: list[str] = []
     for p in parts:
         if p.type == NT.STRING and _string_has_array_at(p):
-            words = await _expand_string_with_array(p, session, execute_fn,
-                                                    call_stack)
+            words = await _expand_string_with_array(p,
+                                                    session,
+                                                    execute_fn,
+                                                    call_stack,
+                                                    view=view)
             result.extend(words)
             continue
         if p.type in BRACE_WORD_TYPES:
-            brace_words = await _expand_brace_word(p, session, execute_fn,
-                                                   call_stack)
+            brace_words = await _expand_brace_word(p,
+                                                   session,
+                                                   execute_fn,
+                                                   call_stack,
+                                                   view=view)
             if brace_words is not None:
                 # Empty unquoted words vanish, like bash: {,x} -> x.
                 result.extend(w for w in brace_words if w)
                 continue
-        expanded = await expand_node(p, session, execute_fn, call_stack)
+        expanded = await expand_node_marked(p,
+                                            session,
+                                            execute_fn,
+                                            call_stack,
+                                            view=view)
         if p.type == NT.COMMAND_SUBSTITUTION:
             for word in expanded.split():
                 if word:
@@ -178,6 +222,17 @@ async def expand_parts(
     return result
 
 
+async def expand_parts(
+    parts: list[Any],
+    session: Session,
+    execute_fn: Callable[..., Any],
+    call_stack: CallStack | None = None,
+) -> list[str]:
+    """Expand a list of tree-sitter child nodes to strings."""
+    words = await expand_words(parts, session, execute_fn, call_stack)
+    return [unmark_globs(w) for w in words]
+
+
 async def expand_and_classify(
     words: list[Any],
     session: Session,
@@ -185,11 +240,19 @@ async def expand_and_classify(
     registry: MountRegistry,
     cwd: str,
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> list[str | PathSpec]:
     """Expand words, classify as PathSpec or text.
 
-    Used by for/select where concrete values are needed
-    before iteration.
+    Used by for/select where concrete values are needed before
+    iteration. Words keep their glob marks, because the loop list is
+    glob-resolved next (``resolve_globs``, which is where the marks come
+    off): `for f in '/data/*.txt'` iterates once over the name as typed,
+    like bash, while `for f in '/data/*'?.txt` still globs on the `?`.
     """
-    expanded = await expand_parts(words, session, execute_fn, call_stack)
+    expanded = await expand_words(words,
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=view)
     return [classify_word(w, registry, cwd) for w in expanded]

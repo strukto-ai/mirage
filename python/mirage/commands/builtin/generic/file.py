@@ -1,9 +1,13 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import MIME_SYMLINK
 from mirage.commands.builtin.file_helper import _detect, format_file_result
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
@@ -90,3 +94,24 @@ async def file_cmd(
 
 
 __all__ = ["file_cmd"]
+
+
+@dataclass(frozen=True, slots=True)
+class FileFlags:
+    brief: bool = False
+    mime: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> FileFlags:
+    fl = FlagView(flags, spec=SPECS["file"])
+    return FileFlags(brief=fl.as_bool("b"), mime=fl.as_bool("i"))
+
+
+async def file_generic(paths, texts, opts: CommandOpts, read_bytes, stat_fn):
+    parsed = parse_flags(opts.flags)
+    return await file_cmd(paths,
+                          read_bytes=read_bytes,
+                          stat_fn=stat_fn,
+                          b=parsed.brief,
+                          i=parsed.mime,
+                          links=opts.ns.links if opts.ns is not None else None)

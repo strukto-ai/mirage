@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedisClientType } from 'redis'
-import { ObserverStoreBase } from '@struktoai/mirage-core'
+import { compareCodePoints, ObserverStoreBase } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
 
 export interface RedisObserverStoreOptions {
@@ -80,7 +80,7 @@ export class RedisObserverStore extends ObserverStoreBase {
   private async indexedPaths(): Promise<string[]> {
     const c = await this.client()
     const members = await c.sMembers(this.indexKey)
-    return [...members].sort()
+    return [...members].sort(compareCodePoints)
   }
 
   private async readPaths(paths: string[]): Promise<Map<string, Uint8Array>> {

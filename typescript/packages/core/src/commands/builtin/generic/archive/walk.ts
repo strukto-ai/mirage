@@ -18,6 +18,7 @@ import { mountKey } from '../../../../utils/key_prefix.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { Entry, MemberKind, Problem, Scan } from './types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 // A mount boundary is a filesystem boundary, so both archivers stop at
 // one and say so in GNU tar's --one-file-system wording. Descending
@@ -124,7 +125,7 @@ async function subtree(
       read: kind === 'file' ? childSpec(virtual, root) : null,
     })
   }
-  entries.sort((a, b) => (a.namePath < b.namePath ? -1 : a.namePath > b.namePath ? 1 : 0))
+  entries.sort((a, b) => compareCodePoints(a.namePath, b.namePath))
   return [entries, crossings.map((c) => rstripSlash(c))]
 }
 

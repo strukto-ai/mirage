@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PathSpec, materialize, type Resource } from '@struktoai/mirage-core'
+import { PathSpec, materialize } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../../accessor/ssh.ts'
 import { makeFakeAccessor } from '../../../../core/ssh/_test_utils.ts'
 import { SSH_COMMANDS } from '../index.ts'
@@ -33,7 +33,6 @@ async function runLs(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
   })
   if (result === null) return ''
   const [out] = result

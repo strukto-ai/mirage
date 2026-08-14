@@ -67,28 +67,28 @@ describe('MirageFs', () => {
     py = await loadPyodideRuntime()
     const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
       calls.push(bytes ? { op, path, bytes: new Uint8Array(bytes) } : { op, path })
-      if (op === 'READ') {
+      if (op === 'read') {
         if (unreadable.has(path)) return Promise.reject(new Error('backend unavailable'))
         const found = store.get(path)
         if (found === undefined) return Promise.reject(new Error(`no such file: ${path}`))
         return Promise.resolve(found)
       }
-      if (op === 'WRITE' && bytes !== undefined) store.set(path, new Uint8Array(bytes))
-      if (op === 'APPEND' && bytes !== undefined) {
+      if (op === 'write' && bytes !== undefined) store.set(path, new Uint8Array(bytes))
+      if (op === 'append' && bytes !== undefined) {
         const base = store.get(path) ?? new Uint8Array()
         const next = new Uint8Array(base.length + bytes.length)
         next.set(base)
         next.set(bytes, base.length)
         store.set(path, next)
       }
-      if (op === 'UNLINK') store.delete(path)
-      if (op === 'RENAME' && dst !== undefined) {
+      if (op === 'unlink') store.delete(path)
+      if (op === 'rename' && dst !== undefined) {
         const moved = store.get(path)
         if (moved === undefined) return Promise.reject(new Error(`no such file: ${path}`))
         store.delete(path)
         store.set(dst, moved)
       }
-      if (op === 'LIST') {
+      if (op === 'readdir') {
         return Promise.resolve(
           [...store.keys()]
             .filter((k) => k.startsWith(path))
@@ -295,7 +295,7 @@ with open('${p}../escaped.txt', 'w') as f:
 `)
     await drain()
     expect([...store.keys()]).toEqual([])
-    expect(calls.filter((c) => c.op === 'WRITE')).toEqual([])
+    expect(calls.filter((c) => c.op === 'write')).toEqual([])
   })
 
   it('refuses to open a listed file the mount would not hand over', async () => {

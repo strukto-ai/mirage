@@ -170,6 +170,21 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     await pipe.exec()
   }
 
+  // Clear rather than expire, because redis cannot say "stale" here. The RAM
+  // store marks entries expired in place, so a later lookup answers EXPIRED
+  // and a backend whose index *is* its listing knows to refetch. A redis key
+  // carries a real TTL and an expired one is simply gone, so absent and stale
+  // read the same. The consequence, deliberately chosen: a github mount on a
+  // redis index answers ENOENT after a CLI write instead of refetching. That
+  // is a loud failure, not a wrong answer -- a no-op here would instead serve
+  // the pre-write tree as if it were current, and quietly wrong is the worse
+  // of the two. Closing this properly means an `invalidatedAt` marker key
+  // compared against each entry's indexTime, which needs no schema change and
+  // can ride the same round trip.
+  async invalidate(): Promise<void> {
+    await this.clear()
+  }
+
   async clear(): Promise<void> {
     const c = await this.client()
     for (const pattern of [`${this.entryPrefix}*`, `${this.childrenPrefix}*`]) {

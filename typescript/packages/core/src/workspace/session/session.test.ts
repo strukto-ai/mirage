@@ -17,10 +17,12 @@ import { Session } from './session.ts'
 import { MountMode } from '../../types.ts'
 
 describe('Session', () => {
-  it('defaults cwd=/ and empty env', () => {
+  it('defaults cwd=/ and an env holding only the seeded $PWD', () => {
     const s = new Session({ sessionId: 'x' })
     expect(s.cwd).toBe('/')
-    expect(s.env).toEqual({})
+    // bash exports $PWD from startup, so even a session that never ran
+    // `cd` has one.
+    expect(s.env).toEqual({ PWD: '/' })
     expect(s.functions).toEqual({})
     expect(s.lastExitCode).toBe(0)
   })
@@ -39,7 +41,7 @@ describe('Session', () => {
     expect(json).toEqual({
       session_id: 'x',
       cwd: '/a',
-      env: { K: 'V' },
+      env: { K: 'V', PWD: '/a' },
       created_at: s.createdAt,
       generation: 0,
     })
@@ -59,7 +61,7 @@ describe('Session', () => {
     )
     expect(restored.sessionId).toBe('x')
     expect(restored.cwd).toBe('/a')
-    expect(restored.env).toEqual({ K: 'V' })
+    expect(restored.env).toEqual({ K: 'V', PWD: '/a' })
   })
 
   it('round-trips mountModes through toJSON/fromJSON', () => {
@@ -106,7 +108,7 @@ describe('Session.fork', () => {
     const forked = original.fork({})
     expect(forked.sessionId).toBe('orig')
     expect(forked.cwd).toBe('/disk')
-    expect(forked.env).toEqual({ FOO: 'bar' })
+    expect(forked.env).toEqual({ FOO: 'bar', PWD: '/disk' })
     expect(forked.mountModes).toBe(original.mountModes)
     expect(forked.shellOptions).toEqual({ errexit: true })
     expect(forked.readonlyVars.has('HOME')).toBe(true)
@@ -123,9 +125,29 @@ describe('Session.fork', () => {
     })
     const forked = original.fork({ cwd: '/ram', env: { BAZ: 'qux' } })
     expect(forked.cwd).toBe('/ram')
-    expect(forked.env).toEqual({ BAZ: 'qux' })
+    // $PWD follows the caller-supplied cwd rather than staying stale.
+    expect(forked.env).toEqual({ BAZ: 'qux', PWD: '/ram' })
     expect(original.cwd).toBe('/disk')
-    expect(original.env).toEqual({ FOO: 'bar' })
+    expect(original.env).toEqual({ FOO: 'bar', PWD: '/disk' })
+  })
+
+  // A caller-supplied cwd has no typed spelling behind it, so carrying the
+  // source's logical name over would make the fork's pwd describe a
+  // directory it is not in — the bug an `execute({cwd})` call hit.
+  it('drops the logical cwd when the caller overrides cwd', () => {
+    const original = new Session({
+      sessionId: 'orig',
+      cwd: '/data/deep/real',
+      logicalCwd: '/data/lk',
+    })
+    expect(original.fork({ cwd: '/ram' }).logicalCwd).toBeUndefined()
+    expect(original.fork({}).logicalCwd).toBe('/data/lk')
+  })
+
+  it('keeps an explicitly supplied logical cwd alongside a cwd override', () => {
+    const original = new Session({ sessionId: 'orig', cwd: '/a' })
+    const forked = original.fork({ cwd: '/data/deep/real', logicalCwd: '/data/lk' })
+    expect(forked.logicalCwd).toBe('/data/lk')
   })
 
   it('deep-copies mutable containers so mutations on the fork do not leak', () => {

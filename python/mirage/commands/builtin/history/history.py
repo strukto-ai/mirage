@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
+from mirage.commands.config import CommandOpts, cwd_str
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.core.history.render import render_history_listing
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -29,20 +30,9 @@ def _out_of_range(value: str) -> IOResult:
 @command("history", resource="history", spec=SPECS["history"])
 async def history_cmd(
     accessor: HistoryAccessor,
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    c: bool = False,
-    d: str | None = None,
-    s: bool = False,
-    p: bool = False,
-    a: bool = False,
-    r: bool = False,
-    w: bool = False,
-    n: bool = False,
-    session_id: str | None = None,
-    cwd: PathSpec | None = None,
-    **_extra: FlagValue,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU history builtin over the recorder.
 
@@ -55,10 +45,15 @@ async def history_cmd(
     When -s and -p are combined, -s wins and nothing is printed
     (bash-verified for both -ps and -sp).
     """
+    fl = FlagView(opts.flags, spec=SPECS["history"])
+    c = fl.as_bool("c")
+    d = fl.as_str("d")
+    s = fl.as_bool("s")
+    p = fl.as_bool("p")
     observer = accessor.observer
-    if session_id is None:
+    if opts.session_id is None:
         raise ValueError("history requires the caller's session id")
-    session = session_id
+    session = opts.session_id
     if c:
         await observer.log_clear(session=session)
     if d is not None:
@@ -72,14 +67,14 @@ async def history_cmd(
             return None, _out_of_range(d)
         await observer.log_delete(session=session, offset=offset)
     if s and texts:
-        await observer.log_command_text(
-            " ".join(texts),
-            session=session,
-            cwd=cwd.virtual if cwd is not None else None)
+        await observer.log_command_text(" ".join(texts),
+                                        session=session,
+                                        cwd=cwd_str(opts.cwd))
     if p and not s:
         out = "\n".join(texts) + "\n" if texts else ""
         return out.encode(), IOResult()
-    if c or d is not None or s or a or r or w or n:
+    if (c or d is not None or s or fl.as_bool("a") or fl.as_bool("r")
+            or fl.as_bool("w") or fl.as_bool("n")):
         return None, IOResult()
     if len(texts) > 1:
         err = b"history: too many arguments\n"

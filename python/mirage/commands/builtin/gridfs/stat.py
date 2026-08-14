@@ -15,17 +15,16 @@
 from functools import partial
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
 from mirage.commands.builtin.generic_bind.adapter import (bound_op,
                                                           overlaid_stat)
 from mirage.commands.builtin.gridfs.io import resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.core.gridfs.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatOverlay
 from mirage.types import PathSpec
 
 
@@ -33,28 +32,24 @@ from mirage.types import PathSpec
 async def stat(
     accessor: GridFSAccessor,
     paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    c: str | None = None,
-    f: str | None = None,
-    L: bool = False,
-    index: IndexCacheStore,
-    stat_overlay: StatOverlay | None = None,
-    links: LinkView | None = None,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
-    stat_fn = bound_op(stat_core, accessor, index)
-    if stat_overlay is not None:
+    fl = FlagView(opts.flags, spec=SPECS["stat"])
+    paths = await resolve_glob(accessor, paths, opts.index)
+    stat_fn = bound_op(stat_core, accessor, opts.index)
+    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    if overlay is not None:
         stat_fn = partial(overlaid_stat,
                           partial(stat_core, accessor),
-                          stat_overlay,
-                          index=index)
-    return await generic_stat(paths,
-                              stat_fn=stat_fn,
-                              c=c,
-                              f=f,
-                              L=L,
-                              links=links)
+                          overlay,
+                          index=opts.index)
+    return await generic_stat(
+        paths,
+        stat_fn=stat_fn,
+        c=fl.as_str("c"),
+        f=fl.as_str("f"),
+        L=fl.as_bool("L"),
+        links=opts.ns.links if opts.ns is not None else None)

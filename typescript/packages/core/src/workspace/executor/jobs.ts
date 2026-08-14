@@ -20,6 +20,8 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { Job, JobTable } from '../../shell/job_table.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { runWithSession } from '../../context/session_context.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { mergeSignals } from '../abort.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -84,44 +86,62 @@ export async function handleBackground(
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
     const console_ = job.console
-    let stdout: ByteSource | null
-    let io: IOResult
-    let execNode: ExecutionNode
-    try {
-      // The sink is what makes compound bodies stream: each statement
-      // writes as it finishes rather than the whole construct landing
-      // at the end. The signal is what makes `kill` able to stop the
-      // job at all, since a promise cannot be cancelled.
-      ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack, {
-        sink: console_,
-        signal: abort.signal,
-      })
-    } catch (err) {
-      if (err instanceof CommandTimeoutError) {
-        const msg = new TextEncoder().encode(`${err.message}\n`)
-        stdout = new Uint8Array()
-        io = new IOResult({ exitCode: 124, stderr: msg })
-        execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
-      } else if (err instanceof ExitSignal) {
-        // A background job is its own shell: exit ends the job only.
-        stdout = err.stdout ?? new Uint8Array()
-        io = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
-        execNode = new ExecutionNode({
-          command: cmdStrInner,
-          stderr: err.stderr,
-          exitCode: err.containedCode,
+    const body = async (): Promise<[IOResult, ExecutionNode]> => {
+      let stdout: ByteSource | null
+      let io: IOResult
+      let execNode: ExecutionNode
+      try {
+        // The sink is what makes compound bodies stream: each statement
+        // writes as it finishes rather than the whole construct landing
+        // at the end. The signal is what makes `kill` able to stop the
+        // job at all, since a promise cannot be cancelled.
+        ;[stdout, io, execNode] = await executeNode(left, bgSession, null, callStack, {
+          sink: console_,
+          signal: abort.signal,
         })
-      } else {
-        throw err
+      } catch (err) {
+        if (err instanceof CommandTimeoutError) {
+          const msg = new TextEncoder().encode(`${err.message}\n`)
+          stdout = new Uint8Array()
+          io = new IOResult({ exitCode: 124, stderr: msg })
+          execNode = new ExecutionNode({ command: cmdStrInner, stderr: msg, exitCode: 124 })
+        } else if (err instanceof ExitSignal) {
+          // A background job is its own shell: exit ends the job only.
+          stdout = err.stdout ?? new Uint8Array()
+          io = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
+          execNode = new ExecutionNode({
+            command: cmdStrInner,
+            stderr: err.stderr,
+            exitCode: err.containedCode,
+          })
+        } else {
+          throw err
+        }
       }
+      // Drained inside the rebind: pumping the stream can still run
+      // ops that read the ambient session.
+      await pump(console_, Channel.STDOUT, stdout)
+      const stderr = await io.materializeStderr()
+      if (stderr.byteLength > 0) {
+        await console_.emit(Channel.STDERR, stderr)
+      }
+      io.syncExitCode()
+      return [io, execNode]
     }
-    await pump(console_, Channel.STDOUT, stdout)
-    const stderr = await io.materializeStderr()
-    if (stderr.byteLength > 0) {
-      await console_.emit(Channel.STDERR, stderr)
-    }
-    io.syncExitCode()
-    return [io, execNode]
+    // The runner's task inherits the OUTER ambient session from its
+    // creation context, and the fork keeps its parent's id, so without
+    // this rebind a nested eval inside the job resolves the ambient
+    // outer session and escapes the fork.
+    //
+    // A job runs concurrently with the rest of the line, so the bind is
+    // only safe where the async context isolates tasks. On the fallback
+    // storage (a browser with no AsyncLocalStorage) it is one global
+    // slot that would stay set while the foreground continues, showing
+    // the job's fork to the rest of the line. There the job's inner
+    // evals resolve by id instead, which is what they did before
+    // ambient sessions existed: a job that leaks into its own nested
+    // eval is narrower than a job that leaks into the whole line.
+    return asyncContextIsolatesTasks ? runWithSession(bgSession, body) : body()
   }
 
   const cmdStr = left.text

@@ -20,6 +20,7 @@ import { ResourceType } from '../../cache/index/config.ts'
 import type { PathSpec } from '../../types.ts'
 import { readdirError } from '../../utils/errors.ts'
 import { norm } from './utils.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export async function readdir(
   accessor: RAMAccessor,
@@ -55,7 +56,7 @@ export async function readdir(
     const first = key.slice(dirPrefix.length).split('/')[0]
     if (first) seen.add(first)
   }
-  const sorted = [...seen].sort()
+  const sorted = [...seen].sort(compareCodePoints)
   const virtualEntries = sorted.map((name) => `${mountPrefix}${dirPrefix}${name}`)
   if (index !== undefined) {
     const fileSet = accessor.store.files

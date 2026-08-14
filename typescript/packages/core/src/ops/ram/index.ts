@@ -17,6 +17,4 @@ import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_IO, {
-  forwardIndex: false,
-})
+export const RAM_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, RAM_IO)

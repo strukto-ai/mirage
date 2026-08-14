@@ -54,7 +54,6 @@ function seed(r: RAMResource, path: string, content: string): void {
 function registerOnAll(ws: Workspace, prefixes: string[], rc: RegisteredCommand): void {
   for (const p of prefixes) {
     const mount = ws.registry.mountForPrefix(p)
-    if (mount === null) throw new Error(`mount missing: ${p}`)
     mount.register(rc)
   }
 }

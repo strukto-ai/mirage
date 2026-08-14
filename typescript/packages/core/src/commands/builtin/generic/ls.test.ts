@@ -396,7 +396,7 @@ describe('link operands on backends with different readdir shapes', () => {
   it('reports the link when readdir throws', async () => {
     const [out] = (await lsGeneric(
       [PathSpec.fromStrPath('/data/symx/flink')],
-      { flags: { args_l: true }, cwd: '/', links } as never,
+      { flags: { args_l: true }, cwd: '/', ns: { links } } as never,
       missing,
       missing,
     )) as [Uint8Array, unknown]
@@ -408,7 +408,7 @@ describe('link operands on backends with different readdir shapes', () => {
   it('reports the link when readdir returns empty', async () => {
     const [out] = (await lsGeneric(
       [PathSpec.fromStrPath('/data/symx/flink')],
-      { flags: { args_l: true }, cwd: '/', links } as never,
+      { flags: { args_l: true }, cwd: '/', ns: { links } } as never,
       () => Promise.resolve([]),
       missing,
     )) as [Uint8Array, unknown]
@@ -431,7 +431,7 @@ describe('structure-only directories', () => {
   it('lists namespace children when no backend serves the directory', async () => {
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
-      { flags: {}, cwd: '/', childMounts } as never,
+      { flags: {}, cwd: '/', ns: { childMounts } } as never,
       missing,
       missing,
     )
@@ -445,7 +445,7 @@ describe('structure-only directories', () => {
   it('-R renders the namespace-only group and leaves descent to fan-out', async () => {
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
-      { flags: { R: true }, cwd: '/', childMounts } as never,
+      { flags: { R: true }, cwd: '/', ns: { childMounts } } as never,
       missing,
       missing,
     )
@@ -460,7 +460,7 @@ describe('structure-only directories', () => {
       parent === '/ghost' ? ['deep'] : parent === '/ghost/deep' ? ['lnk'] : []
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
-      { flags: { R: true }, cwd: '/', childMounts: chain } as never,
+      { flags: { R: true }, cwd: '/', ns: { childMounts: chain } } as never,
       missing,
       missing,
     )
@@ -473,7 +473,7 @@ describe('structure-only directories', () => {
   it('-d prints the namespace-only directory row', async () => {
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
-      { flags: { d: true }, cwd: '/', childMounts } as never,
+      { flags: { d: true }, cwd: '/', ns: { childMounts } } as never,
       missing,
       missing,
     )

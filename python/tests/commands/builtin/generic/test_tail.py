@@ -238,3 +238,47 @@ async def test_tail_from_line_emits_chunks_incrementally_after_skip():
 
     chunks = [c async for c in tail(src(), from_line=3)]
     assert chunks == [b"c", b"\nd\n", b"e\n"]
+
+
+@pytest.mark.asyncio
+async def test_tail_from_byte_starts_at_that_byte():
+    """GNU `tail -c +3` emits from byte 3 to EOF, 1-indexed."""
+    out = await _drain(tail(b"abcdefghij", from_byte=3))
+    assert out == b"cdefghij"
+
+
+@pytest.mark.asyncio
+async def test_tail_from_byte_one_and_zero_are_the_whole_input():
+    assert await _drain(tail(b"abcdefghij", from_byte=1)) == b"abcdefghij"
+    assert await _drain(tail(b"abcdefghij", from_byte=0)) == b"abcdefghij"
+
+
+@pytest.mark.asyncio
+async def test_tail_from_byte_past_the_end_emits_nothing():
+    out = await _drain(tail(b"abcdefghij", from_byte=99))
+    assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_tail_from_byte_skips_across_chunk_boundaries():
+
+    async def src():
+        yield b"ab"
+        yield b"cd"
+        yield b"ef"
+
+    chunks = [c async for c in tail(src(), from_byte=4)]
+    assert b"".join(chunks) == b"def"
+
+
+@pytest.mark.asyncio
+async def test_tail_from_byte_passes_later_chunks_through_untouched():
+    """Once the skip is satisfied, chunks are yielded without rebuffering."""
+
+    async def src():
+        yield b"abc"
+        yield b"defgh"
+        yield b"ij"
+
+    chunks = [c async for c in tail(src(), from_byte=3)]
+    assert chunks == [b"c", b"defgh", b"ij"]

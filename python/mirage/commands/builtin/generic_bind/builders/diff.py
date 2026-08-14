@@ -13,46 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.diff import diff as generic_diff
+from mirage.commands.builtin.generic.diff import diff_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def diff(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    i: bool = False,
-    w: bool = False,
-    b: bool = False,
-    e: bool = False,
-    u: bool = False,
-    q: bool = False,
-    r: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags,
-) -> tuple[ByteSource | None, IOResult]:
+async def diff(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("diff: no resource")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_diff(paths,
-                              read_bytes=bound_op(ops.read_bytes, accessor,
-                                                  index),
-                              readdir_fn=bound_op(ops.readdir, accessor,
-                                                  index),
-                              stat_fn=bound_op(ops.stat, accessor, index),
-                              i=i,
-                              w=w,
-                              b=b,
-                              e=e,
-                              u=u,
-                              q=q,
-                              r=r)
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await diff_generic(resolved, list(texts), opts,
+                              bound_op(ops.read_bytes, accessor, opts.index),
+                              bound_op(ops.readdir, accessor, opts.index),
+                              bound_op(ops.stat, accessor, opts.index))
 
 
 BUILDER = Builder('diff', diff, None, False, None, read=True)

@@ -34,6 +34,8 @@ export {
   FileType,
   type FindFn,
   KERNEL_BACKENDS,
+  type HiddenPaths,
+  type HiddenVars,
   MountBackend,
   MountMode,
   type MoveFn,
@@ -42,6 +44,7 @@ export {
   type NativeMove,
   OnExceed,
   OverflowPolicy,
+  parseMountMode,
   PathSpec,
   type PathSpecInit,
   type PolymorphicReadFn,
@@ -100,9 +103,11 @@ export {
   throwUnsupported,
 } from './resource/base.ts'
 export {
+  type ConfigOf,
   hasRedactedSecret,
   REDACTED_SECRET,
   redactConfigWithSchema,
+  type RedactedConfig,
   resourceStateRequiresOverride,
   secretSchema,
   secretStr,
@@ -136,6 +141,7 @@ export {
   type RegisteredOp,
   registerOp,
 } from './ops/registry.ts'
+export { Ops } from './ops/ops.ts'
 export { RAM_OPS } from './ops/ram/index.ts'
 export { makeGenericOps } from './ops/generic/factory.ts'
 export { extractWriteData } from './ops/write_args.ts'
@@ -180,6 +186,7 @@ export {
 } from './commands/spec/index.ts'
 export { type ByteSource, IOResult, type IOResultInit, materialize } from './io/types.ts'
 export { CachableAsyncIterator } from './io/cachable_iterator.ts'
+export { OpReport } from './io/types.ts'
 export {
   asyncChain,
   closeQuietly,
@@ -394,10 +401,22 @@ export {
   sortLines,
   splitSortLines,
 } from './commands/builtin/sort_helper.ts'
-export { countNewlines, parseN, tailBytes } from './commands/builtin/tail_helper.ts'
+export {
+  countNewlines,
+  normalizeCounts,
+  parseCounts,
+  parseN,
+  tailBytes,
+  type TailCounts,
+} from './commands/builtin/tail_helper.ts'
 export { AsyncLineIterator } from './io/async_line_iterator.ts'
 export { readStdinAsync, resolveSource, wrapBytes } from './commands/builtin/utils/stream.ts'
 export { formatLsLong, humanSize } from './commands/builtin/utils/formatting.ts'
+export {
+  isSlashedLink,
+  mkdirLinkRefusal,
+  rmLinkRefusal,
+} from './commands/builtin/utils/slash_links.ts'
 export {
   formatOptionalRecords,
   formatRecordText,
@@ -493,9 +512,11 @@ export {
 } from './workspace/types.ts'
 export { Session, type SessionInit } from './workspace/session/session.ts'
 export { SessionManager } from './workspace/session/manager.ts'
-export { SessionStore, generationOf, type SessionFields } from './workspace/session/store.ts'
+export { SessionStore, type SessionFields } from './workspace/session/store.ts'
 export { RAMSessionStore } from './workspace/session/ram.ts'
-export { S3RecordClient, S3SessionStore, isConditionLostError } from './workspace/session/s3.ts'
+export { S3RecordClient, isConditionLostError } from './workspace/record/s3.ts'
+export { S3SessionStore } from './workspace/session/s3.ts'
+export { CAS_MAX_RETRIES, generationOf, type RecordFields } from './workspace/record/types.ts'
 export {
   WorkspaceStateStore,
   type WorkspaceFields,
@@ -504,6 +525,7 @@ export {
 export { RAMWorkspaceStateStore } from './workspace/store/ram.ts'
 export { S3WorkspaceStateStore } from './workspace/store/s3.ts'
 export { runWithSession } from './context/session_context.ts'
+export type { SessionProfile } from './workspace/session/profile.ts'
 export { CallFrame, type CallFrameInit, CallStack } from './shell/call_stack.ts'
 export {
   Job,
@@ -541,7 +563,13 @@ export { Runtime, type RuntimeEntry } from './runtime/base.ts'
 export { LanguageRuntime } from './runtime/language.ts'
 export { PythonRuntime } from './runtime/python/base.ts'
 export { JsRuntime } from './runtime/js/base.ts'
-export { bindCommands, DEFAULT_ENTRIES, runtimeBindingsFor, VFSRuntime } from './runtime/table.ts'
+export {
+  bindCommands,
+  DEFAULT_ENTRIES,
+  DEFAULT_PYTHON,
+  runtimeBindingsFor,
+  VFSRuntime,
+} from './runtime/table.ts'
 export {
   coerceRuntimeConfig,
   HOME_CONFIG_KEYS,
@@ -549,13 +577,18 @@ export {
   type RuntimeConfig,
 } from './runtime/config.ts'
 export { CrossMountError, EvalError } from './runtime/errors.ts'
+export { contentSize, DIR_MODE, FILE_MODE, mtimeMs } from './utils/stat_view.ts'
 export {
-  planFlush,
-  RuntimeVFS,
-  type FlushKind,
-  type VFSEntry,
-  type VFSStat,
-} from './runtime/vfs.ts'
+  classify,
+  FS_CONDITIONS,
+  type FsCondition,
+  gnuPhrase,
+  POSIX,
+  posixErrno,
+  type PosixErrno,
+} from './errors/index.ts'
+export { RuntimeVFS, type VFSEntry, type VFSStat } from './runtime/vfs.ts'
+export { FileTable, mergeWrites, planFlush, type FlushKind } from './runtime/handles/index.ts'
 export {
   EVALUATOR,
   isEvaluator,
@@ -686,7 +719,6 @@ export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {
   command,
-  type CommandDispatch,
   type CommandFn,
   type CommandFnResult,
   type CommandOptions,
@@ -701,7 +733,7 @@ export {
   CLISpec,
   type CLISpecInit,
   type CLIVerbFn,
-  type CLIVerbOpts,
+  type CLIDoors,
   type CLIConfigModel,
   type CLIInvocation,
   type WalkFlagBag,
@@ -715,6 +747,7 @@ export { DISCORD } from './commands/cli/builtin/discord/index.ts'
 export { NTN } from './commands/cli/builtin/ntn/index.ts'
 export { LINEAR } from './commands/cli/builtin/linear/index.ts'
 export { GIT } from './commands/cli/builtin/git/index.ts'
+export { GH } from './commands/cli/builtin/gh/index.ts'
 export { nodeHelp, walk } from './commands/cli/walk.ts'
 export { CLIRegistry } from './workspace/cli/registry.ts'
 export type { CLIInstall } from './workspace/cli/types.ts'
@@ -737,7 +770,6 @@ export {
   type ExecuteFn,
   lookupVar,
   type TSNodeLike,
-  unescapePath,
 } from './workspace/expand/index.ts'
 export { resolveGlobs, type ResourceWithGlob } from './workspace/expand/globs.ts'
 export {
@@ -940,6 +972,20 @@ export {
 export { GitHubAccessor, type GitHubResourceLike } from './accessor/github.ts'
 export { GITHUB_COMMANDS } from './commands/builtin/github/index.ts'
 export { GITHUB_OPS } from './ops/github/index.ts'
+export {
+  type GhConfig,
+  type GhConfigRedacted,
+  GhConfigSchema,
+  normalizeGhConfig,
+  redactGhConfig,
+} from './core/github/config.ts'
+export {
+  forkRepo as githubForkRepo,
+  login as githubLogin,
+  parseRepo as githubParseRepo,
+  renameRepo as githubRenameRepo,
+  viewRepo as githubViewRepo,
+} from './core/github/repo.ts'
 export { read as githubRead, stream as githubStream } from './core/github/read.ts'
 export { readdir as githubReaddir } from './core/github/readdir.ts'
 export {
@@ -1301,6 +1347,9 @@ export {
   snakeToCamel,
   type ValueTransform,
 } from './utils/normalize.ts'
+export { compareCodePoints, sortedByCodePoints } from './utils/sort.ts'
+export { advanceColumn, charWidth, isSpace, TAB_WIDTH } from './utils/width.ts'
+export { WHITESPACE, WIDE, ZERO_WIDTH } from './utils/generated/width_data.ts'
 export type { PgDriver, PgQueryResult } from './core/postgres/_driver.ts'
 export { PostgresAccessor } from './accessor/postgres.ts'
 export {
@@ -1478,6 +1527,13 @@ export {
   type NoMountError,
   readdirError,
 } from './utils/errors.ts'
+export {
+  needsShellQuote,
+  quotesOperands,
+  SHELL_QUOTED_COMMANDS,
+  shellQuote,
+  shellQuoteAlways,
+} from './utils/quote.ts'
 
 export {
   DatabricksVolumeAccessor,

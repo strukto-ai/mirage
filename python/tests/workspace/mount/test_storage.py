@@ -136,8 +136,8 @@ def test_path_outside_every_mount_falls_back_to_itself():
 
     class _NoMounts:
 
-        def mount_for(self, path: str):
-            raise ValueError(path)
+        def try_mount_for(self, path: str):
+            return None
 
     key = make_storage_key(_NoMounts())
     assert key(_spec("/nowhere/x.txt")) == "/nowhere/x.txt"

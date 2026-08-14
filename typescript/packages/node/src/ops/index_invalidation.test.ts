@@ -21,17 +21,13 @@ import { tmpRoot } from '../test-utils.ts'
 import { Workspace } from '../workspace.ts'
 
 // Disk carries a 60s index TTL, so a cached directory listing outlives a
-// mutation unless something evicts it. Two paths reach the same ops with
-// different guarantees, and both halves are load-bearing:
-//
-//   ws.dispatch -> Dispatcher, which calls invalidateAfterWriteByPath after
-//   every write op (mirroring Python's Dispatcher.invalidate_after_write).
-//   Forwarding the index here is safe.
-//
-//   ws.fs       -> OpsRegistry.call directly, never through the dispatcher,
-//   so nothing evicts anything. This is the path patchNodeFs and FUSE use,
-//   and it is why the ops factory still withholds the index from the mutable
-//   local backends via `forwardIndex: false`.
+// mutation unless something evicts it. Both surfaces reach the same ops
+// through the same door: ws.dispatch and ws.fs (the path patchNodeFs and
+// FUSE use) both run the Dispatcher, which calls invalidateAfterWriteByPath
+// after every write op, mirroring Python's Dispatcher.invalidate_after_write.
+// That is the whole guarantee, and it is why the ops factory forwards the
+// index to every backend in both languages: the door that populates the
+// listing is the door that evicts it.
 function diskWorkspace(): { ws: Workspace; cleanup: () => void } {
   const { root, cleanup } = tmpRoot('mirage-index-invalidation-')
   mkdirSync(join(root, 'seed'))
@@ -89,10 +85,23 @@ describe('dispatcher evicts the index after a write op', () => {
   })
 })
 
-describe('ws.fs bypasses the dispatcher, so its backends stay index-less', () => {
-  // Dropping `forwardIndex: false` makes these fail: ws.fs.readdir caches the
-  // listing into the index, ws.fs.mkdir never evicts it, and the next readdir
-  // replays the pre-mutation entries for the whole 60s TTL.
+describe('the fs facade evicts the index like the shell does', () => {
+  it('caches the listing in the first place, so the evictions below mean something', async () => {
+    // Non-vacuity guard. These backends used to be handed no index at
+    // all, which made every test in this file pass for the wrong
+    // reason: nothing was ever cached, so nothing needed evicting.
+    const { ws, cleanup } = diskWorkspace()
+    try {
+      const index = ws.registry.mountFor('/d').resource.index
+      expect(index).toBeDefined()
+      await ws.fs.readdir('/d')
+      expect((await index?.listDir('/d'))?.entries).toEqual(['/d/seed'])
+    } finally {
+      await ws.close()
+      cleanup()
+    }
+  })
+
   it('readdir reflects a mkdir issued through ws.fs', async () => {
     const { ws, cleanup } = diskWorkspace()
     try {

@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface OCIConfig {
@@ -24,20 +31,6 @@ export interface OCIConfig {
   sessionToken?: string
   profile?: string
   endpoint?: string
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
-
-export interface OCIConfigRedacted {
-  bucket: string
-  namespace: string
-  region: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  endpoint: string
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
@@ -56,6 +49,13 @@ const OCIConfigSchema = z.object({
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint the redactor fills in.
+export type OCIConfigRedacted = RedactedConfig<
+  ConfigOf<typeof OCIConfigSchema>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 function resolvedOciEndpoint(config: OCIConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

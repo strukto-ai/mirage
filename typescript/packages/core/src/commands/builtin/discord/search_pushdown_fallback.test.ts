@@ -65,7 +65,6 @@ describe('discord grep push-down fallback', () => {
         flags: { args_l: true, w: true },
         filetypeFns: null,
         cwd: '/',
-        resource,
         index: idx,
       },
     )
@@ -101,7 +100,6 @@ describe('discord rg push-down fallback', () => {
         flags: { w: true },
         filetypeFns: null,
         cwd: '/',
-        resource,
         index: idx,
       },
     )

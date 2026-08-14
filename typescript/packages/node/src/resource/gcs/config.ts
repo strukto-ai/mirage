@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export const GCS_ENDPOINT = 'https://storage.googleapis.com'
@@ -25,20 +32,6 @@ export interface GCSConfig {
   profile?: string
   endpoint?: string
   region?: string
-  timeoutMs?: number
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  proxy?: string
-}
-
-export interface GCSConfigRedacted {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  endpoint: string
-  region: string
   timeoutMs?: number
   forcePathStyle?: boolean
   keyPrefix?: string
@@ -58,6 +51,13 @@ const GCSConfigSchema = z.object({
   keyPrefix: z.string().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint the redactor fills in.
+export type GCSConfigRedacted = RedactedConfig<
+  ConfigOf<typeof GCSConfigSchema>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 export function gcsToS3Config(config: GCSConfig): S3Config {
   return {

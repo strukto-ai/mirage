@@ -165,3 +165,39 @@ def test_deeply_nested_not_raises_not_recursion_error():
     tokens = ["-not"] * 500 + ["-name", "x"]
     with pytest.raises(FindParseError):
         parse_find_expression(tokens)
+
+
+@pytest.mark.parametrize("tokens,op", [
+    (["!"], "!"),
+    (["-not"], "-not"),
+    (["-name", "a", "!"], "!"),
+    (["-name", "a", "-not"], "-not"),
+    (["!", "!"], "!"),
+    (["-name", "a", "-a"], "-a"),
+    (["-name", "a", "-and"], "-and"),
+    (["-name", "a", "-o"], "-o"),
+    (["-name", "a", "-or"], "-or"),
+])
+def test_operator_with_nothing_after_it_names_the_operator(tokens, op):
+    # GNU findutils 4.10.0, pinned on debian:stable-slim. Reachable only
+    # since `!` became an expression token: a dangling `!` used to be a
+    # start point, so find printed the whole tree and blamed a missing
+    # path instead.
+    with pytest.raises(FindParseError,
+                       match=f"^find: expected an expression after '{op}'$"):
+        parse_find_expression(tokens)
+
+
+@pytest.mark.parametrize("tokens,op", [
+    (["(", "!", ")"], "!"),
+    (["(", "-not", ")"], "-not"),
+    (["(", "-name", "a", "-a", ")"], "-a"),
+    (["(", "-name", "a", "-and", ")"], "-and"),
+    (["(", "-name", "a", "-o", ")"], "-o"),
+    (["(", "-name", "a", "-or", ")"], "-or"),
+])
+def test_operator_closed_by_paren_names_both(tokens, op):
+    with pytest.raises(
+            FindParseError,
+            match=f"^find: expected an expression between '{op}' and '\\)'$"):
+        parse_find_expression(tokens)

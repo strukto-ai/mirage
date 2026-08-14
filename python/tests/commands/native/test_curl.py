@@ -23,6 +23,7 @@ import pytest
 from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpConnectError, HttpResponse
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 
 
@@ -59,8 +60,12 @@ def _stub(monkeypatch, resp=None, exc=None) -> list[dict]:
     return calls
 
 
-def _run(*texts: str, **kwargs) -> tuple[bytes, object]:
-    body, io = asyncio.run(curl(NOOPAccessor(), [], *texts, **kwargs))
+def _run(*texts: str,
+         dispatch=None,
+         cwd=None,
+         **flags) -> tuple[bytes, object]:
+    opts = CommandOpts(dispatch=dispatch, cwd=cwd or "/", flags=flags)
+    body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), opts))
     if body is None:
         return b"", io
     return bytes(body), io
@@ -75,7 +80,7 @@ def test_get_returns_body(monkeypatch):
 
 def test_missing_url_is_usage_error_exit_2():
     with pytest.raises(UsageError) as excinfo:
-        asyncio.run(curl(NOOPAccessor(), []))
+        asyncio.run(curl(NOOPAccessor(), [], [], CommandOpts()))
     assert excinfo.value.exit_code == 2
     assert "no URL specified" in str(excinfo.value)
 

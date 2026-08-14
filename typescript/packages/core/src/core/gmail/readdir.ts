@@ -27,6 +27,7 @@ import {
   messageJsonBytes,
 } from './messages.ts'
 import { enoent } from '../../utils/errors.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const TITLE_MAX = 80
 const UNSAFE = /[^\w\s\-.]/g
@@ -128,7 +129,7 @@ export async function readdir(
       }
       bucket.push(rawMsg)
     }
-    const sortedDates = [...dateGroups.keys()].sort().reverse()
+    const sortedDates = [...dateGroups.keys()].sort(compareCodePoints).reverse()
     const dateEntries: [string, IndexEntry][] = []
     for (const dateStr of sortedDates) {
       const dateEntry = new IndexEntry({

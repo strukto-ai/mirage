@@ -19,6 +19,7 @@ import {
   PathSpec as PathSpecCtor,
   mountKey,
   mountPrefixOf,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchHeaders, listMessageUids, type FetchedMessage } from './_client.ts'
@@ -160,7 +161,7 @@ export async function readdir(
       }
       bucket.push(hdr)
     }
-    const sortedDates = [...dateGroups.keys()].sort().reverse()
+    const sortedDates = [...dateGroups.keys()].sort(compareCodePoints).reverse()
     const dateEntries: [string, IndexEntry][] = []
     for (const dateStr of sortedDates) {
       const dateEntry = new IndexEntry({

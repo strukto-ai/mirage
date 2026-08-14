@@ -14,31 +14,37 @@
 
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec, ResourceName } from '../../types.ts'
-import type { MountRoot, StatPath } from '../../ops/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
 import type { ScriptSource } from '../../runtime/policy/types.ts'
-import type { CommandDispatch, CommandFnResult } from '../config.ts'
+import type { CommandFnResult } from '../config.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { compileSpec } from '../spec/compile.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
 
 import { CommandSpec, type CommandSpecInit, type FlagValue, UsageStyle } from '../spec/types.ts'
 
 /**
- * The workspace doors a mount-reading CLI verb needs, as one field.
+ * One door per state plane, for the CLI verb that needs one.
  *
  * Most CLIs want none of this: an account CLI reaches a service and has
  * no filesystem, while `git`'s whole subject is a repository that lives
- * on a mount. So this rides `CLIInvocation.ops` and is absent outside a
+ * on a mount. So this rides `CLIInvocation.doors` and is absent outside a
  * workspace (a spec exercised directly in a test), and a verb that never
  * reads it cannot touch a mount. That is the same opt-in a declared
  * parameter gave, moved onto the one record every leaf already takes.
+ *
+ * The field names and types are `CommandOpts`' (commands/config.ts),
+ * deliberately: a fact reached from a CLI leaf and the same fact reached
+ * from a command handler must be spelled the same way, or the two tiers
+ * grow separate vocabularies for one plane.
  */
-export interface CLIVerbOpts {
+export interface CLIDoors {
   /**
    * The workspace op dispatcher. A CLI routes by name rather than by operand,
    * so nothing hands it an accessor; a verb that works over a mount (git over a
    * checkout) reaches one through this instead.
    */
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   /**
    * Dispatcher-backed stat of one path, asking both channels a backend can
    * answer on. On a prefix store a directory is the set of keys under it rather
@@ -48,12 +54,23 @@ export interface CLIVerbOpts {
    */
   statPath?: StatPath
   /**
-   * The mount prefix serving a virtual path. A mount boundary is a filesystem
+   * The name plane's door, holding the facts no backend can see: symlinks,
+   * mount boundaries, the attr overlay, the child names the namespace owes a
+   * directory. A verb that walks a tree itself needs this or it silently
+   * cannot see a link, the way `git status` could not. `ns.mounts.rootOf` is
+   * where a mount prefix comes from: a mount boundary is a filesystem
    * boundary, which is where git stops looking for a repository
-   * (GIT_DISCOVERY_ACROSS_FILESYSTEM); crossing it would probe an unrelated
-   * backend.
+   * (GIT_DISCOVERY_ACROSS_FILESYSTEM).
    */
-  mountRoot?: MountRoot
+  ns?: NamespaceView
+  /**
+   * The session plane's door, live and gated for both reads and writes.
+   * `inv.env` stays the frozen process view, which is what a script or native
+   * handler maps onto a real process environment; a verb that wants liveness,
+   * or wants to write, reads this instead. Env is not a mount, so an account
+   * CLI may read it without breaking the tier rule.
+   */
+  sessionView?: SessionView
 }
 
 /**
@@ -64,7 +81,7 @@ export interface CLIVerbOpts {
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
  * consults no mount, so there is no resource, no mount prefix, and no
  * filetype cascade; the config carries whatever the handler needs, and a
- * verb whose subject is files reads `ops`.
+ * verb whose subject is files reads `doors`.
  */
 export interface CLIInvocation<ConfigT = unknown> {
   /** The installation's validated config, null without a configModel. */
@@ -79,14 +96,18 @@ export interface CLIInvocation<ConfigT = unknown> {
   flags: Record<string, FlagValue>
   /** Piped input, null when the line has none. */
   stdin: ByteSource | null
-  /** The session's environment variables. */
+  /**
+   * The session's environment variables, as one frozen process-view
+   * snapshot. A leaf that wants the live, gated handle reads
+   * `doors.sessionView`.
+   */
   env: Readonly<Record<string, string>>
   /**
    * The workspace doors a mount-reading verb needs (`git`), absent
    * outside a workspace and for every CLI that reaches a service instead
    * of a filesystem.
    */
-  ops?: CLIVerbOpts
+  doors?: CLIDoors
 }
 
 /**

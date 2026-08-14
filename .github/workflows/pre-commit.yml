@@ -67,3 +67,15 @@ jobs:
 
       - name: Spec parity
         run: ./python/.venv/bin/python scripts/check_spec_parity.py
+
+      - name: Width table drift
+        run: |
+          ./python/.venv/bin/python scripts/gen_width_table.py
+          git diff --exit-code python/mirage/utils/generated \
+            typescript/packages/core/src/utils/generated integ/fixtures/wc
+
+      # Runs --strict, which does not demand zero divergences: it fails only
+      # when the count moves off the committed baseline in either direction,
+      # so new drift is blocked and a closed divergence has to be locked in.
+      - name: Layout parity
+        run: ./python/.venv/bin/python scripts/check_layout_parity.py --strict

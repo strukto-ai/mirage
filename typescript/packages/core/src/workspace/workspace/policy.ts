@@ -25,7 +25,8 @@ import type { MountResolver } from '../../runtime/resolver.ts'
 import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionManager } from '../session/manager.ts'
+import type { Session } from '../session/session.ts'
+import { envSnapshot } from '../session/state.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
 
@@ -41,7 +42,6 @@ export class PolicyRouter {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
   private readonly policy: PolicyFn | null
-  private readonly sessions: SessionManager
   private readonly agentId: string | null
   private readonly resolver: MountResolver
 
@@ -49,14 +49,12 @@ export class PolicyRouter {
     registry: MountRegistry,
     runtimes: Runtimes,
     policy: PolicyFn | null,
-    sessions: SessionManager,
     agentId: string | null,
     resolver: MountResolver,
   ) {
     this.registry = registry
     this.runtimes = runtimes
     this.policy = policy
-    this.sessions = sessions
     this.agentId = agentId
     this.resolver = resolver
   }
@@ -65,6 +63,7 @@ export class PolicyRouter {
     root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
+    session: Session,
   ): Promise<PolicyDecision | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     if (options.runtime !== undefined) {
@@ -88,16 +87,14 @@ export class PolicyRouter {
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (this.policy === null && !hasScripts) return null
     const commands = parsedCommands(root, this.registry.clis.names())
-    const sessionId = options.sessionId ?? this.sessions.defaultId
-    const session = this.sessions.get(sessionId)
     const ctx: PolicyContext = {
       line: command,
       commands,
       command: commands[0]?.command ?? '',
       builtin: commands[0]?.builtin ?? false,
       cwd: options.cwd ?? session.cwd,
-      env: { ...session.env, ...(options.env ?? {}) },
-      sessionId,
+      env: { ...envSnapshot(session), ...(options.env ?? {}) },
+      sessionId: session.sessionId,
       agentId: options.agentId ?? this.agentId ?? '',
       mounts: this.resolver.prefixes(),
     }

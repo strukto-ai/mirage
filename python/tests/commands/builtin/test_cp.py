@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.commands import COMMANDS as _CMDS
+from mirage.commands.config import CommandOpts
 from mirage.core.ram.write import write_bytes
 from mirage.types import PathSpec
 
@@ -44,8 +45,7 @@ def test_cp_recursive(backend):
         cp_cmd(accessor, [
             PathSpec.from_str_path("/tmp/src/"),
             PathSpec.from_str_path("/tmp/dst/"),
-        ],
-               r=True))
+        ], [], CommandOpts(flags={"r": True})))
     assert _cat_sync(backend,
                      PathSpec.from_str_path("/tmp/dst/a.txt")) == b"aaa"
     assert _cat_sync(backend,

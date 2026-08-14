@@ -113,11 +113,29 @@ export interface ExecuteResultContext {
   exitCode: number
 }
 
+/**
+ * Facts about one session-state mutation, as preSession hooks see it.
+ * Fires on the session plane before the write lands, so it holds
+ * whichever tier asked. Not an OpsContext: a session key is not a
+ * path, and a path-scoped policy must never receive one dressed as a
+ * path and match it by accident. `value` is null for an unset.
+ * `sessionId` says which session is writing, so a policy can scope a
+ * rule to one agent (deny `set` for session X).
+ */
+export interface SessionContext {
+  plane: string
+  verb: string
+  key: string
+  value: string | null
+  sessionId: string
+}
+
 export const VALIDITY: Readonly<
-  Record<'preCommand' | 'preOps' | 'postOps' | 'postExecute', ReadonlySet<string>>
+  Record<'preCommand' | 'preOps' | 'postOps' | 'postExecute' | 'preSession', ReadonlySet<string>>
 > = {
   preCommand: new Set(['deny']),
   preOps: new Set(['deny']),
   postOps: new Set(['deny', 'limit']),
   postExecute: new Set(['limit']),
+  preSession: new Set(['deny']),
 }

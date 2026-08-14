@@ -1,0 +1,500 @@
+{
+  "suite": "guestops",
+  "cases": [
+    {
+      "id": "monty_w_creates_an_empty_file",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/new.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /data/new.txt"],
+            "ops_absent": ["write /data/new.txt", "append /data/new.txt"]
+          }
+        },
+        {
+          "command": "cat /data/new.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "monty_w_truncates_at_open",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'w').close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["truncate /data/seed.txt"],
+            "ops_absent": ["create /data/seed.txt"]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "monty_w_write_flushes_after_the_create",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"f = open('/data/out.txt', 'w'); f.write('hi'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /data/out.txt"]
+          }
+        },
+        {
+          "command": "cat /data/out.txt",
+          "expect": { "exit": 0, "stdout": "hi" }
+        }
+      ]
+    },
+    {
+      "id": "monty_a_creates_then_appends",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"f = open('/data/log.txt', 'a'); f.write('one\\n'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /data/log.txt", "append /data/log.txt"]
+          }
+        },
+        {
+          "command": "python3 -c \"f = open('/data/log.txt', 'a'); f.write('two\\n'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["append /data/log.txt"],
+            "ops_absent": ["create /data/log.txt", "truncate /data/log.txt"]
+          }
+        },
+        {
+          "command": "cat /data/log.txt",
+          "expect": { "exit": 0, "stdout": "one\ntwo\n" }
+        }
+      ]
+    },
+    {
+      "id": "monty_cannot_spell_exclusive",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'x')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "exclusive creation mode is not supported"
+          }
+        }
+      ]
+    },
+    {
+      "id": "monty_cannot_spell_update",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'r+')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "update modes ('+') are not yet supported"
+          }
+        }
+      ]
+    },
+    {
+      "id": "monty_refuses_a_bad_mode_word",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'rr')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "must have exactly one of create/read/write/append mode"
+          }
+        }
+      ]
+    },
+    {
+      "id": "monty_iterdir_classifies_through_stat",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"from pathlib import Path; print(sorted(str(p).split('/')[-1] for p in Path('/data').iterdir()))\"",
+          "expect": { "exit": 0, "stdout": "['seed.txt', 'sub']\n" }
+        },
+        {
+          "command": "python3 -c \"from pathlib import Path; print(Path('/data/sub').is_dir(), Path('/data/seed.txt').is_file())\"",
+          "expect": { "exit": 0, "stdout": "True True\n" }
+        }
+      ]
+    },
+    {
+      "id": "monty_guest_reads_share_the_shell_ledger",
+      "hosts": ["python"],
+      "world": {
+        "runtimes": ["monty", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"print(open('/data/seed.txt').read().strip())\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "seed\n",
+            "ops_contain": ["read /data/seed.txt"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "qjs_w_creates_an_empty_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/data/new.txt', 'w'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /data/new.txt"],
+            "ops_absent": ["write /data/new.txt"]
+          }
+        },
+        {
+          "command": "cat /data/new.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "qjs_w_truncates_at_open",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/data/seed.txt', 'w'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["truncate /data/seed.txt"],
+            "ops_absent": ["create /data/seed.txt"]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "qjs_wx_refuses_an_existing_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"console.log(std.open('/data/seed.txt', 'wx') === null)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "true\n",
+            "ops_absent": ["create /data/seed.txt", "truncate /data/seed.txt", "write /data/seed.txt"]
+          }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": { "exit": 0, "stdout": "seed\n" }
+        }
+      ]
+    },
+    {
+      "id": "qjs_wx_creates_a_missing_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const f = std.open('/data/fresh.txt', 'wx'); f.puts('fresh'); f.close()\"",
+          "expect": {
+            "exit": 0,
+            "ops_contain": ["create /data/fresh.txt"]
+          }
+        },
+        {
+          "command": "cat /data/fresh.txt",
+          "expect": { "exit": 0, "stdout": "fresh" }
+        }
+      ]
+    },
+    {
+      "id": "qjs_rplus_refuses_a_missing_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"console.log(std.open('/data/nope.txt', 'r+') === null)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "true\n",
+            "ops_absent": ["create /data/nope.txt"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "qjs_refuses_a_bad_mode_word",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "js -e \"std.open('/data/seed.txt', 'rr')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "invalid file mode"
+          }
+        }
+      ]
+    },
+    {
+      "id": "qjs_readdir_classifies_through_stat",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["quickjs", "vfs"],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "js -e \"const [names] = os.readdir('/data'); console.log(names.filter((n) => !n.startsWith('.')).sort().join(','))\"",
+          "expect": { "exit": 0, "stdout": "seed.txt,sub\n" }
+        },
+        {
+          "command": "js -e \"const [d] = os.stat('/data/sub'); const [f] = os.stat('/data/seed.txt'); console.log((d.mode & os.S_IFMT) === os.S_IFDIR, (f.mode & os.S_IFMT) === os.S_IFREG)\"",
+          "expect": { "exit": 0, "stdout": "true true\n" }
+        }
+      ]
+    },
+    {
+      "id": "pyodide_w_creates_an_empty_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["pyodide", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/new.txt', 'w').close()\"",
+          "expect": { "exit": 0 }
+        },
+        {
+          "command": "cat /data/new.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "pyodide_w_truncates_at_open",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["pyodide", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'w').close()\"",
+          "expect": { "exit": 0 }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": { "exit": 0, "stdout": "" }
+        }
+      ]
+    },
+    {
+      "id": "pyodide_x_is_exclusive",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["pyodide", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/seed.txt', 'x')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "FileExistsError"
+          }
+        },
+        {
+          "command": "python3 -c \"f = open('/data/fresh.txt', 'x'); f.write('fresh'); f.close()\"",
+          "expect": { "exit": 0 }
+        },
+        {
+          "command": "cat /data/fresh.txt",
+          "expect": { "exit": 0, "stdout": "fresh" }
+        }
+      ]
+    },
+    {
+      "id": "pyodide_rplus_refuses_a_missing_file",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["pyodide", "vfs"],
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"open('/data/nope.txt', 'r+')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "FileNotFoundError"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pyodide_listdir_classifies_through_stat",
+      "hosts": ["typescript"],
+      "world": {
+        "runtimes": ["pyodide", "vfs"],
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print(sorted(os.listdir('/data'))); print(os.path.isdir('/data/sub'), os.path.isfile('/data/seed.txt'))\"",
+          "expect": { "exit": 0, "stdout": "['seed.txt', 'sub']\nTrue True\n" }
+        }
+      ]
+    },
+    {
+      "id": "facade_probes_answer_through_the_door",
+      "world": {
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": { "method": "exists", "path": "/data/seed.txt" },
+          "expect": { "value": true }
+        },
+        {
+          "facade": { "method": "exists", "path": "/data/nope.txt" },
+          "expect": { "value": false }
+        },
+        {
+          "facade": { "method": "is_dir", "path": "/data/sub" },
+          "expect": { "value": true }
+        },
+        {
+          "facade": { "method": "is_file", "path": "/data/seed.txt" },
+          "expect": { "value": true }
+        },
+        {
+          "facade": { "method": "is_file", "path": "/data/sub" },
+          "expect": { "value": false }
+        },
+        {
+          "facade": { "method": "cat", "path": "/data/seed.txt" },
+          "expect": { "value": "seed\n", "ops_contain": ["read /data/seed.txt"] }
+        },
+        {
+          "facade": { "method": "list_files", "path": "/data" },
+          "expect": { "value": ["seed.txt"] }
+        }
+      ]
+    },
+    {
+      "id": "facade_append_lands_on_the_one_ledger",
+      "world": {
+        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+      },
+      "steps": [
+        {
+          "facade": { "method": "append", "path": "/data/seed.txt", "data": "more\n" },
+          "expect": { "ops_contain": ["append /data/seed.txt"] }
+        },
+        {
+          "command": "cat /data/seed.txt",
+          "expect": { "exit": 0, "stdout": "seed\nmore\n" }
+        }
+      ]
+    }
+  ]
+}

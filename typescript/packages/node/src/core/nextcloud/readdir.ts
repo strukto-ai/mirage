@@ -8,6 +8,7 @@ import {
   stripSlash,
   type IndexCacheStore,
   type PathSpec,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { SCOPE_ERROR } from './constants.ts'
@@ -68,7 +69,7 @@ export async function readdir(
   if (names.length === 1 && names[0] === targetKey && !directories.has(targetKey)) {
     throw enotdir(path)
   }
-  names.sort()
+  names.sort(compareCodePoints)
   if (names.length > SCOPE_ERROR) {
     console.warn(
       `nextcloud readdir: ${virtualKey} returned ${String(names.length)} entries (limit ${String(SCOPE_ERROR)})`,
@@ -93,5 +94,5 @@ export async function readdir(
       }),
     )
   }
-  return names.map((key) => (prefix !== '' ? `${prefix}${key}` : key)).sort()
+  return names.map((key) => (prefix !== '' ? `${prefix}${key}` : key)).sort(compareCodePoints)
 }

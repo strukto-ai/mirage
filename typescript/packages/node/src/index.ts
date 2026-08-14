@@ -29,7 +29,8 @@ export {
   RedisNamespaceStore,
   type RedisNamespaceStoreOptions,
 } from './workspace/namespace/redis.ts'
-export { DiskRecordClient, DiskSessionStore } from './workspace/session/disk.ts'
+export { DiskRecordClient } from './workspace/record/disk.ts'
+export { DiskSessionStore } from './workspace/session/disk.ts'
 export { RedisSessionStore, type RedisSessionStoreOptions } from './workspace/session/redis.ts'
 export {
   DEFAULT_STATE_ROOT,

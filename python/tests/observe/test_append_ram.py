@@ -14,25 +14,15 @@
 
 import asyncio
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.ops.config import OpsMount
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
 
 
 def _make_ops() -> tuple[Ops, RAMResource]:
     mem = RAMResource()
-    mount = OpsMount(
-        prefix="/data/",
-        resource_type="ram",
-        accessor=mem.accessor,
-        index=RAMIndexCacheStore(),
-        mode=MountMode.WRITE,
-        ops=mem.ops_list(),
-    )
-    ops = Ops(mounts=[mount])
-    return ops, mem
+    ws = Workspace({"/data/": mem}, mode=MountMode.WRITE)
+    return ws.ops, mem
 
 
 def test_append_creates_file():

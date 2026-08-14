@@ -18,6 +18,7 @@ import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { buildTree, emitStartPath, keep, startBasename } from '../../commands/builtin/findEval.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 function strip(path: PathSpec): string {
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
@@ -49,7 +50,7 @@ export function find(
   let startKind: 'd' | 'f' | null = base === '' ? 'd' : null
   let startSize = 0
   let hasChild = false
-  const sortedKeys = Object.keys(accessor.tree).sort()
+  const sortedKeys = Object.keys(accessor.tree).sort(compareCodePoints)
   for (const p of sortedKeys) {
     const entry = accessor.tree[p]
     if (entry === undefined) continue
@@ -100,5 +101,5 @@ export function find(
       maxSize: options.maxSize,
     })
   }
-  return Promise.resolve(results.sort())
+  return Promise.resolve(results.sort(compareCodePoints))
 }

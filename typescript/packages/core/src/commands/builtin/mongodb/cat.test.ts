@@ -72,7 +72,6 @@ describe('mongodb cat error surfacing', () => {
         flags: {},
         filetypeFns: null,
         cwd: '/',
-        resource: { kind: 'mongodb' } as never,
       }),
     ).rejects.toThrow(message)
   })
@@ -88,7 +87,6 @@ describe('mongodb cat error surfacing', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'mongodb' } as never,
     })
     expect(result).not.toBeNull()
     if (result === null) return

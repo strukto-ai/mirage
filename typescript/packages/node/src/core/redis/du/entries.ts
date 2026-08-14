@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core'
-import { rstripSlash } from '@struktoai/mirage-core'
+import { compareCodePoints, rstripSlash } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 import { norm } from '../utils.ts'
 
@@ -26,7 +26,7 @@ export async function entries(
   const prefix = rstripSlash(p) + '/'
   const found: [string, number][] = []
   let total = 0
-  for (const key of [...(await store.listFiles())].sort()) {
+  for (const key of [...(await store.listFiles())].sort(compareCodePoints)) {
     if (key === p || key.startsWith(prefix)) {
       const size = await store.fileLen(key)
       found.push([key, size])

@@ -20,17 +20,12 @@ import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { formatRecords } from '../utils/output.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { advanceColumn, isSpace } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
-function countChar(text: string, ch: string): number {
-  let n = 0
-  for (const c of text) if (c === ch) n += 1
-  return n
-}
 
 export interface WcRow {
   values: number[]
@@ -69,17 +64,42 @@ export function parseFlags(flags: Record<string, FlagValue>): WcFlags | string {
   }
 }
 
+// Word splitting and column geometry are separate questions about the same
+// character: `\t` both ends a word and jumps to the next tab stop, while a
+// combining mark ends nothing and occupies nothing. maxLineLength is a
+// running maximum rather than a per-line one because carriage return and form
+// feed rewind the column without ending the line -- which is why the old
+// `split(/\r?\n/)` could not express it. Mirrors Python's `_scan_text`.
 function countsOf(data: Uint8Array): WcCounts {
   const text = DEC.decode(data)
-  return {
-    lines: countChar(text, '\n'),
-    words: text.split(/\s+/u).filter((s) => s !== '').length,
-    bytes: data.byteLength,
-    chars: Array.from(text).length,
-    maxLineLength: text
-      .split(/\r?\n/u)
-      .reduce((m, line) => Math.max(m, Array.from(line).length), 0),
+  let lines = 0
+  let words = 0
+  let chars = 0
+  let inWord = false
+  let column = 0
+  let maxLineLength = 0
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0
+    chars += 1
+    if (isSpace(cp)) {
+      if (inWord) {
+        words += 1
+        inWord = false
+      }
+    } else {
+      inWord = true
+    }
+    if (cp === 0x0a) {
+      lines += 1
+      if (column > maxLineLength) maxLineLength = column
+      column = 0
+      continue
+    }
+    column = advanceColumn(column, cp)
+    if (column > maxLineLength) maxLineLength = column
   }
+  if (inWord) words += 1
+  return { lines, words, bytes: data.byteLength, chars, maxLineLength }
 }
 
 function selectedValues(counts: WcCounts, flags: WcFlags): number[] {

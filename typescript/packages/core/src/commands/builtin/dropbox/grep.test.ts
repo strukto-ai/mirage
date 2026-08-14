@@ -22,7 +22,6 @@ vi.mock('../generic/grep.ts', () => ({ grepGeneric: vi.fn() }))
 import { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import type { DropboxTokenManager } from '../../../core/dropbox/_client.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { Resource } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { grepGeneric } from '../generic/grep.ts'
@@ -51,7 +50,6 @@ async function runGrep(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
   }
   return cmd.fn(makeAccessor(), [scope()], ['needle'], opts)
 }

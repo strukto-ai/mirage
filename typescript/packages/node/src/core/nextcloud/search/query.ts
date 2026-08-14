@@ -81,20 +81,28 @@ function nameCondition(node: Extract<PredNode, { op: 'name' }>): string {
 function compilePredicate(node: PredNode): CompiledPredicate | null {
   switch (node.op) {
     case 'true':
-      return { condition: null }
+      return { condition: null, negatable: false }
     case 'name':
-      return node.pattern.includes('[') ? null : { condition: nameCondition(node) }
+      return node.pattern.includes('[') ? null : { condition: nameCondition(node), negatable: true }
     case 'type':
-      if (node.kind === 'd') return { condition: isCollection() }
-      if (node.kind === 'f') return { condition: negate(isCollection()) }
+      if (node.kind === 'd') return { condition: isCollection(), negatable: true }
+      if (node.kind === 'f') return { condition: negate(isCollection()), negatable: false }
       return null
     case 'not': {
       const compiled = compilePredicate(node.kid)
-      return compiled?.condition != null ? { condition: negate(compiled.condition) } : null
+      if (compiled?.condition == null) return null
+      // Nextcloud inverts a `<d:not>` by swapping the comparison inside it
+      // for its opposite, so the only thing it can negate is a single
+      // comparison; anything else raises server-side and comes back as a 500.
+      // Refusing here is what falls the whole find back to the scan walk,
+      // which has no such limit.
+      if (!compiled.negatable) return null
+      return { condition: negate(compiled.condition), negatable: false }
     }
     case 'and':
     case 'or': {
       const conditions: string[] = []
+      let negatable = false
       for (const kid of node.kids) {
         const compiled = compilePredicate(kid)
         if (compiled === null) return null
@@ -103,10 +111,18 @@ function compilePredicate(node: PredNode): CompiledPredicate | null {
           continue
         }
         conditions.push(compiled.condition)
+        negatable = compiled.negatable
       }
-      if (conditions.length === 0) return node.op === 'and' ? { condition: null } : null
+      if (conditions.length === 0)
+        return node.op === 'and' ? { condition: null, negatable: false } : null
       const operation = node.op === 'and' ? BooleanOperation.AND : BooleanOperation.OR
-      return { condition: combine(operation, conditions) }
+      // `combine` returns a lone condition unwrapped, so a one-armed group is
+      // still exactly whatever that arm was, negatable included. With two or
+      // more arms the result is a `<d:and>`/`<d:or>`, which is not.
+      return {
+        condition: combine(operation, conditions),
+        negatable: conditions.length === 1 && negatable,
+      }
     }
     case 'path':
     case 'empty':

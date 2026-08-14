@@ -16,6 +16,7 @@ import type { GitHubAccessor } from '../../../accessor/github.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { PathSpec } from '../../../types.ts'
 import { strip } from './walk.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 export function entries(
   accessor: GitHubAccessor,
@@ -32,6 +33,6 @@ export function entries(
       total += entry.size ?? 0
     }
   }
-  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  out.sort((a, b) => compareCodePoints(a[0], b[0]))
   return Promise.resolve([out, total])
 }

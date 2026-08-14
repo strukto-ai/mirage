@@ -50,6 +50,7 @@ export interface SearchTarget {
 
 export interface CompiledPredicate {
   condition: string | null
+  negatable: boolean
 }
 
 export type ComparisonOperator = (typeof Comparison)[keyof typeof Comparison]

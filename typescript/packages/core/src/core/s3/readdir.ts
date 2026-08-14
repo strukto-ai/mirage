@@ -19,6 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, loadS3Module, s3Prefix } from './_client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export async function readdir(
   accessor: S3Accessor,
@@ -107,7 +108,7 @@ export async function readdir(
   // so commands like `ls` can stat each entry without re-resolving.
   const mountPrefix = prefix
   const virtualDir = rawPath === '' || rawPath === '/' ? '/' : rstripSlash(rawPath) + '/'
-  const sortedNames = [...entries].sort()
+  const sortedNames = [...entries].sort(compareCodePoints)
   const virtualEntries = sortedNames.map((name) => `${mountPrefix}${virtualDir}${name}`)
 
   // Populate the index as a side-effect so future stat()/readdir() calls

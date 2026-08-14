@@ -31,6 +31,7 @@ import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const UNSTAGED_HEADER = 'Unstaged changes after reset:'
@@ -76,20 +77,18 @@ export function restored(oid: string, mode: number): StagedEntry {
  * unstaged.
  */
 export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   let unstaged: Map<string, string>
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkOperands(texts, UnknownSwitchError)
-    const repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     const start = startPoint(fl)
@@ -121,6 +120,7 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
       repo.location,
       new Set(after.entries.keys()),
       UNTRACKED_NO,
+      doors.ns?.links ?? null,
     )
     unstaged = await workChanges(repo, dispatch, repo.location.worktree, after.entries, found)
   } catch (err) {
@@ -129,6 +129,12 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
   }
   if (unstaged.size === 0) return [null, new IOResult()]
   const lines = [UNSTAGED_HEADER]
-  for (const [path, letter] of [...unstaged.entries()].sort()) lines.push(`${letter}\t${path}`)
+  // Python is `sorted(unstaged.items())`, a tuple sort: path then letter.
+  // A bare .sort() here compared `${path},${letter}` instead, which orders
+  // `a+b` before `a` because ',' outranks '+'.
+  const entries = [...unstaged.entries()].sort(
+    (a, b) => compareCodePoints(a[0], b[0]) || compareCodePoints(a[1], b[1]),
+  )
+  for (const [path, letter] of entries) lines.push(`${letter}\t${path}`)
   return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]
 }

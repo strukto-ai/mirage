@@ -38,6 +38,7 @@ import {
   windowBounds,
 } from './day.ts'
 import { listCalendars, listEvents } from './client.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const CALENDAR_DIR = 'gcal/calendar_dir'
 export const CALENDAR_JSON = 'gcal/calendar_json'
@@ -184,7 +185,7 @@ export async function readdir(
 
   if (key === '') {
     const entries: [string, IndexEntry][] = [...calendars.entries()]
-      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .sort((a, b) => compareCodePoints(a[0], b[0]))
       .map(([name, entry]) => [
         name,
         new IndexEntry({
@@ -229,7 +230,7 @@ export async function readdir(
         }),
       ],
     ]
-    for (const day of [...seen].sort()) {
+    for (const day of [...seen].sort(compareCodePoints)) {
       rows.push([
         day,
         new IndexEntry({

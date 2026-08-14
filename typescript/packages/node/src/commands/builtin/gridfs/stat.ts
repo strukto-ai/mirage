@@ -40,7 +40,7 @@ async function statCommand(
   return statGeneric(
     resolved,
     opts,
-    overlaidStat((p) => gridfsStat(accessor, p, opts.index ?? undefined), opts.statOverlay),
+    overlaidStat((p) => gridfsStat(accessor, p, opts.index ?? undefined), opts.ns?.statOverlay),
   )
 }
 

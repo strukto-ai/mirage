@@ -49,6 +49,7 @@ import {
   streamItem,
   writeItem,
 } from '../msgraph/drive.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 function directoryPath(path: PathSpec): PathSpec {
   return path.pattern !== null ? path.dir : path
@@ -138,7 +139,7 @@ async function cacheNamespace(
       ]),
     )
   }
-  return names.map((name) => `${prefix}${base}/${name}`).sort()
+  return names.map((name) => `${prefix}${base}/${name}`).sort(compareCodePoints)
 }
 
 export async function readdir(
@@ -455,7 +456,7 @@ async function findNamespace(
     minSize: options.minSize,
     maxSize: options.maxSize,
   })
-  return results.sort()
+  return results.sort(compareCodePoints)
 }
 
 export async function find(

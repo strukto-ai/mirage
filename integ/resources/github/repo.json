@@ -142,6 +142,45 @@
         "stdout": "/repo/docs/architecture.md\n/repo/src/auth/step_1.py\n/repo/src/route/step_3.py\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "github_find_empty",
+      "seq": 530012,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_find_empty_composes_with_name",
+      "seq": 530013,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo/docs -name '*.md' -not -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/docs/contributing.md\n/repo/docs/release.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "github_find_bang_composes_with_empty",
+      "seq": 530014,
+      "targets": [
+        "github"
+      ],
+      "command": "find /repo/docs -name '*.md' ! -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/repo/docs/architecture.md\n/repo/docs/contributing.md\n/repo/docs/release.md\n",
+        "stderr": ""
+      }
     }
   ]
 }

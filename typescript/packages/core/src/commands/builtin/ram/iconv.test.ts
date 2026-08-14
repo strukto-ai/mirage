@@ -34,7 +34,6 @@ async function runIconv(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: new Uint8Array(), exitCode: -1 }
   const [out, ioResult] = result

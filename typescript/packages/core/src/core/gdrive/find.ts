@@ -18,6 +18,7 @@ import type { FindOptions } from '../../resource/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFolder, resolveKey } from './resolve.ts'
 import { iterTree } from './tree.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 async function dirExists(accessor: GDriveAccessor, path: PathSpec): Promise<boolean> {
   if (path.resourcePath === '') return true
@@ -97,5 +98,5 @@ export async function find(
       maxSize: options.maxSize,
     })
   }
-  return results.sort()
+  return results.sort(compareCodePoints)
 }

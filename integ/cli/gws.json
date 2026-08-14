@@ -845,6 +845,71 @@
         "stdout": "Serial number\nContact email\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_sheets_quoted_tab_reads_the_whole_worksheet",
+      "seq": 563068,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Quoted Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateSheetProperties\":{\"properties\":{\"sheetId\":0,\"title\":\"Jun-Jul_2025\"},\"fields\":\"title\"}}]}' > /dev/null; gws sheets write --spreadsheet $SID --range \"'Jun-Jul_2025'!A1\" --json-values '[[\"region\",\"revenue\"],[\"emea\",120]]' > /dev/null; gws sheets read --spreadsheet $SID --range \"'Jun-Jul_2025'\" | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"region\",\"revenue\"],[\"emea\",\"120\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_update_cells_clears_what_the_rows_do_not_cover",
+      "seq": 563069,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Clear Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"a\"],[\"b\"],[\"c\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateCells\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":3},\"fields\":\"userEnteredValue\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range Sheet1 | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"a\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_update_cells_writes_typed_values",
+      "seq": 563070,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Typed Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateCells\":{\"start\":{\"sheetId\":0,\"rowIndex\":0,\"columnIndex\":0},\"rows\":[{\"values\":[{\"userEnteredValue\":{\"stringValue\":\"emea\"}},{\"userEnteredValue\":{\"numberValue\":120}},{\"userEnteredValue\":{\"boolValue\":true}}]}],\"fields\":\"userEnteredValue\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range Sheet1 | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"emea\",\"120\",\"TRUE\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_whole_column_range_reads_every_row",
+      "seq": 563071,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Column Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"region\",\"revenue\"],[\"emea\",120]]' > /dev/null; gws sheets read --spreadsheet $SID --range A:Z | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"region\",\"revenue\"],[\"emea\",\"120\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_update_cells_format_mask_leaves_values_alone",
+      "seq": 563072,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Format Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"a\"],[\"b\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateCells\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":2},\"rows\":[{\"values\":[{\"userEnteredValue\":{\"stringValue\":\"zzz\"}}]}],\"fields\":\"userEnteredFormat.numberFormat\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range Sheet1 | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"a\"],[\"b\"]]\n",
+        "stderr": ""
+      }
     }
   ]
 }

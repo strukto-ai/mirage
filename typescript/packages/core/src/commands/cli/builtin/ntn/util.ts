@@ -17,6 +17,7 @@ import type { NotionConfig } from '../../../../core/notion/config.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const CHECKED = '✓'
@@ -44,7 +45,7 @@ function sortDeep(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value
   const source = value as Record<string, unknown>
   const out: Record<string, unknown> = {}
-  for (const key of Object.keys(source).sort()) out[key] = sortDeep(source[key])
+  for (const key of Object.keys(source).sort(compareCodePoints)) out[key] = sortDeep(source[key])
   return out
 }
 

@@ -248,6 +248,49 @@ def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
     return a if MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] else b
 
 
+@dataclass(frozen=True, slots=True)
+class HiddenPaths:
+    """What the data door treats as nonexistent for one session.
+
+    A sibling of ``Session.mount_modes``: per-session narrowing that
+    the doors enforce, None-on-the-session means unrestricted. Hiding
+    is "does not exist", never "forbidden" — matching paths answer
+    ENOENT and drop out of listings, the same no-name-leak rule
+    ``mount_allowed`` applies to ungranted mounts.
+
+    Args:
+        paths (tuple[str, ...]): exact virtual paths. Hiding a path
+            hides its whole subtree (a name you cannot see cannot be a
+            parent you traverse), so a mount root entry hides the
+            mount.
+        patterns (tuple[str, ...]): globs. A pattern with no ``/``
+            matches any single name component anywhere; a pattern
+            containing ``/`` is anchored to the full virtual path, with
+            ``*`` crossing slashes exactly as GNU ``find -path`` does.
+    """
+
+    paths: tuple[str, ...] = ()
+    patterns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class HiddenVars:
+    """What the session door treats as unset for one session.
+
+    Enforced where env leaves the session: ``get`` misses, ``snapshot``
+    omits, expansion sees unset. Field names differ from
+    ``HiddenPaths`` on purpose — the planes' matching semantics differ,
+    so the specs are not interchangeable.
+
+    Args:
+        names (tuple[str, ...]): exact variable names.
+        patterns (tuple[str, ...]): globs over names (``AWS_*``).
+    """
+
+    names: tuple[str, ...] = ()
+    patterns: tuple[str, ...] = ()
+
+
 MOUNT_MODE_ALIASES: dict[str, MountMode] = {
     "r": MountMode.READ,
     "rw": MountMode.WRITE,

@@ -15,38 +15,41 @@
 import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { posixNormpath } from '../../../utils/path.ts'
-import { shlexSplit } from '../../../utils/shlex.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import { hasGlob } from '../../../utils/glob_walk.ts'
+import { hasGlob, unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { relativeSpec } from './relative.ts'
 
 const FILENAME_CHAR = /[a-zA-Z0-9_./]/
 const NON_PATH_CHAR = /[(){}=;|&<> ]/
 const RELATIVE_PATH = /^(?:\.?[a-zA-Z0-9_-]*\/)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/
 
-export function unescapePath(word: string): string {
-  if (!word.includes('\\')) return word
-  const parts = shlexSplit(word)
-  return parts[0] ?? word
-}
-
+// Every caller hands this an already-expanded word, so quote removal has
+// happened and a surviving backslash is a literal character of the name
+// (GNU reads a file named `a\b` as `cat '/data/a\b'`). Unescaping again
+// here corrupted both that name and any control character an escape had
+// produced.
 export function classifyWord(
   word: string,
   registry: MountRegistry,
   cwd: string,
 ): string | PathSpec {
+  // Whether the word globs is read off the marks, but whether it looks
+  // like a path at all is a question about the name itself, so the shape
+  // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word)
+  const shape = unmarkGlobs(word)
 
   if (word.startsWith('/')) {
-    let w = word
-    if (w.includes('\\')) w = unescapePath(w)
-    const mount = registry.mountFor(w)
+    const mount = registry.tryMountFor(word)
     if (mount === null) return word
-    let isDir = w.endsWith('/')
-    const path = posixNormpath(w)
+    let isDir = word.endsWith('/')
+    const path = posixNormpath(word)
     if (!isDir && `${path}/` === mount.prefix) {
       isDir = true
     }
+    // `rawPath` keeps the spelling as typed, the way relativeSpec does:
+    // `virtual` has already lost any `..`, and `cd -P` has to resolve the
+    // link a `..` follows before applying it.
     if (wordHasGlob) {
       const lastSlash = path.lastIndexOf('/')
       return new PathSpec({
@@ -54,6 +57,7 @@ export function classifyWord(
         virtual: path,
         directory: path.slice(0, lastSlash + 1),
         pattern: path.slice(lastSlash + 1),
+        rawPath: word,
         resolved: false,
       })
     }
@@ -62,6 +66,7 @@ export function classifyWord(
         resourcePath: stripSlash(path),
         virtual: path,
         directory: `${path}/`,
+        rawPath: word,
         resolved: false,
       })
     }
@@ -70,21 +75,20 @@ export function classifyWord(
       resourcePath: stripSlash(path),
       virtual: path,
       directory: path.slice(0, lastSlash + 1),
+      rawPath: word,
       resolved: true,
     })
   }
 
-  if (wordHasGlob && (word.includes('/') || !word.startsWith('.'))) {
-    if (!FILENAME_CHAR.test(word) || NON_PATH_CHAR.test(word)) {
+  if (wordHasGlob && (word.includes('/') || !shape.startsWith('.'))) {
+    if (!FILENAME_CHAR.test(shape) || NON_PATH_CHAR.test(shape)) {
       return word
     }
     return relativeSpec(word, registry, cwd)
   }
 
-  if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(word)) {
-    let w = word
-    if (w.includes('\\')) w = unescapePath(w)
-    return relativeSpec(w, registry, cwd)
+  if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(shape)) {
+    return relativeSpec(word, registry, cwd)
   }
 
   return word

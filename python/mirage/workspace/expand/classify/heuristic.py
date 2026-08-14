@@ -14,10 +14,9 @@
 
 import posixpath
 import re
-import shlex
 
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import has_glob
+from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
@@ -28,28 +27,15 @@ _RELATIVE_PATH = re.compile(
     r"(?:\.?[a-zA-Z0-9_\-]*/)*[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+")
 
 
-def _unescape_path(word: str) -> str:
-    """Strip shell backslash escapes from a path string.
-
-    Uses shlex.split which handles all POSIX shell escaping rules:
-        Zecheng\\'s\\ Server  ->  Zecheng's Server
-        hello\\ world         ->  hello world
-
-    Args:
-        word (str): raw path string possibly containing backslash escapes.
-    """
-    if "\\" not in word:
-        return word
-    try:
-        parts = shlex.split(word)
-        return parts[0] if parts else word
-    except ValueError:
-        return word
-
-
 def classify_word(word: str, registry: MountRegistry,
                   cwd: str) -> str | PathSpec:
     """Classify an expanded word as text or PathSpec.
+
+    Every caller hands this an already-expanded word, so quote removal
+    has happened and a surviving backslash is a literal character of the
+    name (GNU reads a file named ``a\\b`` as ``cat '/data/a\\b'``).
+    Unescaping again here corrupted both that name and any control
+    character an escape had produced.
 
     Rules:
     - Absolute + glob chars -> PathSpec with pattern
@@ -58,23 +44,24 @@ def classify_word(word: str, registry: MountRegistry,
     - Relative + no glob -> plain text (never a path)
     - No mount match -> plain text
     """
+    # Whether the word globs is read off the marks, but whether it looks
+    # like a path at all is a question about the name itself, so the
+    # shape tests below read the literal spelling.
     word_has_glob = has_glob(word)
+    shape = unmark_globs(word)
 
     if word.startswith("/"):
-        # Unescape backslash-escaped paths (e.g. /data/Zecheng\'s\ Server).
-        # Only for absolute paths — non-path text like sed programs
-        # (N;s/\n/ /) also contains \ and / but must not be unescaped.
-        if "\\" in word:
-            word = _unescape_path(word)
-        try:
-            mount = registry.mount_for(word)
-        except ValueError:
+        mount = registry.try_mount_for(word)
+        if mount is None:
             return word
         is_dir = word.endswith("/")
         path = posixpath.normpath(word)
         if not is_dir and path + "/" == mount.prefix:
             is_dir = True
         resource_path = mount_key(path, mount.prefix.rstrip("/"))
+        # `raw_path` keeps the spelling as typed, the way `relative_spec`
+        # does: `virtual` has already lost any `..`, and `cd -P` has to
+        # resolve the link a `..` follows before applying it.
         if word_has_glob:
             last_slash = path.rfind("/")
             return PathSpec(
@@ -82,18 +69,21 @@ def classify_word(word: str, registry: MountRegistry,
                 directory=path[:last_slash + 1],
                 resource_path=resource_path,
                 pattern=path[last_slash + 1:],
+                raw_path=word,
                 resolved=False,
             )
         if is_dir:
             return PathSpec(virtual=path,
                             directory=path + "/",
                             resource_path=resource_path,
+                            raw_path=word,
                             resolved=False)
         last_slash = path.rfind("/")
         return PathSpec(
             virtual=path,
             directory=path[:last_slash + 1],
             resource_path=resource_path,
+            raw_path=word,
             resolved=True,
         )
 
@@ -101,8 +91,8 @@ def classify_word(word: str, registry: MountRegistry,
     # filename pattern (has alphanumeric, dot, or slash alongside
     # glob chars). Bare globs like *, ?, [a-z] are command
     # arguments (e.g. expr 4 * 3), not path patterns.
-    if word_has_glob and ("/" in word or not word.startswith(".")):
-        if not _FILENAME_CHAR.search(word) or _NON_PATH_CHAR.search(word):
+    if word_has_glob and ("/" in word or not shape.startswith(".")):
+        if not _FILENAME_CHAR.search(shape) or _NON_PATH_CHAR.search(shape):
             return word
         return relative_spec(word, registry, cwd)
 
@@ -113,9 +103,7 @@ def classify_word(word: str, registry: MountRegistry,
     #   cat file.txt   (file path — should resolve)
     #   for f in file.txt  (loop value — should stay text)
     # Users must use "./file.txt" or absolute paths for bare filenames.
-    if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
-        if "\\" in word:
-            word = _unescape_path(word)
+    if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(shape):
         return relative_spec(word, registry, cwd)
 
     return word

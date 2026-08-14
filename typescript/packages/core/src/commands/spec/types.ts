@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { flagKwargName } from './constants.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // Command names the spec layer references by value. Not a registry of
 // every command: only names that appear away from their own module
@@ -501,7 +502,7 @@ export class FlagView {
     if (this.allowed !== null && !this.allowed.has(name)) {
       throw new Error(
         `flag '${name}' is not declared by the command spec ` +
-          `(known: ${[...this.allowed].sort().join(', ')})`,
+          `(known: ${[...this.allowed].sort(compareCodePoints).join(', ')})`,
       )
     }
     return name

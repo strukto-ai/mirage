@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
+import { quotesOperands, shellQuote } from './quote.ts'
 import { rstripSlash } from './slash.ts'
 
 export interface FsError extends Error {
@@ -67,6 +69,19 @@ export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
 
+// readlink on a path that exists but is not a symlink. Mirrors Python's
+// OSError(errno.EINVAL).
+export function einval(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EINVAL')
+}
+
+// A rename whose two ends sit on different mounts. POSIX's answer for a
+// rename across filesystems, and the one a caller reads as "copy and
+// unlink instead" (that is what makes `mv` work over a FUSE mount).
+export function exdev(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EXDEV')
+}
+
 // The errno a failed directory listing should report. opendir reports ENOTDIR
 // only when a component of the path exists and is not a directory (GNU
 // `ls /f.txt/x` -> 'Not a directory'); a component that does not exist at all
@@ -109,6 +124,14 @@ export function noMount(path: string): NoMountError {
   const err = new Error(`no mount matches path: ${path}`) as NoMountError
   err.noMount = true
   return err
+}
+
+// The registry's miss and nothing else: catch sites that cope with an
+// unmounted path test this instead of swallowing every error, mirroring
+// Python's `except NoMountError`.
+export function isNoMount(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  return (err as { noMount?: unknown }).noMount === true
 }
 
 // True when the error means the path is simply not there: a stamped ENOENT,
@@ -184,14 +207,20 @@ export function enoentWithMessage(
   return err
 }
 
+// The phrases live once, in the posix table. The DOMAIN here stays
+// deliberately narrower than the vocabulary: these are the per-operand
+// codes a read-family command skips-and-reports, and widening it (say
+// to ELOOP or EIO) would widen isFsError's swallow set, which mirrors
+// python's typed FS_ERRORS tuple, not the whole condition enum.
 const STRERROR: Record<string, string> = {
-  ENOENT: 'No such file or directory',
-  ENOTDIR: 'Not a directory',
-  EISDIR: 'Is a directory',
-  EACCES: 'Permission denied',
-  EEXIST: 'File exists',
-  ENOTEMPTY: 'Directory not empty',
-  ENOTSUP: 'Operation not supported',
+  ENOENT: gnuPhrase('ENOENT'),
+  ENOTDIR: gnuPhrase('ENOTDIR'),
+  EISDIR: gnuPhrase('EISDIR'),
+  EACCES: gnuPhrase('EACCES'),
+  EEXIST: gnuPhrase('EEXIST'),
+  ENOTEMPTY: gnuPhrase('ENOTEMPTY'),
+  ENOTSUP: gnuPhrase('ENOTSUP'),
+  EXDEV: gnuPhrase('EXDEV'),
 }
 
 // GNU strerror text for a POSIX error code, or null if not a recognized
@@ -228,6 +257,14 @@ export function isFsError(err: unknown): boolean {
 // `except FileNotFoundError`. Three modules had grown their own copy of this.
 export function isEnoent(err: unknown): boolean {
   return err instanceof Error && (err as Error & { code?: string }).code === 'ENOENT'
+}
+
+// Python's twin is `except IsADirectoryError`. GNU sometimes spells a
+// directory read as something other than the EISDIR strerror (checksum
+// --check says the literal "read error"), so callers need the code, not
+// just the walk-error class.
+export function isEisdir(err: unknown): boolean {
+  return err instanceof Error && (err as Error & { code?: string }).code === 'EISDIR'
 }
 
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
@@ -269,12 +306,15 @@ export function operandSpelling(
 // (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
 // Python fs_error_line. Used by read-family commands that keep processing
 // remaining operands after one fails, where the caller holds the operand.
+// A command in SHELL_QUOTED_COMMANDS reports the operand shell-quoted when
+// it needs it ('*.txt'), the way GNU does; every other command reports it
+// bare.
 export function fsErrorLine(
   cmdName: string,
   path: string | { virtual: string; rawPath?: string },
   err: unknown,
 ): string {
-  const label = virtualOf(path)
+  const label = quotesOperands(cmdName) ? shellQuote(virtualOf(path)) : virtualOf(path)
   const strerror = gnuStrerror((err as { code?: string }).code)
   if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
   return `${cmdName}: ${label}\n`

@@ -15,12 +15,11 @@
 import pytest
 
 from mirage.commands.builtin.generic import split as split_generic
-from mirage.commands.builtin.generic.split import (parse_bytes_value,
-                                                   parse_chunks_value,
-                                                   parse_lines_value,
-                                                   parse_suffix_length,
-                                                   parse_suffix_start)
 from mirage.commands.errors import UsageError
+
+from mirage.commands.builtin.generic.split import (  # isort: skip
+    parse_bytes_value, parse_chunks_value, parse_lines_value, parse_separator,
+    parse_suffix_length, parse_suffix_start)
 
 _TRY = "\nTry 'split --help' for more information."
 _ALPHA_SUFFIXES = split_generic._ALPHA_SUFFIXES
@@ -116,6 +115,35 @@ def test_suffix_length_rejects_junk_but_allows_zero():
     with pytest.raises(UsageError) as exc:
         parse_suffix_length("1k")
     assert str(exc.value) == "split: invalid suffix length: '1k'"
+
+
+def test_separator_takes_one_byte_and_the_nul_spelling():
+    # `\0` is the only escape GNU reads, and it is two characters on the
+    # command line; everything else is taken literally, so a lone backslash
+    # and a digit zero are ordinary separators.
+    assert parse_separator(None) == b"\n"
+    assert parse_separator("\\0") == b"\0"
+    assert parse_separator("X") == b"X"
+    assert parse_separator("0") == b"0"
+    assert parse_separator("\\") == b"\\"
+
+
+@pytest.mark.parametrize("value", ["XY", "abc", "\\n", "\\t", "é"])
+def test_separator_rejects_multi_byte_values(value):
+    # This used to keep the whole byte string as the separator, splitting on
+    # 'XY' where GNU refuses to run at all. 'é' is one character but two
+    # UTF-8 bytes, and GNU counts bytes.
+    with pytest.raises(UsageError) as exc:
+        parse_separator(value)
+    assert str(exc.value) == f"split: multi-character separator '{value}'"
+    assert exc.value.exit_code == 1
+
+
+def test_separator_rejects_an_empty_value():
+    with pytest.raises(UsageError) as exc:
+        parse_separator("")
+    assert str(exc.value) == "split: empty record separator"
+    assert exc.value.exit_code == 1
 
 
 def test_suffix_names_auto_lengthen_like_gnu():

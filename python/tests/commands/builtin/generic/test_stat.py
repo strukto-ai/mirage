@@ -44,6 +44,20 @@ async def _render(fmt: str, fs: FileStat) -> str:
     return (await materialize(out)).decode().rstrip("\n")
 
 
+async def _render_named(fmt: str, name: str) -> str:
+    """Render one directive for an operand typed as ``name``.
+
+    Args:
+        fmt (str): the format string.
+        name (str): the operand, kept verbatim for %n and %N.
+    """
+    out, io = await stat([PathSpec.from_str_path(name)],
+                         stat_fn=partial(_const_stat, _fs()),
+                         c=fmt)
+    assert io.exit_code == 0
+    return (await materialize(out)).decode().rstrip("\n")
+
+
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
     r = await ws.execute(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
@@ -106,19 +120,59 @@ async def test_printf_flags_width_precision():
     assert await _render("%.3F", _fs()) == "reg"
 
 
+# Pinned against GNU coreutils 9.7 on debian:stable-slim. Single quotes
+# are the rule; a name whose only awkward character is an apostrophe reads
+# better in double quotes and GNU renders that one case that way, but any
+# other shell character (or an unprintable one) sends it back to single
+# quotes. mirage paths are text rather than bytes, so a non-ASCII name
+# stays literal the way GNU renders it in a UTF-8 locale instead of the
+# octal bytes it emits under LC_ALL=C.
+_GNU_QUOTED = [
+    ("/data/f.txt", "'/data/f.txt'"),
+    ("a$b", "'a$b'"),
+    ('a"b', "'a\"b'"),
+    ("a'b", "\"a'b\""),
+    ("a'b c", "\"a'b c\""),
+    ("a'b$c", "'a'\\''b$c'"),
+    ("a'b`c", "'a'\\''b`c'"),
+    ("a'b\\c", "'a'\\''b\\c'"),
+    ("a'b\"c", "'a'\\''b\"c'"),
+    ("a'b!c", "'a'\\''b!c'"),
+    # # and ~ count as special only away from the front.
+    ("#a'b", "\"#a'b\""),
+    ("~a'b", "\"~a'b\""),
+    ("a#'b", "'a#'\\''b'"),
+    ("$a'b", "'$a'\\''b'"),
+    ("a\tb", "'a'$'\\t''b'"),
+    ("a\nb", "'a'$'\\n''b'"),
+    ("a\x07b", "'a'$'\\a''b'"),
+    ("a\x01b", "'a'$'\\001''b'"),
+    ("a\x1bb", "'a'$'\\033''b'"),
+    ("a\x7fb", "'a'$'\\177''b'"),
+    # A leading escape keeps the empty quotes; a trailing one does not.
+    ("\ta", "''$'\\t''a'"),
+    ("a\t", "'a'$'\\t'"),
+    ("a\t\nb", "'a'$'\\t\\n''b'"),
+    ("a'b\tc", "'a'\\''b'$'\\t''c'"),
+    ("café", "'café'"),
+    ("a'béc", "\"a'béc\""),
+]
+
+
 @pytest.mark.asyncio
-async def test_quoted_name_is_shell_safe():
-    assert await _render("%N", _fs()) == "'/data/f.txt'"
-    # An apostrophe in the path switches to double quotes.
-    ap, _io = await stat([PathSpec.from_str_path("/data/a'b.txt")],
-                         stat_fn=partial(_const_stat, _fs()),
-                         c="%N")
-    assert (await materialize(ap)).decode() == "\"/data/a'b.txt\"\n"
-    # Both quote kinds -> single-quote with escaped apostrophes.
-    both, _io2 = await stat([PathSpec.from_str_path("/data/a'b\"c")],
-                            stat_fn=partial(_const_stat, _fs()),
-                            c="%N")
-    assert (await materialize(both)).decode() == "'/data/a'\\''b\"c'\n"
+@pytest.mark.parametrize("name,quoted", _GNU_QUOTED)
+async def test_quoted_name_is_shell_safe(name: str, quoted: str):
+    assert await _render_named("%N", name) == quoted
+
+
+@pytest.mark.asyncio
+async def test_a_link_target_is_quoted_by_the_same_rule():
+    """The target is a second field, so it gets its own quoting."""
+    assert await _render("%N",
+                         _link_fs("a'b$c")) == "'/data/f.txt' -> 'a'\\''b$c'"
+    assert await _render("%N", _link_fs("a'b")) == "'/data/f.txt' -> \"a'b\""
+    assert await _render("%N",
+                         _link_fs("a\tb")) == "'/data/f.txt' -> 'a'$'\\t''b'"
 
 
 @pytest.mark.asyncio

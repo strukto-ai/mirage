@@ -36,7 +36,8 @@ export function isCrossMount(
   if (!CROSS_MOUNT_COMMANDS.has(cmdName) || scopes.length < 2) return false
   const mounts = new Set<string>()
   for (const s of scopes) {
-    const m = registry.mountFor(s.virtual)
+    // a scope outside any mount cannot make the command cross-mount
+    const m = registry.tryMountFor(s.virtual)
     if (m !== null) mounts.add(m.prefix)
   }
   return mounts.size > 1

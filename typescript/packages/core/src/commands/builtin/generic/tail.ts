@@ -18,13 +18,30 @@ import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { countNewlines, numberFlagError, parseN, tailBytes } from '../tail_helper.ts'
+import {
+  countNewlines,
+  normalizeCounts,
+  numberFlagError,
+  parseCounts,
+  tailBytes,
+  type TailCounts,
+} from '../tail_helper.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
+
+// Whether this operand's whole content is what tail emits, which is what
+// makes it worth handing to the file cache. Counting from the start is
+// never treated as a full read, matching what `-n +N` has always done.
+function readsEverything(rawCounts: TailCounts, raw: Uint8Array): boolean {
+  const counts = normalizeCounts(rawCounts)
+  if (counts.fromByte !== null || counts.fromLine !== null) return false
+  if (counts.byteCount !== null) return counts.byteCount >= raw.byteLength
+  return (counts.lines ?? 10) >= countNewlines(raw)
+}
 
 function concat(chunks: Uint8Array[]): Uint8Array {
   let total = 0
@@ -52,8 +69,7 @@ export async function tailGeneric(
   if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
   const qFlag = fl.asBool('q')
   const vFlag = fl.asBool('v')
-  const [lines, plusMode] = parseN(nRaw)
-  const bytesMode = cRaw !== null ? Number.parseInt(cRaw, 10) : null
+  const counts = parseCounts(nRaw, cRaw)
 
   if (paths.length > 0) {
     const chunks: Uint8Array[] = []
@@ -77,13 +93,8 @@ export async function tailGeneric(
         chunks.push(ENC.encode(header))
       }
       printed += 1
-      if (bytesMode !== null) {
-        chunks.push(bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode))
-        if (bytesMode >= raw.byteLength) cache.push(p.virtual)
-      } else {
-        chunks.push(tailBytes(raw, lines, null, plusMode))
-        if (!plusMode && lines >= countNewlines(raw)) cache.push(p.virtual)
-      }
+      chunks.push(tailBytes(raw, counts))
+      if (readsEverything(counts, raw)) cache.push(p.virtual)
     }
     const io = new IOResult({
       cache,
@@ -98,9 +109,5 @@ export async function tailGeneric(
   if (raw === null) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tail: missing operand\n') })]
   }
-  if (bytesMode !== null) {
-    const out: ByteSource = bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode)
-    return [out, new IOResult()]
-  }
-  return [tailBytes(raw, lines, null, plusMode), new IOResult()]
+  return [tailBytes(raw, counts), new IOResult()]
 }

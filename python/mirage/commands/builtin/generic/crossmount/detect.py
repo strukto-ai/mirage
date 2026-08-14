@@ -45,9 +45,8 @@ def is_cross_mount(cmd_name: str, scopes: list[PathSpec], registry) -> bool:
         return False
     mounts = set()
     for s in scopes:
-        try:
-            mounts.add(registry.mount_for(s.virtual).prefix)
-        except ValueError:
-            # a scope outside any mount cannot make the command cross-mount
-            pass
+        m = registry.try_mount_for(s.virtual)
+        # a scope outside any mount cannot make the command cross-mount
+        if m is not None:
+            mounts.add(m.prefix)
     return len(mounts) > 1

@@ -20,6 +20,7 @@ from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS)
 from mirage.workspace.executor.builtins.condition.operators import apply_unary
+from mirage.workspace.session import visible_env
 
 from mirage.workspace.executor.builtins.condition.types import (  # isort: skip
     CondAnd, CondBinary, CondContext, CondError, CondNode, CondNot, CondOr,
@@ -83,10 +84,11 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     compare = INT_COMPARATORS.get(node.op)
     if compare is not None:
         # [[ evaluates numeric operands as arithmetic: variables
-        # resolve, expressions compute, bare unset words are 0.
+        # resolve, expressions compute, bare unset words are 0. The
+        # visible env, so a hidden name reads as unset here too.
         try:
-            li, _ = evaluate_arith(node.left, ctx.session.env)
-            ri, _ = evaluate_arith(node.right, ctx.session.env)
+            li, _ = evaluate_arith(node.left, visible_env(ctx.session))
+            ri, _ = evaluate_arith(node.right, visible_env(ctx.session))
         except ArithError:
             raise CondError("mirage: syntax error in conditional expression")
         return compare(li, ri)

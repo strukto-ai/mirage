@@ -25,6 +25,7 @@ import {
 } from './log_entry.ts'
 import type { OpRecord } from './record.ts'
 import { type ObserverStore, RAMObserverStore } from './store.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP])
 
@@ -33,7 +34,7 @@ export type EventDict = Record<string, unknown>
 function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
   const out: EventDict[] = []
   const decoder = new TextDecoder('utf-8', { fatal: false })
-  for (const key of [...files.keys()].sort()) {
+  for (const key of [...files.keys()].sort(compareCodePoints)) {
     if (!key.endsWith('.jsonl')) continue
     const text = decoder.decode(files.get(key))
     for (const line of text.split('\n')) {

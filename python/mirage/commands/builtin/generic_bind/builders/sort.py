@@ -15,34 +15,27 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.sort import sort as generic_sort
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def sort(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
+async def sort(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
     return await generic_sort(
         paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         write_bytes=(partial(ops.write, accessor)
                      if ops.write is not None else None),
-        stdin=stdin,
-        flags=flags,
+        stdin=opts.stdin,
+        flags=opts.flags,
     )
 
 

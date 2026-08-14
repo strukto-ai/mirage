@@ -34,6 +34,7 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const HEAD = 'HEAD'
@@ -131,9 +132,7 @@ async function remove(
  * names sort together and remotes follow.
  */
 export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   const remotesOnly = fl.asBool('r')
@@ -141,10 +140,10 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   let refs: ReadonlyMap<string, string>
   let head: HeadRef
   try {
-    const dispatch = opts.dispatch
+    const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
     checkOperands(texts, UnknownSwitchError)
-    const repo = await opened(fl, opts.statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
     head = await readHead(dispatch, repo.location.gitdir)
     const force = fl.asBool('D')
@@ -164,7 +163,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
     throw err
   }
   const lines: string[] = []
-  const keys = [...refs.keys()].sort()
+  const keys = [...refs.keys()].sort(compareCodePoints)
   if (!remotesOnly) {
     for (const ref of keys.filter((k) => k.startsWith(HEADS_PREFIX))) {
       const name = ref.slice(HEADS_PREFIX.length)

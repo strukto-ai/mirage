@@ -62,6 +62,15 @@ interface Expect {
   throws_contains?: string;
   errno?: string;
   content?: string;
+  ops_contain?: string[];
+  ops_absent?: string[];
+  value?: unknown;
+}
+
+interface FacadeSpec {
+  method: string;
+  path: string;
+  data?: string;
 }
 
 interface Step {
@@ -72,6 +81,7 @@ interface Step {
   s3_put?: { key: string; body: string };
   rename?: { src: string; dst: string };
   read_op?: string;
+  facade?: FacadeSpec;
   expect?: Expect;
 }
 
@@ -398,7 +408,19 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     });
     ws.registerCli(name, spec, entry.config ?? null);
   }
+  const madeDirs = new Set<string>();
   for (const [prefix, name, content] of seeds) {
+    // A nested seed needs its directory first: write refuses a missing
+    // parent (GNU dest-parent semantics), and the op-level mkdir
+    // creates the whole chain.
+    const slash = name.lastIndexOf("/");
+    if (slash > 0) {
+      const dir = `${prefix}/${name.slice(0, slash)}`;
+      if (!madeDirs.has(dir)) {
+        await ws.dispatch("mkdir", dir, []);
+        madeDirs.add(dir);
+      }
+    }
     await ws.dispatch("write", `${prefix}/${name}`, [ENC.encode(content)]);
   }
   return ws;
@@ -431,9 +453,62 @@ function check(
   return problems.map((p) => `${caseId} ${label}: ${p}`);
 }
 
+function checkOps(expect: Expect, seen: string[]): string[] {
+  const problems: string[] = [];
+  for (const entry of expect.ops_contain ?? []) {
+    if (!seen.includes(entry)) {
+      problems.push(`ledger missing ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`);
+    }
+  }
+  for (const entry of expect.ops_absent ?? []) {
+    if (seen.includes(entry)) {
+      problems.push(`ledger must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`);
+    }
+  }
+  return problems;
+}
+
+// One facade step: call a typed Ops convenience (`ws.fs`) and check its
+// value. The JSON carries the python facade spelling (`is_dir`,
+// `list_files`); snakeToCamel maps it onto the TS method.
+async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promise<string[]> {
+  const facade = ws.fs as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const method = facade[snakeToCamel(spec.method)];
+  if (method === undefined) return [`facade has no method ${spec.method}`];
+  const args: unknown[] = [spec.path];
+  if (spec.data !== undefined) args.push(ENC.encode(spec.data));
+  if (expect.throws_contains !== undefined) {
+    try {
+      await method.apply(ws.fs, args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes(expect.throws_contains)) return [];
+      return [
+        `facade raised ${JSON.stringify(message)}, expected ` +
+          `${JSON.stringify(expect.throws_contains)} in the message`,
+      ];
+    }
+    return ["facade: expected an error, none raised"];
+  }
+  const value = await method.apply(ws.fs, args);
+  if (expect.value !== undefined && JSON.stringify(value ?? null) !== JSON.stringify(expect.value)) {
+    return [`facade value ${JSON.stringify(value ?? null)}, expected ${JSON.stringify(expect.value)}`];
+  }
+  return [];
+}
+
 async function runStep(ws: Workspace, caseId: string, index: number, step: Step): Promise<string[]> {
   const expect = step.expect ?? {};
   const label = `step[${index}]`;
+  // The ledger slice this step adds: ws.records delegates to the Ops
+  // facade's account, so the step's own ops are the tail.
+  const ledgerBefore = ws.records.length;
+  if (step.facade !== undefined) {
+    const problems = await runFacade(ws, expect, step.facade);
+    const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`);
+    problems.push(...checkOps(expect, seen));
+    return problems.map((p) => `${caseId} ${label}: ${p}`);
+  }
   if (step.s3_put !== undefined) {
     await putS3(step.s3_put.key, step.s3_put.body);
     return [];
@@ -496,7 +571,10 @@ async function runStep(ws: Workspace, caseId: string, index: number, step: Step)
   const result = await ws.execute(command, options);
   const stdout = DEC.decode(result.stdout);
   const stderr = DEC.decode(result.stderr);
-  return check(caseId, label, expect, result.exitCode, stdout, stderr);
+  const problems = check(caseId, label, expect, result.exitCode, stdout, stderr);
+  const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`);
+  problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`));
+  return problems;
 }
 
 async function runCase(suite: string, testCase: Case): Promise<string[]> {

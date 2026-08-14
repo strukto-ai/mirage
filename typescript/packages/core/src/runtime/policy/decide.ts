@@ -30,6 +30,7 @@ import {
   type PolicyFn,
   type PolicyScript,
 } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 /** Policy evaluation is bounded: a hung script must not freeze every
  * line (command limits resolve after policy, so nothing above this
@@ -200,7 +201,7 @@ export function parseVerdict(verdict: unknown): string | null {
     const obj = verdict as Record<string, unknown>
     const unknown = Object.keys(obj)
       .filter((key) => key !== 'runtime' && key !== 'deny')
-      .sort()
+      .sort(compareCodePoints)
     if (unknown.length > 0) {
       throw new PolicyError(`unknown policy verdict keys: ${JSON.stringify(unknown)}`)
     }

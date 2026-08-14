@@ -188,6 +188,31 @@ def post_spans(host: str) -> None:
             raise RuntimeError(f"OTLP push failed: HTTP {response.status}")
 
 
+async def push_when_ready(otlp_host: str) -> None:
+    """Push the fixture spans, retrying until the receiver is listening.
+
+    Args:
+        otlp_host (str): OTLP HTTP base URL.
+
+    Raises:
+        RuntimeError: the receiver never accepted the batch.
+    """
+    last = ""
+    for _ in range(POLL_ATTEMPTS):
+        try:
+            post_spans(otlp_host)
+            return
+        except OSError as exc:
+            # Same reason `query` catches OSError rather than URLError:
+            # a booting container's docker-proxy accepts the connection
+            # and resets it, which reaches us as a raw ConnectionResetError.
+            last = str(exc)
+            print(f"otlp not ready: {exc}", file=sys.stderr)
+            await asyncio.sleep(POLL_DELAY)
+    raise RuntimeError(
+        f"OTLP receiver at {otlp_host} never accepted the batch: {last}")
+
+
 def query(query_host: str, path: str) -> dict:
     """Call the Jaeger query API.
 
@@ -242,7 +267,11 @@ async def seed(query_host: str, otlp_host: str) -> None:
         if query(query_host, "/api/services"):
             break
         await asyncio.sleep(POLL_DELAY)
-    post_spans(otlp_host)
+    # The query API answering says nothing about the OTLP receiver: they are
+    # separate ports on the same container, bound at different times, so the
+    # push meets the same half-open docker-proxy socket `query` already
+    # guards against. Poll the port we actually need by retrying the push.
+    await push_when_ready(otlp_host)
     await wait_for_services(query_host)
     print(f"JAEGER_URL={query_host}")
 

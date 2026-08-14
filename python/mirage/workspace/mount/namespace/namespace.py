@@ -491,5 +491,8 @@ class Namespace:
     def mount_for(self, path: str) -> MountEntry:
         return self._registry.mount_for(path)
 
+    def try_mount_for(self, path: str) -> MountEntry | None:
+        return self._registry.try_mount_for(path)
+
     def is_mount_root(self, path: str) -> bool:
         return self._registry.is_mount_root(path)

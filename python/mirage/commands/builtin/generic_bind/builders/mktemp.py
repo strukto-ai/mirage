@@ -15,45 +15,21 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
+from mirage.commands.builtin.generic.mktemp import mktemp_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def mktemp(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    p: PathSpec | None = None,
-    t: bool = False,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["mktemp"])
-    tmpdir_flag = fl.raw("tmpdir")
-    tmpdir: str | PathSpec | None
-    if isinstance(tmpdir_flag, (str, PathSpec)):
-        tmpdir = tmpdir_flag
-    elif tmpdir_flag is True:
-        tmpdir = "/tmp"
-    else:
-        tmpdir = p
-    return await generic_mktemp(
-        *texts,
-        mkdir_fn=partial(ops.require(Operation.MKDIR), accessor),
-        write_bytes_fn=partial(ops.require(Operation.WRITE), accessor),
-        d=fl.as_bool("directory"),
-        p=tmpdir,
-        t=t,
-        dry_run=fl.as_bool("dry_run"),
-        suffix=fl.as_str("suffix") or "",
-        quiet=fl.as_bool("quiet"),
-    )
+async def mktemp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    return await mktemp_generic(
+        paths, list(texts), opts,
+        partial(ops.require(Operation.MKDIR), accessor),
+        partial(ops.require(Operation.WRITE), accessor))
 
 
 BUILDER = Builder('mktemp',

@@ -20,9 +20,11 @@ from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX
+from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.mongodb.cat import cat
+from mirage.commands.config import CommandOpts
 from mirage.resource.mongodb.config import MongoDBConfig
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 @pytest.fixture
@@ -33,6 +35,23 @@ def accessor():
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
     return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+
+
+async def _fake_stat(_accessor, path, index=None):
+    return FileStat(name=path.virtual, size=None)
+
+
+async def _unused(*_args, **_kwargs):
+    raise AssertionError("not used")
+
+
+def _fake_io() -> CommandIO:
+    return CommandIO(readdir=_unused,
+                     read_bytes=_unused,
+                     read_stream=_unused,
+                     stat=_fake_stat,
+                     is_mounted=lambda _a: True,
+                     local=False)
 
 
 async def _drain(source) -> bytes:
@@ -55,9 +74,11 @@ async def test_cat_streams_all_docs_as_extended_json(accessor):
             yield d
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
-            "mirage.commands.builtin.mongodb.cat.resolve_glob",
-            new=AsyncMock(return_value=[_path()])):
-        source, _ = await cat(accessor, [_path()], index=NULL_INDEX)
+            "mirage.commands.builtin.mongodb.cat.IO", new=_fake_io()), patch(
+                "mirage.commands.builtin.mongodb.cat.resolve_or_empty",
+                new=AsyncMock(return_value=[_path()])):
+        source, _ = await cat(accessor, [_path()], [],
+                              CommandOpts(index=NULL_INDEX))
         data = await _drain(source)
     lines = [line for line in data.decode().split("\n") if line]
     assert len(lines) == 7
@@ -76,11 +97,12 @@ async def test_cat_n_prepends_line_numbers(accessor):
             yield d
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
-            "mirage.commands.builtin.mongodb.cat.resolve_glob",
-            new=AsyncMock(return_value=[_path()])):
-        source, _ = await cat(accessor, [_path()],
-                              index=NULL_INDEX,
-                              number=True)
+            "mirage.commands.builtin.mongodb.cat.IO", new=_fake_io()), patch(
+                "mirage.commands.builtin.mongodb.cat.resolve_or_empty",
+                new=AsyncMock(return_value=[_path()])):
+        source, _ = await cat(
+            accessor, [_path()], [],
+            CommandOpts(index=NULL_INDEX, flags={'number': True}))
         data = await _drain(source)
     lines = data.decode().splitlines()
     assert lines[0].lstrip().startswith("1\t")

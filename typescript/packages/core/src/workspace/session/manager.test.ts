@@ -110,7 +110,7 @@ describe('SessionManager with a SessionStore', () => {
     await m.ensureLoaded()
     const s = m.get('restored')
     expect(s.cwd).toBe('/w')
-    expect(s.env).toEqual({ K: 'v' })
+    expect(s.env).toEqual({ K: 'v', PWD: '/w' })
     expect(s.mountModes?.get('/data')).toBe(MountMode.READ)
   })
 
@@ -130,7 +130,27 @@ describe('SessionManager with a SessionStore', () => {
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     expect(m.cwd).toBe('/w')
-    expect(m.env).toEqual({ A: '1' })
+    expect(m.env).toEqual({ A: '1', PWD: '/w' })
+  })
+
+  it('default session adopts stored hidden specs', async () => {
+    // A restarted daemon must not wake up unrestricted: the stored
+    // hidden shapes land on the default placeholder with the other
+    // durable fields, or the first command after restart reads what
+    // the spec hides and the next flush erases the restriction.
+    const store = new RAMSessionStore()
+    await store.set('def', {
+      session_id: 'def',
+      cwd: '/w',
+      env: {},
+      hidden_paths: { paths: ['/s3/secrets'], patterns: ['*.key'] },
+      hidden_vars: { names: ['SLACK_TOKEN'], patterns: [] },
+    })
+    const m = new SessionManager('def', store)
+    await m.ensureLoaded()
+    const dflt = m.get('def')
+    expect(dflt.hiddenPaths).toEqual({ paths: ['/s3/secrets'], patterns: ['*.key'] })
+    expect(dflt.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
   })
 
   it('flush writes every session through', async () => {

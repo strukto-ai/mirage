@@ -82,7 +82,12 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-not"),
         ),
         rest=Operand(type="path"),
-        ignore_tokens=frozenset({"(", ")"}),
+        # `!` is GNU's negation, spelled without a leading dash, so the
+        # rest slot's PATH kind would read it as a start point. It joins
+        # the parens here rather than becoming an Option: an option is
+        # matched by spelling and `-not` already covers that half, while
+        # these three are grammar the expression parser consumes.
+        ignore_tokens=frozenset({"(", ")", "!"}),
     ),
     'tree':
     CommandSpec(
@@ -105,6 +110,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c"),
             Option(short="-L"),
             Option(short="-P"),
+            Option(short="-S", long="--separate-dirs"),
         ),
         rest=Operand(type="path"),
     ),

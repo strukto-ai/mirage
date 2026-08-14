@@ -14,10 +14,10 @@
 
 import { CLI_CONFIG_ENV } from '../../../commands/cli/constants.ts'
 import { CLAP_EXIT, clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
-import { CLISpec, type CLIInvocation, type CLIVerbOpts } from '../../../commands/cli/types.ts'
+import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
 import { ownsArgv, walk } from '../../../commands/cli/walk.ts'
-import type { CommandDispatch } from '../../../commands/config.ts'
-import type { MountRoot, StatPath } from '../../../ops/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import type { NamespaceView, SessionView, StatPath } from '../../../ops/types.ts'
 import { HELP_OPTION } from '../../../commands/config.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle } from '../../../commands/spec/types.ts'
@@ -34,6 +34,7 @@ import {
 } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { Session } from '../../session/session.ts'
+import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/policy/decide.ts'
@@ -160,9 +161,10 @@ export interface CliFacts {
    * installs.
    */
   entries?: readonly Runtime[]
-  dispatch?: CommandDispatch
+  dispatch?: DispatchFn
   statPath?: StatPath
-  mountRoot?: MountRoot
+  ns?: NamespaceView
+  sessionView?: SessionView
 }
 
 /**
@@ -179,8 +181,8 @@ export interface CliFacts {
  * (scriptOutput), so usage refusals, limits, and classification all
  * happen in front of either tier. Help too, for every node that declared
  * a grammar to render it from (parseSpecFor). The workspace facts in
- * `facts` reach a verb as one `inv.ops` field, so a verb that never reads
- * it cannot touch a mount.
+ * `facts` reach a verb as one `inv.doors` field, one door per state plane,
+ * so a verb that never reads it cannot touch a mount.
  */
 export async function handleCli(
   install: CLIInstall,
@@ -218,34 +220,29 @@ export async function handleCli(
   // The environment goes into the parse, not on top of it: an option
   // declaring one is coerced, choice-checked, path-resolved and credited
   // against required exactly as a typed value is.
-  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, session.env)
-  const [paths, texts, flagKwargs, warnings] = [parsed[0], parsed[1], parsed[2], parsed[3]]
+  const parsed = parseFlags([...result.argv], parseSpec, prog, session.cwd, envSnapshot(session))
+  const { paths, texts, flagKwargs, warnings } = parsed
   if (mirageHelp && flagKwargs.help === true) {
     const helpText = new TextEncoder().encode(renderHelp(prog, parseSpec, [], style))
     return [helpText, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
 
-  const refusal = optionError(
-    prog,
-    parsed[4],
-    parsed[5],
-    parsed[6],
-    parsed[7],
-    parsed[8],
-    parsed[9],
-    parsed[10],
-    parsed[11],
-    parsed[12],
-  )
+  const refusal = optionError(prog, parsed)
   let msg: Uint8Array | null = null
   let code = 0
   if (refusal !== null) {
-    ;[msg, code] = leafRefusal(style, refusal[0], parsed[4])
-  } else if (parsed[13].length > 0 && style === UsageStyle.CLAP) {
+    ;[msg, code] = leafRefusal(style, refusal[0], parsed.invalidOptions)
+  } else if (parsed.missingRequiredOperands.length > 0 && style === UsageStyle.CLAP) {
     // Only clap names the empty slots. Under every other style a required
     // operand stays the leaf's own business, worded by the command, which is
     // what every mirage CLI did before this.
-    msg = clapMissingOperands(prog, parseSpec, parsed[13], parsed[14], session.env)
+    msg = clapMissingOperands(
+      prog,
+      parseSpec,
+      parsed.missingRequiredOperands,
+      parsed.typedDests,
+      session.env,
+    )
     code = CLAP_EXIT
   }
   if (msg !== null) {
@@ -272,10 +269,11 @@ export async function handleCli(
   // field. Most CLIs never read it: an API client has no filesystem,
   // while `git` is nothing but one. Absent outside a workspace, so a verb
   // that needs a mount refuses there on its own.
-  const ops: CLIVerbOpts = {
+  const doors: CLIDoors = {
     ...(facts.dispatch !== undefined ? { dispatch: facts.dispatch } : {}),
     ...(facts.statPath !== undefined ? { statPath: facts.statPath } : {}),
-    ...(facts.mountRoot !== undefined ? { mountRoot: facts.mountRoot } : {}),
+    ...(facts.ns !== undefined ? { ns: facts.ns } : {}),
+    ...(facts.sessionView !== undefined ? { sessionView: facts.sessionView } : {}),
   }
   const inv: CLIInvocation = {
     config: install.config,
@@ -284,8 +282,8 @@ export async function handleCli(
     texts,
     flags,
     stdin,
-    env: { ...session.env },
-    ...(Object.keys(ops).length > 0 ? { ops } : {}),
+    env: envSnapshot(session),
+    ...(Object.keys(doors).length > 0 ? { doors } : {}),
   }
 
   let body: Promise<[ByteSource | null, IOResult] | null>
@@ -359,7 +357,13 @@ export async function handleCli(
   // matters. Dropping the service's listings is what lets the agent's next
   // `ls` see what it just made, and dropping its cached bodies is what lets
   // the next `cat` see an edit rather than the pre-write content.
-  if (leaf.write && dropCaches !== null) await dropCaches()
+  //
+  // The spec's `write` is the static answer, which is the only one most
+  // verbs have; a handler that knows better says so on its result, so a
+  // read-only `gh api` does not expire every github mount.
+  const mutated = io.mutated ?? leaf.write
+  if (mutated && dropCaches !== null) await dropCaches()
+
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 
   if (warnings.length > 0) {

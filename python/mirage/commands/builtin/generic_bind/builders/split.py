@@ -15,34 +15,27 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.split import (parse_bytes_value,
-                                                   parse_chunks_value,
-                                                   parse_lines_value,
-                                                   parse_suffix_length,
-                                                   parse_suffix_start)
 from mirage.commands.builtin.generic.split import split as generic_split
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
+from mirage.commands.builtin.generic.split import (  # isort: skip
+    parse_bytes_value, parse_chunks_value, parse_lines_value, parse_separator,
+    parse_suffix_length, parse_suffix_start)
 
-async def split(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["split"])
-    paths = await resolve_or_empty(ops, accessor, paths, index)
+
+async def split(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["split"])
+    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
     # as_str, not `x or y`: the latter would swallow an explicitly empty
     # value, which GNU rejects loudly (`split -b ''` is an invalid number,
     # not an absent flag).
@@ -66,9 +59,9 @@ async def split(
                     if isinstance(hex_value, str) else 0)
     return await generic_split(
         paths,
-        read_stream=bound_op(ops.read_stream, accessor, index),
+        read_stream=bound_op(ops.read_stream, accessor, opts.index),
         write_bytes=partial(ops.require(Operation.WRITE), accessor),
-        stdin=stdin,
+        stdin=opts.stdin,
         lines_per_file=(parse_lines_value(lines_value)
                         if lines_value is not None else 0),
         byte_limit=(parse_bytes_value(bytes_value)
@@ -81,7 +74,7 @@ async def split(
         hex_suffix=hex_value is not None,
         suffix_start=suffix_start,
         additional_suffix=fl.as_str("additional_suffix") or "",
-        separator=(fl.as_str("separator") or "\n").encode())
+        separator=parse_separator(fl.as_str("separator")))
 
 
 BUILDER = Builder('split',

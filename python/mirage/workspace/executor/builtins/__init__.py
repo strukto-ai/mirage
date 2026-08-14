@@ -17,7 +17,8 @@ from mirage.workspace.executor.builtins.command import handle_command_builtin
 from mirage.workspace.executor.builtins.condition import handle_test
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.executor.builtins.history import handle_history
-from mirage.workspace.executor.builtins.links import (follow_paths, handle_ln,
+from mirage.workspace.executor.builtins.links import (accepts_line,
+                                                      follow_paths, handle_ln,
                                                       handle_readlink,
                                                       link_flags, prepare_mv,
                                                       strip_link_operands)
@@ -66,6 +67,7 @@ __all__ = [
     'handle_local',
     'handle_readlink',
     'link_flags',
+    'accepts_line',
     'follow_paths',
     'handle_df',
     'handle_chgrp',

@@ -314,3 +314,69 @@ async def test_an_unknown_switch_is_refused(git_rw):
     code, _out, err = await run(git_rw, "checkout -Z")
     assert code == 129
     assert err == b"error: unknown switch `Z'\n"
+
+
+@pytest.mark.asyncio
+async def test_checking_out_a_symlink_restores_a_link_not_a_file(git_rw):
+    # A 120000 entry materializes as a link in the working tree, not as
+    # a regular file holding the target string. The name plane owns
+    # links, so restoring one is a namespace write rather than a
+    # content write; writing the blob would leave a 5-byte regular file
+    # spelling "a.txt".
+    assert (await run(git_rw, "checkout -b side"))[0] == 0
+    await git_rw.execute("ln -s a.txt /repo/link")
+    assert (await run(git_rw, "add link"))[0] == 0
+    assert (await run(git_rw, "commit -m linked"))[0] == 0
+    assert (await run(git_rw, "checkout main"))[0] == 0
+    assert (await run(git_rw, "checkout side"))[0] == 0
+    listing = await git_rw.execute("ls -l /repo/link")
+    assert (listing.stdout or b"").startswith(b"lrwxrwxrwx")
+    assert b"link -> a.txt" in (listing.stdout or b"")
+
+
+@pytest.mark.asyncio
+async def test_checking_out_a_regular_file_over_a_link_replaces_it(git_rw):
+    # git 2.47: a path that is a symlink on one branch and a regular
+    # file on the other comes back as a regular file, and the file the
+    # link pointed at keeps its own content. Writing through the link
+    # instead dereferences it: the blob lands in a.txt, which no branch
+    # ever changed, and the link stays in the working tree while HEAD
+    # and the index say a file is there.
+    assert (await run(git_rw, "checkout -b linked"))[0] == 0
+    await git_rw.execute("ln -s a.txt /repo/thing")
+    assert (await run(git_rw, "add thing"))[0] == 0
+    assert (await run(git_rw, "commit -m link"))[0] == 0
+    assert (await run(git_rw, "checkout -b plain"))[0] == 0
+    await git_rw.execute("rm /repo/thing")
+    await git_rw.execute("printf 'PLAIN\\n' > /repo/thing")
+    assert (await run(git_rw, "add thing"))[0] == 0
+    assert (await run(git_rw, "commit -m plain"))[0] == 0
+    assert (await run(git_rw, "checkout linked"))[0] == 0
+    assert (await run(git_rw, "checkout plain"))[0] == 0
+    listing = await git_rw.execute("ls -l /repo/thing")
+    assert not (listing.stdout or b"").startswith(b"lrwxrwxrwx")
+    content = await git_rw.execute("cat /repo/thing")
+    assert (content.stdout or b"") == b"PLAIN\n"
+    kept = await git_rw.execute("cat /repo/a.txt")
+    assert (kept.stdout or b"") == b"one changed\n"
+
+
+@pytest.mark.asyncio
+async def test_checking_out_a_link_over_a_regular_file_replaces_it(git_rw):
+    # The mirror: the file must not survive under the link it was
+    # replaced by, or removing the link later uncovers content no
+    # branch records.
+    assert (await run(git_rw, "checkout -b plainfirst"))[0] == 0
+    await git_rw.execute("printf 'PLAIN\\n' > /repo/thing")
+    assert (await run(git_rw, "add thing"))[0] == 0
+    assert (await run(git_rw, "commit -m plain"))[0] == 0
+    assert (await run(git_rw, "checkout -b linkedafter"))[0] == 0
+    await git_rw.execute("rm /repo/thing")
+    await git_rw.execute("ln -s a.txt /repo/thing")
+    assert (await run(git_rw, "add thing"))[0] == 0
+    assert (await run(git_rw, "commit -m link"))[0] == 0
+    assert (await run(git_rw, "checkout plainfirst"))[0] == 0
+    assert (await run(git_rw, "checkout linkedafter"))[0] == 0
+    await git_rw.execute("rm /repo/thing")
+    listing = await git_rw.execute("ls /repo/thing")
+    assert b"No such file or directory" in (listing.stderr or b"")

@@ -48,6 +48,17 @@ const PAGE_SIZE = new Option({
   description: 'Maximum envelopes per page',
 })
 
+// Upstream v2 spells the sent copy as an explicit mailbox on every verb
+// that produces a message, so `--save` alone files it without sending and
+// `--save` with `--send` does both, naming the mailbox the account's
+// saveCopy would otherwise resolve on its own.
+const SAVE = new Option({
+  long: '--save',
+  type: 'str',
+  metavar: 'MAILBOX',
+  description: 'Append a copy of the message to this mailbox',
+})
+
 // The built-in flag composer, shared verbatim by compose, reply and
 // forward: upstream flattens the same clap struct into all three.
 const COMPOSER = [
@@ -88,6 +99,7 @@ const COMPOSER = [
     long: '--send',
     description: 'Send through SMTP instead of writing MIME to stdout',
   }),
+  SAVE,
 ]
 
 const QUOTING = [
@@ -166,6 +178,7 @@ export const HIMALAYA = new CLISpec({
           description: 'Send a raw RFC 5322 message',
           fn: send,
           write: true,
+          options: [SAVE],
           rest: ID,
         }),
         new CLISpec({

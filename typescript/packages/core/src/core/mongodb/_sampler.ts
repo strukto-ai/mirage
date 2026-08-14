@@ -14,6 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { BsonTypeTag, PRIMARY_KEY } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface SampledField {
   path: string
@@ -126,7 +127,7 @@ export async function sampleFieldTypes(
   }
   if (total === 0) return []
   const fields: SampledField[] = []
-  for (const path of [...counts.keys()].sort()) {
+  for (const path of [...counts.keys()].sort(compareCodePoints)) {
     if (path === PRIMARY_KEY) continue
     const inner = counts.get(path) ?? new Map<string, number>()
     const presenceCount = [...inner.values()].reduce((a, b) => a + b, 0)

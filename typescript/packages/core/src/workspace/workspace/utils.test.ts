@@ -51,8 +51,8 @@ describe('forkForCall', () => {
   it('layers env overrides on top of the session env', () => {
     const session = makeSession()
     const forked = forkForCall(session, undefined, { B: '9', C: '3' })
-    expect(forked.env).toEqual({ A: '1', B: '9', C: '3' })
-    expect(session.env).toEqual({ A: '1', B: '2' })
+    expect(forked.env).toEqual({ A: '1', B: '9', C: '3', PWD: '/home' })
+    expect(session.env).toEqual({ A: '1', B: '2', PWD: '/home' })
   })
 })
 

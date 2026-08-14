@@ -14,8 +14,9 @@
 
 from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
+from mirage.workspace.record.types import generation_of
 from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.store import SessionStore, generation_of
+from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 

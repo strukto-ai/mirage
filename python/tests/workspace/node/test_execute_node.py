@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.policy import Policies
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
@@ -42,15 +43,11 @@ def _mock_dispatch():
     return d
 
 
-async def _echo_resolve_glob(scopes, prefix=""):
-    # Return resource-relative paths, matching real resolve_glob behavior
-    results = []
-    for s in scopes:
-        path = s.virtual
-        if prefix and path.startswith(prefix):
-            path = path[len(prefix):] or "/"
-        results.append(path)
-    return results
+async def _no_match_resolve_glob(scopes, prefix=""):
+    # A backend holding nothing the patterns match: a resolved spec passes
+    # through, a pattern spec resolves to no matches and the expander
+    # reinstates the literal word (bash with nullglob off).
+    return [s for s in scopes if not s.pattern]
 
 
 def _mock_registry():
@@ -59,13 +56,16 @@ def _mock_registry():
     mount.mode = MountMode.EXEC
     mount.execute_cmd = AsyncMock(return_value=(b"ok\n", IOResult()))
     mount.resource = MagicMock()
-    mount.resource.resolve_glob = _echo_resolve_glob
+    mount.resource.resolve_glob = _no_match_resolve_glob
     mount.spec_for = MagicMock(return_value=None)
 
     reg = MagicMock()
     reg.mount_for = MagicMock(return_value=mount)
+    reg.try_mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
-    reg.policies.pre_command = AsyncMock(return_value=None)
+    # A bare MagicMock policies answers wants() truthy and then fails the
+    # await inside the gates; an empty Policies is what production carries.
+    reg.policies = Policies()
     # A bare MagicMock answers clis.get() with a truthy mock, which
     # would spuriously dispatch every command as an installed CLI.
     reg.clis = CLIRegistry()

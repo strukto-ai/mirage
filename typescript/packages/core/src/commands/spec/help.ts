@@ -14,6 +14,7 @@
 
 import { ARG_PLACEHOLDER } from './constants.ts'
 import { type CommandSpec, type Operand, type Option, UsageStyle } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 /**
  * The bare name of an option's value, declared or derived.
@@ -67,6 +68,20 @@ function flagRows(spec: CommandSpec): [string, string][] {
 }
 
 /**
+ * One operand's placeholder outside the clap dialect.
+ *
+ * A spec that named the slot gets that name, which is what argparse prints
+ * too (it renders the dest, not a generic word); a spec that did not falls
+ * back to the type. Only `gh` names one outside clap today, so this is the
+ * difference between `gh api [flags] <text>` and upstream's
+ * `gh api <endpoint>`.
+ */
+function slot(operand: Operand): string {
+  if (operand.name !== '') return `<${operand.name}>`
+  return operand.type === 'path' ? '<path>' : '<text>'
+}
+
+/**
  * Render one command's help; a CLI group is the same shape plus a Commands
  * section. `subcommands` carries (name, one-line help) rows for a CLI
  * group node; when given, the usage line reads `<command> [<args>]`
@@ -83,11 +98,11 @@ function usageLine(
   if (spec.options.length > 0) bits.push(clap ? '[OPTIONS]' : '[flags]')
   if (subcommands.length > 0) bits.push(clap ? '<COMMAND>' : '<command> [<args>]')
   for (const op of spec.positional) {
-    bits.push(clap ? operandSlot(op) : op.type === 'path' ? '<path>' : '<text>')
+    bits.push(clap ? operandSlot(op) : slot(op))
   }
   if (spec.rest !== null) {
     if (clap) bits.push(operandSlot(spec.rest, !spec.rest.required))
-    else bits.push(spec.rest.type === 'path' ? '[<path>...]' : '[<text>...]')
+    else bits.push(`[${slot(spec.rest)}...]`)
   }
   return `Usage: ${bits.join(' ')}`
 }
@@ -118,7 +133,9 @@ export function renderHelp(
     // clap prints subcommands in the order the program declares them, which is
     // a deliberate ordering by an author rather than an alphabet, so re-sorting
     // would lose information.
-    const subRows = clap ? subcommands : [...subcommands].sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    const subRows = clap
+      ? subcommands
+      : [...subcommands].sort((a, b) => compareCodePoints(a[0], b[0]))
     for (const [sub, desc] of subRows) {
       const first = desc.split('\n')[0] ?? ''
       lines.push(first === '' ? `  ${sub}` : `  ${sub.padEnd(width, ' ')}  ${first}`)

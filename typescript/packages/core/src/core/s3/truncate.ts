@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import type { PathSpec } from '../../types.ts'
+import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
+import { record } from '../../observe/context.ts'
 import {
   isNotFoundError,
   loadS3Module,
@@ -32,6 +33,7 @@ export async function truncate(
   const { GetObjectCommand, PutObjectCommand } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
   const key = s3Key(raw, accessor.config)
+  const start = performance.now()
   await withClient(accessor.config, async (client) => {
     let existing: Uint8Array = new Uint8Array()
     try {
@@ -47,5 +49,6 @@ export async function truncate(
     // Remaining bytes are already zero-filled (Uint8Array default).
     await client.send(new PutObjectCommand({ Bucket: accessor.config.bucket, Key: key, Body: out }))
   })
+  record('truncate', path.virtual, ResourceName.S3, 0, start)
   await invalidateAfterWrite(path)
 }

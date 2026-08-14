@@ -15,6 +15,7 @@
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { MongoFindOptions, MongoIndexAccess, MongoIterOptions } from './_driver.ts'
 import { EntityKind } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const SYSTEM_DBS: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
 
@@ -27,7 +28,7 @@ export async function listDatabases(accessor: MongoDBAccessor): Promise<string[]
       const allowSet = new Set(allow)
       dbs = dbs.filter((d) => allowSet.has(d))
     }
-    return [...dbs].sort()
+    return [...dbs].sort(compareCodePoints)
   })
 }
 
@@ -39,7 +40,7 @@ export async function listCollections(
   const key = `listCollections:${database}:${kind ?? ''}`
   return accessor.cachedList(key, async () => {
     const cols = await accessor.driver.listCollections(database, kind)
-    return [...cols].sort()
+    return [...cols].sort(compareCodePoints)
   })
 }
 

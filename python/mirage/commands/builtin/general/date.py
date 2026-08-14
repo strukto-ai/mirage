@@ -15,11 +15,12 @@
 import email.utils
 from datetime import datetime, timezone
 
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import CommandName, FlagValue
+from mirage.commands.spec.types import CommandName, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -27,16 +28,14 @@ from mirage.types import PathSpec
 
 @command("date", resource=None, spec=SPECS["date"], provision=pure_provision)
 async def date(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    u: bool = False,
-    d: str | None = None,
-    args_I: bool = False,
-    R: bool = False,
-    **_extra: FlagValue,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["date"])
+    u = fl.as_bool("u")
+    d = fl.as_str("d")
     if len(texts) > 1:
         raise extra_operand_error(CommandName.DATE, texts[1])
     if d is not None:
@@ -52,9 +51,9 @@ async def date(
         if t.startswith("+"):
             fmt = t[1:]
             break
-    if args_I:
+    if fl.as_bool("args_I"):
         result = dt.strftime("%Y-%m-%d")
-    elif R:
+    elif fl.as_bool("R"):
         result = email.utils.format_datetime(dt)
     elif fmt is not None:
         result = dt.strftime(fmt)

@@ -23,6 +23,7 @@ import {
   rstripSlash,
   type IndexCacheStore,
   type PathSpec,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { norm, resolveSafe } from './utils.ts'
 
@@ -58,7 +59,7 @@ export async function readdir(
   }
   const base = norm(virtual)
   const dirPrefix = base === '/' ? '/' : `${base}/`
-  const sorted = [...entries].sort()
+  const sorted = [...entries].sort(compareCodePoints)
   const virtualEntries = sorted.map((e) => `${mountPrefix}${dirPrefix}${e}`)
   if (index !== undefined) {
     const indexEntries: [string, IndexEntry][] = sorted.map((name) => [

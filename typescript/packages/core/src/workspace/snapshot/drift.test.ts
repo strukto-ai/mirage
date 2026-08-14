@@ -28,7 +28,7 @@ import {
 } from './drift.ts'
 
 interface RegistryLike {
-  mountFor(path: string): MountEntry | null
+  tryMountFor(path: string): MountEntry | null
   allMounts(): readonly MountEntry[]
 }
 
@@ -63,7 +63,7 @@ function makeStatFn(stats?: Record<string, FileStat>): (path: string) => Promise
 
 function makeRegistry(mounts: MountEntry[]): RegistryLike {
   return {
-    mountFor: (path: string): MountEntry | null => {
+    tryMountFor: (path: string): MountEntry | null => {
       for (const m of mounts) {
         if (path.startsWith(m.prefix.replace(/\/$/, ''))) return m
       }
@@ -217,7 +217,7 @@ describe('installDriftState under DriftPolicy.OFF', () => {
     }
     const drift = new DriftQueue()
     installDriftState(
-      { mountFor: () => null, allMounts: () => [] },
+      { tryMountFor: () => null, allMounts: () => [] },
       cache,
       drift,
       {

@@ -14,7 +14,7 @@
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { Session } from '../../../session/session.ts'
-import type { DispatchFn } from '../../cross_mount.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CondNode =
   | { kind: 'word'; value: string }

@@ -23,6 +23,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.types import MountMode, PathSpec
+from mirage.utils.errors import NoMountError
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 
 # ── mount_for ──────────────────────────────────
@@ -443,3 +444,55 @@ async def test_resolve_mount_allows_default_without_path_binding():
     mount = await reg.resolve_mount("fallback-only", [], "/limited")
     assert mount is not None
     assert mount.prefix == "/"
+
+
+# ── mount lookup contract ─────────────────────
+
+
+def test_mount_for_raises_typed_no_mount(registry):
+    with pytest.raises(NoMountError):
+        registry.mount_for("/unknown/file.txt")
+
+
+def test_try_mount_for_none_on_miss(registry):
+    assert registry.try_mount_for("/unknown/file.txt") is None
+
+
+def test_try_mount_for_hit(registry):
+    mount = registry.try_mount_for("/data/file.txt")
+    assert mount is not None
+    assert mount.prefix == "/data/"
+
+
+def test_mount_for_prefix_raises_typed_no_mount(registry):
+    with pytest.raises(NoMountError):
+        registry.mount_for_prefix("/unknown/")
+
+
+def test_try_mount_for_prefix_none_on_miss(registry):
+    assert registry.try_mount_for_prefix("/unknown/") is None
+
+
+def test_try_mount_for_prefix_normalizes_the_spelling(registry):
+    # The registration spelling ("/data", "data/") finds the stored
+    # "/data/" entry, mirroring the TS twin's normalization.
+    for spelling in ("/data", "data/", "/data/"):
+        mount = registry.try_mount_for_prefix(spelling)
+        assert mount is not None
+        assert mount.prefix == "/data/"
+
+
+def test_group_by_mount_propagates_miss(registry):
+    with pytest.raises(NoMountError):
+        registry.group_by_mount(["/data/a.txt", "/unknown/b.txt"])
+
+
+def test_mount_for_command_never_answers_dev():
+    # /dev/ registers the general set like every mount, but must not
+    # claim command routing (mirrors the TS scan).
+    reg = MountRegistry()
+    assert reg.mount_for_command("seq") is None
+    reg.mount("/d/", RAMResource(), MountMode.WRITE)
+    mount = reg.mount_for_command("seq")
+    assert mount is not None
+    assert mount.prefix == "/d/"

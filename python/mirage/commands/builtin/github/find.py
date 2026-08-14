@@ -15,28 +15,22 @@
 from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.find import find as generic_find
+from mirage.commands.builtin.generic.find import find_generic
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.github.find import find as find_core
 from mirage.core.github.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, StatPath
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def find_provision(
-    accessor: GitHubAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    index: IndexCacheStore,
-    **_extra: FlagValue,
-) -> ProvisionResult:
+async def find_provision(accessor: GitHubAccessor, paths: list[PathSpec],
+                         texts: list[str],
+                         opts: CommandOpts) -> ProvisionResult:
     path_strs = [
         p.virtual if isinstance(p, PathSpec) else str(p) for p in paths
     ]
@@ -50,37 +44,16 @@ async def find_provision(
 async def find(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    name: str | None = None,
-    type: str | None = None,
-    maxdepth: str | None = None,
-    size: str | None = None,
-    mtime: str | None = None,
-    iname: str | None = None,
-    path: str | None = None,
-    mindepth: str | None = None,
-    index: IndexCacheStore,
-    L: bool = False,
-    links: LinkView | None = None,
-    stat_path: StatPath | None = None,
-    **_extra: FlagValue,
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths, index)
-    return await generic_find(paths,
+    paths = await resolve_glob(accessor, paths, opts.index)
+    return await find_generic(paths,
                               texts,
+                              opts,
                               find_core=partial(find_core,
                                                 accessor,
-                                                index=index),
-                              stat=partial(stat_core, accessor, index=index),
-                              name=name,
-                              type=type,
-                              size=size,
-                              mtime=mtime,
-                              maxdepth=maxdepth,
-                              iname=iname,
-                              path=path,
-                              mindepth=mindepth,
-                              links=links,
-                              stat_path=stat_path,
-                              follow=L)
+                                                index=opts.index),
+                              stat=partial(stat_core,
+                                           accessor,
+                                           index=opts.index))

@@ -22,6 +22,7 @@ import {
   rstripSlash,
   startBasename,
   stripSlash,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { isNotFound, rawPathOf } from './util.ts'
@@ -136,5 +137,5 @@ export async function find(
       maxSize: options.maxSize,
     })
   }
-  return [...new Set(results)].sort()
+  return [...new Set(results)].sort(compareCodePoints)
 }

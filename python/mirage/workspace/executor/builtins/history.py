@@ -100,9 +100,8 @@ async def handle_history(
     flags, texts, error = _parse_args(args)
     if error is not None:
         return _usage_error(error)
-    try:
-        mount = registry.mount_for(HISTORY_PREFIX)
-    except ValueError:
+    mount = registry.try_mount_for(HISTORY_PREFIX)
+    if mount is None:
         err = b"history: not enabled for this workspace\n"
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command="history",

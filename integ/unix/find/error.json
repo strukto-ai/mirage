@@ -258,6 +258,117 @@
       "flags": [
         "boguspredicate"
       ]
+    },
+    {
+      "id": "find_bang_dangling",
+      "seq": 688,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data !",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: expected an expression after '!'\n"
+      },
+      "flags": [
+        "not"
+      ]
+    },
+    {
+      "id": "find_not_dangling",
+      "seq": 689,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -not",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: expected an expression after '-not'\n"
+      },
+      "flags": [
+        "not"
+      ]
+    },
+    {
+      "id": "find_bang_empty_parens",
+      "seq": 690,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data \\( ! \\)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: expected an expression between '!' and ')'\n"
+      },
+      "flags": [
+        "not"
+      ]
     }
   ]
 }

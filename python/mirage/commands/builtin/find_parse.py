@@ -89,6 +89,26 @@ def _advance(state: _State) -> str | None:
     return tok
 
 
+def _after_operator(state: _State, op: str) -> None:
+    """Refuse an operator the line left without a right-hand side.
+
+    GNU words the empty slot two ways and both name the operator, which
+    is why this runs where the operator was just consumed rather than in
+    _parse_primary: by the time the recursion reaches a primary the token
+    that needed an operand is gone.
+
+    Args:
+        state (_State): parser state, positioned after the operator.
+        op (str): the operator as typed (`!`, `-not`, `-a`, `-o`, ...).
+    """
+    tok = _peek(state)
+    if tok is None:
+        raise FindParseError(f"find: expected an expression after '{op}'")
+    if tok == ")":
+        raise FindParseError(
+            f"find: expected an expression between '{op}' and ')'")
+
+
 def _type_node(value: str) -> Type:
     if value in ("f", "file"):
         return Type("f")
@@ -179,8 +199,9 @@ def _parse_factor(state: _State) -> PredNode:
         raise FindParseError("find: expression too deeply nested")
     try:
         tok = _peek(state)
-        if tok in ("-not", "!"):
+        if tok is not None and tok in ("-not", "!"):
             _advance(state)
+            _after_operator(state, tok)
             return Not(_parse_factor(state))
         if tok == "(":
             _advance(state)
@@ -198,8 +219,9 @@ def _parse_and(state: _State) -> PredNode:
     factors = [_parse_factor(state)]
     while True:
         tok = _peek(state)
-        if tok in ("-a", "-and"):
+        if tok is not None and tok in ("-a", "-and"):
             _advance(state)
+            _after_operator(state, tok)
             factors.append(_parse_factor(state))
             continue
         if tok is None or tok in ("-o", "-or", ")"):
@@ -210,8 +232,12 @@ def _parse_and(state: _State) -> PredNode:
 
 def _parse_or(state: _State) -> PredNode:
     terms = [_parse_and(state)]
-    while _peek(state) in ("-o", "-or"):
+    while True:
+        tok = _peek(state)
+        if tok is None or tok not in ("-o", "-or"):
+            break
         _advance(state)
+        _after_operator(state, tok)
         terms.append(_parse_and(state))
     return terms[0] if len(terms) == 1 else Or(terms)
 

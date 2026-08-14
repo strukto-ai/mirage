@@ -200,6 +200,13 @@ export function parseCommand(
     if (tok === undefined) break
 
     if (!endOfFlags && spec.ignoreTokens.has(tok)) {
+      // Expression syntax, never an operand of the declared kind: `find
+      // /d \( -name x \) ! -empty` would otherwise classify "(", ")" and
+      // "!" as PATH operands, giving find three phantom start points on
+      // top of the real one. The kind is stated rather than left null,
+      // because null means "guess from the shape" and the shape of a
+      // grammar token says nothing about it.
+      wordKinds[origIndices[i] ?? -1] = 'str'
       i += 1
       continue
     }

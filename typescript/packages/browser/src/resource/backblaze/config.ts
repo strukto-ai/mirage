@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface BackblazeConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  region?: string
-  endpoint?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface BackblazeConfigRedacted extends Omit<BackblazeConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const BackblazeConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const BackblazeConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type BackblazeConfig = ConfigOf<typeof BackblazeConfigSchema>
+
+export type BackblazeConfigRedacted = RedactedConfig<BackblazeConfig, 'presignedUrlProvider'>
 
 export function resolvedBackblazeEndpoint(config: BackblazeConfig): string | undefined {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

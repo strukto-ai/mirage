@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountAllowed } from '../../context/session_context.ts'
+import { mountAllowed, pathAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -22,7 +22,7 @@ import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.t
 import { ExecutionNode } from '../types.ts'
 import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/findEval.ts'
 import {
   FindParseError,
@@ -31,8 +31,9 @@ import {
 } from '../../commands/builtin/findParse.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
-import type { ChildMounts, LinkView, MountView, StatPath } from '../../ops/types.ts'
+import type { NamespaceView, StatPath } from '../../ops/types.ts'
 import { mergeDuBlocks } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -84,7 +85,9 @@ async function mountDirs(
  * unobservable optimization.
  */
 function allowedDescendants(registry: MountRegistry, path: string): MountEntry[] {
-  return registry.descendantMounts(path).filter((m) => mountAllowed(m.prefix))
+  return registry
+    .descendantMounts(path)
+    .filter((m) => mountAllowed(m.prefix) && pathAllowed('/' + stripSlash(m.prefix)))
 }
 
 export function shouldFanOut(
@@ -310,16 +313,14 @@ export async function fanOutTraversal(
   cmdStr: string,
   stdin: ByteSource | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
-  // Offered to every sub-run, because a rollup total cannot be repaired
-  // by line filtering: du must exclude a shadowed subtree while it is
-  // accounting, not after it has rendered.
-  mounts?: MountView,
-  // Offered for the same reason the single-mount path offers it: symlinks
-  // are namespace state, so a sub-run that never receives them reports a
-  // tree with every link missing, and a nested mount is not a reason for
-  // `find` to stop seeing one.
-  links?: LinkView | null,
-  childMounts: ChildMounts | null = null,
+  // The name plane's facts, offered whole to every sub-run. The mount
+  // boundaries, because a rollup total cannot be repaired by line
+  // filtering: du must exclude a shadowed subtree while it is
+  // accounting, not after it has rendered. The symlinks, for the same
+  // reason the single-mount path offers them: a sub-run that never
+  // receives them reports a tree with every link missing, and a nested
+  // mount is not a reason for `find` to stop seeing one.
+  ns?: NamespaceView,
   statPath: StatPath | null = null,
 ): Promise<Result> {
   const targetPath = paths[0]?.virtual ?? cwd
@@ -343,12 +344,13 @@ export async function fanOutTraversal(
     total: flagKwargs.c === true,
     human: flagKwargs.h === true,
     maxDepth: depthFlagValue(flagKwargs.max_depth ?? null),
+    separateDirs: flagKwargs.separate_dirs === true,
   }
   let flags = flagKwargs
   if (duMerge) {
     const rest = { ...flagKwargs }
     delete rest.max_depth
-    flags = { ...rest, a: true, s: false, c: false, h: false }
+    flags = { ...rest, a: true, s: false, c: false, h: false, separate_dirs: false }
   }
 
   const allStdout: Uint8Array[] = []
@@ -418,14 +420,11 @@ export async function fanOutTraversal(
     // The child-mount names and the dispatcher-backed start-point stat.
     // A start point only the namespace serves (a nested mount's
     // ancestor) has no backend listing, so without them the primary run
-    // reports the operand missing. The stat overlay is still dropped
-    // here, a known seam of the fan-out.
+    // reports the operand missing.
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
-      ...(mounts === undefined ? {} : { mounts }),
-      ...(links === undefined || links === null ? {} : { links }),
-      ...(childMounts !== null ? { childMounts } : {}),
+      ...(ns === undefined ? {} : { ns }),
       ...(statPath !== null ? { statPath } : {}),
     })
     let stdout: ByteSource | null = stdout0
@@ -489,7 +488,7 @@ export async function fanOutTraversal(
           .flatMap((d) => new TextDecoder().decode(d).split('\n'))
           .filter((line) => line !== ''),
       ),
-    ].sort()
+    ].sort(compareCodePoints)
     combined = new TextEncoder().encode(lines.join('\n') + '\n')
   } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
@@ -509,7 +508,7 @@ export async function fanOutTraversal(
       flags,
       registry,
       cwd,
-      childMounts,
+      ns?.childMounts ?? null,
       statPath,
     )
     combined = newCombined
@@ -551,10 +550,8 @@ export function runWithFanout(
   runSingle: RunSingle,
   registry: MountRegistry,
   cwd: string,
-  mounts: MountView | undefined,
-  links: LinkView | null,
+  ns: NamespaceView | undefined,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
-  childMounts: ChildMounts | null = null,
   statPath: StatPath | null = null,
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
@@ -582,9 +579,7 @@ export function runWithFanout(
       cmdName,
       stdin,
       ensureOpen,
-      mounts,
-      links,
-      childMounts,
+      ns,
       statPath,
     )
     return [stdout, io]

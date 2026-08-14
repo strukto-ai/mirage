@@ -1,6 +1,7 @@
 import pytest
 from pydantic import SecretStr
 
+from mirage.commands.config import CommandOpts
 from mirage.resource.mem0 import Mem0Config
 from mirage.resource.mem0.mem0 import Mem0Resource
 from mirage.types import PathSpec
@@ -37,9 +38,9 @@ def _command(resource: Mem0Resource, name: str):
 async def test_ls_lists_memories():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", resource_path="")
-    source, _io = await _command(res, "ls")(res.accessor, [p],
-                                            index=res.index,
-                                            cwd=p)
+    source, _io = await _command(res, "ls")(res.accessor, [p], [],
+                                            CommandOpts(index=res.index,
+                                                        cwd=p))
     out = b"".join([chunk async for chunk in source]) if hasattr(
         source, "__aiter__") else source
     text = out.decode()

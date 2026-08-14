@@ -15,12 +15,13 @@
 import math
 from typing import Any
 
-from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -52,14 +53,14 @@ def _eval_bc(expression: str, use_math: bool) -> str:
 
 @command("bc", resource=None, spec=SPECS["bc"], provision=pure_provision)
 async def bc(
-    accessor: Accessor = NOOPAccessor(),
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: ByteSource | None = None,
-    args_l: bool = False,
-    **_extra: FlagValue,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    raw = await _read_stdin_async(stdin)
+    fl = FlagView(opts.flags, spec=SPECS["bc"])
+    use_math = fl.as_bool("args_l")
+    raw = await _read_stdin_async(opts.stdin)
     if raw is None:
         raw = b""
     lines = raw.decode(errors="replace").strip().splitlines()
@@ -67,7 +68,7 @@ async def bc(
     for line in lines:
         line = line.strip()
         if line:
-            results.append(_eval_bc(line, args_l))
+            results.append(_eval_bc(line, use_math))
     if not results:
         return b"", IOResult()
     return ("\n".join(results) + "\n").encode(), IOResult()

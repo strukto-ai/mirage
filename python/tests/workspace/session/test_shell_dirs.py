@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.shell_dirs import change_dir, home_dir
+from mirage.workspace.session.shell_dirs import (change_dir, home_dir,
+                                                 logical_cwd, set_cwd)
 
 
 def test_home_dir_unset_is_none():
@@ -44,3 +45,49 @@ def test_change_dir_overwrites_oldpwd():
     change_dir(session, "/c")
     assert session.cwd == "/c"
     assert session.env["OLDPWD"] == "/b"
+
+
+def test_logical_cwd_falls_back_to_the_physical_cwd():
+    assert logical_cwd(Session(session_id="s", cwd="/data")) == "/data"
+
+
+def test_change_dir_records_a_logical_name_that_differs():
+    session = Session(session_id="s", cwd="/data")
+    change_dir(session, "/data/deep/real", "/data/lk")
+    assert session.cwd == "/data/deep/real"
+    assert logical_cwd(session) == "/data/lk"
+
+
+def test_change_dir_collapses_the_pair_when_the_names_agree():
+    # Storing the two names as one collapsed field keeps `logical_cwd`
+    # from reporting a stale spelling after a `-P` move.
+    session = Session(session_id="s", cwd="/data")
+    change_dir(session, "/data/deep/real", "/data/lk")
+    change_dir(session, "/data/deep/real", "/data/deep/real")
+    assert session.logical_cwd is None
+    assert logical_cwd(session) == "/data/deep/real"
+
+
+def test_oldpwd_records_the_logical_name():
+    # It is what `cd -` returns to, so it has to be the spelling.
+    session = Session(session_id="s", cwd="/data")
+    change_dir(session, "/data/deep/real", "/data/lk")
+    change_dir(session, "/tmp")
+    assert session.env["OLDPWD"] == "/data/lk"
+
+
+def test_set_cwd_drops_a_stale_logical_name():
+    # A snapshot restore or `workspace.cwd = ...` moves the session with
+    # no typed spelling behind it. Leaving the old logical name would
+    # make `pwd` describe a directory the session is no longer in.
+    session = Session(session_id="s", cwd="/data")
+    change_dir(session, "/data/deep/real", "/data/lk")
+    set_cwd(session, "/elsewhere")
+    assert session.logical_cwd is None
+    assert logical_cwd(session) == "/elsewhere"
+
+
+def test_set_cwd_leaves_oldpwd_alone():
+    session = Session(session_id="s", cwd="/data")
+    set_cwd(session, "/elsewhere")
+    assert "OLDPWD" not in session.env

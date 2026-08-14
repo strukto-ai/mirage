@@ -23,7 +23,7 @@ import { ExecutionNode } from '../types.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 
 export { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
-export type { DispatchFn } from '../../commands/builtin/generic/crossmount/index.ts'
+export type { DispatchFn } from '../../runtime/types.ts'
 
 type Flags = Record<string, FlagValue>
 type Result = [ByteSource | null, IOResult, ExecutionNode]

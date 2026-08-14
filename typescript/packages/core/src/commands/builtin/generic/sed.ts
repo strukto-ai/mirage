@@ -19,7 +19,15 @@ import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { executeProgram, parseOneCommand, parseProgram, type SedCommand } from '../sed_helper.ts'
+import {
+  executeProgram,
+  parseOneCommand,
+  parseProgram,
+  SED_MISSING_SCRIPT,
+  SED_NO_INPUT_EXIT,
+  SED_NO_INPUT_FILES,
+  type SedCommand,
+} from '../sed_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -56,7 +64,7 @@ export async function sedGeneric(
   if (!flagScript && texts[0] !== undefined) scriptParts.push(texts[0])
   const script = scriptParts.length > 0 ? scriptParts.join('\n') : undefined
   if (script === undefined) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sed: missing script\n') })]
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${SED_MISSING_SCRIPT}\n`) })]
   }
   const suppress = fl.asBool('n')
   const inPlace = fl.asBool('i')
@@ -185,7 +193,13 @@ export async function sedGeneric(
 
   const raw = await readStdinAsync(opts.stdin)
   if (raw === null) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sed: missing operand\n') })]
+    return [
+      null,
+      new IOResult({
+        exitCode: SED_NO_INPUT_EXIT,
+        stderr: ENC.encode(`${SED_NO_INPUT_FILES}\n`),
+      }),
+    ]
   }
   const text = DEC.decode(raw)
   const result = executeProgram(text, commands, suppress, extended)

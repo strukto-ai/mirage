@@ -19,7 +19,8 @@ from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session.disk import DiskRecordClient, DiskSessionStore
+from mirage.workspace.record.disk import DiskRecordClient
+from mirage.workspace.session.disk import DiskSessionStore
 from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 

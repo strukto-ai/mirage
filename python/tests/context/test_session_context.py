@@ -15,10 +15,11 @@
 import pytest
 
 from mirage.context import (assert_mount_allowed, effective_mount_mode,
-                            get_current_session, mount_allowed,
-                            reset_current_session, set_current_session)
+                            get_current_session, get_current_session_for,
+                            mount_allowed, reset_current_session,
+                            set_current_session)
 from mirage.types import MountMode, weaker_mode
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, SessionManager
 
 
 @pytest.fixture
@@ -95,3 +96,40 @@ def test_mount_allowed_is_the_non_raising_twin(bound_session):
 
 def test_mount_allowed_without_session_permits_everything():
     assert mount_allowed("/anything") is True
+
+
+def test_ownership_gates_the_binding():
+    """A binding answers only the manager that published it."""
+    mine = SessionManager("default")
+    theirs = SessionManager("default")
+    sess = Session(session_id="default")
+    token = set_current_session(sess, owner=mine)
+    try:
+        assert get_current_session_for(mine) is sess
+        assert get_current_session_for(theirs) is None
+        assert get_current_session() is sess
+    finally:
+        reset_current_session(token)
+
+
+def test_a_nested_binding_keeps_the_owner():
+    """A background job's fork is still the workspace's own session."""
+    mine = SessionManager("default")
+    outer = Session(session_id="default")
+    inner = Session(session_id="default")
+    outer_token = set_current_session(outer, owner=mine)
+    inner_token = set_current_session(inner)
+    try:
+        assert get_current_session_for(mine) is inner
+    finally:
+        reset_current_session(inner_token)
+        reset_current_session(outer_token)
+
+
+def test_an_unowned_binding_answers_nobody():
+    """The op-dispatch binders name no owner, so no line adopts one."""
+    token = set_current_session(Session(session_id="default"))
+    try:
+        assert get_current_session_for(SessionManager("default")) is None
+    finally:
+        reset_current_session(token)

@@ -63,7 +63,7 @@ export async function fileGeneric(
   const lines: string[] = []
   // Without -L the operand arrives unfollowed, so a link is described
   // as a link rather than sniffed as its target.
-  const links = opts.links ?? null
+  const links = opts.ns?.links ?? null
   for (const p of paths) {
     if (links !== null) {
       const described = await linkDescription(p, links)

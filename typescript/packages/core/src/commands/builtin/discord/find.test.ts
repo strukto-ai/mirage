@@ -36,7 +36,6 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
     ...(options.index !== undefined ? { index: options.index } : {}),
   })
   if (result === null) return ''
@@ -88,7 +87,7 @@ describe('discord find', () => {
         }),
       ],
       [],
-      { stdin: null, flags: { maxdepth: 'abc' }, filetypeFns: null, cwd: '/', resource },
+      { stdin: null, flags: { maxdepth: 'abc' }, filetypeFns: null, cwd: '/' },
     )
     expect(result).not.toBeNull()
     const [out, io] = result as [unknown, { exitCode: number; stderr: AsyncIterable<Uint8Array> }]

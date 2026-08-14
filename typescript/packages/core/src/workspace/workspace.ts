@@ -20,6 +20,7 @@ import type { OpRecord } from '../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed } from '../context/session_context.ts'
 import { isMissingPath } from '../utils/errors.ts'
+import { contentSize, isDir as statIsDir, mtimeMs } from '../utils/stat_view.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -39,20 +40,13 @@ import { applyStateDict, buildMountArgs, type CLIOverrides, toStateDict } from '
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
 import type { FileEvent, FileStat } from '../types.ts'
-import {
-  ConsistencyPolicy,
-  DriftPolicy,
-  FileType,
-  MountMode,
-  parseMountMode,
-  PathSpec,
-} from '../types.ts'
+import { ConsistencyPolicy, DriftPolicy, MountMode, parseMountMode, PathSpec } from '../types.ts'
 import type { Policies } from '../policy/index.ts'
 import type { PolicyFn } from '../runtime/policy/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 import type { ExecuteFn } from './expand/node.ts'
 import type { ProvisionResult } from '../provision/types.ts'
-import { WorkspaceFS } from './fs.ts'
+import { Ops } from '../ops/ops.ts'
 import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import type { VFSEntry } from '../runtime/vfs.ts'
@@ -63,14 +57,14 @@ import { scriptStringError, type Runtime, type RuntimeEntry } from '../runtime/b
 import { isEvaluator } from '../runtime/mixin.ts'
 import type { EvalResult } from '../runtime/types.ts'
 import { PyodideUnavailableError } from '../runtime/python/types.ts'
-import { Dispatcher } from './dispatcher.ts'
+import { Dispatcher } from './dispatcher/index.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
-import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from './store/base.ts'
 import type { Session } from './session/session.ts'
+import type { SessionProfile } from './session/profile.ts'
 import { newSessionId, newWorkspaceId } from '../utils/ids.ts'
 import { stripSlash } from '../utils/slash.ts'
 import type { WatchRuntime } from '../watch/base.ts'
@@ -109,8 +103,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
-  readonly records: OpRecord[] = []
-  readonly fs: WorkspaceFS
+  readonly fs: Ops
   private closed = false
   private readonly closers: (() => Promise<void>)[] = []
   private readonly watchManager: WatchManager
@@ -188,7 +181,6 @@ export class Workspace {
       this.registry,
       this.runtimes,
       this.policy,
-      this.sessionManager,
       this.agentId,
       sandboxResolver,
     )
@@ -210,6 +202,7 @@ export class Workspace {
       this.opsRegistry,
       consistency,
       this.registry.policies,
+      this.drift,
     )
     this.registry.setReconciler(this.dispatcher.reconciler)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
@@ -245,7 +238,7 @@ export class Workspace {
       ...normalized.commandLimits,
       ...(options.commandLimits ?? {}),
     })) {
-      const mount = this.registry.mountForPrefix(prefix)
+      const mount = this.registry.tryMountForPrefix(prefix)
       if (mount === null) {
         throw new Error(`commandLimits references unknown mount prefix: ${prefix}`)
       }
@@ -253,18 +246,20 @@ export class Workspace {
         mount.commandLimits.set(cmd, sg)
       }
     }
-    this.fs = new WorkspaceFS(
-      (path) => this.resolve(path),
-      this.opsRegistry,
+    // The facade delegates every op to the dispatcher, so FUSE and
+    // programmatic ws.fs walk the same pipeline as a shell command and
+    // the policy gates fire exactly once, at that door. It keeps the
+    // ledger, which is its own; the sink is only the observer's copy.
+    this.fs = new Ops(
+      this.dispatcher.dispatch,
       async (rec) => {
-        this.records.push(rec)
         await this.observer.logOp(rec, this.agentId ?? '', this.sessionManager.defaultId)
       },
       this.namespace,
-      (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
-      this.registry.policies,
-      (path) => this.registry.mountFor(path)?.prefix ?? '',
-      () => this.registry.mountPrefixes(),
+      (path) => {
+        const mount = this.registry.tryMountFor(path)
+        return mount === null ? null : { prefix: mount.prefix, kind: mount.resource.kind }
+      },
     )
   }
 
@@ -295,6 +290,11 @@ export class Workspace {
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
     return this.runtimes.add(runtime)
+  }
+
+  /** The ordered runtime world, as a read-only view of the live list. */
+  get runtimeEntries(): readonly Runtime[] {
+    return this.runtimes.entries
   }
 
   /**
@@ -330,7 +330,7 @@ export class Workspace {
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
-  // Routes through `dispatch`, not the raw WorkspaceFS, so sandbox I/O
+  // Routes through `dispatch`, not the raw Ops facade, so sandbox I/O
   // takes the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
   // by the current session all come from the Dispatcher. Reads are raw
@@ -338,47 +338,55 @@ export class Workspace {
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes, dst) => {
       switch (op) {
-        case 'READ':
+        case 'read':
           return (await this.dispatch('read', path)) as Uint8Array
-        case 'WRITE': {
-          if (bytes === undefined) throw new Error('WRITE op requires bytes')
+        case 'write': {
+          if (bytes === undefined) throw new Error('write op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('write', path, [buf])
           return undefined
         }
-        case 'APPEND': {
-          if (bytes === undefined) throw new Error('APPEND op requires bytes')
+        case 'append': {
+          if (bytes === undefined) throw new Error('append op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
           await this.dispatch('append', path, [buf])
           return undefined
         }
-        case 'STAT': {
+        case 'stat': {
           const st = (await this.dispatch('stat', path)) as FileStat
-          const isDir = st.type === FileType.DIRECTORY
-          const mtimeMs = st.modified !== null ? Date.parse(st.modified) : 0
+          // One translator: bare Date.parse read an offset-less stamp
+          // as LOCAL time here while the fuse fold read it as UTC.
+          // VFSStat has no validity channel, so an unknown mtime and
+          // epoch zero both encode as 0 on this wire.
           return {
-            size: isDir ? 0 : (st.size ?? 0),
-            isDir,
-            mtimeMs: Number.isNaN(mtimeMs) ? 0 : mtimeMs,
+            size: contentSize(st),
+            isDir: statIsDir(st),
+            mtimeMs: mtimeMs(st) ?? 0,
           }
         }
-        case 'UNLINK':
+        case 'create':
+          await this.dispatch('create', path)
+          return undefined
+        case 'truncate':
+          await this.dispatch('truncate', path, [0])
+          return undefined
+        case 'unlink':
           await this.dispatch('unlink', path)
           return undefined
-        case 'MKDIR':
+        case 'mkdir':
           await this.dispatch('mkdir', path)
           return undefined
-        case 'RMDIR':
+        case 'rmdir':
           await this.dispatch('rmdir', path)
           return undefined
-        case 'RENAME': {
-          if (dst === undefined) throw new Error('RENAME op requires dst')
+        case 'rename': {
+          if (dst === undefined) throw new Error('rename op requires dst')
           await this.dispatch('rename', path, [PathSpec.fromStrPath(dst)])
           return undefined
         }
-        case 'LIST': {
+        case 'readdir': {
           const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
           return await Promise.all(
             entries.map(async (entry): Promise<VFSEntry> => {
@@ -400,11 +408,10 @@ export class Workspace {
                 if (!isMissingPath(err)) throw err
                 return { path: entry, size: 0, isDir: false, ...(isLink ? { isLink } : {}) }
               }
-              const isDir = stat.type === FileType.DIRECTORY
               return {
                 path: entry,
-                size: isDir ? 0 : (stat.size ?? 0),
-                isDir,
+                size: contentSize(stat),
+                isDir: statIsDir(stat),
                 ...(isLink ? { isLink } : {}),
               }
             }),
@@ -470,9 +477,15 @@ export class Workspace {
     sessionId: string,
     options: {
       mounts?: ReadonlyMap<string, string> | Record<string, string> | readonly string[] | null
+      /**
+       * A role's narrowing bundle; its fields unpack onto the session,
+       * with an explicit `mounts` option overriding the profile's.
+       */
+      profile?: SessionProfile | null
     } = {},
   ): Session {
-    const mounts = options.mounts ?? null
+    const profile = options.profile ?? null
+    const mounts = options.mounts ?? profile?.mounts ?? null
     let modes: Map<string, MountMode> | null = null
     if (mounts !== null) {
       modes = new Map<string, MountMode>()
@@ -493,7 +506,13 @@ export class Workspace {
         if (!modes.has(p)) modes.set(p, MountMode.EXEC)
       }
     }
-    return this.sessionManager.create(sessionId, { mountModes: modes })
+    const session = this.sessionManager.create(sessionId, { mountModes: modes })
+    if (profile !== null) {
+      session.hiddenPaths = profile.hiddenPaths ?? null
+      session.hiddenVars = profile.hiddenVars ?? null
+      if (profile.env != null) Object.assign(session.env, profile.env)
+    }
+    return session
   }
 
   getSession(sessionId: string): Session {
@@ -556,7 +575,7 @@ export class Workspace {
     return this.registry.allMounts()
   }
 
-  mount(prefix: string): MountEntry | null {
+  mount(prefix: string): MountEntry {
     return this.registry.mountFor(prefix)
   }
 
@@ -631,28 +650,32 @@ export class Workspace {
     this.cache.maxDrainBytes = value
   }
 
+  /**
+   * The op ledger. It lives on the `Ops` facade (python parity); these
+   * are thin delegates so the public workspace API keeps reading.
+   */
+  get records(): OpRecord[] {
+    return this.fs.records
+  }
+
   /** Records that hit a remote resource (not cache). */
   get networkRecords(): OpRecord[] {
-    return this.records.filter((r) => !r.isCache)
+    return this.fs.networkRecords
   }
 
   /** Total bytes transferred over the network. */
   get networkBytes(): number {
-    let total = 0
-    for (const r of this.records) if (!r.isCache) total += r.bytes
-    return total
+    return this.fs.networkBytes
   }
 
   /** Records served from in-memory cache. */
   get cacheRecords(): OpRecord[] {
-    return this.records.filter((r) => r.isCache)
+    return this.fs.cacheRecords
   }
 
   /** Total bytes served from cache. */
   get cacheBytes(): number {
-    let total = 0
-    for (const r of this.records) if (r.isCache) total += r.bytes
-    return total
+    return this.fs.cacheBytes
   }
 
   get filePrompt(): string {
@@ -698,16 +721,13 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    await this.namespace.ensureLoaded()
-    if (this.drift.pending) {
-      await this.drift.drain(this.registry, (p) => this.dispatch('stat', p))
-    }
-    // The Dispatcher owns the rest — symlink follow, resolution (its
-    // resolveFn is Workspace.resolve, so lazy open and mount grants
-    // happen there), cache read-through, mode enforcement, per-op
-    // commandLimits on the executing mount, revisions, overlay stat, and
-    // post-write invalidation — the same single path Python's
-    // Workspace.dispatch delegates to.
+    // The Dispatcher owns the whole pipeline: pre-dispatch
+    // initialization (namespace load, pending drift checks), symlink
+    // follow, resolution (its resolveFn is Workspace.resolve, so lazy
+    // open and mount grants happen there), cache read-through, mode
+    // enforcement, per-op commandLimits on the executing mount,
+    // revisions, overlay stat, and post-write invalidation. The same
+    // single path Python's Workspace.dispatch delegates to.
     const [result] = await this.dispatcher.dispatch(
       opName,
       PathSpec.fromStrPath(path),
@@ -723,8 +743,9 @@ export class Workspace {
     }
     const result = this.registry.resolve(path)
     const [resource] = result
+    // resolve() above already threw for a path outside every mount.
     const mount = this.registry.mountFor(path)
-    if (mount !== null) assertMountAllowed(mount.prefix)
+    assertMountAllowed(mount.prefix)
     await this.ensureOpen(resource)
     return result
   }

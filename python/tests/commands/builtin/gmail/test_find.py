@@ -18,6 +18,7 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gmail import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 
 LABELS = [{"id": "INBOX", "type": "system"}]
@@ -76,11 +77,9 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
          patch("mirage.core.gmail.readdir.get_message_raw",
                new_callable=AsyncMock,
                return_value=RAW_MESSAGE):
-        stdout, _io = await find(AsyncMock(),
-                                 paths,
-                                 *texts,
-                                 index=RAMIndexCacheStore(),
-                                 **flags)
+        stdout, _io = await find(
+            AsyncMock(), paths, list(texts),
+            CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
     data = stdout if isinstance(stdout, bytes) else b""
     return data.decode().splitlines()
 

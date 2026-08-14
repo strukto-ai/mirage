@@ -16,10 +16,14 @@ import { describe, expect, it } from 'vitest'
 import {
   assertMountAllowed,
   effectiveMountMode,
+  getCurrentSession,
+  getCurrentSessionFor,
   MountNotAllowedError,
   runWithSession,
 } from './session_context.ts'
+import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { MountMode, weakerMode } from '../types.ts'
+import { SessionManager } from '../workspace/session/manager.ts'
 import { Session } from '../workspace/session/session.ts'
 
 function grantedSession(): Session {
@@ -112,5 +116,54 @@ describe('session grants', () => {
       expect(effectiveMountMode('/other', MountMode.EXEC)).toBe(MountMode.READ)
       return Promise.resolve()
     })
+  })
+})
+
+describe('a binding belongs to the workspace that published it', () => {
+  it('answers only its own manager', async () => {
+    const mine = new SessionManager('default')
+    const theirs = new SessionManager('default')
+    const session = new Session({ sessionId: 'default' })
+    await runWithSession(
+      session,
+      () => {
+        expect(getCurrentSessionFor(mine)).toBe(session)
+        expect(getCurrentSessionFor(theirs)).toBeNull()
+        expect(getCurrentSession()).toBe(session)
+        return Promise.resolve()
+      },
+      mine,
+    )
+  })
+
+  it('a nested bind keeps the owner', async () => {
+    // A background job's fork is still the workspace's own session.
+    const mine = new SessionManager('default')
+    const outer = new Session({ sessionId: 'default' })
+    const inner = new Session({ sessionId: 'default' })
+    await runWithSession(
+      outer,
+      () =>
+        runWithSession(inner, () => {
+          expect(getCurrentSessionFor(mine)).toBe(inner)
+          return Promise.resolve()
+        }),
+      mine,
+    )
+  })
+
+  it('an unowned bind answers nobody', async () => {
+    // The op-dispatch binders name no owner, so no line adopts one.
+    await runWithSession(new Session({ sessionId: 'default' }), () => {
+      expect(getCurrentSessionFor(new SessionManager('default'))).toBeNull()
+      return Promise.resolve()
+    })
+  })
+
+  it('node isolates concurrent tasks', () => {
+    // What lets a background job bind its fork without the foreground
+    // seeing it; the browser fallback storage cannot, and jobs.ts
+    // reads this to decide.
+    expect(asyncContextIsolatesTasks).toBe(true)
   })
 })

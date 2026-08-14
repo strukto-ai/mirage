@@ -32,18 +32,19 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { classifyBarePath } from '../expand/classify/index.ts'
-import type { Argv } from '../expand/argv.ts'
-import { expandArgv } from '../expand/argv.ts'
+import { Argv, expandArgv } from '../expand/argv.ts'
+import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
 import { pathFlagScopes, positionalScopes } from '../executor/command/routing.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { resolveLimit } from '../../policy/index.ts'
+import { PolicyDenied, resolveLimit } from '../../policy/index.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
-import type { DispatchFn } from '../executor/cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import {
+  acceptsLine,
   followPaths,
   handleBash,
   handleCd,
@@ -84,17 +85,14 @@ import {
   prepareMv,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
+import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import {
-  NO_FOLLOW_COMMANDS,
-  UNSUPPORTED_BUILTINS,
-  dereferences,
-  reportsLink,
-} from '../route/index.ts'
+import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
-import { homeDir } from '../session/shell_dirs.ts'
+import { homeDir, logicalCwd } from '../session/shell_dirs.ts'
+import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -108,17 +106,25 @@ function loopLevels(args: readonly string[]): number {
   return 1
 }
 
-// Split leading `cd` option flags (-L -P -e -@, clusters like -LP, and a
-// `--` terminator) from the directory operand. A bare `-` is the OLDPWD
-// operand, not an option. `bad` is the first unknown option character.
-function splitCdOptions(args: (string | PathSpec)[]): {
+// Split leading -L/-P option flags (clusters like -LP, and a `--`
+// terminator) from the operands. Shared by `cd` (which also takes -e -@)
+// and `pwd`, so the last-wins rule -- `pwd -L -P` is physical, `pwd -P
+// -L` logical -- has one implementation. A bare `-` is an operand (`cd`'s
+// OLDPWD shorthand), not an option. `bad` is the first unknown character.
+function splitModeOptions(
+  args: (string | PathSpec)[],
+  letters = 'LPe@',
+  // The mode to assume when the line names neither, which is what
+  // `set -P` changes for the whole session.
+  fallback = false,
+): {
   operands: (string | PathSpec)[]
   bad: string | null
   physical: boolean
 } {
   const operands: (string | PathSpec)[] = []
   let parsing = true
-  let physical = false
+  let physical = fallback
   for (const arg of args) {
     const s = arg instanceof PathSpec ? arg.virtual : arg
     if (parsing) {
@@ -129,7 +135,7 @@ function splitCdOptions(args: (string | PathSpec)[]): {
       if (s !== '-' && s.length >= 2 && s.startsWith('-')) {
         let bad: string | null = null
         for (const c of s.slice(1)) {
-          if (!'LPe@'.includes(c)) {
+          if (!letters.includes(c)) {
             bad = c
             break
           }
@@ -182,11 +188,35 @@ export async function executeCommand(
     const valNodes = p.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
     const firstVal = valNodes[0]
     const v =
-      firstVal !== undefined ? await expandNode(firstVal, session, executeFn, callStack) : rawVal
+      firstVal !== undefined
+        ? await expandNode(
+            firstVal,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          )
+        : rawVal
     prefixAssignments.push([key, v])
   }
 
   for (const [k] of prefixAssignments) {
+    // The hidden gate runs first, as in setVar: calling a hidden name
+    // "readonly" would leak that it exists. Both branches below write
+    // session.env raw (a function-call prefix on purpose never
+    // restores), so ungated they would let a narrowed session clobber
+    // the host's value.
+    try {
+      ensureVarVisible(session, k)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const stderr = new TextEncoder().encode(`bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr }),
+        new ExecutionNode({ command: name !== '' ? name : k, exitCode: 1, stderr }),
+      ]
+    }
     if (session.readonlyVars.has(k)) {
       const err = new TextEncoder().encode(`bash: ${k}: readonly variable\n`)
       return [
@@ -273,7 +303,13 @@ async function runCommandBody(
     for (const child of node.namedChildren) {
       if (child.type === NT.HERESTRING_REDIRECT) {
         for (const sc of child.namedChildren) {
-          const content = await expandNode(sc, session, executeFn, callStack)
+          const content = await expandNode(
+            sc,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          )
           stdin = encodeText(`${content}\n`)
           break
         }
@@ -321,7 +357,15 @@ async function runCommandBody(
     stdin = merged
   }
 
-  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
+  const argv = await expandArgv(
+    cleanParts,
+    session,
+    executeFn,
+    callStack,
+    registry,
+    namespace,
+    sessionView(session, registry.policies),
+  )
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
@@ -402,6 +446,31 @@ async function runArgv(
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
+
+  // A glob whose directory holds a child mount cannot be pushed down to
+  // one backend: the mount root is a child of that directory but its keys
+  // live in another resource, so the backend reports "no such file" for a
+  // name its own listing shows. Expanding such a word here lets the
+  // matches route per mount. It has to happen before the admission
+  // policies below, not just before the follow policy: a word left
+  // unexpanded reaches preCommand as the literal pattern, and
+  // MountRootPolicy cannot recognize a mount root inside one, so
+  // `tar -cf out.tar /base/*` would archive a whole backend the same
+  // operand typed by hand is refused for.
+  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const expandedWords = boundary.map(wordText)
+  // Compared as words, not as a count: a glob that matches exactly one
+  // name (`du /base/i*` where only the mount root matches) is still an
+  // expansion, and dropping it routes the pattern to a backend that
+  // cannot serve the child mount's keys.
+  const typedWords = argv.operands.map(wordText)
+  if (
+    expandedWords.length !== typedWords.length ||
+    expandedWords.some((w, i) => w !== typedWords[i])
+  ) {
+    argv = new Argv(argv.name, expandedWords, boundary)
+  }
+
   const args = [...argv.args]
   let operands = [...argv.operands]
 
@@ -454,13 +523,34 @@ async function runArgv(
   }
 
   // Shell builtins
+  // `set -P` (`set -o physical`) is the session-wide version of the
+  // per-command flag, and GNU applies it to both `cd` and `pwd`.
+  const shellPhysical = session.shellOptions.physical === true
+
   if (name === SB.PWD) {
-    const out = new TextEncoder().encode(`${session.cwd}\n`)
+    const { bad: pwdBad, physical: pwdPhysical } = splitModeOptions(operands, 'LP', shellPhysical)
+    if (pwdBad !== null) {
+      const err = new TextEncoder().encode(
+        `pwd: -${pwdBad}: invalid option\npwd: usage: pwd [-LP]\n`,
+      )
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'pwd', exitCode: 2, stderr: err }),
+      ]
+    }
+    // GNU ignores operands entirely: `pwd extra` still prints the cwd.
+    const cwd = pwdPhysical ? session.cwd : logicalCwd(session)
+    const out = new TextEncoder().encode(`${cwd}\n`)
     return [out, new IOResult(), new ExecutionNode({ command: 'pwd', exitCode: 0 })]
   }
 
   if (name === SB.CD) {
-    const { operands: cdOperands, bad, physical } = splitCdOptions(operands)
+    const {
+      operands: cdOperands,
+      bad,
+      physical,
+    } = splitModeOptions(operands, 'LPe@', shellPhysical)
     const links = namespace.symlinkTargets()
     if (bad !== null) {
       const err = new TextEncoder().encode(
@@ -568,9 +658,10 @@ async function runArgv(
   if (name === SB.BASH || name === SB.SH) {
     return handleBash(dispatch, executeFn, args, session, stdin, name)
   }
-  if (name === SB.EXPORT) return handleExport(args, session)
-  if (name === SB.UNSET) return handleUnset(args, session)
-  if (name === SB.LOCAL) return handleLocal(args, session)
+  if (name === SB.EXPORT)
+    return handleExport(args, session, sessionView(session, registry.policies))
+  if (name === SB.UNSET) return handleUnset(args, session, sessionView(session, registry.policies))
+  if (name === SB.LOCAL) return handleLocal(args, session, sessionView(session, registry.policies))
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
@@ -582,7 +673,9 @@ async function runArgv(
   if (name === SB.SHIFT) {
     return handleShift(args, callStack, session)
   }
-  if (name === SB.GETOPTS) return handleGetopts(args, session, callStack)
+  if (name === SB.GETOPTS) {
+    return handleGetopts(args, session, callStack, sessionView(session, registry.policies))
+  }
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
     let testArgs = [...operands]
@@ -605,10 +698,12 @@ async function runArgv(
   if (name === SB.ECHO) {
     return handleEcho(args)
   }
-  if (name === SB.PRINTF) return handlePrintf(args, session)
+  if (name === SB.PRINTF) {
+    return handlePrintf(args, session, sessionView(session, registry.policies))
+  }
   if (name === SB.SLEEP) return handleSleep(args, signal)
   if (name === SB.READ) {
-    return handleRead(args, session, stdin)
+    return handleRead(args, session, stdin, sessionView(session, registry.policies))
   }
   if (name === SB.SOURCE || name === SB.DOT) {
     const target = operands[0] ?? ''
@@ -646,11 +741,42 @@ async function runArgv(
     return handleTimeout(executeFn, args, session)
   }
 
+  // Pathname resolution (POSIX): every component of an operand but the
+  // last resolves for every command, so `stat dlink/f2` reports f2 the
+  // way GNU does. The last one resolves only for a command that follows
+  // (open(2) rather than lstat(2)) or an operand typed with a trailing
+  // slash, which POSIX reads as `dlink/.`. This runs ahead of every
+  // handler below because the kernel resolves a path before the syscall,
+  // not inside it.
+  if (namespace.nodes.size > 0 && operands.length > 0) {
+    try {
+      operands = followPaths(
+        namespace,
+        operands,
+        followsLastComponent(name, argv.words),
+        !SLASH_KEEPS_LAST.has(name),
+      )
+    } catch (err) {
+      if (err instanceof CycleError) {
+        const errBytes = new TextEncoder().encode(
+          `${name}: ${err.path}: Too many levels of symbolic links\n`,
+        )
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: name, exitCode: 1, stderr: errBytes }),
+        ]
+      }
+      throw err
+    }
+    argv = argv.withOperands(operands)
+  }
+
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
   if (name === 'ln' && linkFlags(operands, 'sfnvrT').has('s')) {
-    return await handleLn(namespace, session, operands)
+    return await handleLn(namespace, dispatch, session, operands)
   }
   if (name === 'readlink') {
     return await handleReadlink(namespace, dispatch, session, operands)
@@ -674,23 +800,6 @@ async function runArgv(
   // Capacity (registry-routed: enumerates mounts, reports per-mount statfs;
   // never fabricates numbers).
   if (name === 'df') {
-    if (namespace.nodes.size > 0) {
-      try {
-        operands = followPaths(namespace, operands)
-      } catch (err) {
-        if (err instanceof CycleError) {
-          const errBytes = new TextEncoder().encode(
-            `df: ${err.path}: Too many levels of symbolic links\n`,
-          )
-          return [
-            null,
-            new IOResult({ exitCode: 1, stderr: errBytes }),
-            new ExecutionNode({ command: 'df', exitCode: 1, stderr: errBytes }),
-          ]
-        }
-        throw err
-      }
-    }
     return handleDf(registry, session, dispatch, operands)
   }
 
@@ -701,7 +810,16 @@ async function runArgv(
   let dispatchArgv = argv
   if (namespace.nodes.size > 0) {
     try {
-      if (name === 'rm') {
+      // Both remove the link entry itself, which no backend can see;
+      // unlink(1) is rm(1) restricted to one non-directory. Gated on the
+      // line being one the command layer accepts, because this removal
+      // happens before that layer parses and it cannot be taken back
+      // (GNU refuses `rm --bogus dlink` and `unlink dlink other` with
+      // the link still there).
+      if (
+        (name === 'rm' || name === 'unlink') &&
+        acceptsLine(name, argv.args, operands, session.cwd)
+      ) {
         const [rest, removed] = await stripLinkOperands(namespace, operands)
         operands = rest
         if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {
@@ -713,11 +831,6 @@ async function runArgv(
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
-      } else if (
-        !reportsLink(name, argv.words) &&
-        (!NO_FOLLOW_COMMANDS.has(name) || dereferences(name, argv.words))
-      ) {
-        operands = followPaths(namespace, operands)
       }
     } catch (err) {
       if (err instanceof CycleError) {
@@ -759,8 +872,16 @@ async function runArgv(
       // table matches the pattern itself.
       for (const item of operands) {
         if (!(item instanceof PathSpec)) continue
+        // A trailing slash asked for the directory, and rm refused (or -f
+        // silenced the refusal). Nothing was removed, so nothing may be
+        // purged: dropping the node here deleted the very link the slash
+        // protects (GNU keeps it through `rm -rf dlink/`).
+        if (item.rawPath.endsWith('/')) continue
         if (item.pattern !== null) {
-          await namespace.unlinkGlob(item.virtual)
+          // A quoted metacharacter is a literal here too, so the node
+          // table is matched with the same pattern the backend resolved
+          // with.
+          await namespace.unlinkGlob(globPattern(item.virtual))
         } else {
           await namespace.unlink(item.virtual)
           await namespace.purgeUnder(item.virtual)

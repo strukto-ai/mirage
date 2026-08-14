@@ -18,10 +18,12 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.shell.array import array_extent, array_set
+from mirage.ops.types import SessionView
+from mirage.policy import PolicyDenied
+from mirage.shell.array import ShellArray, array_extent, array_with
 from mirage.shell.bytes import byte_char, encode_text
 from mirage.workspace.expand.variable import _array_index
-from mirage.workspace.session import Session
+from mirage.workspace.session import Session, ensure_var_visible, visible_env
 from mirage.workspace.types import ExecutionNode
 
 # A subscript must be non-empty: bash rejects `a[]` as an invalid
@@ -646,8 +648,9 @@ def _convert(conv: str, raw: str | None, flags: str, width: int | None,
     return _format_float(value_f, conv, flags, width, precision), err, False
 
 
-def _assign_printf_target(session: Session, name: str, subscript: str | None,
-                          value: str) -> str:
+async def _assign_printf_target(session: Session, view: SessionView | None,
+                                name: str, subscript: str | None,
+                                value: str) -> str:
     """Assign ``value`` to a ``printf -v`` target (scalar or ``name[idx]``).
 
     A bare name assigns element 0 when the name already holds an array,
@@ -657,44 +660,67 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
 
     Args:
         session (Session): shell session whose variables are written.
+        view (SessionView | None): the session plane's door, which the
+            scalar write clears; None outside a workspace.
         name (str): the target's base variable name.
         subscript (str | None): the ``[...]`` text, or None for a scalar.
         value (str): the formatted text to store.
 
     Returns:
-        str: ``"ok"``, ``"readonly"``, or ``"subscript"``.
+        str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
+
+    Raises:
+        PolicyDenied: a pre_session rule refused the write; the caller
+            renders the rule's own message.
     """
+    try:
+        # The hidden half of the session door, in this builtin's
+        # status-string voice: a hidden name is not printf's to write,
+        # and hiding never explains itself.
+        ensure_var_visible(session, name)
+    except PolicyDenied:
+        return "denied"
     if name in session.readonly_vars:
         return "readonly"
-    if subscript is None:
-        arr = session.arrays.get(name)
-        if arr is None:
-            session.env[name] = value
-        else:
-            array_set(arr, 0, value)
-        return "ok"
     arr = session.arrays.get(name)
-    from_scalar = arr is None
-    if arr is None:
-        scalar = session.env.get(name)
-        # An existing scalar becomes element 0, even when empty: bash
-        # resolves `x[-1]` against the length-1 array that produces.
-        arr = [] if scalar is None else [scalar]
-    idx = _array_index(subscript, session.env)
-    if idx < 0:
-        idx += array_extent(arr)
-    if idx < 0:
-        return "subscript"
-    array_set(arr, idx, value)
-    if from_scalar:
+    if subscript is None:
+        # A bare name over an array is element 0, as bash has it.
+        stored: str | ShellArray = (value if arr is None else array_with(
+            arr, 0, value))
+    else:
+        if arr is None:
+            scalar = session.env.get(name)
+            # An existing scalar becomes element 0, even when empty:
+            # bash resolves `x[-1]` against the length-1 array that
+            # produces.
+            arr = [] if scalar is None else [scalar]
+        idx = _array_index(subscript, visible_env(session))
+        if idx < 0:
+            idx += array_extent(arr)
+        if idx < 0:
+            return "subscript"
+        stored = array_with(arr, idx, value)
+    # The gated half. The door speaks in whole variables, so an element
+    # write states itself as the array it produces rather than taking a
+    # direct path around the gate: `printf -v 'AWS_KEY[0]'` is a write
+    # to AWS_KEY, and a pre_session rule refusing that name has to see
+    # it. The refusal is raised, not collapsed into a status, so the
+    # rule's own words reach the user as they do from `export`.
+    if view is not None:
+        await view.set(name, stored)
+        return "ok"
+    if isinstance(stored, str):
+        session.env[name] = stored
+    else:
+        session.arrays[name] = stored
         session.env.pop(name, None)
-    session.arrays[name] = arr
     return "ok"
 
 
 async def handle_printf(
     args: list[str],
     session: Session,
+    view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -745,11 +771,23 @@ async def handle_printf(
     err_bytes = "".join(errors).encode() if errors else b""
     if target is not None and parsed is not None:
         base, subscript = parsed.group(1), parsed.group(2)
-        status = _assign_printf_target(session, base, subscript, output)
+        try:
+            status = await _assign_printf_target(session, view, base,
+                                                 subscript, output)
+        except PolicyDenied as exc:
+            err_bytes += f"bash: {exc.strerror}\n".encode()
+            return None, IOResult(
+                exit_code=1, stderr=err_bytes), ExecutionNode(command="printf",
+                                                              exit_code=1,
+                                                              stderr=err_bytes)
         if status != "ok":
-            err_bytes += (f"bash: {base}: readonly variable\n"
-                          if status == "readonly" else
-                          f"bash: {target}: bad array subscript\n").encode()
+            if status == "readonly":
+                refusal = f"bash: {base}: readonly variable\n"
+            elif status == "denied":
+                refusal = f"bash: {base}: permission denied\n"
+            else:
+                refusal = f"bash: {target}: bad array subscript\n"
+            err_bytes += refusal.encode()
             return None, IOResult(
                 exit_code=1, stderr=err_bytes), ExecutionNode(command="printf",
                                                               exit_code=1,

@@ -16,14 +16,13 @@ from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.du import run_du
+from mirage.commands.builtin.generic.du import du_generic
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.builtin.github.io import IO, resolve_glob
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView, MountView
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
@@ -49,48 +48,27 @@ async def _du_entries(index: IndexCacheStore,
     return found, sum(size for _, size in found)
 
 
-async def du_provision(
-    accessor: GitHubAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    index: IndexCacheStore,
-    **_extra: FlagValue,
-) -> ProvisionResult:
+async def du_provision(accessor: GitHubAccessor, paths: list[PathSpec],
+                       texts: list[str], opts: CommandOpts) -> ProvisionResult:
     return await metadata_provision("du " + " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
+async def _resolve(accessor: GitHubAccessor, index: IndexCacheStore,
+                   targets: list[PathSpec]) -> list[PathSpec]:
+    return await resolve_glob(accessor, targets, index)
+
+
+async def _stat(accessor: GitHubAccessor, index: IndexCacheStore,
+                path: PathSpec):
+    return await IO.stat(accessor, path, index)
+
+
 @command("du", resource="github", spec=SPECS["du"], provision=du_provision)
-async def du(
-    accessor: GitHubAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    h: bool = False,
-    s: bool = False,
-    a: bool = False,
-    max_depth: str | None = None,
-    c: bool = False,
-    index: IndexCacheStore,
-    cwd: PathSpec | str = "/",
-    L: bool = False,
-    links: LinkView | None = None,
-    mounts: MountView | None = None,
-    **_extra: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    out = await run_du(
-        paths,
-        cwd,
-        lambda targets: resolve_glob(accessor, targets, index),
-        lambda path: IO.stat(accessor, path, index),
-        partial(_du_size, index),
-        partial(_du_entries, index),
-        s=s,
-        a=a,
-        h=h,
-        c=c,
-        max_depth=max_depth,
-        links=None if L else links,
-        mounts=mounts,
-    )
-    return out.stdout, IOResult(stderr=out.stderr, exit_code=out.exit_code)
+async def du(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    return await du_generic(paths, list(texts), opts,
+                            partial(_resolve, accessor, opts.index),
+                            partial(_stat, accessor, opts.index),
+                            partial(_du_size, opts.index),
+                            partial(_du_entries, opts.index))

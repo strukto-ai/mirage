@@ -30,7 +30,6 @@ async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCo
     flags: {},
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result

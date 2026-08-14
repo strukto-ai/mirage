@@ -334,7 +334,7 @@
       "command": "du /db/",
       "expect": {
         "exit": 0,
-        "stdout": "84\t/db/cat/big\n86\t/db/cat/small\n170\t/db/cat\n82\t/db/dog/big\n88\t/db/dog/small\n170\t/db/dog\n340\t/db\n",
+        "stdout": "84\t/db/cat/big\n86\t/db/cat/small\n170\t/db/cat\n82\t/db/dog/big\n88\t/db/dog/small\n170\t/db/dog\n340\t/db/\n",
         "stderr": ""
       }
     },

@@ -15,7 +15,7 @@
 import asyncio
 import posixpath
 from io import BytesIO
-from typing import IO, Any, Callable, Iterator, cast
+from typing import IO, Iterator, cast
 
 from dulwich.object_format import SHA1
 from dulwich.object_store import PackCapableObjectStore
@@ -29,6 +29,7 @@ from mirage.commands.cli.builtin.git.io import (file_size, read_file,
                                                 read_names, read_optional,
                                                 write_once)
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
+from mirage.runtime.types import DispatchFn
 
 OBJECTS_DIR = "objects"
 PACK_DIR = "objects/pack"
@@ -65,7 +66,7 @@ def loose_path(commondir: str, oid: ObjectID) -> str:
                           name[FANOUT_LEN:])
 
 
-async def store_blob(dispatch: Callable[..., Any], commondir: str,
+async def store_blob(dispatch: DispatchFn, commondir: str,
                      data: bytes) -> ObjectID:
     """Write file contents into the object database as a blob.
 
@@ -76,7 +77,7 @@ async def store_blob(dispatch: Callable[..., Any], commondir: str,
     there is nothing the store would add here.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         commondir (str): absolute virtual path of the shared git
             directory.
         data (bytes): the file's contents.
@@ -96,12 +97,12 @@ class LooseObjects:
     that reads names rather than contents.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
 
-    def __init__(self, dispatch: Callable[..., Any], gitdir: str,
+    def __init__(self, dispatch: DispatchFn, gitdir: str,
                  loop: asyncio.AbstractEventLoop) -> None:
         self._dispatch = dispatch
         self._gitdir = gitdir
@@ -309,7 +310,7 @@ class VfsObjectStore(PackCapableObjectStore):
         raise NotImplementedError("VfsObjectStore writes loose objects only")
 
 
-async def load_packs(dispatch: Callable[..., Any], gitdir: str,
+async def load_packs(dispatch: DispatchFn, gitdir: str,
                      loop: asyncio.AbstractEventLoop) -> list[Pack]:
     """Open every packfile under ``.git/objects/pack``.
 
@@ -321,7 +322,7 @@ async def load_packs(dispatch: Callable[..., Any], gitdir: str,
     whole, which is correct but costs what this exists to avoid.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the ``.git`` directory.
         loop (asyncio.AbstractEventLoop): the loop serving the mount.
     """
@@ -350,12 +351,12 @@ async def load_packs(dispatch: Callable[..., Any], gitdir: str,
     return packs
 
 
-async def load_object_store(dispatch: Callable[..., Any],
+async def load_object_store(dispatch: DispatchFn,
                             gitdir: str) -> VfsObjectStore:
     """Assemble the object database for one repository.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the ``.git`` directory.
     """
     loop = asyncio.get_running_loop()

@@ -41,16 +41,14 @@ async function treeOf(repo: Repo, revision: string): Promise<string> {
  * and the worktree scan, which is where unstaged and staged diffs live.
  */
 export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   const first = texts[0]
   if (first === undefined) return [null, new IOResult()]
   try {
     checkOperands(texts, InvalidOptionError)
-    const repo = await opened(fl, opts.statPath, opts.mountRoot, opts.dispatch)
+    const repo = await opened(fl, doors)
     const body = await treeDiff(
       repo,
       await treeOf(repo, first),

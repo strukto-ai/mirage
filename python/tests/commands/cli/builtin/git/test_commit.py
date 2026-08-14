@@ -20,8 +20,23 @@ from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.commit import DEFAULT_EMAIL, identity
 from mirage.commands.spec.types import FlagView
+from mirage.ops.types import SessionView
+from mirage.types import HiddenVars
+from mirage.workspace.session import Session
+from mirage.workspace.session.state import session_view
 
 SUMMARY = re.compile(rb"^\[main [0-9a-f]{7,}\] (.+)$", re.M)
+
+
+def env_view(env: dict[str, str]) -> SessionView:
+    """The session plane's door over a session holding ``env``.
+
+    Args:
+        env (dict[str, str]): the variables the session holds.
+    """
+    session = Session(session_id="s")
+    session.env.update(env)
+    return session_view(session)
 
 
 async def run(ws, line: str) -> tuple[int, bytes, bytes]:
@@ -149,3 +164,51 @@ async def test_an_unknown_switch_is_refused(git_rw):
     code, _out, err = await run(git_rw, "commit -Z")
     assert code == 129
     assert err == b"error: unknown switch `Z'\n"
+
+
+def test_the_author_flag_still_wins_over_the_environment():
+    view = env_view({"GIT_AUTHOR_NAME": "Env", "GIT_AUTHOR_EMAIL": "e@x"})
+    fl = FlagView({"author": "Flag <f@x>"})
+    assert identity(fl, view) == b"Flag <f@x>"
+
+
+def test_the_author_comes_from_the_git_author_variables():
+    # Pinned against git 2.50: GIT_AUTHOR_NAME and GIT_AUTHOR_EMAIL name
+    # the author, ahead of any config and of the stated default.
+    view = env_view({"GIT_AUTHOR_NAME": "A", "GIT_AUTHOR_EMAIL": "a@x"})
+    assert identity(FlagView({}), view) == b"A <a@x>"
+
+
+def test_email_is_the_fallback_address():
+    # git falls back to $EMAIL when no GIT_*_EMAIL is set.
+    view = env_view({"GIT_AUTHOR_NAME": "A", "EMAIL": "e@x"})
+    assert identity(FlagView({}), view) == b"A <e@x>"
+
+
+def test_no_environment_leaves_the_stated_default():
+    assert identity(FlagView({}), env_view({})) == b"mirage <mirage@localhost>"
+
+
+def test_a_hidden_variable_is_not_read_as_an_identity():
+    # The door filters hidden names, so a hidden GIT_AUTHOR_NAME reads
+    # as unset rather than leaking into a commit the session can see.
+    session = Session(session_id="s",
+                      hidden_vars=HiddenVars(patterns=("GIT_AUTHOR_*", )))
+    session.env.update({
+        "GIT_AUTHOR_NAME": "Secret",
+        "GIT_AUTHOR_EMAIL": "s@x"
+    })
+    assert identity(FlagView({}),
+                    session_view(session)) == (b"mirage <mirage@localhost>")
+
+
+@pytest.mark.asyncio
+async def test_commit_records_the_environment_author(git_rw, repo_path: Path):
+    (repo_path / "a.txt").write_text("changed\n", encoding="utf-8")
+    assert (await run(git_rw, "add -A"))[0] == 0
+    line = ("GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@x "
+            "git -C /repo commit -m env")
+    assert (await git_rw.execute(line)).exit_code == 0
+    with Repo(str(repo_path)) as repo:
+        head = repo[repo.refs[b"HEAD"]]
+        assert head.author == b"Ada <ada@x>"

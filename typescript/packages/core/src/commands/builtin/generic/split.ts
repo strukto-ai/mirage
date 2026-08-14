@@ -104,6 +104,27 @@ function parseSuffixStart(value: string, hexMode: boolean, suffixLen: number): n
   return start
 }
 
+// GNU reads -t as one byte and refuses every other length rather than
+// truncating to the first: an empty value is an empty record separator and
+// anything longer is a multi-character one, with the two-character spelling
+// `\0` carved out as the only way to write a NUL on a command line. The
+// length is counted in bytes, so a lone non-ASCII character is
+// multi-character too (pinned against coreutils 9.7). Deliberate
+// divergence, matching truncate: GNU's quotearg escapes control characters
+// in the message and mirage quotes the raw value. Not covered: GNU also
+// refuses two -t flags naming different characters, which needs a
+// list-valued flag the spec does not have.
+function parseSeparator(value: string | undefined): number {
+  if (value === undefined) return 0x0a
+  if (value === '\\0') return 0
+  const encoded = ENC.encode(value)
+  if (encoded.byteLength === 0) throw new UsageError('split: empty record separator', 1)
+  if (encoded.byteLength > 1) {
+    throw new UsageError(`split: multi-character separator '${value}'`, 1)
+  }
+  return encoded[0] ?? 0x0a
+}
+
 const ALPHA_SUFFIXES = 'abcdefghijklmnopqrstuvwxyz'
 const NUMERIC_SUFFIXES = '0123456789'
 const HEX_SUFFIXES = '0123456789abcdef'
@@ -261,12 +282,7 @@ export async function splitGeneric(
         ? parseSuffixStart(hexValue, true, suffixLen)
         : 0
   const additionalSuffix = fl.asStr('additional_suffix') ?? ''
-  const separator =
-    separatorValue === '\\0'
-      ? 0
-      : typeof separatorValue === 'string'
-        ? (ENC.encode(separatorValue)[0] ?? 0x0a)
-        : 0x0a
+  const separator = parseSeparator(separatorValue)
   const linesPerFile =
     linesFlag !== null ? parseLinesValue(linesFlag) : bFlag === null && nFlag === null ? 1000 : 0
   const byteLimit = bFlag !== null ? parseBytesValue(bFlag) : 0

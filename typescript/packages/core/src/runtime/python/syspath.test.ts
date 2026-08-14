@@ -17,7 +17,8 @@ import { PrefixResolver } from '../resolver.ts'
 import { PyodideRuntime } from './pyodide.ts'
 import type { BridgeDispatchFn } from '../types.ts'
 
-const EMPTY_MOUNT: BridgeDispatchFn = (op) => Promise.resolve(op === 'LIST' ? [] : new Uint8Array())
+const EMPTY_MOUNT: BridgeDispatchFn = (op) =>
+  Promise.resolve(op === 'readdir' ? [] : new Uint8Array())
 
 function decode(bytes: Uint8Array | null | undefined): string {
   return bytes ? new TextDecoder().decode(bytes) : ''

@@ -13,14 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
+from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
-                                array_indices, array_slice, array_values)
+                                array_indices, array_slice, array_values,
+                                array_with)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
@@ -28,7 +31,8 @@ from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
-from mirage.workspace.session import Session
+from mirage.workspace.session import (Session, ensure_var_visible,
+                                      visible_arrays, visible_env)
 from mirage.workspace.session.shell_dirs import home_dir
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -73,6 +77,81 @@ def _unbound(var: str) -> ExitSignal:
                       contained_code=1)
 
 
+def guard_expansion_write(session: Session, *names: str) -> None:
+    """Refuse expansion-time writes that name hidden variables.
+
+    ``${X:=d}`` and ``$((X=5))`` land on the raw session env rather
+    than the async session door, so the hidden half of that door
+    (``ensure_var_visible``) is applied here, and the refusal takes the
+    fatal expansion-error shape ``${var:?}`` uses.
+
+    Args:
+        session (Session): shell session the write would land on.
+        *names (str): the variable names about to be written.
+
+    Raises:
+        ExitSignal: a name is hidden; the line dies with status 1.
+    """
+    for name in names:
+        try:
+            ensure_var_visible(session, name)
+        except PolicyDenied as exc:
+            raise ExitSignal(1,
+                             stderr=f"bash: {exc.strerror}\n".encode(),
+                             contained_code=1) from exc
+
+
+async def expansion_write(session: Session, view: SessionView | None,
+                          name: str, value: str) -> None:
+    """One expansion-time write, through the session plane's door.
+
+    ``${X:=d}`` and ``$((X=5))`` are assignments the shell performs
+    while expanding a word rather than while running a command, and
+    they used to land on the raw session env. That made a
+    ``pre_session`` rule one ``${X:=d}`` away from irrelevant: a
+    deployment refusing ``AWS_*`` still had ``${AWS_PROFILE:=prod}``
+    write it. They go through the door now, so one rule covers every
+    spelling.
+
+    Without a door (a unit test outside a workspace) the write lands
+    directly, with the hidden half still applied: skipping that would
+    let the write-back clobber a value the host's wiring reads.
+
+    A name already holding an array takes the write at element 0 and
+    keeps its other elements, which is bash: ``a=(1 2 3)`` then
+    ``$((a=5))`` leaves ``5 2 3``. Storing the value as a scalar
+    instead would discard every element after the first.
+
+    Args:
+        session (Session): shell session the write lands on.
+        view (SessionView | None): the session plane's gated door,
+            None outside a workspace.
+        name (str): the variable being written.
+        value (str): the value to store.
+
+    Raises:
+        ExitSignal: the name is hidden, or a pre_session rule refused
+            the write; either way the line dies with status 1, the
+            shape ``${var:?}`` uses.
+    """
+    guard_expansion_write(session, name)
+    held = session.arrays.get(name)
+    stored: str | ShellArray = (value if held is None else array_with(
+        held, 0, value))
+    if view is None:
+        if isinstance(stored, str):
+            session.env[name] = stored
+        else:
+            session.arrays[name] = stored
+        return
+    try:
+        await view.set(name, stored)
+    except PolicyDenied as exc:
+        raise ExitSignal(1,
+                         stderr=f"bash: {exc.strerror}\n".encode(),
+                         contained_code=1) from exc
+
+
 def _lookup_var(var: str,
                 session: Session,
                 call_stack: CallStack | None,
@@ -88,7 +167,7 @@ def _lookup_var(var: str,
             pass False because they handle unset themselves. Specials
             (``@ * # ? $ ! 0``) never raise, matching bash >= 4.4.
     """
-    env = session.env
+    env = visible_env(session)
     last_exit_code = session.last_exit_code
     positional = getattr(session, "positional_args", None)
     nounset = strict and bool(session.shell_options.get("nounset"))
@@ -128,11 +207,13 @@ def _lookup_var(var: str,
         local_val = call_stack.get_local(var)
         if local_val is not None:
             return local_val
-    arrays = getattr(session, "arrays", None)
-    if arrays and var in arrays:
+    arrays = visible_arrays(session)
+    if var in arrays:
         return array_get(arrays[var], 0)
-    if var == "PWD":
-        return session.cwd
+    # `$PWD` is deliberately absent here: `cd` writes it into the env like
+    # any exported variable, so it can be assigned, unset and printed by
+    # `env`, exactly as bash allows. Resolving it here instead would make
+    # `PWD=/x` and `unset PWD` silently do nothing.
     if var == "HOME":
         return home_dir(session) or ""
     if var not in env:
@@ -465,7 +546,7 @@ def _case_mod(op: str, val: str, pattern: str) -> str:
     return "".join(chars)
 
 
-def _arith_int(text: str, env: dict[str, str]) -> int | None:
+def _arith_int(text: str, env: Mapping[str, str]) -> int | None:
     """Resolve an arithmetic-context operand (offsets, subscripts).
 
     bash evaluates substring offsets and array subscripts as
@@ -473,7 +554,7 @@ def _arith_int(text: str, env: dict[str, str]) -> int | None:
 
     Args:
         text (str): the raw operand text.
-        env (dict[str, str]): session environment for name resolution.
+        env (Mapping[str, str]): session environment for name resolution.
     """
     try:
         return int(text.strip())
@@ -489,7 +570,7 @@ def _arith_int(text: str, env: dict[str, str]) -> int | None:
         return None
 
 
-def _substring(val: str, groups: list[str], env: dict[str, str]) -> str:
+def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
     if not groups:
         return val
     offset = _arith_int(groups[0], env)
@@ -509,7 +590,7 @@ def _substring(val: str, groups: list[str], env: dict[str, str]) -> str:
     return val[offset:offset + length]
 
 
-def _array_index(idx_text: str, env: dict[str, str]) -> int:
+def _array_index(idx_text: str, env: Mapping[str, str]) -> int:
     """Resolve a numeric or arithmetic array subscript.
 
     bash evaluates subscripts in arithmetic context (``${a[i+1]}``);
@@ -518,14 +599,14 @@ def _array_index(idx_text: str, env: dict[str, str]) -> int:
 
     Args:
         idx_text (str): the raw subscript text.
-        env (dict[str, str]): session environment for name resolution.
+        env (Mapping[str, str]): session environment for name resolution.
     """
     resolved = _arith_int(idx_text, env)
     return resolved if resolved is not None else 0
 
 
-def _value_op(op: str, val: str, groups: list[str], env: dict[str,
-                                                              str]) -> str:
+def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
+                                                                 str]) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
         return _glob_strip(val, pattern, op in ("##", "%%"), op in ("#", "##"))
@@ -541,9 +622,11 @@ def _value_op(op: str, val: str, groups: list[str], env: dict[str,
     return val
 
 
-async def expand_braces(node: tree_sitter.Node, session: Session,
+async def expand_braces(node: tree_sitter.Node,
+                        session: Session,
                         call_stack: CallStack | None,
-                        expand_child: ExpandChild) -> str:
+                        expand_child: ExpandChild,
+                        view: SessionView | None = None) -> str:
     """Expand ${VAR}, ${VAR<op>...}, ${a[i]}, ${#a[@]}, etc.
 
     Args:
@@ -563,8 +646,8 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
         # ${v:$((o))}.
         msg = f"bash: ${{{p.var_name or ''}}}: bad substitution\n"
         raise ExitSignal(2, stderr=msg.encode(), contained_code=2)
-    env = session.env
-    arrays = getattr(session, "arrays", {})
+    env = visible_env(session)
+    arrays = visible_arrays(session)
 
     groups: list[str] = []
     for gi, group in enumerate(p.groups):
@@ -655,7 +738,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                     and call_stack.get_local(p.var_name) is not None):
                 call_stack.set_local(p.var_name, default)
             else:
-                env[p.var_name] = default
+                await expansion_write(session, view, p.var_name, default)
         return default
     if p.op == ":-":
         return val if val else (groups[0] if groups else "")
@@ -671,13 +754,13 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
 
 
 def _slice_array(arr: ShellArray, groups: list[str],
-                 env: dict[str, str]) -> list[str]:
+                 env: Mapping[str, str]) -> list[str]:
     """Resolve ``${a[@]:offset:length}`` against a shell array.
 
     Args:
         arr (ShellArray): the array being sliced.
         groups (list[str]): the raw offset and length words.
-        env (dict[str, str]): environment for the arithmetic context.
+        env (Mapping[str, str]): environment for the arithmetic context.
     """
     if not groups:
         return array_values(arr)
@@ -777,11 +860,12 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         params: list[str | None] = [*_positional_args(session, call_stack)]
         arr = [session.argv0, *params] if p.op == ":" else params
     else:
-        arrays = getattr(session, "arrays", {})
-        arr = arrays.get(p.var_name)
+        arrays = visible_arrays(session)
+        arr = arrays.get(p.var_name) if p.var_name else None
+    env = visible_env(session)
     if arr is None:
         name = p.var_name or ""
-        arr = [session.env[name]] if name in session.env else []
+        arr = [env[name]] if name in env else []
     if p.indirect_op:
         return [str(i) for i in array_indices(arr)]
     values = array_values(arr)
@@ -793,5 +877,5 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(arr, groups, session.env)
-    return [_value_op(p.op, el, groups, session.env) for el in values]
+        return _slice_array(arr, groups, env)
+    return [_value_op(p.op, el, groups, env) for el in values]

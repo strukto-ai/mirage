@@ -29,7 +29,9 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse)
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.node import provision_node, run_command_tree
-from mirage.workspace.session import reset_current_session, set_current_session
+from mirage.workspace.session import (get_current_session_for,
+                                      reset_current_session,
+                                      set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.workspace.failure import failure_result
 from mirage.workspace.workspace.line import run_whole_line
@@ -134,11 +136,25 @@ async def execute_line(
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
     if ws._drift.pending:
-        await ws._drift.drain(ws)
+        await ws._drift.drain(ws._registry.try_mount_for)
 
-    if session_id is None:
-        session_id = ws._session_mgr.default_id
-    session = ws._session_mgr.get(session_id)
+    # A re-entrant execute (the evaluator's $(), eval, source, xargs, or
+    # an embedder callback fired mid-line) continues in the live ambient
+    # session unless it names a different one. An id cannot say that: it
+    # names a registered session, never the ephemeral per-call fork the
+    # outer line actually runs in, and re-resolving through the manager
+    # is how a nested line used to escape the fork and its confinement.
+    # Only this workspace's own binding counts: a session carries one
+    # workspace's cwd, env and mount grants, so a callback reaching a
+    # second workspace must resolve that workspace's session instead.
+    ambient = get_current_session_for(ws._session_mgr)
+    if ambient is not None and session_id in (None, ambient.session_id):
+        session = ambient
+        session_id = ambient.session_id
+    else:
+        if session_id is None:
+            session_id = ws._session_mgr.default_id
+        session = ws._session_mgr.get(session_id)
     effective_session = fork_for_call(session, cwd, env)
     ws._current_agent_id = (agent_id
                             if agent_id is not None else ws._default_agent_id)
@@ -153,7 +169,8 @@ async def execute_line(
         effective_session._stdin_buffer = None
     scope = RecordingScope(active=is_line)
 
-    session_token = set_current_session(effective_session)
+    session_token = set_current_session(effective_session,
+                                        owner=ws._session_mgr)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and

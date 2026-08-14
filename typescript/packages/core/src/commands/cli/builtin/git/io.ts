@@ -12,15 +12,75 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, LINK_TARGET_KEY, PathSpec } from '../../../../types.ts'
+import type { FileStat } from '../../../../types.ts'
 import { parent, posixNormpath } from '../../../../utils/path.ts'
 import { isMissingPath } from '../../../../utils/errors.ts'
-import type { Dispatch } from './types.ts'
+import type { LinkView } from '../../../../ops/types.ts'
+import { SYMLINK_MODE, type Dispatch } from './types.ts'
 
 /** Read one virtual path through the workspace dispatcher. */
 export async function readFile(dispatch: Dispatch, path: string): Promise<Uint8Array> {
   const [data] = await dispatch('read', PathSpec.fromStrPath(path))
   return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+}
+
+/**
+ * The bytes git stores for one working-tree entry.
+ *
+ * A symlink's blob is its target string, not what the target holds, so reading
+ * through the link would stage a second copy of the target under mode 100644
+ * and then report the entry modified forever after (the staged blob and the
+ * bytes behind the link never match). The target is namespace state, which is
+ * why it arrives on the stat rather than from a read.
+ */
+export async function entryBytes(
+  dispatch: Dispatch,
+  path: string,
+  info: FileStat,
+): Promise<Uint8Array> {
+  if (info.type === FileType.SYMLINK) {
+    const target = info.extra[LINK_TARGET_KEY]
+    if (typeof target === 'string') return new TextEncoder().encode(target)
+  }
+  return readFile(dispatch, path)
+}
+
+/**
+ * Materialize one tree entry into the working tree.
+ *
+ * A 120000 entry is a symlink whose blob is the target string, so it is
+ * restored through the namespace rather than written as content: writing the
+ * blob would leave a regular file spelling the target. The namespace overwrites
+ * a link of the same name, which is what a checkout that changes where a link
+ * points needs.
+ *
+ * Whatever is already there goes first when it is the other kind, because the
+ * two live on different planes and neither replaces the other. Writing a
+ * regular blob at a path the namespace holds a link for follows the link and
+ * lands the content in the file it points at, corrupting a path no branch
+ * touched while the link stays; and linking over a regular file leaves that
+ * file behind the link, ready to reappear when the link goes. git replaces the
+ * entry in both directions. The check is a namespace lookup, so the ordinary
+ * file-for-file case costs nothing.
+ */
+export async function restoreEntry(
+  dispatch: Dispatch,
+  path: string,
+  mode: string,
+  blob: Uint8Array,
+  links: LinkView | null = null,
+): Promise<void> {
+  const linked = links !== null && links.statAt(path) !== null
+  if (mode === SYMLINK_MODE) {
+    if (!linked) await removeFile(dispatch, path)
+    await dispatch('symlink', PathSpec.fromStrPath(path), [], {
+      target: new TextDecoder().decode(blob),
+    })
+    return
+  }
+  if (linked) await removeFile(dispatch, path)
+  await writeFile(dispatch, path, blob)
 }
 
 /** Read a byte range of one virtual path. */

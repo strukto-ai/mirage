@@ -35,6 +35,184 @@
         "not",
         "name"
       ]
+    },
+    {
+      "id": "find_bang_name",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data ! -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/abc.csv\n/data/binary.bin\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/poem.diff\n/data/sub\n/data/sub/deep\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "not",
+        "name"
+      ]
+    },
+    {
+      "id": "find_bang_composes_with_empty",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name \"*.txt\" ! -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "not",
+        "name",
+        "empty"
+      ]
+    },
+    {
+      "id": "find_bang_before_paren_group",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "find /data ! \\( -name \"*.txt\" -o -name \"*.csv\" \\)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/binary.bin\n/data/chat.jsonl\n/data/data.jsonl\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/poem.diff\n/data/sub\n/data/sub/deep\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "not",
+        "name",
+        "o"
+      ]
+    },
+    {
+      "id": "find_bang_type_f",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data ! -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/sub\n/data/sub/deep\n",
+        "stderr": ""
+      },
+      "flags": [
+        "not",
+        "type"
+      ]
+    },
+    {
+      "id": "find_bang_double_negation",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data ! ! -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "not",
+        "name"
+      ]
     }
   ]
 }

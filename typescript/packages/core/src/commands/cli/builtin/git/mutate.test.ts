@@ -647,3 +647,140 @@ describe('the fixture repository', () => {
     }
   })
 })
+
+describe('symlinks', () => {
+  it('stages a link as 120000 holding its target, not the target content', async () => {
+    // Pinned against git 2.50, and read back by the real binary: the blob is
+    // the target string. Reading through the link would store a second copy
+    // of numbers.txt under mode 100644, which is a file, not a link.
+    const h = await harness()
+    await h.ws.execute('ln -s numbers.txt /repo/link')
+    expect((await h.run('add link'))[0]).toBe(0)
+    expect((await h.run('commit -m linked'))[0]).toBe(0)
+    const out = await h.drain()
+    expect(git(out, ['ls-files', '-s'])).toContain('120000')
+    expect(git(out, ['cat-file', '-p', 'HEAD:link'])).toBe('numbers.txt')
+  })
+
+  it('finds a broken link the backend stat cannot see', async () => {
+    // git lstats, so a link to nothing is untracked like any other entry; a
+    // dereferencing stat answers null and loses it entirely.
+    const h = await harness()
+    await h.ws.execute('ln -s nowhere /repo/broken')
+    const [, out] = await h.run('status --porcelain')
+    expect(out).toContain('?? broken')
+  })
+
+  it('reports the symlink mode in the commit summary', async () => {
+    const h = await harness()
+    await h.ws.execute('ln -s numbers.txt /repo/link')
+    expect((await h.run('add link'))[0]).toBe(0)
+    const [, out] = await h.run('commit -m linked')
+    expect(out).toContain(' create mode 120000 link')
+  })
+
+  it('leaves a staged link unmodified rather than always dirty', async () => {
+    const h = await harness()
+    await h.ws.execute('ln -s numbers.txt /repo/link')
+    expect((await h.run('add link'))[0]).toBe(0)
+    const [, out] = await h.run('status --porcelain')
+    expect(out).toBe('A  link\n')
+  })
+
+  it('restores a checked-out link as a link, not as a file of its target', async () => {
+    // The name plane owns links, so restoring one is a namespace write rather
+    // than a content write.
+    const h = await harness()
+    expect((await h.run('checkout -b side'))[0]).toBe(0)
+    await h.ws.execute('ln -s numbers.txt /repo/link')
+    expect((await h.run('add link'))[0]).toBe(0)
+    expect((await h.run('commit -m linked'))[0]).toBe(0)
+    expect((await h.run('checkout main'))[0]).toBe(0)
+    expect((await h.run('checkout side'))[0]).toBe(0)
+    const listing = await h.ws.execute('ls -l /repo/link')
+    expect(DEC.decode(listing.stdout)).toContain('link -> numbers.txt')
+  })
+
+  it('replaces a link with the regular file the other branch records', async () => {
+    // git 2.47: a path that is a symlink on one branch and a regular file on
+    // the other comes back as a regular file, and the file the link pointed at
+    // keeps its own content. Writing through the link instead dereferences it:
+    // the blob lands in numbers.txt, which no branch ever changed, and the link
+    // stays in the working tree while HEAD and the index say a file is there.
+    const h = await harness()
+    expect((await h.run('checkout -b linked'))[0]).toBe(0)
+    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m link'))[0]).toBe(0)
+    expect((await h.run('checkout -b plain'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    await write(h, 'thing', 'PLAIN\n')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    expect((await h.run('checkout linked'))[0]).toBe(0)
+    expect((await h.run('checkout plain'))[0]).toBe(0)
+    const listing = await h.ws.execute('ls -l /repo/thing')
+    expect(DEC.decode(listing.stdout).startsWith('lrwxrwxrwx')).toBe(false)
+    const content = await h.ws.execute('cat /repo/thing')
+    expect(DEC.decode(content.stdout)).toBe('PLAIN\n')
+    const kept = await h.ws.execute('cat /repo/numbers.txt')
+    expect(DEC.decode(kept.stdout)).not.toContain('PLAIN')
+  })
+
+  it('replaces a regular file with the link the other branch records', async () => {
+    // The mirror: the file must not survive under the link it was replaced by,
+    // or removing the link later uncovers content no branch records.
+    const h = await harness()
+    expect((await h.run('checkout -b plainfirst'))[0]).toBe(0)
+    await write(h, 'thing', 'PLAIN\n')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    expect((await h.run('checkout -b linkedafter'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m link'))[0]).toBe(0)
+    expect((await h.run('checkout plainfirst'))[0]).toBe(0)
+    expect((await h.run('checkout linkedafter'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    const listing = await h.ws.execute('ls /repo/thing')
+    expect(DEC.decode(listing.stderr)).toContain('No such file or directory')
+  })
+})
+
+describe('commit identity', () => {
+  it('takes the author from the environment', async () => {
+    // Real git reads GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL ahead of any config,
+    // and there is no config file behind a mount.
+    const h = await harness()
+    await write(h, 'numbers.txt', 'changed\n')
+    expect((await h.run('add -A'))[0]).toBe(0)
+    const result = await h.ws.execute(
+      'GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@x git -C /repo commit -m env',
+    )
+    expect(result.exitCode).toBe(0)
+    const out = await h.drain()
+    expect(git(out, ['log', '-1', '--format=%an <%ae>'])).toBe('Ada <ada@x>\n')
+  })
+
+  it('falls back to EMAIL for the address', async () => {
+    const h = await harness()
+    await write(h, 'numbers.txt', 'changed\n')
+    expect((await h.run('add -A'))[0]).toBe(0)
+    const result = await h.ws.execute(
+      'GIT_AUTHOR_NAME=Ada EMAIL=ada@fallback git -C /repo commit -m env',
+    )
+    expect(result.exitCode).toBe(0)
+    const out = await h.drain()
+    expect(git(out, ['log', '-1', '--format=%an <%ae>'])).toBe('Ada <ada@fallback>\n')
+  })
+
+  it('keeps the stated default when the environment names nobody', async () => {
+    const h = await harness()
+    await write(h, 'numbers.txt', 'changed\n')
+    expect((await h.run('add -A'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    const out = await h.drain()
+    expect(git(out, ['log', '-1', '--format=%an <%ae>'])).toBe('mirage <mirage@localhost>\n')
+  })
+})

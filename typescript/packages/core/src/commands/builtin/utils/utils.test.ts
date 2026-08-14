@@ -17,9 +17,6 @@ import { FileStat, FileType } from '../../../types.ts'
 import { formatLsLong, humanSize } from './formatting.ts'
 import { readStdinAsync, resolveSource, wrapBytes } from './stream.ts'
 
-// interpretEscapes tests live in
-// workspace/executor/escapes.test.ts (direct Python port).
-
 function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }

@@ -26,7 +26,6 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import type { TokenManager } from '../../../core/google/_client.ts'
 import * as drive from '../../../core/google/drive.ts'
 import { materialize } from '../../../io/types.ts'
-import type { Resource } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { GDRIVE_COMMANDS } from './index.ts'
@@ -46,7 +45,6 @@ function makeOpts(partial: Partial<CommandOpts>): CommandOpts {
     flags: {},
     filetypeFns: null,
     cwd: '/',
-    resource: {} as Resource,
     ...partial,
   }
 }

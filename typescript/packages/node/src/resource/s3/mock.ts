@@ -24,7 +24,7 @@ import {
   CopyObjectCommand,
 } from '@aws-sdk/client-s3'
 import { createHash } from 'node:crypto'
-import { lstripSlash } from '@struktoai/mirage-core'
+import { compareCodePoints, lstripSlash } from '@struktoai/mirage-core'
 
 const LAST_MODIFIED = new Date('2026-03-31T00:00:00Z')
 
@@ -110,7 +110,7 @@ interface PaginateResult {
 function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const commonPrefixes = new Set<string>()
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const sorted = [...objects.entries()].sort(([a], [b]) => compareCodePoints(a, b))
   for (const [key, data] of sorted) {
     if (!key.startsWith(prefix)) continue
     const relative = key.slice(prefix.length)
@@ -126,14 +126,14 @@ function paginateDirectory(objects: Map<string, Uint8Array>, prefix: string): Pa
     contents.push({ Key: key, Size: data.byteLength })
   }
   return {
-    CommonPrefixes: [...commonPrefixes].sort().map((p) => ({ Prefix: p })),
+    CommonPrefixes: [...commonPrefixes].sort(compareCodePoints).map((p) => ({ Prefix: p })),
     Contents: contents,
   }
 }
 
 function paginateFlat(objects: Map<string, Uint8Array>, prefix: string): PaginateResult {
   const contents: { Key: string; Size: number }[] = []
-  const sorted = [...objects.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  const sorted = [...objects.entries()].sort(([a], [b]) => compareCodePoints(a, b))
   for (const [key, data] of sorted) {
     if (key.startsWith(prefix)) contents.push({ Key: key, Size: data.byteLength })
   }

@@ -15,38 +15,31 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def tee(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
+async def tee(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
     # A backend that can append natively does; the rest fall back to the
     # read-modify-write inside the generic.
     append = ops.append
     return await generic_tee(
         paths,
         texts,
-        read_stream=bound_op(ops.read_stream, accessor, index),
+        read_stream=bound_op(ops.read_stream, accessor, opts.index),
         write_bytes=partial(ops.require(Operation.WRITE), accessor),
         append_bytes=(None if append is None else partial(append, accessor)),
-        stdin=stdin,
-        flags=flags)
+        stdin=opts.stdin,
+        flags=opts.flags)
 
 
 BUILDER = Builder('tee',

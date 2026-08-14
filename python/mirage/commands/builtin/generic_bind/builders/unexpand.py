@@ -13,41 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.unexpand import \
-    unexpand as generic_unexpand
+from mirage.commands.builtin.generic.unexpand import unexpand_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          bound_op)
-from mirage.commands.builtin.generic_bind.builders.common import (
-    merge_split_errors, resolve_readable)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+                                                          bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def unexpand(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["unexpand"])
-    paths, err = await resolve_readable(ops, accessor, paths, index,
-                                        "unexpand")
-    if err and not paths:
-        return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await generic_unexpand(paths,
-                               read_bytes=bound_op(ops.read_bytes, accessor,
-                                                   index),
-                               stdin=stdin,
-                               tabsize=int(fl.as_str("tabs") or "8"),
-                               all_spaces=fl.as_bool("all"),
-                               first_only=fl.as_bool("first_only")), err)
+async def unexpand(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                   texts: list[str],
+                   opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await unexpand_generic(
+        resolved, list(texts), opts, dir_aware_stat(ops, accessor, opts.index),
+        bound_op(ops.read_bytes, accessor, opts.index))
 
 
 BUILDER = Builder('unexpand', unexpand, None, False, None, read=True)

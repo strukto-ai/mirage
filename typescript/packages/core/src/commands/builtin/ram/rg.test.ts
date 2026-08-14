@@ -40,7 +40,6 @@ async function runRg(
       flags,
       filetypeFns: null,
       cwd: '/',
-      resource,
     },
   )
   if (result === null) return { lines: [], out: '', exitCode: -1 }

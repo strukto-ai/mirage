@@ -1,6 +1,5 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindArgs, FindEntry, PredNode,
@@ -12,10 +11,14 @@ from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
                                                  _parse_size)
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.context import path_allowed
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, StatPath
 from mirage.types import FileStat, FileType, FindType, PathSpec
-from mirage.utils.dates import iso_timestamp
+from mirage.utils.dates import iso_timestamp, matches_mtime
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_raw
 
@@ -93,15 +96,12 @@ async def apply_mtime_filter(
             s = await stat(spec)
         except (FileNotFoundError, ValueError):
             continue
-        if s.modified is None:
-            continue
-        mod_ts = datetime.fromisoformat(
-            s.modified).replace(tzinfo=timezone.utc).timestamp()
-        if mtime_min is not None and mod_ts < mtime_min:
-            continue
-        if mtime_max is not None and mod_ts > mtime_max:
-            continue
-        filtered.append(r)
+        # `matches_mtime` is the same helper the rest of this file already
+        # uses. Parsing inline instead stamped UTC over an offset the
+        # backend actually reported, moving the entry by that offset, and
+        # let a malformed timestamp raise out of the walk.
+        if matches_mtime(s.modified, mtime_min, mtime_max):
+            filtered.append(r)
     return filtered
 
 
@@ -117,17 +117,21 @@ def apply_mount_prefix(results: list[str], mount_prefix: str) -> list[str]:
     return out
 
 
-def missing_start_line(search_path: PathSpec) -> str:
-    """GNU's stderr line for a start point that does not exist.
+def missing_start_line(search_path: PathSpec,
+                       detail: str = "No such file or directory") -> str:
+    """GNU's stderr line for a start point find will not walk.
 
     One spelling of the diagnostic, because both find paths emit it: the
-    native-op path and the walk each collect one per operand.
+    native-op path and the walk each collect one per operand. The detail
+    is the strerror: a start point that is not there, or one typed with
+    a trailing slash that did not name a directory.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
+        detail (str): the strerror to report.
     """
     label = search_path.raw_path or search_path.virtual
-    return f"find: '{label}': No such file or directory"
+    return f"find: '{label}': {detail}"
 
 
 def is_link(links: LinkView | None, search: PathSpec) -> bool:
@@ -154,10 +158,19 @@ class StartPoint:
     results: list[str]
     missing: bool = False
     stat: FileStat | None = None
+    # The strerror the diagnostic carries when `missing` is set. A start
+    # point that is simply absent keeps GNU's default wording; one typed
+    # with a trailing slash that resolved to a non-directory reports
+    # ENOTDIR instead (`find flink/` -> "Not a directory").
+    detail: str = "No such file or directory"
 
 
 WALK_START = StartPoint(walk=True, results=[])
 MISSING_START = StartPoint(walk=False, results=[], missing=True)
+NOT_DIR_START = StartPoint(walk=False,
+                           results=[],
+                           missing=True,
+                           detail="Not a directory")
 
 
 async def resolve_start(
@@ -198,6 +211,11 @@ async def resolve_start(
         return MISSING_START
     if start.type == FileType.DIRECTORY:
         return StartPoint(walk=True, results=[], stat=start)
+    # POSIX reads `x/` as `x/.`, so an operand typed with a trailing
+    # slash has to name a directory; GNU refuses the rest with ENOTDIR
+    # rather than reporting the entry itself.
+    if search.raw_path.endswith("/"):
+        return NOT_DIR_START
     prefix = mount_prefix_of(search.virtual, search.resource_path)
     # `-path` matches the display path, so Path nodes carry the mount
     # prefix. Built here rather than read off args.tree: only the
@@ -365,16 +383,16 @@ async def find(
     results: list[str] = []
     missing: list[str] = []
     for search_path in searches:
-        rows = await _find_root(search_path,
-                                args,
-                                find_core=find_core,
-                                stat_path=stat_path,
-                                stat=stat,
-                                dir_empty=dir_empty,
-                                links=links,
-                                follow=follow)
+        rows, detail = await _find_root(search_path,
+                                        args,
+                                        find_core=find_core,
+                                        stat_path=stat_path,
+                                        stat=stat,
+                                        dir_empty=dir_empty,
+                                        links=links,
+                                        follow=follow)
         if rows is None:
-            missing.append(missing_start_line(search_path))
+            missing.append(missing_start_line(search_path, detail))
             continue
         results.extend(rows)
     if missing:
@@ -394,8 +412,12 @@ async def _find_root(
     dir_empty: Callable[[PathSpec], Awaitable[bool]] | None,
     links: LinkView | None,
     follow: bool,
-) -> list[str] | None:
+) -> tuple[list[str] | None, str]:
     """One start point's rows on the native-op path, None when missing.
+
+    The second element is the strerror the caller's diagnostic carries
+    when the rows are None, so the native-op path words a start point it
+    will not walk exactly as the walk path does.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
@@ -420,8 +442,12 @@ async def _find_root(
     if stat_path is None and stat is not None and not root_is_link:
         try:
             await stat(search_path)
+        except NotADirectoryError:
+            # The operand carried a trailing slash and did not name a
+            # directory; the backend stat is the only probe wired here.
+            return None, "Not a directory"
         except (FileNotFoundError, ValueError):
-            return None
+            return None, "No such file or directory"
     root_prefix = mount_prefix_of(search_path.virtual,
                                   search_path.resource_path)
     # `-path` matches the display path as printed; stamp the mount
@@ -445,9 +471,9 @@ async def _find_root(
                                 stat_path,
                                 is_link=root_is_link)
     if start.missing:
-        return None
+        return None, start.detail
     if not start.walk and not root_is_link:
-        return start.results
+        return start.results, start.detail
     results: list[str] = [] if root_is_link else await find_core(
         search_path,
         name=args.name,
@@ -506,7 +532,12 @@ async def _find_root(
                                         args,
                                         tree,
                                         follow=follow))
-    return respell_raw(results, search_path.virtual, search_path.raw_path)
+    # Hidden rows drop here, above the native-op/walk fork and after the
+    # link merge, so a mount's visibility behavior cannot depend on
+    # whether its backend ships a native find op.
+    results = [r for r in results if path_allowed(r)]
+    return respell_raw(results, search_path.virtual,
+                       search_path.raw_path), start.detail
 
 
 def _modified_ts(modified: str | None) -> float | None:
@@ -719,6 +750,8 @@ async def walk_find(
     need_empty = tree_has_empty(tree)
     results: list[str] = []
     for p, kind in sorted(collected):
+        if not path_allowed(p):
+            continue
         is_dir = kind == "d"
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p
@@ -771,3 +804,144 @@ async def walk_find(
                                       tree,
                                       follow=follow))
     return sorted(results)
+
+
+@dataclass(frozen=True, slots=True)
+class FindFlags:
+    name: str | None = None
+    type: str | None = None
+    size: str | None = None
+    mtime: str | None = None
+    maxdepth: str | None = None
+    iname: str | None = None
+    path: str | None = None
+    mindepth: str | None = None
+    empty: bool = False
+    follow: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
+    fl = FlagView(flags, spec=SPECS["find"])
+    return FindFlags(
+        name=fl.as_str("name"),
+        type=fl.as_str("type"),
+        size=fl.as_str("size"),
+        mtime=fl.as_str("mtime"),
+        maxdepth=fl.as_str("maxdepth"),
+        iname=fl.as_str("iname"),
+        path=fl.as_str("path"),
+        mindepth=fl.as_str("mindepth"),
+        empty=fl.as_bool("empty"),
+        follow=fl.as_bool("L"),
+    )
+
+
+async def find_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    *,
+    find_core: Callable[..., Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
+    dir_empty: Callable[[PathSpec], Awaitable[bool]] | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run find through a backend's native op; mirrors findGeneric.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved start points.
+        texts (list[str]): The raw expression words.
+        opts (CommandOpts): Flags and namespace facts (stat_path, links)
+            from the dispatcher.
+        find_core (Callable): The backend's native find op, bound.
+        stat (Callable | None): Bound overlaid stat, when the backend
+            serves local stats cheaply.
+        dir_empty (Callable | None): Whether a directory start point is
+            empty, for ``-empty``.
+    """
+    parsed = parse_flags(opts.flags)
+    return await find(paths,
+                      tuple(texts),
+                      find_core=find_core,
+                      stat_path=opts.stat_path,
+                      stat=stat,
+                      dir_empty=dir_empty,
+                      name=parsed.name,
+                      type=parsed.type,
+                      size=parsed.size,
+                      mtime=parsed.mtime,
+                      maxdepth=parsed.maxdepth,
+                      iname=parsed.iname,
+                      path=parsed.path,
+                      mindepth=parsed.mindepth,
+                      empty=parsed.empty,
+                      links=opts.ns.links if opts.ns is not None else None,
+                      follow=parsed.follow)
+
+
+async def find_walk_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    *,
+    readdir: Callable[..., Awaitable[list[str]]],
+    stat: Callable[..., Awaitable[FileStat]],
+) -> tuple[ByteSource | None, IOResult]:
+    """Run find by walking readdir/stat; the no-native-op twin.
+
+    GNU find walks every start point in operand order, names each one it
+    cannot stat, keeps going with the rest, and exits 1; results print
+    under the operand as typed.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved start points.
+        texts (list[str]): The raw expression words.
+        opts (CommandOpts): Flags, the index for the walk, and namespace
+            facts (stat_path, links) from the dispatcher.
+        readdir (Callable): Bound readdir called as ``readdir(p, index)``.
+        stat (Callable): Bound overlaid stat called as ``stat(p, index)``.
+    """
+    parsed = parse_flags(opts.flags)
+    stat_path = opts.stat_path
+    links = opts.ns.links if opts.ns is not None else None
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
+    args = parse_find_args(tuple(texts),
+                           name=parsed.name,
+                           type=parsed.type,
+                           size=parsed.size,
+                           mtime=parsed.mtime,
+                           maxdepth=parsed.maxdepth,
+                           iname=parsed.iname,
+                           path=parsed.path,
+                           mindepth=parsed.mindepth,
+                           empty=parsed.empty)
+    results: list[str] = []
+    missing: list[str] = []
+    for search in searches:
+        # Same start-point rule as the native-op path, so what `find` does
+        # with a file or a missing operand does not depend on whether the
+        # mounted backend ships a find op.
+        start = await resolve_start(search,
+                                    args,
+                                    stat_path,
+                                    is_link=is_link(links, search))
+        if start.missing:
+            missing.append(missing_start_line(search, start.detail))
+            continue
+        if not start.walk:
+            results.extend(start.results)
+            continue
+        walked = await walk_find(search,
+                                 readdir=readdir,
+                                 stat=stat,
+                                 index=opts.index,
+                                 args=args,
+                                 links=links,
+                                 follow=parsed.follow)
+        results.extend(respell_raw(walked, search.virtual, search.raw_path))
+    if missing:
+        return format_records(results), IOResult(stderr=("\n".join(missing) +
+                                                         "\n").encode(),
+                                                 exit_code=1)
+    return format_records(results), IOResult()

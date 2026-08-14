@@ -615,7 +615,12 @@ async def _mirror_dirs(
     if strategy.mkdir is None:
         return True
     mounts = [src_base, *await strategy.find(src, type="d")]
-    for entry_mount in sorted(set(mounts), key=len):
+    # Shortest first so a parent is created before its children. The name is
+    # the tiebreak because `sorted` is stable and set iteration over strings
+    # is PYTHONHASHSEED-dependent, so sibling directories of equal length
+    # used to come out in a different order run to run -- and in a different
+    # order from TypeScript, whose Set keeps insertion order.
+    for entry_mount in sorted(set(mounts), key=lambda p: (len(p), p)):
         entry_dst = mounted_path(target,
                                  dst_base + entry_mount[len(src_base):])
         if lines is not None:

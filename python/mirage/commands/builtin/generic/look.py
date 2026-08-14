@@ -1,8 +1,11 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
-from mirage.commands.spec.types import CommandName
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName, FlagValue, FlagView
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -37,3 +40,24 @@ async def look(
 
 
 __all__ = ["look"]
+
+
+@dataclass(frozen=True, slots=True)
+class LookFlags:
+    fold_case: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> LookFlags:
+    fl = FlagView(flags, spec=SPECS["look"])
+    return LookFlags(fold_case=fl.as_bool("f"))
+
+
+async def look_generic(paths, texts, opts: CommandOpts, read_bytes):
+    if not texts:
+        raise ValueError("look: missing prefix")
+    parsed = parse_flags(opts.flags)
+    return await look(paths,
+                      texts[0],
+                      read_bytes=read_bytes,
+                      stdin=opts.stdin,
+                      fold_case=parsed.fold_case)

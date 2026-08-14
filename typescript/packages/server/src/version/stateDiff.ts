@@ -15,6 +15,7 @@
 import { readVersion, resolveRef, versionDiff } from './api.ts'
 import { toState, type AnyDict } from './stateTree.ts'
 import type { VersionStore } from './store.ts'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 interface DictDelta {
   added: AnyDict
@@ -79,8 +80,8 @@ function sessionsDiff(before: AnyDict[], after: AnyDict[]): SessionsDiff {
     if (Object.keys(delta).length > 0) modified[sid] = delta
   }
   return {
-    added: [...b.keys()].filter((sid) => !a.has(sid)).sort(),
-    deleted: [...a.keys()].filter((sid) => !b.has(sid)).sort(),
+    added: [...b.keys()].filter((sid) => !a.has(sid)).sort(compareCodePoints),
+    deleted: [...a.keys()].filter((sid) => !b.has(sid)).sort(compareCodePoints),
     modified,
   }
 }
@@ -90,7 +91,7 @@ function sessionsDiff(before: AnyDict[], after: AnyDict[]): SessionsDiff {
 // replays and clears stay honest).
 function commandsBetween(historyA: AnyDict[], historyB: AnyDict[]): AnyDict[] {
   const key = (e: AnyDict): string =>
-    JSON.stringify(Object.entries(e).sort(([x], [y]) => (x < y ? -1 : 1)))
+    JSON.stringify(Object.entries(e).sort(([x], [y]) => compareCodePoints(x, y)))
   const seen = new Set(historyA.map(key))
   return historyB.filter((e) => !seen.has(key(e)))
 }

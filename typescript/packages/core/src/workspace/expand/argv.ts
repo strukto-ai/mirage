@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
+import { literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { WordPolicy, endOptionsAfterProgram, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
+import type { NamespaceLinks } from '../../ops/config.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
-import { expandParts } from './parts.ts'
+import { expandWords } from './parts.ts'
 import { type ValueType } from '../../commands/spec/types.ts'
 import { specForCommand, specWordBases, specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -78,13 +81,18 @@ export async function expandArgv(
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   registry: MountRegistry,
+  namespace: NamespaceLinks | null = null,
+  view?: SessionView,
 ): Promise<Argv> {
-  const expanded = await expandParts(parts, session, executeFn, callStack)
+  let expanded = await expandWords(parts, session, executeFn, callStack, view)
   if (expanded.length === 0) return new Argv('', [], [])
+  // `set -f` turns pathname expansion off, which is the same word for
+  // word as every glob character having been quoted.
+  if (session.shellOptions.noglob === true) expanded = expanded.map((w) => markGlobs(w))
   // A command name may span several leading words (git-style, e.g.
   // `gws docs documents get`); the registry says how many.
   const consumed = registry.matchCommandPrefix(expanded)
-  const name = expanded.slice(0, consumed).join(' ')
+  const name = unmarkGlobs(expanded.slice(0, consumed).join(' '))
   // Before anything reads the line: an option carrying a program hands
   // the words after it to that program, and POSIX's own `--` is how that
   // handoff is spelled. Only when the interpreter is what runs, though:
@@ -95,9 +103,9 @@ export async function expandArgv(
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
   const shadowed = Object.hasOwn(session.functions, name)
-  const lineWords = shadowed
-    ? [...expanded]
-    : [...expanded.slice(0, consumed), ...endOptionsAfterProgram(name, expanded.slice(consumed))]
+  const line = expanded.slice(consumed)
+  const tail = shadowed ? line : endOptionsAfterProgram(name, line)
+  const lineWords = [...expanded.slice(0, consumed), ...tail]
 
   const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (ValueType | null)[] | null = null
@@ -114,32 +122,24 @@ export async function expandArgv(
     }
   }
 
-  let classified = classifyParts(lineWords, registry, session.cwd, wordKinds, wordBases)
-  // set -f: glob words become literal paths for every consumer,
-  // including backend pushdown, so `cat *.txt` looks up a file
-  // literally named `*.txt` like bash with noglob.
-  if (session.shellOptions.noglob === true) {
-    classified = classified.map((item) =>
-      item instanceof PathSpec && item.pattern !== null
-        ? new PathSpec({
-            virtual: item.virtual,
-            directory: item.directory,
-            pattern: null,
-            resolved: item.resolved,
-            resourcePath: item.resourcePath,
-            rawPath: item.rawPath,
-          })
-        : item,
-    )
-  }
+  const classified = classifyParts(lineWords, registry, session.cwd, wordKinds, wordBases)
   // A glob word is resolved by whoever consumes it, exactly once:
   // WordPolicy.SHELL words get matches here; mount commands keep
   // patterns for backend pushdown; unknown names fail without
   // touching backends.
-  const words = policy === WordPolicy.SHELL ? await resolveGlobs(classified, registry) : classified
+  const words =
+    policy === WordPolicy.SHELL
+      ? await resolveGlobs(classified, registry, false, namespace)
+      : // A pattern still owes its backend a resolution, so it travels
+        // marked and the marks come off there; every other word is done
+        // with its quoting and reads literally from here on.
+        classified.map((item) =>
+          item instanceof PathSpec && item.pattern !== null ? item : literalWord(item),
+        )
   // The text view renders words as typed (rawPath): bash hands
   // programs their words unchanged, so `echo sub/file.txt` prints the
-  // relative form, not the resolved absolute path.
-  const textView = words.map(wordText)
+  // relative form, not the resolved absolute path. Quote removal is part
+  // of "as typed": a word never reaches a command marked.
+  const textView = words.map((w) => unmarkGlobs(wordText(w)))
   return new Argv(name, textView.slice(consumed), words.slice(consumed))
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { noMount } from '../../utils/errors.ts'
+import { isNoMount, noMount } from '../../utils/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { VFSRuntime } from '../../runtime/table.ts'
@@ -26,6 +26,7 @@ import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.
 import { CLIRegistry } from '../cli/registry.ts'
 import { MountEntry } from './mount.ts'
 import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 // The one thing the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -220,7 +221,18 @@ export class MountRegistry {
     return removed
   }
 
-  mountForPrefix(prefix: string): MountEntry | null {
+  /**
+   * The mount at exactly this prefix; throws noMount for none. Callers
+   * that expect the miss branch on `tryMountForPrefix` returning null.
+   */
+  mountForPrefix(prefix: string): MountEntry {
+    const m = this.tryMountForPrefix(prefix)
+    if (m === null) throw noMount(prefix)
+    return m
+  }
+
+  /** The mount at exactly this prefix, or null when none matches. */
+  tryMountForPrefix(prefix: string): MountEntry | null {
     const norm = normalizePrefix(prefix)
     for (const m of this.mountList) {
       if (m.prefix === norm) return m
@@ -243,7 +255,7 @@ export class MountRegistry {
   }
 
   isMountRoot(path: string): boolean {
-    return this.mountForPrefix(path) !== null
+    return this.tryMountForPrefix(path) !== null
   }
 
   descendantMounts(path: string): MountEntry[] {
@@ -254,7 +266,7 @@ export class MountRegistry {
       if (!m.prefix.startsWith(norm)) continue
       out.push(m)
     }
-    return out.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0))
+    return out.sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   }
 
   mountPrefixes(): string[] {
@@ -282,8 +294,9 @@ export class MountRegistry {
     try {
       const [resource] = this.resolve(path)
       return resource.kind
-    } catch {
-      return null
+    } catch (err) {
+      if (isNoMount(err)) return null
+      throw err
     }
   }
 
@@ -291,7 +304,6 @@ export class MountRegistry {
     const groups = new Map<MountEntry, string[]>()
     for (const path of paths) {
       const m = this.mountFor(path)
-      if (m === null) continue
       const [, spec] = this.resolve(path)
       let bucket = groups.get(m)
       if (bucket === undefined) {
@@ -313,9 +325,6 @@ export class MountRegistry {
 
   resolve(path: string): [Resource, PathSpec, MountMode] {
     const m = this.mountFor(path)
-    if (m === null) {
-      throw noMount(path)
-    }
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`
     const mountPrefix = rstripSlash(m.prefix)
@@ -329,7 +338,23 @@ export class MountRegistry {
     ]
   }
 
-  mountFor(path: string): MountEntry | null {
+  /**
+   * The mount that handles this path; throws noMount for none.
+   *
+   * The lookup contract pair: `mountFor` is for callers whose path must
+   * be mounted (a miss is a broken invariant and propagates as a typed
+   * noMount error), `tryMountFor` is for callers with a real fallback
+   * for the miss. Never catch around this method — call the try variant
+   * instead.
+   */
+  mountFor(path: string): MountEntry {
+    const m = this.tryMountFor(path)
+    if (m === null) throw noMount(path)
+    return m
+  }
+
+  /** The mount that handles this path, or null when none does. */
+  tryMountFor(path: string): MountEntry | null {
     const owner = ownerPrefix(
       this.mountList.map((m) => m.prefix),
       path,
@@ -393,7 +418,7 @@ export class MountRegistry {
     cwd: string,
   ): Promise<MountEntry | null> {
     const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
-    let mount = this.mountFor(mountPath)
+    let mount = this.tryMountFor(mountPath)
     if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
       throw new MountCommandUnsupported(cmdName, mount.resource.kind, pathScopes[0]?.rawPath ?? cwd)
     }

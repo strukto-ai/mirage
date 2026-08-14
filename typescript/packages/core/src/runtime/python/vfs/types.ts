@@ -16,6 +16,10 @@
  * Emscripten's errno numbering, which is musl's and not Linux's: EXDEV
  * is 75 here and 18 is EDOM. Always read the numbers off the running
  * interpreter (`pyodide.ERRNO_CODES`) rather than writing literals.
+ * The five required keys are what this filesystem raises itself; the
+ * rest of the vocabulary's names are optional because Emscripten
+ * builds differ on the tail (ENODATA), and `errnoError` guards a
+ * missing one with EIO instead of ErrnoError(undefined).
  */
 export interface ErrnoCodes {
   readonly ENOENT: number
@@ -23,6 +27,16 @@ export interface ErrnoCodes {
   readonly EINVAL: number
   readonly EIO: number
   readonly EXDEV: number
+  readonly ENOTDIR?: number
+  readonly EISDIR?: number
+  readonly EEXIST?: number
+  readonly EACCES?: number
+  readonly ENOTEMPTY?: number
+  readonly ENOTSUP?: number
+  readonly ELOOP?: number
+  readonly EBUSY?: number
+  readonly EROFS?: number
+  readonly ENODATA?: number
 }
 
 export interface FSNode {

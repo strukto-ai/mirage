@@ -63,9 +63,8 @@ def storage_key(registry: MountRegistry, path: PathSpec) -> str:
         registry (MountRegistry): Mount set the operand is addressed in.
         path (PathSpec): The operand.
     """
-    try:
-        entry = registry.mount_for(path.virtual)
-    except ValueError:
+    entry = registry.try_mount_for(path.virtual)
+    if entry is None:
         # Outside every mount there is no storage to name, so fall back
         # to the path itself; such an operand fails on its own when the
         # command tries to read it.

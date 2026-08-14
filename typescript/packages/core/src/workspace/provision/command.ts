@@ -61,7 +61,7 @@ function mountGroups(registry: MountRegistry, parts: readonly (string | PathSpec
       unresolved.push(p)
       continue
     }
-    const mount = registry.mountFor(p.virtual)
+    const mount = registry.tryMountFor(p.virtual)
     if (mount === null) {
       unresolved.push(p)
       continue
@@ -145,7 +145,7 @@ export async function handleCommandProvision(
   // Pathless commands (seq, date, ...) still need a mount to resolve
   // their registration; any mount carries the general commands, so fall
   // back to the first one.
-  const mount = registry.mountFor(mountPath) ?? registry.allMounts()[0] ?? null
+  const mount = registry.tryMountFor(mountPath) ?? registry.allMounts()[0] ?? null
   if (mount === null) {
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
@@ -201,7 +201,6 @@ export async function handleCommandProvision(
     cwd: session.cwd,
     filetypeFns: null,
     mountPrefix,
-    resource,
     command: cmdStr,
     ...(spec !== null ? { spec } : {}),
     index: rawIndex,

@@ -42,6 +42,7 @@ import {
   type WorkspaceOptions,
   type WorkspaceStateStore,
 } from '@struktoai/mirage-node'
+import { compareCodePoints } from '@struktoai/mirage-core'
 
 const VALID_MODES = new Set<string>([MountMode.READ, MountMode.WRITE, MountMode.EXEC])
 
@@ -441,7 +442,7 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
   const missing: string[] = []
   const out = walkInterpolate(value, env, missing)
   if (missing.length > 0) {
-    const unique = Array.from(new Set(missing)).sort()
+    const unique = Array.from(new Set(missing)).sort(compareCodePoints)
     throw new Error(`missing environment variables: ${unique.join(', ')}`)
   }
   return out as T
@@ -803,7 +804,9 @@ function buildCliEntries(
     }
     const unknown = Object.keys(block).filter((k) => !CLI_KEYS.includes(k))
     if (unknown.length > 0) {
-      throw new Error(`clis entry '${name}': unknown keys: ${unknown.sort().join(', ')}`)
+      throw new Error(
+        `clis entry '${name}': unknown keys: ${unknown.sort(compareCodePoints).join(', ')}`,
+      )
     }
     const hasCli = typeof block.cli === 'string'
     const hasScript = typeof block.script === 'string'

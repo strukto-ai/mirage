@@ -14,9 +14,23 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { runWithSession } from '../context/session_context.ts'
 import { PathSpec } from '../types.ts'
+import { Session } from '../workspace/session/session.ts'
 import { enoent } from './errors.ts'
-import { expandPattern, hasGlob, isWordShaped, resolveGlobWith, spellMatch } from './glob_walk.ts'
+import {
+  expandPattern,
+  globPattern,
+  hasGlob,
+  isWordShaped,
+  literalWord,
+  markEscapedGlobs,
+  markGlobs,
+  resolveGlobWith,
+  spellMatch,
+  unmarkGlobs,
+} from './glob_walk.ts'
+import { unescapeUnquoted } from '../workspace/expand/node.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
 
 const TREE: Record<string, string[]> = {
@@ -62,6 +76,81 @@ describe('hasGlob', () => {
     expect(hasGlob('x?')).toBe(true)
     expect(hasGlob('[ab]')).toBe(true)
     expect(hasGlob('page.md')).toBe(false)
+  })
+})
+
+describe('glob marks', () => {
+  it('hides a quoted metacharacter from hasGlob and round-trips it', () => {
+    const marked = markGlobs('a*b?c[d')
+    expect(hasGlob(marked)).toBe(false)
+    expect(unmarkGlobs(marked)).toBe('a*b?c[d')
+    expect(marked.length).toBe('a*b?c[d'.length)
+    expect(markGlobs('page.md')).toBe('page.md')
+    expect(unmarkGlobs('page.md')).toBe('page.md')
+  })
+
+  it('marks one occurrence at a time', () => {
+    // The word bash globs on the `?` alone: only the star is quoted.
+    const word = markGlobs('*') + '?.txt'
+    expect(hasGlob(word)).toBe(true)
+    expect(unmarkGlobs(word)).toBe('*?.txt')
+    expect(globPattern(word)).toBe('[*]?.txt')
+  })
+
+  it('hands a marked character to fnmatch as its own class', () => {
+    expect(globPattern(markGlobs('*'))).toBe('[*]')
+    expect(globPattern(markGlobs('?'))).toBe('[?]')
+    expect(globPattern(markGlobs('['))).toBe('[[]')
+    // A live glob character is left alone, so the two mix in one segment.
+    expect(globPattern('*' + markGlobs('?'))).toBe('*[?]')
+    expect(globPattern('plain.txt')).toBe('plain.txt')
+  })
+
+  it('reads backslashes the way bash does', () => {
+    const marked = (text: string) => hasGlob(unescapeUnquoted(markEscapedGlobs(text)))
+    expect(marked('Demo_*')).toBe(true)
+    expect(marked('x?')).toBe(true)
+    expect(marked('[ab]')).toBe(true)
+    expect(marked('page.md')).toBe(false)
+    expect(marked('\\*.txt')).toBe(false)
+    expect(marked('a\\?b')).toBe(false)
+    expect(marked('\\[ab]')).toBe(false)
+    expect(marked('a\\*b*c')).toBe(true)
+    // An escaped backslash does not quote what follows it.
+    expect(marked('\\\\*')).toBe(true)
+    expect(marked('\\\\\\*')).toBe(false)
+    // A trailing backslash quotes nothing.
+    expect(marked('a\\')).toBe(false)
+  })
+})
+
+describe('literalWord', () => {
+  it('freezes a pattern that carried marks', () => {
+    const spec = new PathSpec({
+      virtual: '/data/' + markGlobs('*') + '?.txt',
+      directory: '/data/',
+      resourcePath: markGlobs('*') + '?.txt',
+      pattern: markGlobs('*') + '?.txt',
+      resolved: false,
+    })
+    const out = literalWord(spec)
+    expect(out).toBeInstanceOf(PathSpec)
+    // The word after quote removal, and no pattern left to glob again.
+    expect((out as PathSpec).virtual).toBe('/data/*?.txt')
+    expect((out as PathSpec).pattern).toBeNull()
+    expect((out as PathSpec).resolved).toBe(true)
+  })
+
+  it('leaves an unmarked spec untouched', () => {
+    const spec = new PathSpec({
+      virtual: '/data/*.txt',
+      directory: '/data/',
+      resourcePath: '*.txt',
+      pattern: '*.txt',
+      resolved: false,
+    })
+    expect(literalWord(spec)).toBe(spec)
+    expect(literalWord('plain')).toBe('plain')
   })
 })
 
@@ -161,5 +250,38 @@ describe('resolveGlobWith', () => {
     const spec = globSpec('/notion/pages/*.nope', '/notion').dir
     const out = await resolveGlobWith(fakeReaddir, null, [spec], undefined)
     expect(out).toEqual([])
+  })
+})
+
+describe('resolveGlobWith under hidden paths', () => {
+  it('drops hidden matches', async () => {
+    const sess = new Session({ sessionId: 'narrowed' })
+    sess.hiddenPaths = { patterns: ['*.json'] }
+    const result = await runWithSession(sess, () =>
+      resolveGlobWith(
+        fakeReaddir,
+        null,
+        [globSpec('/notion/pages/Demo_page__uuid1/page.*', '/notion')],
+        undefined,
+      ),
+    )
+    expect(result.map((r) => r.virtual)).toEqual(['/notion/pages/Demo_page__uuid1/page.md'])
+  })
+
+  it('an all-hidden match set falls back to the literal', async () => {
+    const sess = new Session({ sessionId: 'narrowed' })
+    sess.hiddenPaths = { patterns: ['*.json'] }
+    const result = await runWithSession(sess, () =>
+      resolveGlobWith(
+        fakeReaddir,
+        null,
+        [globSpec('/notion/pages/Roadmap__uuid2/page.*', '/notion')],
+        undefined,
+      ),
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0]?.resolved).toBe(true)
+    expect(result[0]?.pattern).toBeNull()
+    expect(result[0]?.virtual).toBe('/notion/pages/Roadmap__uuid2/page.*')
   })
 })

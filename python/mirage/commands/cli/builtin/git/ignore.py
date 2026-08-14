@@ -14,11 +14,12 @@
 
 import posixpath
 from io import BytesIO
-from typing import Any, BinaryIO, Callable, cast
+from typing import BinaryIO, cast
 
 from dulwich.ignore import IgnoreFilter, read_ignore_patterns
 
 from mirage.commands.cli.builtin.git.io import read_optional
+from mirage.runtime.types import DispatchFn
 
 GITIGNORE = ".gitignore"
 INFO_EXCLUDE = "info/exclude"
@@ -86,7 +87,7 @@ class IgnoreStack:
         return False
 
 
-async def load_ignores(dispatch: Callable[..., Any], gitdir: str,
+async def load_ignores(dispatch: DispatchFn, gitdir: str,
                        worktree: str) -> IgnoreStack:
     """The root of the ignore stack: the repository's own two files.
 
@@ -101,7 +102,7 @@ async def load_ignores(dispatch: Callable[..., Any], gitdir: str,
     else's repository.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the git directory.
         worktree (str): absolute virtual path of the working tree root.
     """

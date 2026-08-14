@@ -33,3 +33,15 @@ def test_ln_n(env):
     result = env.mirage(
         "ln -s -n /data/a.txt /data/link.txt && readlink /data/link.txt")
     assert "/data/a.txt" in result
+
+
+def test_ln_s_keeps_control_char_in_target(env):
+    # A symlink target is stored verbatim as typed. GNU: readlink of a
+    # link made from `printf '/data/x\ty'` prints the tab back.
+    env.mirage(r"""ln -s "$(printf '/data/x\ty')" /data/tabby""")
+    assert env.mirage("readlink /data/tabby") == "/data/x\ty\n"
+
+
+def test_ln_s_keeps_literal_backslash_in_target(env):
+    env.mirage(r"""ln -s '/data/a\b' /data/bs""")
+    assert env.mirage("readlink /data/bs") == "/data/a\\b\n"

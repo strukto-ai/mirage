@@ -32,19 +32,20 @@ import {
 import type { IgnoreStack } from './ignore.ts'
 import { loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { readFile, under } from './io.ts'
+import { entryBytes, under } from './io.ts'
 import { matched, repoRelative } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
-import type { RepoLocation, WorkTree } from './types.ts'
+import {
+  EXECUTABLE,
+  OWNER_EXECUTE,
+  REGULAR,
+  SYMLINK,
+  type RepoLocation,
+  type WorkTree,
+} from './types.ts'
 import { checkOperands, fatal, startPoint } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
-
-// git records one of two modes for a regular file and reads only the owner
-// execute bit to choose. A mount that reports no mode at all stages the ordinary
-// one, which is what the file will read back as.
-const REGULAR = 0o100644
-const EXECUTABLE = 0o100755
-const OWNER_EXECUTE = 0o100
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /** The parsed shape of a `git add` invocation. */
 interface AddFlags {
@@ -63,6 +64,7 @@ function parseFlags(fl: FlagView): AddFlags {
 
 /** The mode git would record for a working-tree file. */
 function entryMode(info: FileStat): number {
+  if (info.type === FileType.SYMLINK) return SYMLINK
   return info.mode !== null && (info.mode & OWNER_EXECUTE) !== 0 ? EXECUTABLE : REGULAR
 }
 
@@ -182,24 +184,29 @@ async function resolve(
  * already holds.
  */
 export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     checkOperands(texts, UnknownSwitchError)
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
-    const repo: Repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo: Repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
     const tracked = new Set(state.entries.keys())
-    const found = await scan(dispatch, statPath, repo.location, tracked, UNTRACKED_ALL)
+    const found = await scan(
+      dispatch,
+      statPath,
+      repo.location,
+      tracked,
+      UNTRACKED_ALL,
+      doors.ns?.links ?? null,
+    )
     const ignores = await loadIgnores(dispatch, repo.location.gitdir, repo.location.worktree)
     const present = new Set(found.files.keys())
     let stage: Set<string>
@@ -227,11 +234,11 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
       )
     }
     const staged = new Map<string, StagedEntry>()
-    for (const path of [...stage].sort()) {
-      const data = await readFile(dispatch, under(repo.location.worktree, path))
-      const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
+    for (const path of [...stage].sort(compareCodePoints)) {
       const info = found.files.get(path)
       if (info === undefined) continue
+      const data = await entryBytes(dispatch, under(repo.location.worktree, path), info)
+      const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
       staged.set(path, stagedEntry(oid, info, data.length))
     }
     await updateIndex(repo, staged, remove)

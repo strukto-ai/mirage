@@ -33,7 +33,7 @@ def test_workspace_accepts_commands_param():
     @command("myecho",
              resource="ram",
              spec=CommandSpec(rest=Operand(type="str")))
-    async def my_echo(store, paths, *texts, cwd="/", stdin=None, **flags):
+    async def my_echo(store, paths, texts, opts):
         return " ".join(texts).encode(), IOResult()
 
     ws = Workspace(
@@ -58,7 +58,7 @@ def test_workspace_register_method():
     @command("myecho",
              resource="ram",
              spec=CommandSpec(rest=Operand(type="str")))
-    async def my_echo(store, paths, *texts, cwd="/", stdin=None, **flags):
+    async def my_echo(store, paths, texts, opts):
         return " ".join(texts).encode(), IOResult()
 
     _register(ws, my_echo)
@@ -73,7 +73,7 @@ def test_workspace_register_method():
 def test_workspace_user_command_overrides_builtin():
 
     @command("stat", resource="ram", spec=CommandSpec())
-    async def my_stat(store, paths, *texts, stdin=None, **flags):
+    async def my_stat(store, paths, texts, opts):
         return b"custom-stat", IOResult()
 
     ws = Workspace(

@@ -13,31 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.realpath import \
-    realpath as generic_realpath
+from mirage.commands.builtin.generic.realpath import realpath_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def realpath(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    e: bool = False,
-    m: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
-    paths = await ops.resolve_glob(accessor, paths or [], index)
-    return await generic_realpath(paths,
-                                  stat_fn=bound_op(ops.stat, accessor, index),
-                                  e=e,
-                                  m=m)
+async def realpath(ops: CommandIO, accessor: Accessor,
+                   paths: list[PathSpec] | None, texts: list[str],
+                   opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await ops.resolve_glob(accessor, paths or [], opts.index)
+    return await realpath_generic(resolved, list(texts), opts,
+                                  bound_op(ops.stat, accessor, opts.index))
 
 
 BUILDER = Builder('realpath', realpath, None, False, None)

@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface WasabiConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  region?: string
-  endpoint?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface WasabiConfigRedacted extends Omit<WasabiConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const WasabiConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const WasabiConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type WasabiConfig = ConfigOf<typeof WasabiConfigSchema>
+
+export type WasabiConfigRedacted = RedactedConfig<WasabiConfig, 'presignedUrlProvider'>
 
 export function resolvedWasabiEndpoint(config: WasabiConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

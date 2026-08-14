@@ -16,10 +16,12 @@ import errno
 
 import pytest
 
+from mirage.errors import FsCondition, classify
 from mirage.types import PathSpec
-from mirage.utils.errors import (OperationNotSupportedError, enoent, enotdir,
-                                 enotsup, format_fs_error, fs_strerror,
-                                 readdir_error)
+from mirage.utils.errors import (NoMountError, OperationNotSupportedError,
+                                 eacces, eloop, enoent, enotdir, enotempty,
+                                 enotsup, error_path, exdev, format_fs_error,
+                                 fs_strerror, no_mount, readdir_error)
 
 
 def test_fs_strerror_known_types():
@@ -161,3 +163,32 @@ async def test_readdir_error_reports_the_virtual_path():
     exc = await readdir_error(spec, "/data/nope", _is_file, _is_dir)
     assert format_fs_error(
         "ls", exc) == (b"ls: /data/nope: No such file or directory\n")
+
+
+def test_new_constructors_name_their_condition():
+    # The four constructors python was missing (R5a): each construction
+    # classifies to its own condition, so no boundary needs a message
+    # needle to recognize it.
+    spec = PathSpec.from_str_path("/data/x")
+    assert classify(eacces(spec)) is FsCondition.EACCES
+    assert classify(enotempty(spec)) is FsCondition.ENOTEMPTY
+    assert classify(exdev(spec)) is FsCondition.EXDEV
+    assert classify(eloop(spec)) is FsCondition.ELOOP
+
+
+def test_new_constructors_carry_the_virtual_path():
+    spec = PathSpec.from_str_path("/data/x")
+    for exc in (eacces(spec), enotempty(spec), exdev(spec), eloop(spec)):
+        assert error_path(exc) == "/data/x"
+
+
+def test_no_mount_is_a_typed_miss():
+    # The registry's miss stays a ValueError for every existing catch,
+    # but only the subclass classifies to ENOENT: a backend's bare
+    # ValueError is a refusal, not absence.
+    err = no_mount("/nowhere/x")
+    assert isinstance(err, NoMountError)
+    assert isinstance(err, ValueError)
+    assert str(err) == "no mount matches path: '/nowhere/x'"
+    assert classify(err) is FsCondition.ENOENT
+    assert classify(ValueError("row too large to render")) is None

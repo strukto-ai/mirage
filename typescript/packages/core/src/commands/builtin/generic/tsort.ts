@@ -18,6 +18,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -56,7 +57,7 @@ function topologicalSort(pairs: readonly (readonly [string, string])[]): [string
     const node = queue[head] ?? ''
     head += 1
     result.push(node)
-    const neighbors = [...(graph.get(node) ?? new Set<string>())].sort()
+    const neighbors = [...(graph.get(node) ?? new Set<string>())].sort(compareCodePoints)
     for (const nb of neighbors) {
       const d = (inDegree.get(nb) ?? 0) - 1
       inDegree.set(nb, d)

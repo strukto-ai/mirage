@@ -14,11 +14,14 @@
 
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
-import { arrayExtent, arraySet } from '../../../shell/array.ts'
+import { arrayExtent, arrayWith, type ShellArray } from '../../../shell/array.ts'
 import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
+import { PolicyDenied } from '../../../policy/errors.ts'
 import type { Session } from '../../session/session.ts'
+import type { SessionView } from '../../../ops/types.ts'
+import { ensureVarVisible, visibleEnv } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
@@ -48,8 +51,11 @@ const OCT_CHARS = new Set('01234567')
  * output); an unknown escape like `\z` passes through as `\z`. `tr` has
  * its own reader (`commands/builtin/utils/escapes.ts`) because only the
  * shell writes bytes: `\xHH` here names a byte, not a code point.
+ *
+ * Exported for its test only, mirroring how Python's `_interpret_escapes`
+ * is re-exported from `builtins/__init__.py`.
  */
-function interpretEchoEscapes(text: string): string {
+export function interpretEchoEscapes(text: string): string {
   const out: string[] = []
   let i = 0
   const n = text.length
@@ -847,37 +853,58 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
  * unless the whole assignment succeeds: a readonly name or an
  * out-of-range subscript leaves the variable exactly as it was.
  */
-function assignPrintfTarget(
+async function assignPrintfTarget(
   session: Session,
+  view: SessionView | undefined,
   name: string,
   subscript: string | undefined,
   value: string,
-): 'ok' | 'readonly' | 'subscript' {
+): Promise<'ok' | 'denied' | 'readonly' | 'subscript'> {
+  try {
+    // The hidden half of the session door, in this builtin's
+    // status-string voice: a hidden name is not printf's to write, and
+    // hiding never explains itself.
+    ensureVarVisible(session, name)
+  } catch (err) {
+    if (!(err instanceof PolicyDenied)) throw err
+    return 'denied'
+  }
   if (session.readonlyVars.has(name)) return 'readonly'
+  const held = sessionEntry(session.arrays, name)
+  let stored: string | ShellArray
   if (subscript === undefined) {
-    const existing = sessionEntry(session.arrays, name)
-    if (existing === undefined) setSessionEntry(session.env, name, value)
-    else arraySet(existing, 0, value)
+    // A bare name over an array is element 0, as bash has it.
+    stored = held === undefined ? value : arrayWith(held, 0, value)
+  } else {
+    let arr = held
+    if (arr === undefined) {
+      // An existing scalar becomes element 0, even when empty: bash
+      // resolves `x[-1]` against the length-1 array that produces.
+      const scalar = sessionEntry(session.env, name)
+      arr = scalar === undefined ? [] : [scalar]
+    }
+    let idx = arrayIndex(subscript, visibleEnv(session))
+    if (idx < 0) idx += arrayExtent(arr)
+    if (idx < 0) return 'subscript'
+    stored = arrayWith(arr, idx, value)
+  }
+  // The gated half. The door speaks in whole variables, so an element write
+  // states itself as the array it produces rather than taking a direct path
+  // around the gate: `printf -v 'AWS_KEY[0]'` is a write to AWS_KEY, and a
+  // preSession rule refusing that name has to see it. The refusal is thrown,
+  // not collapsed into a status, so the rule's own words reach the user as
+  // they do from `export`.
+  if (view !== undefined) {
+    await view.set(name, stored)
     return 'ok'
   }
-  const existing = sessionEntry(session.arrays, name)
-  const fromScalar = existing === undefined
-  let arr = existing
-  if (arr === undefined) {
-    // An existing scalar becomes element 0, even when empty: bash
-    // resolves `x[-1]` against the length-1 array that produces.
-    const scalar = sessionEntry(session.env, name)
-    arr = scalar === undefined ? [] : [scalar]
-  }
-  let idx = arrayIndex(subscript, session.env)
-  if (idx < 0) idx += arrayExtent(arr)
-  if (idx < 0) return 'subscript'
-  arraySet(arr, idx, value)
-  if (fromScalar) {
+  if (typeof stored === 'string') {
+    setSessionEntry(session.env, name, stored)
+  } else {
+    setSessionEntry(session.arrays, name, stored)
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.env[name]
   }
-  setSessionEntry(session.arrays, name, arr)
   return 'ok'
 }
 
@@ -899,7 +926,11 @@ function assignPrintfTarget(
  * still reports the format's own errors first, then fails with status 1
  * and leaves the variable untouched.
  */
-export function handlePrintf(args: string[], session: Session): Result {
+export async function handlePrintf(
+  args: string[],
+  session: Session,
+  view?: SessionView,
+): Promise<Result> {
   let target: string | null = null
   let parsed: RegExpExecArray | null = null
   if (args.length >= 2 && args[0] === '-v') {
@@ -932,12 +963,25 @@ export function handlePrintf(args: string[], session: Session): Result {
   const errBytes = errors.length > 0 ? new TextEncoder().encode(errors.join('')) : null
   if (target !== null && parsed !== null) {
     const base = parsed[1] ?? ''
-    const status = assignPrintfTarget(session, base, parsed[2], output)
+    let status: 'ok' | 'denied' | 'readonly' | 'subscript'
+    try {
+      status = await assignPrintfTarget(session, view, base, parsed[2], output)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const denied = new TextEncoder().encode(errors.join('') + `bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: denied }),
+        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: denied }),
+      ]
+    }
     if (status !== 'ok') {
       const detail =
         status === 'readonly'
           ? `bash: ${base}: readonly variable\n`
-          : `bash: ${target}: bad array subscript\n`
+          : status === 'denied'
+            ? `bash: ${base}: permission denied\n`
+            : `bash: ${target}: bad array subscript\n`
       const err = new TextEncoder().encode(errors.join('') + detail)
       return [
         null,

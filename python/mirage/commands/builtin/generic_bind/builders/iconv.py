@@ -15,40 +15,23 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.iconv import iconv as generic_iconv
+from mirage.commands.builtin.generic.iconv import iconv_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def iconv(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    f: str | None = None,
-    t: str | None = None,
-    c: bool = False,
-    o: PathSpec | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_iconv(paths,
-                               read_bytes=bound_op(ops.read_bytes, accessor,
-                                                   index),
-                               write_bytes=partial(
-                                   ops.require(Operation.WRITE), accessor),
-                               stdin=stdin,
-                               from_enc=f or "utf-8",
-                               to_enc=t or "utf-8",
-                               ignore_errors=c,
-                               output_path=o)
+async def iconv(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                texts: list[str],
+                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await iconv_generic(resolved, list(texts), opts,
+                               bound_op(ops.read_bytes, accessor, opts.index),
+                               partial(ops.require(Operation.WRITE), accessor))
 
 
 BUILDER = Builder('iconv',

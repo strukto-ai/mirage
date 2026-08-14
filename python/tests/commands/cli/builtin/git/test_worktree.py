@@ -22,7 +22,9 @@ from mirage.commands.cli.builtin.git.worktree import (UNTRACKED_ALL,
                                                       UNTRACKED_NO,
                                                       UNTRACKED_NORMAL, scan,
                                                       tracked_directories)
+from mirage.types import LINK_TARGET_KEY, FileType
 from mirage.workspace.executor.builtins.links import path_stat
+from mirage.workspace.executor.command.run import namespace_view_of
 
 LOCATION = RepoLocation(gitdir="/repo/.git",
                         commondir="/repo/.git",
@@ -39,8 +41,9 @@ async def walk(ws, tracked: set[str], mode: str = UNTRACKED_NORMAL):
         tracked (set[str]): paths to treat as held by the index.
         mode (str): which untracked files to report.
     """
+    ns = namespace_view_of(ws._registry, ws._namespace, ws.dispatch)
     return await scan(ws.dispatch, functools.partial(path_stat, ws.dispatch),
-                      LOCATION, tracked, mode)
+                      LOCATION, tracked, mode, ns.links)
 
 
 def test_a_path_contributes_every_directory_above_it():
@@ -139,3 +142,35 @@ async def test_an_ignored_directory_holding_a_tracked_file_is_still_walked(
     found = await walk(workspace, TRACKED | {"vendor/kept.txt"})
     assert "vendor/kept.txt" in found.files
     assert "vendor/junk.txt" not in found.untracked
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_is_reported_as_a_symlink(git_rw):
+    # Links are namespace state, so the backend stat behind the walk
+    # dereferences one: without the name plane the walk sees the target.
+    await git_rw.execute("ln -s a.txt /repo/link")
+    found = await walk(git_rw, TRACKED)
+    assert found.files["link"].type is FileType.SYMLINK
+    assert found.files["link"].extra[LINK_TARGET_KEY] == "a.txt"
+    assert "link" in found.untracked
+
+
+@pytest.mark.asyncio
+async def test_a_broken_symlink_is_still_found(git_rw):
+    # git lstats, so a link to nothing is an untracked entry like any
+    # other; a dereferencing stat answers None and loses it entirely.
+    await git_rw.execute("ln -s nowhere /repo/broken")
+    found = await walk(git_rw, TRACKED)
+    assert found.files["broken"].type is FileType.SYMLINK
+    assert "broken" in found.untracked
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_to_a_directory_is_not_descended(
+        git_rw, repo_path: Path):
+    (repo_path / "sub").mkdir()
+    (repo_path / "sub" / "in.txt").write_text("x\n", encoding="utf-8")
+    await git_rw.execute("ln -s sub /repo/dirlink")
+    found = await walk(git_rw, TRACKED)
+    assert found.files["dirlink"].type is FileType.SYMLINK
+    assert not any(path.startswith("dirlink/") for path in found.files)

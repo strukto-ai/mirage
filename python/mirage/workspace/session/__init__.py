@@ -13,14 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context import (assert_mount_allowed, get_current_session,
-                            reset_current_session, set_current_session)
+                            get_current_session_for, reset_current_session,
+                            set_current_session)
+from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.manager import SessionManager
+from mirage.workspace.session.profile import SessionProfile
 from mirage.workspace.session.ram import RAMSessionStore
 from mirage.workspace.session.session import Session
+from mirage.workspace.session.state import (ensure_var_visible, env_snapshot,
+                                            session_view, visible_arrays,
+                                            visible_env)
 from mirage.workspace.session.store import SessionFields, SessionStore
 
 __all__ = [
     "RAMSessionStore",
+    "ReadonlyVariableError",
+    "env_snapshot",
+    "ensure_var_visible",
+    "SessionProfile",
+    "session_view",
+    "visible_arrays",
+    "visible_env",
     "RedisSessionStore",
     "S3SessionStore",
     "Session",
@@ -29,6 +42,7 @@ __all__ = [
     "SessionStore",
     "assert_mount_allowed",
     "get_current_session",
+    "get_current_session_for",
     "reset_current_session",
     "set_current_session",
 ]

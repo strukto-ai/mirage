@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import HiddenPaths, HiddenVars, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.session import RAMSessionStore, SessionManager
 
@@ -42,7 +42,8 @@ def test_manager_default_cwd():
 
 def test_manager_default_env():
     mgr = SessionManager("default")
-    assert mgr.env == {}
+    # A fresh session carries the seeded `$PWD` and nothing else.
+    assert mgr.env == {"PWD": "/"}
     mgr.env = {"A": "1"}
     assert mgr.env == {"A": "1"}
     assert mgr.get("default").env == {"A": "1"}
@@ -159,7 +160,7 @@ async def test_manager_hydrates_from_store():
     await mgr.ensure_loaded()
     s = mgr.get("restored")
     assert s.cwd == "/w"
-    assert s.env == {"K": "v"}
+    assert s.env == {"K": "v", "PWD": "/w"}
     assert s.mount_modes == {"/data": MountMode.READ}
 
 
@@ -187,7 +188,36 @@ async def test_manager_default_adopts_stored_fields():
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     assert mgr.cwd == "/w"
-    assert mgr.env == {"A": "1"}
+    assert mgr.env == {"A": "1", "PWD": "/w"}
+
+
+@pytest.mark.asyncio
+async def test_manager_default_adopts_stored_hidden_specs():
+    # A restarted daemon must not wake up unrestricted: the stored
+    # hidden shapes land on the default placeholder with the other
+    # durable fields, or the first command after restart reads what
+    # the spec hides and the next flush erases the restriction.
+    store = RAMSessionStore()
+    await store.set(
+        "default", {
+            "session_id": "default",
+            "cwd": "/w",
+            "env": {},
+            "hidden_paths": {
+                "paths": ["/s3/secrets"],
+                "patterns": ["*.key"],
+            },
+            "hidden_vars": {
+                "names": ["SLACK_TOKEN"],
+                "patterns": [],
+            },
+        })
+    mgr = SessionManager("default", store=store)
+    await mgr.ensure_loaded()
+    default = mgr.get("default")
+    assert default.hidden_paths == HiddenPaths(paths=("/s3/secrets", ),
+                                               patterns=("*.key", ))
+    assert default.hidden_vars == HiddenVars(names=("SLACK_TOKEN", ))
 
 
 @pytest.mark.asyncio

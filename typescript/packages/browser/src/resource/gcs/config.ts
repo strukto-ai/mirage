@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+import {
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
-
-export interface GCSConfig {
-  bucket: string
-  presignedUrlProvider: S3BrowserPresignedUrlProvider
-  region?: string
-  endpoint?: string
-  defaultContentType?: string
-  keyPrefix?: string
-}
-
-export interface GCSConfigRedacted extends Omit<GCSConfig, 'presignedUrlProvider'> {
-  presignedUrlProvider: '<REDACTED>'
-}
 
 const GCSConfigSchema = z.object({
   bucket: z.string(),
@@ -38,6 +31,10 @@ const GCSConfigSchema = z.object({
   defaultContentType: z.string().optional(),
   keyPrefix: z.string().optional(),
 })
+
+export type GCSConfig = ConfigOf<typeof GCSConfigSchema>
+
+export type GCSConfigRedacted = RedactedConfig<GCSConfig, 'presignedUrlProvider'>
 
 export function gcsToS3Config(config: GCSConfig): S3Config {
   return {

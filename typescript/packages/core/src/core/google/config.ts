@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import {
+  type ConfigOf,
+  redactConfigWithSchema,
+  type RedactedConfig,
+  secretStr,
+} from '../../resource/secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
 
 export interface GoogleConfig {
@@ -47,17 +52,6 @@ export interface GoogleConfig {
   today?: string
 }
 
-export interface GoogleConfigRedacted {
-  clientId: string
-  clientSecret?: '<REDACTED>'
-  refreshToken: '<REDACTED>'
-  apiBase?: string
-  folderId?: string
-  timeZone?: string
-  minAccessRole?: string
-  today?: string
-}
-
 export const GoogleConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr().optional(),
@@ -68,6 +62,13 @@ export const GoogleConfigSchema = z.object({
   minAccessRole: z.string().optional(),
   today: z.string().optional(),
 })
+
+// Only the redacted twin derives: the schema deliberately omits `refreshFn`,
+// which no snapshot can carry.
+export type GoogleConfigRedacted = RedactedConfig<
+  ConfigOf<typeof GoogleConfigSchema>,
+  'clientSecret' | 'refreshToken'
+>
 
 export function redactGoogleConfig(config: GoogleConfig): GoogleConfigRedacted {
   return redactConfigWithSchema(GoogleConfigSchema, config) as unknown as GoogleConfigRedacted

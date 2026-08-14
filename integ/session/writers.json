@@ -1,0 +1,194 @@
+{
+  "cases": [
+    {
+      "id": "writers_export_refuses_a_hidden_name",
+      "seq": 922001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "export SLACK_TOKEN=leak",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_assignment_refuses_a_hidden_name",
+      "seq": 922002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "SLACK_TOKEN=leak",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_default_assign_refuses_a_hidden_name",
+      "seq": 922003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "echo \"${SLACK_TOKEN:=leak}\"",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_arith_expansion_refuses_a_hidden_name",
+      "seq": 922004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "echo $((SLACK_TOKEN=1))",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_arith_command_refuses_a_hidden_name",
+      "seq": 922005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "((SLACK_TOKEN=1))",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_printf_v_refuses_a_hidden_name",
+      "seq": 922006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "printf -v SLACK_TOKEN %s leak",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_cfor_header_refuses_a_hidden_name",
+      "seq": 922007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "for ((SLACK_TOKEN=0; SLACK_TOKEN<1; SLACK_TOKEN++)); do :; done",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_a_refused_expansion_write_aborts_the_line",
+      "seq": 922008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "echo \"${SLACK_TOKEN:=leak}\"; echo unreachable",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    },
+    {
+      "id": "writers_a_name_no_rule_covers_still_writes",
+      "seq": 922009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "echo \"${OPEN_A:=x}\" $((OPEN_B=5)); printf -v OPEN_C %s z; for ((OPEN_D=0; OPEN_D<2; OPEN_D++)); do :; done; echo $OPEN_A $OPEN_B $OPEN_C $OPEN_D",
+      "expect": {
+        "exit": 0,
+        "stdout": "x 5\nx 5 z 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "writers_subscripted_printf_refuses_a_hidden_name",
+      "seq": 922010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "printf -v 'SLACK_TOKEN[0]' %s leak",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
+    }
+  ]
+}

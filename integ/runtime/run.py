@@ -358,11 +358,70 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
     if "clis" in world:
         _install_clis(ws, world["clis"])
+    made_dirs: set[str] = set()
     for prefix, name, data in seeds:
+        # A nested seed needs its directory first: write refuses a
+        # missing parent (GNU dest-parent semantics), and the op-level
+        # mkdir creates the whole chain.
+        parent = f"{prefix}/{name.rpartition('/')[0]}"
+        if "/" in name and parent not in made_dirs:
+            await ws.dispatch("mkdir", PathSpec.from_str_path(parent))
+            made_dirs.add(parent)
         await ws.dispatch("write",
                           PathSpec.from_str_path(f"{prefix}/{name}"),
                           data=data)
     return ws
+
+
+def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
+    """Ledger expectations for one step, against the ops it added.
+
+    Args:
+        expect (dict[str, Any]): the step's expect block; ``ops_contain``
+            and ``ops_absent`` hold ``"<op> <path>"`` strings.
+        seen (list[str]): the records the step appended, one
+            ``"<op> <path>"`` string per record, in arrival order.
+    """
+    problems = []
+    for entry in expect.get("ops_contain", []):
+        if entry not in seen:
+            problems.append(f"ledger missing {entry!r}: got {seen!r}")
+    for entry in expect.get("ops_absent", []):
+        if entry in seen:
+            problems.append(f"ledger must not hold {entry!r}: got {seen!r}")
+    return problems
+
+
+async def _run_facade(ws: Workspace, expect: dict[str, Any],
+                      spec: dict[str, Any]) -> list[str]:
+    """One facade step: call a typed Ops convenience and check its value.
+
+    Args:
+        ws (Workspace): the workspace under test.
+        expect (dict[str, Any]): ``value`` (JSON-comparable result) or
+            ``throws_contains``.
+        spec (dict[str, Any]): ``method`` (the python facade spelling,
+            e.g. ``is_dir``), ``path``, and ``data`` for ``append``.
+    """
+    method = getattr(ws.ops, spec["method"])
+    args: list[Any] = [spec["path"]]
+    if "data" in spec:
+        args.append(spec["data"].encode())
+    if "throws_contains" in expect:
+        try:
+            await method(*args)
+        except Exception as exc:
+            if expect["throws_contains"] in str(exc):
+                return []
+            return [
+                f"facade raised {exc!r}, expected "
+                f"{expect['throws_contains']!r} in the message"
+            ]
+        return ["facade: expected an error, none raised"]
+    value = await method(*args)
+    if "value" in expect and value != expect["value"]:
+        return [f"facade value {value!r}, expected {expect['value']!r}"]
+    return []
 
 
 def _check(case_id: str, label: str, expect: dict[str, Any], exit_code: int,
@@ -389,6 +448,14 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
                     step: dict[str, Any]) -> list[str]:
     expect = step.get("expect", {})
     label = f"step[{index}]"
+    # The ledger slice this step adds: ws.ops.records is the one
+    # workspace-wide account, so the step's own ops are the tail.
+    ledger_before = len(ws.ops.records)
+    if "facade" in step:
+        problems = await _run_facade(ws, expect, step["facade"])
+        seen = [f"{r.op} {r.path}" for r in ws.ops.records[ledger_before:]]
+        problems.extend(_check_ops(expect, seen))
+        return [f"{case_id} {label}: {p}" for p in problems]
     if "s3_put" in step:
         put = step["s3_put"]
         _s3_client().put_object(Bucket=BUCKET,
@@ -452,7 +519,11 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
     result = await ws.execute(command, **kwargs)
     stdout = await result.stdout_str()
     stderr = await result.stderr_str()
-    return _check(case_id, label, expect, result.exit_code, stdout, stderr)
+    problems = _check(case_id, label, expect, result.exit_code, stdout, stderr)
+    seen = [f"{r.op} {r.path}" for r in ws.ops.records[ledger_before:]]
+    problems.extend(f"{case_id} {label}: {p}"
+                    for p in _check_ops(expect, seen))
+    return problems
 
 
 async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:

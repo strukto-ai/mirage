@@ -1,14 +1,57 @@
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Protocol
 
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.builtin.utils.operands import (materialized_read,
+                                                    merge_split_errors,
+                                                    normalized_read,
+                                                    split_readable)
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.errors import WALK_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
+
+
+@dataclass(frozen=True, slots=True)
+class ChecksumFlags:
+    check: bool = False
+    binary: bool = False
+    tag: bool = False
+    zero: bool = False
+    strict: bool = False
+    ignore_missing: bool = False
+    status: bool = False
+    quiet: bool = False
+    warn: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
+    """Parse the shared ``*sum`` flag set against one command's spec.
+
+    Args:
+        flags (Mapping[str, FlagValue]): The raw flag bag.
+        name (str): The invoked command (md5sum, sha256sum, ...), whose
+            spec validates the names; all five declare the same set.
+    """
+    fl = FlagView(flags, spec=SPECS[name])
+    return ChecksumFlags(
+        check=fl.as_bool("check"),
+        binary=fl.as_bool("binary"),
+        tag=fl.as_bool("tag"),
+        zero=fl.as_bool("zero"),
+        strict=fl.as_bool("strict"),
+        ignore_missing=fl.as_bool("ignore_missing"),
+        status=fl.as_bool("status"),
+        quiet=fl.as_bool("quiet"),
+        warn=fl.as_bool("warn"),
+    )
 
 
 class Digest(Protocol):
@@ -100,6 +143,26 @@ def _resolve_check_target(filename: str, cwd: str,
 
 def _count_noun(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else f"{count} {plural}"
+
+
+def _check_list_error(algorithm: str, path: PathSpec,
+                      exc: BaseException) -> bytes:
+    """GNU stderr line for a checksum-list operand that cannot be read.
+
+    GNU verifies every ``--check`` operand in turn and keeps going when
+    one cannot be read; a directory operand reports the literal ``read
+    error`` (its ``fopen`` succeeds and the read fails), everything else
+    reports the strerror (pinned on coreutils 9.7).
+
+    Args:
+        algorithm (str): digest name, e.g. ``"sha256"``.
+        path (PathSpec): the list operand as resolved.
+        exc (BaseException): the failure raised by the list read.
+    """
+    label = path.raw_path or path.virtual
+    detail = ("read error" if isinstance(exc, IsADirectoryError) else
+              (fs_strerror(exc) or str(exc)))
+    return f"{algorithm}sum: {label}: {detail}\n".encode()
 
 
 async def _hash_check(
@@ -218,12 +281,29 @@ async def hashsum(
 ) -> tuple[ByteSource | None, IOResult]:
     if check and paths:
         cwd_dir = cwd.virtual if isinstance(cwd, PathSpec) else (cwd or "/")
-        out, stderr, exit_code = await _hash_check(paths[0], read_bytes,
-                                                   read_stream, factory,
-                                                   algorithm, cwd_dir, strict,
-                                                   ignore_missing, status,
-                                                   quiet, warn)
-        return out, IOResult(exit_code=exit_code, stderr=stderr)
+        outs: list[bytes] = []
+        errs: list[bytes] = []
+        exit_code = 0
+        # Every operand is its own checksum list: GNU verifies each in
+        # turn and keeps going when one cannot be read (coreutils 9.7).
+        for p in paths:
+            try:
+                out, stderr, code = await _hash_check(p, read_bytes,
+                                                      read_stream, factory,
+                                                      algorithm, cwd_dir,
+                                                      strict, ignore_missing,
+                                                      status, quiet, warn)
+            except WALK_ERRORS as exc:
+                errs.append(_check_list_error(algorithm, p, exc))
+                exit_code = 1
+                continue
+            outs.append(out)
+            if stderr is not None:
+                errs.append(stderr)
+            if code:
+                exit_code = 1
+        return b"".join(outs), IOResult(exit_code=exit_code,
+                                        stderr=b"".join(errs) or None)
     if paths:
         return _hash_multi(paths, read_stream, factory, algorithm, binary, tag,
                            zero), IOResult(cache=[p.mount_path for p in paths])
@@ -232,4 +312,64 @@ async def hashsum(
                         zero), IOResult()
 
 
-__all__ = ["Digest", "DigestFactory", "hashsum"]
+async def hashsum_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    stat: StatFn,
+    stream: PolymorphicReadFn,
+    *,
+    factory: DigestFactory,
+    algorithm: str,
+    name: str,
+) -> tuple[ByteSource | None, IOResult]:
+    """Run a GNU ``*sum`` over resolved operands; mirrors checksumGeneric.
+
+    The wiring resolves globs and binds one backend reader; everything
+    else lives here: flag parsing, the per-operand report-and-continue
+    split, the ``--check`` verification pass (which resolves recorded
+    names against ``opts.cwd``), and the stdin fallback.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
+        texts (list[str]): Non-path words, unused by checksums.
+        opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
+        stat (StatFn): Bound stat called as ``stat(path)``.
+        stream (PolymorphicReadFn): Bound reader called as
+            ``stream(path)``.
+        factory (DigestFactory): Digest constructor, e.g. hashlib.md5.
+        algorithm (str): Digest name for rendered lines, e.g. ``"md5"``.
+        name (str): The invoked command name, for its spec and stderr.
+    """
+    parsed = parse_flags(opts.flags, name)
+    if parsed.check and paths:
+        return await hashsum(paths,
+                             factory=factory,
+                             algorithm=algorithm,
+                             read_bytes=materialized_read(stream),
+                             read_stream=normalized_read(stream),
+                             stdin=opts.stdin,
+                             check=True,
+                             strict=parsed.strict,
+                             ignore_missing=parsed.ignore_missing,
+                             status=parsed.status,
+                             quiet=parsed.quiet,
+                             warn=parsed.warn,
+                             cwd=opts.cwd)
+    readable, err = await split_readable(paths, stat, name)
+    if err and not readable:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await hashsum(readable,
+                      factory=factory,
+                      algorithm=algorithm,
+                      read_bytes=materialized_read(stream),
+                      read_stream=normalized_read(stream),
+                      stdin=opts.stdin,
+                      binary=parsed.binary,
+                      tag=parsed.tag,
+                      zero=parsed.zero,
+                      cwd=opts.cwd), err)
+
+
+__all__ = ["Digest", "DigestFactory", "hashsum", "hashsum_generic"]

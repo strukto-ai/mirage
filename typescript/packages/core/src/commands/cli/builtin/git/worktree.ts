@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { StatPath } from '../../../../ops/types.ts'
+import type { LinkView, StatPath } from '../../../../ops/types.ts'
 import { FileType, type FileStat } from '../../../../types.ts'
 import type { IgnoreStack } from './ignore.ts'
 import { loadIgnores } from './ignore.ts'
 import { readNames, readOptional, under } from './io.ts'
 import { basename } from './path.ts'
 import type { Dispatch, RepoLocation, WorkTree } from './types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const GIT_DIR = '.git'
 const GITIGNORE = '.gitignore'
@@ -64,6 +65,7 @@ class Scanner {
     private readonly worktree: string,
     private readonly tracked: ReadonlySet<string>,
     private readonly mode: string,
+    private readonly links: LinkView | null,
   ) {
     this.directories = trackedDirectories(tracked)
   }
@@ -71,6 +73,23 @@ class Scanner {
   /** The virtual path a repository-relative path names. */
   private absolute(relative: string): string {
     return relative === '' ? this.worktree : under(this.worktree, relative)
+  }
+
+  /**
+   * What the walk sees at one path, without following a link.
+   *
+   * git lstats the working tree, so a symlink is an entry in its own right:
+   * real git records mode 120000 and the target string, and reports a link to
+   * nothing as untracked rather than as absent. Symlinks are namespace state,
+   * so the backend stat behind `statPath` cannot see one and answers about the
+   * target instead (null when the target is missing). Asking the name plane
+   * first is what makes this an lstat.
+   */
+  private async entryStat(relative: string): Promise<FileStat | null> {
+    const absolute = this.absolute(relative)
+    const link = this.links?.statAt(absolute) ?? null
+    if (link !== null) return link
+    return this.statPath(absolute)
   }
 
   /**
@@ -86,7 +105,7 @@ class Scanner {
       const name = basename(entry)
       if (name === '') continue
       const child = relative === '' ? name : `${relative}/${name}`
-      const info = await this.statPath(this.absolute(child))
+      const info = await this.entryStat(child)
       if (info === null) continue
       const directory = info.type === FileType.DIRECTORY
       if (rules.isIgnored(child, directory)) continue
@@ -140,12 +159,14 @@ class Scanner {
    */
   async walk(relative: string, ignored: boolean, ignores: IgnoreStack): Promise<void> {
     const rules = await this.descend(relative, ignores)
-    const entries = (await readNames(this.dispatch, this.absolute(relative))).sort()
+    const entries = (await readNames(this.dispatch, this.absolute(relative))).sort(
+      compareCodePoints,
+    )
     for (const entry of entries) {
       const name = basename(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue
       const child = relative === '' ? name : `${relative}/${name}`
-      const info = await this.statPath(this.absolute(child))
+      const info = await this.entryStat(child)
       if (info === null) continue
       if (info.type === FileType.DIRECTORY) {
         await this.visitDirectory(child, ignored || rules.isIgnored(child, true), rules)
@@ -171,6 +192,8 @@ class Scanner {
  * @param location the discovered repository
  * @param tracked repository-relative paths the index holds
  * @param mode which untracked files to report
+ * @param links the name plane's link facts, so the walk lstats as git does;
+ *   null outside a workspace, where there is no namespace to hold a link
  */
 export async function scan(
   dispatch: Dispatch,
@@ -178,9 +201,10 @@ export async function scan(
   location: RepoLocation,
   tracked: ReadonlySet<string>,
   mode: string,
+  links: LinkView | null = null,
 ): Promise<WorkTree> {
   const ignores = await loadIgnores(dispatch, location.gitdir, location.worktree)
-  const scanner = new Scanner(dispatch, statPath, location.worktree, tracked, mode)
+  const scanner = new Scanner(dispatch, statPath, location.worktree, tracked, mode, links)
   await scanner.walk('', false, ignores)
   return scanner.found
 }

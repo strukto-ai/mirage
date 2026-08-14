@@ -31,4 +31,9 @@ class PolicyDenied(PermissionError):
     ``<cmd>: <path>: Permission denied`` line. The distinct type lets
     handlers that special-case mount-mode refusals (the read-only
     wording) tell a policy deny apart without guessing from errno.
+
+    It carries no accounting: a post_ops refusal suppresses the result,
+    not the effect, and the door reports the completed op through the
+    caller's ``OpReport``, which covers this error and any foreign one
+    the same way.
     """

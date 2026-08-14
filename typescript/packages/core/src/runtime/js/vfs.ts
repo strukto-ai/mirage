@@ -12,64 +12,41 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NO_WRITE, type RuntimeVFS, type VFSStat } from '../vfs.ts'
+import { classify } from '../../errors/index.ts'
+import { isMissingPath } from '../../utils/errors.ts'
+import { WASI } from './wasi.ts'
+import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
+import { FileHandle, FileTable, parseMode, type OpenMode } from '../handles/index.ts'
+import type { RuntimeVFS, VFSStat } from '../vfs.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// WASI preview1 errnos, the numbers the real qjs-wasi engine reports
-// (python/mirage/runtime/wasm/abi.py is the reference table): guests
-// compare against these, so host errno numbering must not leak.
-const EACCES = 2
-const EEXIST = 20
-const EIO = 29
-const EISDIR = 31
-const ENOENT = 44
-const ENOTDIR = 54
-const ENOTSUP = 58
-
-// stat mode bits (matching qjs-wasi's synthesized st_mode)
-const S_IFDIR = 16384
-const S_IFREG = 32768
-
-// Mirror of the python errno_for table, keyed on the error's `code`.
-const CODE_TO_WASI: Record<string, number> = {
-  ENOENT: ENOENT,
-  EEXIST: EEXIST,
-  EISDIR: EISDIR,
-  ENOTDIR: ENOTDIR,
-  EACCES: EACCES,
-  EPERM: EACCES,
-  ENOTSUP: ENOTSUP,
-}
+// WASI preview1 errnos this shim answers with directly. The numbering
+// lives beside this shim (wasi.ts, the same numbers python's abi.py
+// keeps): guests compare against these, so host errno numbering must
+// not leak.
+const EIO = WASI.EIO
+const ENOENT = WASI.ENOENT
 
 function wasiErrno(err: unknown): number {
-  const code = (err as { code?: string }).code
-  if (code !== undefined && code in CODE_TO_WASI) return CODE_TO_WASI[code] ?? EIO
-  return EIO
-}
-
-interface GuestFile {
-  path: string
-  buf: Uint8Array
-  pos: number
-  dirty: boolean
-  writable: boolean
-  // What close needs to plan the flush: the length this handle opened
-  // over, and the lowest offset it wrote at. An append-mode handle only
-  // ever writes at or past baseLen, so its close ships the tail alone.
-  baseLen: number
-  lowWrite: number
+  // Naming is the shared classifier's; this boundary only renders the
+  // condition in preview1 numbers. EIO is the same everything-else
+  // fallback the python host keeps for an unnamed OSError.
+  const condition = classify(err)
+  return condition !== null ? WASI[condition] : EIO
 }
 
 // The `std.open`/`os.readdir` surface that qjs-wasi exposes natively,
 // synthesized here over the runtime's mount vocabulary so
-// quickjs-emscripten matches it. Whole-file buffering mirrors the Python
-// `WasiFs`: open fetches the bytes (or starts empty), the byte-level
-// calls touch the in-memory buffer, and close hands the buffer to
-// `RuntimeVFS.flush`, which ships a tail when the handle only extended
-// the file. Only open, close, and readdir cross the async boundary, so
+// quickjs-emscripten matches it. Whole-file buffering is the shared
+// `FileHandle` (the same one Python's `WasiFs` rides): open fetches the
+// bytes (or starts empty), the byte-level calls touch the in-memory
+// buffer, and close hands the buffer to `RuntimeVFS.flush`, which ships
+// a tail when the handle only extended the file. Only open, close, and
+// readdir cross the async boundary, so
 // they are asyncified host functions (the guest suspends until the
 // dispatch resolves); the byte-level calls are synchronous.
 //
@@ -78,6 +55,7 @@ interface GuestFile {
 export const MIRAGE_FS_BOOTSTRAP = `
 std.open = (path, mode) => {
   const fd = __mirage_open(String(path), String(mode === undefined ? 'r' : mode));
+  if (fd === -2) throw new TypeError('invalid file mode');
   if (fd < 0) return null;
   return {
     readAsString: (max) => __mirage_read(fd, max === undefined ? -1 : (max | 0)),
@@ -103,23 +81,6 @@ os.S_IFDIR = 16384;
 os.S_IFREG = 32768;
 `
 
-function isWritable(mode: string): boolean {
-  return /[wax+]/.test(mode)
-}
-
-function writeAt(file: GuestFile, bytes: Uint8Array): void {
-  file.lowWrite = Math.min(file.lowWrite, file.pos)
-  const end = file.pos + bytes.length
-  if (end > file.buf.length) {
-    const grown = new Uint8Array(end)
-    grown.set(file.buf)
-    file.buf = grown
-  }
-  file.buf.set(bytes, file.pos)
-  file.pos = end
-  file.dirty = true
-}
-
 /**
  * Install the `std.open`/`os.readdir` host functions on an asyncified
  * quickjs context, backed by the runtime vfs. A null vfs (no
@@ -132,8 +93,7 @@ function writeAt(file: GuestFile, bytes: Uint8Array): void {
  * @param vfs - the runtime's mount vocabulary, or null when no mounts are wired
  */
 export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null): void {
-  const table = new Map<number, GuestFile>()
-  let nextFd = 1
+  const table = new FileTable<FileHandle>()
 
   const mountOf = (path: string): string | null => (vfs === null ? null : vfs.mountOf(path))
 
@@ -156,49 +116,61 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineAsync('__mirage_open', async (pathH, modeH) => {
     const path = ctx.getString(pathH)
-    const mode = ctx.getString(modeH)
+    // The engine validates the mode before touching the filesystem
+    // (qjs-libc throws TypeError before any open); -2 tells the
+    // bootstrap to raise that refusal, since a host throw would not
+    // arrive typed. The shared parser is stricter than qjs-libc's
+    // character scan ('rr' passes strspn but not CPython's one-base
+    // rule); the strict answer is the one both guests can agree on.
+    let mode: OpenMode
+    try {
+      mode = parseMode(ctx.getString(modeH))
+    } catch {
+      return ctx.newNumber(-2)
+    }
     if (vfs === null || !underMount(path)) return ctx.newNumber(-1)
-    const truncate = mode.includes('w')
-    const append = mode.includes('a')
-    const writable = isWritable(mode)
+    let st: VFSStat | null = null
+    try {
+      st = await vfs.stat(path)
+    } catch (err) {
+      // Only a confirmed absence reads as "no file yet" (the python
+      // host's stat_or_none makes the same distinction): a transient
+      // failure or a policy denial on an existing file must refuse the
+      // open, or a create-capable mode would create over content this
+      // open never saw.
+      if (!isMissingPath(err)) return ctx.newNumber(-1)
+    }
+    // The same ladder as the python wasi host's path_open, so the two
+    // engines refuse the same opens: a directory, an exclusive open
+    // over an existing file (EEXIST in the real engine), and a missing
+    // file whose mode does not create.
+    if (st?.isDir === true) return ctx.newNumber(-1)
+    if (st !== null && mode.exclusive) return ctx.newNumber(-1)
+    if (st === null && !mode.create) return ctx.newNumber(-1)
+    // The establishing op goes through the mount at open as the op it
+    // is — create for a missing file, truncate for a discarded one —
+    // so write modes and a read-narrowed session refuse here (the
+    // guest gets null), the ledger records the real op, and a backend
+    // with a native truncate receives it.
     let buf: Uint8Array = new Uint8Array()
-    let existed = false
-    if (!truncate) {
-      try {
+    try {
+      if (st === null) {
+        await vfs.create(path)
+      } else if (mode.truncate) {
+        await vfs.truncate(path)
+      } else {
         buf = await vfs.read(path)
-        existed = true
-      } catch {
-        if (!writable) return ctx.newNumber(-1)
       }
+    } catch {
+      return ctx.newNumber(-1)
     }
-    // Truncate or create writes through the mount at open, mirroring
-    // the Python runtime: this enforces write modes (a read-only mount
-    // or a read-narrowed session throws here, so the guest gets null)
-    // and establishes the file before the buffered writes.
-    if (truncate || (writable && !existed)) {
-      try {
-        await vfs.write(path, buf)
-      } catch {
-        return ctx.newNumber(-1)
-      }
-    }
-    const fd = nextFd++
-    table.set(fd, {
-      path,
-      buf,
-      pos: append ? buf.length : 0,
-      dirty: false,
-      writable,
-      baseLen: buf.length,
-      lowWrite: NO_WRITE,
-    })
+    const fd = table.add(FileHandle.opened(path, buf, mode))
     return ctx.newNumber(fd)
   })
 
   defineAsync('__mirage_close', async (fdH) => {
-    const file = table.get(ctx.getNumber(fdH))
+    const file = table.pop(ctx.getNumber(fdH))
     if (file === undefined) return ctx.undefined
-    table.delete(ctx.getNumber(fdH))
     if (file.dirty && file.writable && vfs !== null) {
       await vfs.flush(file.path, file.baseLen, file.lowWrite, file.buf)
     }
@@ -218,7 +190,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
           const rel = entry.path.replace(/\/$/, '').slice(prefix.length)
           if (rel.length > 0 && !rel.includes('/')) names.push(rel)
         }
-        names.sort()
+        names.sort(compareCodePoints)
       } catch (err) {
         errno = wasiErrno(err)
       }
@@ -241,11 +213,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
   defineSync('__mirage_read', (fdH, maxH) => {
     const file = table.get(ctx.getNumber(fdH))
     if (file === undefined) return ctx.newString('')
-    const max = ctx.getNumber(maxH)
-    const end = max < 0 ? file.buf.length : Math.min(file.buf.length, file.pos + max)
-    const slice = file.buf.subarray(file.pos, end)
-    file.pos = end
-    return ctx.newString(DEC.decode(slice))
+    return ctx.newString(DEC.decode(file.read(ctx.getNumber(maxH))))
   })
 
   defineSync('__mirage_getline', (fdH) => {
@@ -260,7 +228,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineSync('__mirage_write', (fdH, textH) => {
     const file = table.get(ctx.getNumber(fdH))
-    if (file?.writable) writeAt(file, ENC.encode(ctx.getString(textH)))
+    if (file?.writable) file.write(ENC.encode(ctx.getString(textH)))
     return ctx.undefined
   })
 
@@ -281,7 +249,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
 
   defineSync('__mirage_eof', (fdH) => {
     const file = table.get(ctx.getNumber(fdH))
-    const atEof = file === undefined || file.pos >= file.buf.length
+    const atEof = file === undefined || file.eof
     return atEof ? ctx.true : ctx.false
   })
 
@@ -358,7 +326,7 @@ export function installMirageFs(ctx: QuickJSAsyncContext, vfs: RuntimeVFS | null
       }
       setNum('dev', 0)
       setNum('ino', 0)
-      setNum('mode', (st.isDir ? S_IFDIR : S_IFREG) | 0o644)
+      setNum('mode', st.isDir ? DIR_MODE : FILE_MODE)
       setNum('nlink', 1)
       setNum('uid', 0)
       setNum('gid', 0)

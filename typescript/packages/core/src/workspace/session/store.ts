@@ -1,4 +1,5 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,25 +13,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
+
+export { CAS_MAX_RETRIES, generationOf }
+
 // One session's durable fields: the JSON-able `Session.toJSON()` payload
 // (session_id, cwd, env, created_at, mount_modes — snake_case so Python
 // and TypeScript workspaces can share one store). Volatile shell state
 // (functions, arrays, stdin buffers) never persists.
-export type SessionFields = Record<string, unknown>
-
-// Shared cap for every generation-CAS retry loop (session flush,
-// workspace meta): losing this many times in a row on a rarely written
-// record is a bug to surface, not contention to absorb.
-export const CAS_MAX_RETRIES = 3
-
-/**
- * A stored record's CAS generation; a missing record or a legacy
- * record without the field counts as 0.
- */
-export function generationOf(fields: Record<string, unknown> | null | undefined): number {
-  if (fields === null || fields === undefined) return 0
-  return Number(fields.generation ?? 0)
-}
+// A session's stored shape is one keyed record like any other, so the alias
+// and the CAS helpers come from the record tier rather than being restated
+// here. The name stays SessionFields at this seam because that is what a
+// SessionStore stores.
+export type SessionFields = RecordFields
 
 /**
  * Storage seam for durable session state. Abstract base.

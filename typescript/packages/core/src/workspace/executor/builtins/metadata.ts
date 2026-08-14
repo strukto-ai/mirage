@@ -17,11 +17,11 @@ import { PolicyDenied } from '../../../policy/index.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../utils/errors.ts'
-import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseMode } from '../../../utils/mode.ts'
+import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../utils/mode.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import type { DispatchFn } from '../cross_mount.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -187,15 +187,10 @@ export function splitValueFlags(
   return { flags, values, operands, bad: null }
 }
 
-interface ResourceWithGlob {
-  glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
-}
-
-function hasGlob(r: object): r is ResourceWithGlob {
-  return 'glob' in r && typeof (r as { glob?: unknown }).glob === 'function'
-}
-
-// Coerce operands to PathSpec and expand glob patterns per mount.
+// Coerce operands to PathSpec and expand glob patterns per mount. A
+// pattern spec only exists for a mounted word (classification gates
+// it), so the lookup propagates on a miss; a backend with no glob
+// keeps the literal spec.
 async function expandOperands(
   namespace: Namespace,
   operands: readonly (string | PathSpec)[],
@@ -205,7 +200,7 @@ async function expandOperands(
     const spec = item instanceof PathSpec ? item : PathSpec.fromStrPath(item)
     if (spec.pattern !== null) {
       const mount = namespace.mountFor(spec.virtual)
-      if (mount !== null && hasGlob(mount.resource)) {
+      if (mount.resource.glob !== undefined) {
         const prefix = rstripSlash(mount.prefix)
         const withPrefix = new PathSpec({
           virtual: spec.virtual,
@@ -224,9 +219,10 @@ async function expandOperands(
   return out
 }
 
-// Render the mirage read-only refusal for a metadata write.
+// Render the mirage read-only refusal for a metadata write. The path
+// was already routed to a mount, so the lookup cannot miss.
 function readOnlyError(cmd: string, namespace: Namespace, path: PathSpec): string {
-  const prefix = namespace.mountFor(path.virtual)?.prefix ?? '/'
+  const prefix = namespace.mountFor(path.virtual).prefix
   return `${cmd}: read-only mount at ${prefix}\n`
 }
 
@@ -246,38 +242,29 @@ interface SetAttrFields {
   mtime?: string
 }
 
-// Apply attributes natively where the backend can hold them; store the
-// rest in the namespace overlay. A registered setattr op applies what it
-// can and returns the residual (e.g. disk: clamped mode bits, ownership).
-// Residual fields go to the overlay; fields the backend applied natively
-// are dropped from it, so a stale overlay never shadows the fresh backend
-// value. Unlike Python (which asks the mount upfront), ops resolve in the
-// workspace OpsRegistry here, so the probe is the dispatch itself: only
-// the registry's own missing-op error routes everything to the overlay.
+// Route one attribute write through the op door. The door applies what
+// the backend can hold natively and stores the residual in the namespace
+// overlay (dropping overlay fields the backend applied, so a stale
+// overlay never shadows the fresh backend value); a resource with no
+// setattr op overlays everything. Kept as a seam so every metadata
+// builtin shares one call shape.
 async function setattrVia(
-  namespace: Namespace,
   dispatch: DispatchFn,
   path: PathSpec,
   fields: SetAttrFields,
 ): Promise<void> {
-  let effective = fields
-  try {
-    const [result] = await dispatch('setattr', path, [], fields as Record<string, unknown>)
-    const residual = result as Record<string, number | string>
-    const applied = Object.entries(fields)
-      .filter(([key, value]) => value !== undefined && !(key in residual))
-      .map(([key]) => key)
-    if (applied.length > 0) await namespace.dropAttrs(path.virtual, applied)
-    if (Object.keys(residual).length === 0) return
-    effective = residual as SetAttrFields
-  } catch (err) {
-    if (!isMissingOp(err, 'setattr')) throw err
-  }
-  const { mtime, ...rest } = effective
-  await namespace.setAttrs(path.virtual, {
-    ...rest,
-    ...(mtime !== undefined ? { mtime: new Date(mtime).getTime() / 1000 } : {}),
-  })
+  await dispatch('setattr', path, [], fields as Record<string, unknown>)
+}
+
+// Setattr a link node itself (the -h family): dispatched with `nofollow`
+// so the door writes the link entry's own attrs instead of the target's;
+// a link has no backend inode, so the door stores them in the overlay.
+async function setattrLink(
+  dispatch: DispatchFn,
+  path: PathSpec,
+  fields: SetAttrFields,
+): Promise<void> {
+  await dispatch('setattr', path, [], { ...(fields as Record<string, unknown>), nofollow: true })
 }
 
 function joinedError(cmd: string, errors: string[], exitCode: number): Result {
@@ -354,7 +341,7 @@ export async function handleChmod(
   const first = operands[0]
   if (first === undefined) return errorResult('chmod', 'chmod: missing operand\n', 2)
   const modeText = first instanceof PathSpec ? first.virtual : first
-  if (parseMode(modeText, 0) === null) {
+  if (parseChmod(modeText, 0) === null) {
     return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
   }
 
@@ -395,12 +382,12 @@ export async function handleChmod(
       const current =
         pathStat.mode ??
         (pathStat.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
-      const newMode = parseMode(modeText, current)
+      const newMode = parseChmod(modeText, current)
       if (newMode === null) {
         return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
       }
       try {
-        await setattrVia(namespace, dispatch, path, { mode: newMode })
+        await setattrVia(dispatch, path, { mode: newMode })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
         errors.push(readOnlyError('chmod', namespace, path))
@@ -437,7 +424,7 @@ export async function handleChown(
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
     if (noDeref && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, {
+      await setattrLink(dispatch, target, {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
@@ -472,7 +459,7 @@ export async function handleChown(
       : { paths: [resolved], links: [] as string[] }
     for (const path of paths) {
       try {
-        await setattrVia(namespace, dispatch, path, {
+        await setattrVia(dispatch, path, {
           ...(uid !== null ? { uid } : {}),
           ...(gid !== null ? { gid } : {}),
         })
@@ -483,7 +470,7 @@ export async function handleChown(
       }
     }
     for (const link of links) {
-      await namespace.setAttrs(link, {
+      await setattrLink(dispatch, PathSpec.fromStrPath(link), {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
@@ -519,7 +506,7 @@ export async function handleChgrp(
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
     if (noDeref && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, { gid })
+      await setattrLink(dispatch, target, { gid })
       continue
     }
     let virtual: string
@@ -551,7 +538,7 @@ export async function handleChgrp(
       : { paths: [resolved], links: [] as string[] }
     for (const path of paths) {
       try {
-        await setattrVia(namespace, dispatch, path, { gid })
+        await setattrVia(dispatch, path, { gid })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
         errors.push(readOnlyError('chgrp', namespace, path))
@@ -559,7 +546,7 @@ export async function handleChgrp(
       }
     }
     for (const link of links) {
-      await namespace.setAttrs(link, { gid })
+      await setattrLink(dispatch, PathSpec.fromStrPath(link), { gid })
     }
   }
   if (errors.length > 0) return joinedError('chgrp', errors, exitCode)
@@ -618,7 +605,7 @@ export async function handleTouch(
       continue
     }
     if (flags.has('h') && namespace.isLink(target.virtual)) {
-      await namespace.setAttrs(target.virtual, { mtime: new Date(stamp).getTime() / 1000 })
+      await setattrLink(dispatch, target, { mtime: stamp })
       continue
     }
     let virtual: string
@@ -633,6 +620,26 @@ export async function handleTouch(
       throw err
     }
     const resolved = PathSpec.fromStrPath(virtual)
+    // `x/` is `x/.`, so touch never creates through a trailing slash: it
+    // sets times on a directory that has to be there already, and GNU
+    // words that refusal ("setting times of") differently from its
+    // create-path one ("cannot touch").
+    if (target.rawPath.endsWith('/')) {
+      let slashed: FileStat
+      try {
+        ;[slashed] = (await dispatch('stat', resolved)) as [FileStat, unknown]
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(`touch: setting times of '${target.rawPath}': ${String(fsStrerror(err))}\n`)
+        exitCode = 1
+        continue
+      }
+      if (slashed.type !== FileType.DIRECTORY) {
+        errors.push(`touch: setting times of '${target.rawPath}': Not a directory\n`)
+        exitCode = 1
+        continue
+      }
+    }
     try {
       try {
         await dispatch('stat', resolved)
@@ -654,7 +661,7 @@ export async function handleTouch(
       const fields: SetAttrFields = {}
       if (setAtime) fields.atime = stamp
       if (setMtime) fields.mtime = stamp
-      await setattrVia(namespace, dispatch, resolved, fields)
+      await setattrVia(dispatch, resolved, fields)
     } catch (err) {
       if (isReadOnlyError(err)) {
         errors.push(readOnlyError('touch', namespace, resolved))

@@ -1,9 +1,13 @@
 import posixpath
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.context import mount_allowed
 from mirage.io.types import IOResult
 from mirage.ops.types import MountView, ReaddirPath, StatPath
@@ -300,3 +304,40 @@ async def tree(
 
 
 __all__ = ["tree"]
+
+
+@dataclass(frozen=True, slots=True)
+class TreeFlags:
+    max_depth: int | None = None
+    show_hidden: bool = False
+    ignore_pattern: str | None = None
+    dirs_only: bool = False
+    match_pattern: str | None = None
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
+    fl = FlagView(flags, spec=SPECS["tree"])
+    depth_raw = fl.as_str("L")
+    return TreeFlags(
+        max_depth=int(depth_raw) if depth_raw is not None else None,
+        show_hidden=fl.as_bool("a"),
+        ignore_pattern=fl.as_str("args_I"),
+        dirs_only=fl.as_bool("d"),
+        match_pattern=fl.as_str("P"),
+    )
+
+
+async def tree_generic(paths, texts, opts: CommandOpts, readdir, stat):
+    parsed = parse_flags(opts.flags)
+    return await tree(paths[0],
+                      readdir=readdir,
+                      stat=stat,
+                      max_depth=parsed.max_depth,
+                      show_hidden=parsed.show_hidden,
+                      ignore_pattern=parsed.ignore_pattern,
+                      dirs_only=parsed.dirs_only,
+                      match_pattern=parsed.match_pattern,
+                      index=opts.index,
+                      stat_path=opts.stat_path,
+                      readdir_path=opts.readdir_path,
+                      mounts=opts.ns.mounts if opts.ns is not None else None)

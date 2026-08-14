@@ -13,48 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.xxd import xxd as generic_xxd
+from mirage.commands.builtin.generic.xxd import xxd_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def xxd(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    r: bool = False,
-    p: bool = False,
-    args_l: str | bool = False,
-    c: str | bool = False,
-    s: str | bool = False,
-    g: str | bool = False,
-    u: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    skip = int(s) if s and s is not True else 0
-    limit = int(args_l) if args_l and args_l is not True else 0
-    cols = int(c) if c and c is not True else 16
-    group = int(g) if g and g is not True else 2
-    return await generic_xxd(paths,
-                             read_stream=bound_op(ops.read_stream, accessor,
-                                                  index),
-                             stdin=stdin,
-                             reverse=r,
-                             plain=p,
-                             uppercase=u,
-                             cols=cols,
-                             group=group,
-                             skip=skip,
-                             limit=limit)
+async def xxd(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+              texts: list[str],
+              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(ops, accessor, paths, opts.index)
+    return await xxd_generic(resolved, list(texts), opts,
+                             bound_op(ops.read_stream, accessor, opts.index))
 
 
 BUILDER = Builder('xxd', xxd, None, False, None, read=True)

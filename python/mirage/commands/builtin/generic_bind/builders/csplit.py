@@ -15,37 +15,31 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def csplit(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["csplit"])
-    paths = await resolve_or_empty(ops, accessor, paths, index)
+async def csplit(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                 texts: list[str],
+                 opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["csplit"])
+    paths = await resolve_or_empty(ops, accessor, paths, opts.index)
     prefix_flag = fl.raw("prefix")
     prefix = prefix_flag if isinstance(prefix_flag, (str, PathSpec)) else "xx"
     return await generic_csplit(
         paths,
         texts,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
+        read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         write_bytes=partial(ops.require(Operation.WRITE), accessor),
-        stdin=stdin,
+        stdin=opts.stdin,
         prefix=prefix,
         digits=int(fl.as_str("digits") or "2"),
         suffix_format=fl.as_str("suffix_format"),

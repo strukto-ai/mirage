@@ -21,6 +21,7 @@ import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
+import { mkdirLinkRefusal } from '../utils/slash_links.ts'
 
 const resolveGlob = resolveGlobOf(S3_IO)
 
@@ -41,13 +42,30 @@ async function mkdirCommand(
   const parents = fl.asBool('parents')
   const lines: string[] = []
   const writes: Record<string, Uint8Array> = {}
+  const errors: string[] = []
+  const links = opts.ns?.links ?? null
   for (const path of resolved) {
+    // A symlink occupying the name is EEXIST; the shared helper keeps
+    // this identical to the generic builder's answer.
+    const collision = await mkdirLinkRefusal(path, links, { parents })
+    if (collision.taken) {
+      if (collision.message !== null) errors.push(collision.message)
+      continue
+    }
     await s3Mkdir(accessor, path, parents)
     writes[path.mountPath] = new Uint8Array()
     if (verbose) lines.push(`mkdir: created directory '${path.virtual}'`)
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
-  return [output, new IOResult({ writes })]
+  const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
+  return [
+    output,
+    new IOResult({
+      writes,
+      exitCode: errors.length > 0 ? 1 : 0,
+      ...(stderr !== undefined ? { stderr } : {}),
+    }),
+  ]
 }
 
 export const S3_MKDIR = command({

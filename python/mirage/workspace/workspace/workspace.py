@@ -46,9 +46,9 @@ from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session import Session, SessionManager, SessionStore
+from mirage.workspace.session import (Session, SessionManager, SessionProfile,
+                                      SessionStore)
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        build_mount_args, install_fingerprints,
                                        read_tar)
@@ -155,8 +155,10 @@ class Workspace:
         self._namespace = Namespace(self._registry,
                                     store=stores.namespace,
                                     user=agent_id)
-        self._dispatcher = Dispatcher(self._namespace, self._cache,
-                                      consistency)
+        self._dispatcher = Dispatcher(self._namespace,
+                                      self._cache,
+                                      consistency,
+                                      drift=self._drift)
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
 
@@ -168,14 +170,15 @@ class Workspace:
         self._registry.mount(HISTORY_PREFIX,
                              HistoryViewResource(self.observer),
                              MountMode.READ)
+        # The facade delegates every op to the dispatcher, so FUSE and
+        # programmatic ws.ops walk the same pipeline as a shell command
+        # and the policy gates fire exactly once, at that door.
         self._ops = Ops(self._registry.ops_mounts(),
-                        on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
                         agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
-                        stat_overlay=self._merge_overlay,
-                        policies=self._registry.policies)
+                        dispatch=self._dispatcher.dispatch)
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
 
         self._runtimes, self._policy_router = wire_runtime_world(
@@ -602,6 +605,8 @@ class Workspace:
         self,
         session_id: str,
         mounts: Mapping[str, MountMode | str] | Iterable[str] | None = None,
+        *,
+        profile: SessionProfile | None = None,
     ) -> Session:
         """Create a session, optionally restricted to per-mount modes.
 
@@ -614,7 +619,12 @@ class Workspace:
                 prefixes keeps each mount at its own configured mode (the
                 previous allowlist behavior). ``None`` leaves the
                 session unrestricted.
+            profile (SessionProfile | None): a role's narrowing bundle;
+                its fields unpack onto the session, with an explicit
+                ``mounts`` argument overriding the profile's.
         """
+        if profile is not None and mounts is None:
+            mounts = profile.mounts
         modes: dict[str, MountMode] | None = None
         if mounts is not None:
             if isinstance(mounts, str):
@@ -628,7 +638,13 @@ class Workspace:
                 modes = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
             for prefix in infrastructure_prefixes(self._implicit_root):
                 modes.setdefault(prefix, MountMode.EXEC)
-        return self._session_mgr.create(session_id, mount_modes=modes)
+        session = self._session_mgr.create(session_id, mount_modes=modes)
+        if profile is not None:
+            session.hidden_paths = profile.hidden_paths
+            session.hidden_vars = profile.hidden_vars
+            if profile.env:
+                session.env.update(profile.env)
+        return session
 
     def get_session(self, session_id: str) -> Session:
         return self._session_mgr.get(session_id)
@@ -673,23 +689,10 @@ class Workspace:
 
     # ── mount management ────────────────────────────────────────────────────
 
-    def _merge_overlay(self, path: str, stat: FileStat) -> FileStat:
-        """Overlay namespace attrs onto an ops-facade stat.
-
-        Injected into Ops so FUSE and the os patch report chmod/chown/touch
-        results identically to dispatch("stat").
-
-        Args:
-            path (str): virtual path (already link-resolved).
-            stat (FileStat): the backend-reported stat.
-        """
-        return merge_overlay_stat(self._namespace.meta_for(path), stat)
-
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
-        await self._namespace.ensure_loaded()
-        if self._drift.pending:
-            await self._drift.drain(self)
+        # The door owns pre-dispatch initialization (namespace load,
+        # pending drift checks), so FUSE and the ops facade get it too.
         return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def stat(self, path: str) -> FileStat:
@@ -714,13 +717,6 @@ class Workspace:
                        io: IOResult,
                        records: list[OpRecord] | None = None) -> None:
         await self._dispatcher.apply_io(io, records=records)
-
-    async def _invalidate_after_write_by_path(self,
-                                              path: str,
-                                              observed: float | None = None
-                                              ) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(
-            path, observed=observed)
 
     @overload
     async def execute(

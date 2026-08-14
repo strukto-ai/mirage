@@ -58,7 +58,7 @@ export function resourceStorageId(resource: Resource): string {
  */
 export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => string {
   return (path: PathSpec): string => {
-    const entry = registry.mountFor(path.virtual)
+    const entry = registry.tryMountFor(path.virtual)
     if (entry === null) {
       // Outside every mount there is no storage to name, so fall back to
       // the path itself; such an operand fails on its own when the

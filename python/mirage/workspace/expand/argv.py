@@ -20,15 +20,18 @@ from typing import Any
 import tree_sitter
 
 from mirage.commands.spec.types import ValueType
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.types import PathSpec, word_text
+from mirage.utils.glob_walk import literal_word, mark_globs, unmark_globs
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import resolve_globs
-from mirage.workspace.expand.parts import expand_parts
+from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_bases,
                                                 spec_word_kinds)
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.route import (WordPolicy, end_options_after_program,
                                     route, word_policy)
 from mirage.workspace.session import Session
@@ -82,6 +85,8 @@ async def expand_argv(
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
+    namespace: Namespace | None = None,
+    view: SessionView | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -96,14 +101,25 @@ async def expand_argv(
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         registry (MountRegistry): mount registry for classification.
+        namespace (Namespace | None): addressing authority holding the
+            links, so a glob word sees links and nested mount roots the
+            way a listing does.
     """
-    expanded = await expand_parts(parts, session, execute_fn, call_stack)
+    expanded = await expand_words(parts,
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=view)
     if not expanded:
         return Argv(name="", args=(), operands=())
+    # `set -f` turns pathname expansion off, which is the same word for
+    # word as every glob character having been quoted.
+    if session.shell_options.get("noglob"):
+        expanded = [mark_globs(w) for w in expanded]
     # A command name may span several leading words (git-style, e.g.
     # `gws docs documents get`); the registry says how many.
     consumed = registry.match_command_prefix(expanded)
-    name = " ".join(expanded[:consumed])
+    name = unmark_globs(" ".join(expanded[:consumed]))
 
     # Before anything reads the line: an option carrying a program hands
     # the words after it to that program, and POSIX's own `--` is how
@@ -139,27 +155,25 @@ async def expand_argv(
                                 session.cwd,
                                 word_kinds=word_kinds,
                                 word_bases=word_bases)
-    # set -f: glob words become literal paths for every consumer,
-    # including backend pushdown, so `cat *.txt` looks up a file
-    # literally named `*.txt` like bash with noglob.
-    if session.shell_options.get("noglob"):
-        classified = [
-            dataclasses.replace(item, pattern=None) if
-            (isinstance(item, PathSpec) and item.pattern) else item
-            for item in classified
-        ]
     # A glob word is resolved by whoever consumes it, exactly once:
     # WordPolicy.SHELL words get matches here; mount commands keep
     # patterns for backend pushdown; unknown names fail without
     # touching backends.
     if policy is WordPolicy.SHELL:
-        words = await resolve_globs(classified, registry)
+        words = await resolve_globs(classified, registry, links=namespace)
     else:
-        words = classified
+        # A pattern still owes its backend a resolution, so it travels
+        # marked and the marks come off there; every other word is done
+        # with its quoting and reads literally from here on.
+        words = [
+            item if isinstance(item, PathSpec) and item.pattern else
+            literal_word(item) for item in classified
+        ]
     # The text view renders words as typed (raw_path): bash hands
     # programs their words unchanged, so `echo sub/file.txt` prints the
-    # relative form, not the resolved absolute path.
-    text_view = [word_text(p) for p in words]
+    # relative form, not the resolved absolute path. Quote removal is
+    # part of "as typed": a word never reaches a command marked.
+    text_view = [unmark_globs(word_text(p)) for p in words]
     return Argv(name=name,
                 args=tuple(text_view[consumed:]),
                 operands=tuple(words[consumed:]))

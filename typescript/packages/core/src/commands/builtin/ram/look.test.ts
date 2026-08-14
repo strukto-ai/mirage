@@ -40,7 +40,6 @@ async function runLook(
       flags,
       filetypeFns: null,
       cwd: '/',
-      resource,
     },
   )
   if (result === null) return { out: '', exitCode: -1 }

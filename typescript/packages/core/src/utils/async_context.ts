@@ -65,6 +65,18 @@ async function resolveCtor(): Promise<ALSCtor> {
 
 const AsyncStorageCtor: ALSCtor = await resolveCtor()
 
+/**
+ * Whether the resolved storage isolates concurrent tasks.
+ *
+ * `AsyncLocalStorage` gives every task its own store. The fallback is
+ * one global slot restored when `run`'s promise settles, so work
+ * started beside a still-running scope observes that scope's store;
+ * a caller that binds a store for concurrent work has to know which
+ * it got.
+ */
+export const asyncContextIsolatesTasks: boolean =
+  (AsyncStorageCtor as unknown) !== (FallbackStorage as unknown)
+
 export function createAsyncContext<T>(): AsyncStorage<T> {
   return new AsyncStorageCtor<T>()
 }

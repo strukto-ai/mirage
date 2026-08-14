@@ -19,6 +19,7 @@ import {
   type LanceDBConfig,
   type QdrantConfig,
   type Resource,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 
 /**
@@ -303,7 +304,7 @@ const CUSTOM: Record<string, ResourceFactory> = {}
  * has added.
  */
 export function knownResources(): string[] {
-  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort()
+  return [...new Set([...Object.keys(REGISTRY), ...Object.keys(CUSTOM)])].sort(compareCodePoints)
 }
 
 /**

@@ -22,8 +22,8 @@ from mirage.commands.cli.compile import validate_cli
 from mirage.commands.spec.types import (CommandSpec, FlagValue,
                                         ParsedFlagValue, UsageStyle)
 from mirage.io.types import ByteSource
-from mirage.ops.types import MountRoot, StatPath
-from mirage.runtime.types import ScriptSource
+from mirage.ops.types import NamespaceView, SessionView, StatPath
+from mirage.runtime.types import DispatchFn, ScriptSource
 from mirage.types import Limit, PathSpec, ResourceName
 
 # The group-level flag bag the walk accumulates, keyed by canonical
@@ -34,32 +34,51 @@ ConfigT = TypeVar("ConfigT")
 
 
 @dataclass(frozen=True)
-class CLIVerbOpts:
-    """The workspace doors a mount-reading CLI verb needs, as one field.
+class CLIDoors:
+    """One door per state plane, for the CLI verb that needs one.
 
     Most CLIs want none of this: an account CLI reaches a service and
     has no filesystem, while ``git``'s whole subject is a repository
-    that lives on a mount. So this rides ``CLIInvocation.ops`` and is
+    that lives on a mount. So this rides ``CLIInvocation.doors`` and is
     None outside a workspace (a spec exercised directly in a test), and
     a verb that never reads it cannot touch a mount. That is the same
     opt-in the parameter-injection form gave, moved onto the one record
     every leaf already takes: the door is a field read instead of a
     signature the dispatcher inspects.
 
+    The field names and types are ``CommandOpts``' (commands/config.py),
+    deliberately: a fact reached from a CLI leaf and the same fact
+    reached from a command handler must be spelled the same way, or the
+    two tiers grow separate vocabularies for one plane.
+    ``tests/commands/cli/test_doors_parity.py`` pins that.
+
     Args:
-        dispatch (Callable[..., Any] | None): the workspace op
-            dispatcher. Typed loosely on purpose: the DispatchFn
-            Protocol lives in ``workspace.types``, and ``commands``
-            stays free of a workspace import.
+        dispatch (DispatchFn | None): the data plane's door, the
+            workspace op dispatcher. Typed loosely on purpose: the
+            DispatchFn Protocol lives in ``workspace.types``, and
+            ``commands`` stays free of a workspace import.
         stat_path (StatPath | None): dispatcher-backed stat that asks
             both channels a backend can answer on.
-        mount_root (MountRoot | None): the mount prefix serving a path.
-            A mount boundary is a filesystem boundary, which is where
-            git stops looking for a repository.
+        ns (NamespaceView | None): the name plane's door, holding the
+            facts no backend can see: symlinks, mount boundaries, the
+            attr overlay, the child names the namespace owes a
+            directory. A verb that walks a tree itself needs this or it
+            silently cannot see a link, the way ``git status`` could
+            not. ``ns.mounts.root_of`` is where a mount prefix comes
+            from: a mount boundary is a filesystem boundary, which is
+            where git stops looking for a repository.
+        session_view (SessionView | None): the session plane's door,
+            live and gated for both reads and writes. ``inv.env`` stays
+            the frozen process view, which is what a script or native
+            handler maps onto a real process environment; a verb that
+            wants liveness, or wants to write, reads this instead. Env
+            is not a mount, so an account CLI may read it without
+            breaking the tier rule.
     """
-    dispatch: Callable[..., Any] | None = None
+    dispatch: DispatchFn | None = None
     stat_path: StatPath | None = None
-    mount_root: MountRoot | None = None
+    ns: NamespaceView | None = None
+    session_view: SessionView | None = None
 
 
 @dataclass(frozen=True)
@@ -90,10 +109,12 @@ class CLIInvocation(Generic[ConfigT]):
             FlagView. PATH-typed flag values arrive as PathSpec.
         stdin (ByteSource | None): piped input, None when the line has
             none.
-        env (Mapping[str, str]): the session's environment variables.
-        ops (CLIVerbOpts | None): the workspace doors a mount-reading
-            verb needs (``git``), None outside a workspace and for every
-            CLI that reaches a service instead of a filesystem.
+        env (Mapping[str, str]): the session's environment variables,
+            as one frozen process-view snapshot. A leaf that wants the
+            live, gated handle reads ``doors.session_view``.
+        doors (CLIDoors | None): one door per state plane, None outside
+            a workspace and for every CLI that reaches a service
+            instead of a filesystem.
     """
     config: ConfigT
     argv: tuple[str, ...] = ()
@@ -102,7 +123,7 @@ class CLIInvocation(Generic[ConfigT]):
     flags: Mapping[str, FlagValue] = field(default_factory=dict)
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)
-    ops: CLIVerbOpts | None = None
+    doors: CLIDoors | None = None
 
 
 @dataclass(frozen=True)

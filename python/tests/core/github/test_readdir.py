@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import mirage.core.github.tree
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.readdir import readdir
@@ -113,3 +114,52 @@ async def test_readdir_missing_directory(tree):
             PathSpec(resource_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
+
+
+# The index *is* the listing here, seeded once from the recursive tree, so
+# an expired one is a tree that aged out rather than a repository that
+# emptied. Before the refill, `ls /repo` exited 0 with no output once the
+# day-long TTL lapsed, and reported the mount root missing after a `gh`
+# write invalidated it.
+@pytest.mark.asyncio
+async def test_readdir_refills_an_expired_index(tree, monkeypatch):
+    index = _index_from_tree(tree)
+    await index.invalidate()
+    calls = []
+
+    async def fake_fetch_tree(config, owner, repo, ref):
+        calls.append((owner, repo, ref))
+        return tree, False
+
+    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
+    accessor = MagicMock()
+    accessor.truncated = False
+    result = await readdir(
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+        index)
+    assert result == ["/README.md", "/src"]
+    assert len(calls) == 1
+
+
+# A miss against a live index is a real absence, so it must stay one call
+# of nothing: refilling here would spend a full recursive-tree fetch on
+# every ENOENT.
+@pytest.mark.asyncio
+async def test_readdir_does_not_refill_on_a_real_miss(tree, monkeypatch):
+    index = _index_from_tree(tree)
+    calls = []
+
+    async def fake_fetch_tree(config, owner, repo, ref):
+        calls.append((owner, repo, ref))
+        return tree, False
+
+    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
+    accessor = MagicMock()
+    accessor.truncated = False
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            accessor,
+            PathSpec(resource_path="nonexistent",
+                     virtual="/nonexistent",
+                     directory="/nonexistent"), index)
+    assert calls == []

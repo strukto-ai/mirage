@@ -15,7 +15,6 @@
 import asyncio
 import posixpath
 from stat import S_IFMT, S_IFREG, S_IXUSR
-from typing import Any, Callable
 
 from dulwich.diff_tree import _similarity_score
 from dulwich.index import ConflictedIndexEntry, IndexEntry
@@ -26,11 +25,12 @@ from dulwich.refs import Ref
 from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git.index import read_index
-from mirage.commands.cli.builtin.git.io import read_file
+from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.types import (IndexState, RepoLocation,
                                                    StatusEntry, WorkTree)
 from mirage.commands.cli.builtin.git.worktree import scan
-from mirage.ops.types import StatPath
+from mirage.ops.types import LinkView, StatPath
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat
 from mirage.utils.errors import MISS_ERRORS
 
@@ -295,7 +295,7 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
     return bool(entry.mode & S_IXUSR) != bool(info.mode & S_IXUSR)
 
 
-async def _differs(dispatch: Callable[..., Any], worktree: str, path: str,
+async def _differs(dispatch: DispatchFn, worktree: str, path: str,
                    entry: IndexEntry, info: FileStat) -> bool:
     """Whether a working-tree file differs from what the index staged.
 
@@ -316,7 +316,7 @@ async def _differs(dispatch: Callable[..., Any], worktree: str, path: str,
     through to the hash and compares equal there.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         worktree (str): absolute virtual path of the working tree root.
         path (str): repository-relative path.
         entry (IndexEntry): what the index staged for it.
@@ -327,19 +327,20 @@ async def _differs(dispatch: Callable[..., Any], worktree: str, path: str,
     if info.size is not None and entry.size and info.size != entry.size:
         return True
     try:
-        data = await read_file(dispatch, posixpath.join(worktree, path))
+        data = await entry_bytes(dispatch, posixpath.join(worktree, path),
+                                 info)
     except MISS_ERRORS:
         return True
     return Blob.from_string(data).id != entry.sha
 
 
-async def work_changes(dispatch: Callable[..., Any], worktree: str,
+async def work_changes(dispatch: DispatchFn, worktree: str,
                        entries: dict[bytes, IndexEntry],
                        found: WorkTree) -> dict[str, str]:
     """Compare the index with the working tree: what is not staged yet.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         worktree (str): absolute virtual path of the working tree root.
         entries (dict[bytes, IndexEntry]): the index.
         found (WorkTree): what the walk of the working tree found.
@@ -390,13 +391,18 @@ def merge(staged: dict[str, tuple[str, str | None]], unstaged: dict[str, str],
     return rows
 
 
-async def collect(dispatch: Callable[..., Any], stat_path: StatPath,
-                  repo: BaseRepo, location: RepoLocation,
-                  mode: str) -> tuple[list[StatusEntry], IndexState, bool]:
+async def collect(
+    dispatch: DispatchFn,
+    stat_path: StatPath,
+    repo: BaseRepo,
+    location: RepoLocation,
+    mode: str,
+    links: LinkView | None = None
+) -> tuple[list[StatusEntry], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
@@ -410,7 +416,7 @@ async def collect(dispatch: Callable[..., Any], stat_path: StatPath,
         path.decode("utf-8", errors="replace")
         for path in (set(state.entries) | set(state.conflicts))
     }
-    found = await scan(dispatch, stat_path, location, tracked, mode)
+    found = await scan(dispatch, stat_path, location, tracked, mode, links)
     unstaged = await work_changes(dispatch, location.worktree, state.entries,
                                   found)
     rows = merge(staged, unstaged, conflict_codes(state.conflicts),

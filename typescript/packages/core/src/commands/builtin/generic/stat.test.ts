@@ -17,7 +17,14 @@ import { materialize } from '../../../io/types.ts'
 import { OpsRegistry, type RegisteredOp } from '../../../ops/registry.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { type CommandOpts } from '../../config.ts'
-import { FileStat, type FileStatInit, FileType, MountMode, PathSpec } from '../../../types.ts'
+import {
+  FileStat,
+  type FileStatInit,
+  FileType,
+  LINK_TARGET_KEY,
+  MountMode,
+  PathSpec,
+} from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
@@ -65,6 +72,48 @@ async function renderNamed(fmt: string, name: string): Promise<string> {
   if (result === null) throw new Error('statGeneric returned null')
   return DEC.decode(await materialize(result[0]))
 }
+
+function linkFs(target: string): FileStat {
+  return fs({ type: FileType.SYMLINK, extra: { [LINK_TARGET_KEY]: target } })
+}
+
+// Pinned against GNU coreutils 9.7 on debian:stable-slim. Single quotes are
+// the rule; a name whose only awkward character is an apostrophe reads better
+// in double quotes and GNU renders that one case that way, but any other shell
+// character (or an unprintable one) sends it back to single quotes. mirage
+// paths are text rather than bytes, so a non-ASCII name stays literal the way
+// GNU renders it in a UTF-8 locale instead of the octal bytes it emits under
+// LC_ALL=C.
+const GNU_QUOTED: [string, string][] = [
+  ['/data/f.txt', "'/data/f.txt'"],
+  ['a$b', "'a$b'"],
+  ['a"b', "'a\"b'"],
+  ["a'b", '"a\'b"'],
+  ["a'b c", '"a\'b c"'],
+  ["a'b$c", "'a'\\''b$c'"],
+  ["a'b`c", "'a'\\''b`c'"],
+  ["a'b\\c", "'a'\\''b\\c'"],
+  ['a\'b"c', "'a'\\''b\"c'"],
+  ["a'b!c", "'a'\\''b!c'"],
+  // # and ~ count as special only away from the front.
+  ["#a'b", '"#a\'b"'],
+  ["~a'b", '"~a\'b"'],
+  ["a#'b", "'a#'\\''b'"],
+  ["$a'b", "'$a'\\''b'"],
+  ['a\tb', "'a'$'\\t''b'"],
+  ['a\nb', "'a'$'\\n''b'"],
+  ['a\x07b', "'a'$'\\a''b'"],
+  ['a\x01b', "'a'$'\\001''b'"],
+  ['a\x1bb', "'a'$'\\033''b'"],
+  ['a\x7fb', "'a'$'\\177''b'"],
+  // A leading escape keeps the empty quotes; a trailing one does not.
+  ['\ta', "''$'\\t''a'"],
+  ['a\t', "'a'$'\\t'"],
+  ['a\t\nb', "'a'$'\\t\\n''b'"],
+  ["a'b\tc", "'a'\\''b'$'\\t''c'"],
+  ['café', "'café'"],
+  ["a'béc", '"a\'béc"'],
+]
 
 class NoSetattrRegistry extends OpsRegistry {
   override register(ro: RegisteredOp): void {
@@ -125,10 +174,14 @@ describe('stat -c directive formatting', () => {
     expect(await render('%.3F', fs())).toBe('reg')
   })
 
-  it('shell-quotes %N safely', async () => {
-    expect(await render('%N', fs())).toBe("'/data/f.txt'")
-    expect(await renderNamed('%N', "/data/a'b.txt")).toBe('"/data/a\'b.txt"\n')
-    expect(await renderNamed('%N', '/data/a\'b"c')).toBe("'/data/a'\\''b\"c'\n")
+  it.each(GNU_QUOTED)('shell-quotes %N safely: %j', async (name, quoted) => {
+    expect(await renderNamed('%N', name)).toBe(quoted + '\n')
+  })
+
+  it('quotes a link target by the same rule', async () => {
+    expect(await render('%N', linkFs("a'b$c"))).toBe("'/data/f.txt' -> 'a'\\''b$c'")
+    expect(await render('%N', linkFs("a'b"))).toBe("'/data/f.txt' -> \"a'b\"")
+    expect(await render('%N', linkFs('a\tb'))).toBe("'/data/f.txt' -> 'a'$'\\t''b'")
   })
 
   it('renders owner directives, falling back to "user"', async () => {

@@ -15,6 +15,36 @@
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { ExecutionNode } from '../../types.ts'
 import type { FlagValue } from '../../../commands/spec/types.ts'
+import type { PathSpec } from '../../../types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
 export type Flags = Record<string, FlagValue>
+
+/**
+ * One parsed command line, named field for field after Python's
+ * `ParsedCommand` NamedTuple (executor/command/types.py). It replaces
+ * a bare 15-slot positional tuple whose four identical `string[]`
+ * slots could be swapped without a compile error, silently changing
+ * which usage error is reported.
+ */
+export interface ParsedCommand {
+  paths: PathSpec[]
+  texts: string[]
+  flagKwargs: Record<string, FlagValue>
+  warnings: string[]
+  invalidOptions: string[]
+  ambiguousOptions: [string, readonly string[]][]
+  optionErrorKinds: string[]
+  needsValueOptions: string[]
+  invalidValueOptions: [string, string, readonly string[]][]
+  invalidIntOptions: [string, string][]
+  invalidFloatOptions: [string, string][]
+  missingRequiredOptions: string[]
+  oldOptionNeedsValue: string | null
+  // Only a CLI reads these two: the display names of required operand
+  // slots the line left empty, and the dests it actually typed in scan
+  // order. Both feed a usage line rendered in another program's
+  // dialect, which is why they carry names and order at all.
+  missingRequiredOperands: readonly string[]
+  typedDests: readonly string[]
+}

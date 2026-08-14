@@ -21,7 +21,8 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import Job, JobTable
-from mirage.workspace.session import Session
+from mirage.workspace.session import (Session, reset_current_session,
+                                      set_current_session)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -69,38 +70,51 @@ async def handle_background(
         # race conditions when stdin is an async iterator.
         console = job.console
         cmd_str_inner = get_text(left) if hasattr(left, "text") else str(left)
+        # The task's context snapshot still points at the OUTER session
+        # (create_task copies the context before the fork can be bound),
+        # and the fork keeps its parent's id, so without this rebind a
+        # nested eval inside the job resolves the ambient outer session
+        # and escapes the fork.
+        token = set_current_session(bg_session)
         try:
-            # Handing the console down as a sink is what makes compound
-            # bodies stream: each statement writes as it finishes rather
-            # than the whole construct landing at the end. Statements
-            # that emit return no stdout, so the pump below is a no-op
-            # for them and still covers constructs that do not stream.
-            stdout, io, exec_node = await execute_node(left,
-                                                       bg_session,
-                                                       None,
-                                                       call_stack,
-                                                       sink=console)
-        except CommandTimeoutError as exc:
-            msg = (str(exc) + "\n").encode()
-            stdout = b""
-            io = IOResult(exit_code=124, stderr=msg)
-            exec_node = ExecutionNode(command=cmd_str_inner,
-                                      stderr=msg,
-                                      exit_code=124)
-        except ExitSignal as sig:
-            # A background job is its own shell: exit ends the job only.
-            stdout = sig.stdout or b""
-            io = IOResult(exit_code=sig.contained_code,
-                          stderr=sig.stderr or None)
-            exec_node = ExecutionNode(command=cmd_str_inner,
-                                      stderr=sig.stderr,
-                                      exit_code=sig.contained_code)
-        await pump(console, Channel.STDOUT, stdout)
-        stderr = await io.materialize_stderr()
-        if stderr:
-            await console.emit(Channel.STDERR, stderr)
-        io.sync_exit_code()
-        return io, exec_node
+            try:
+                # Handing the console down as a sink is what makes
+                # compound bodies stream: each statement writes as it
+                # finishes rather than the whole construct landing at
+                # the end. Statements that emit return no stdout, so the
+                # pump below is a no-op for them and still covers
+                # constructs that do not stream.
+                stdout, io, exec_node = await execute_node(left,
+                                                           bg_session,
+                                                           None,
+                                                           call_stack,
+                                                           sink=console)
+            except CommandTimeoutError as exc:
+                msg = (str(exc) + "\n").encode()
+                stdout = b""
+                io = IOResult(exit_code=124, stderr=msg)
+                exec_node = ExecutionNode(command=cmd_str_inner,
+                                          stderr=msg,
+                                          exit_code=124)
+            except ExitSignal as sig:
+                # A background job is its own shell: exit ends the job
+                # only.
+                stdout = sig.stdout or b""
+                io = IOResult(exit_code=sig.contained_code,
+                              stderr=sig.stderr or None)
+                exec_node = ExecutionNode(command=cmd_str_inner,
+                                          stderr=sig.stderr,
+                                          exit_code=sig.contained_code)
+            # Drain inside the rebind: pumping the stream can still run
+            # ops that read the ambient session.
+            await pump(console, Channel.STDOUT, stdout)
+            stderr = await io.materialize_stderr()
+            if stderr:
+                await console.emit(Channel.STDERR, stderr)
+            io.sync_exit_code()
+            return io, exec_node
+        finally:
+            reset_current_session(token)
 
     cmd_str = get_text(left) if hasattr(left, 'text') else str(left)
 

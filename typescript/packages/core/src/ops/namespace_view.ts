@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountAllowed } from '../context/session_context.ts'
+import { mountAllowed, pathAllowed } from '../context/session_context.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType } from '../types.ts'
 import type { NamespaceLinks } from './config.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 /**
  * Immediate child segments of mounts strictly under `parent`.
@@ -26,17 +27,17 @@ import type { NamespaceLinks } from './config.ts'
  * names (leading dot) are included; presentation filtering is the
  * consumer's job, exactly as for backend entries.
  */
-function childMountNames(prefixes: readonly string[], parent: string): string[] {
+export function childMountNames(prefixes: readonly string[], parent: string): string[] {
   const norm = normDir(parent)
   const out = new Set<string>()
   for (const prefix of prefixes) {
     const p = normDir(prefix)
     if (p === norm || !p.startsWith(norm)) continue
     const name = p.slice(norm.length).split('/', 1)[0] ?? ''
-    if (name === '' || !mountAllowed(p)) continue
+    if (name === '' || !mountAllowed(p) || !pathAllowed(norm + name)) continue
     out.add(name)
   }
-  return [...out].sort()
+  return [...out].sort(compareCodePoints)
 }
 
 /**
@@ -76,9 +77,9 @@ function linkNames(
   for (const link of links.symlinkTargets().keys()) {
     if (!link.startsWith(norm)) continue
     const name = link.slice(norm.length).split('/', 1)[0] ?? ''
-    if (name !== '' && linkAllowed(prefixes, link)) out.add(name)
+    if (name !== '' && linkAllowed(prefixes, link) && pathAllowed(norm + name)) out.add(name)
   }
-  return [...out].sort()
+  return [...out].sort(compareCodePoints)
 }
 
 /**
@@ -96,7 +97,7 @@ export function namespaceNames(
 ): string[] {
   return [
     ...new Set([...childMountNames(prefixes, parent), ...linkNames(prefixes, links, parent)]),
-  ].sort()
+  ].sort(compareCodePoints)
 }
 
 /**

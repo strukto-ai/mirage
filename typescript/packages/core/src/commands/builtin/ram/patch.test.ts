@@ -32,7 +32,6 @@ async function runPatch(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
 }
 

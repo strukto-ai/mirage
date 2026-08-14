@@ -18,6 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { listAllDocuments } from './_client.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 interface CollectedFiles {
   files: Map<string, Record<string, unknown>>
@@ -42,9 +43,9 @@ export async function ensureTree(
 
   const documents = await listAllDocuments(accessor)
   const dirEntries = buildDirEntries(documents, prefix, accessor.config.slugMetadataName)
-  for (const directory of [...dirEntries.keys()].sort()) {
+  for (const directory of [...dirEntries.keys()].sort(compareCodePoints)) {
     const entries = dirEntries.get(directory) ?? []
-    const sorted = [...entries].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    const sorted = [...entries].sort((a, b) => compareCodePoints(a[0], b[0]))
     await index.setDir(directory, sorted)
   }
 }
@@ -62,7 +63,7 @@ export function buildDirEntries(
     dirEntries.set(virtualPath(directory, prefix), [])
   }
 
-  for (const directory of [...directories].sort()) {
+  for (const directory of [...directories].sort(compareCodePoints)) {
     if (directory === '/') continue
     const entry = new IndexEntry({
       id: stripSlash(directory),
@@ -72,7 +73,7 @@ export function buildDirEntries(
     dirEntries.get(virtualPath(parent(directory), prefix))?.push([entry.name, entry])
   }
 
-  for (const path of [...files.keys()].sort()) {
+  for (const path of [...files.keys()].sort(compareCodePoints)) {
     const document = files.get(path) ?? {}
     const entry = new IndexEntry({
       id: scalarString(document.id) ?? '',
@@ -176,7 +177,7 @@ function skipPathCollisions(
 ): Map<string, Record<string, unknown>> {
   const safe = new Map(files)
   const paths = new Set(files.keys())
-  for (const path of [...paths].sort()) {
+  for (const path of [...paths].sort(compareCodePoints)) {
     const parts = stripSlash(path).split('/')
     for (let i = 1; i < parts.length; i++) {
       const ancestor = '/' + parts.slice(0, i).join('/')

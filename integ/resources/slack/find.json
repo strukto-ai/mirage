@@ -9,7 +9,7 @@
       "command": "find /slack/channels/eng-agents__C8/2026-02-06/",
       "expect": {
         "exit": 0,
-        "stdout": "/slack/channels/eng-agents__C8/2026-02-06\n/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
+        "stdout": "/slack/channels/eng-agents__C8/2026-02-06/\n/slack/channels/eng-agents__C8/2026-02-06/chat.jsonl\n/slack/channels/eng-agents__C8/2026-02-06/files\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
         "stderr": ""
       }
     },

@@ -19,6 +19,7 @@ import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../rout
 import { z } from 'zod'
 
 import type { CLIInstall } from './types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 /**
  * Installed CLIs, keyed by head word.
@@ -125,7 +126,9 @@ export class CLIRegistry {
       if (model.def.catchall === undefined) {
         const unknown = [...taken].filter((k) => !Object.hasOwn(model.shape, k))
         if (unknown.length > 0) {
-          throw new Error(`CLI '${name}': unknown config keys: ${unknown.sort().join(', ')}`)
+          throw new Error(
+            `CLI '${name}': unknown config keys: ${unknown.sort(compareCodePoints).join(', ')}`,
+          )
         }
       }
       return model.parse(norm)

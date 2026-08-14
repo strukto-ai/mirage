@@ -12,7 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lstripSlash, stripSlash, type WorkspaceStateDict } from '@struktoai/mirage-core'
+import {
+  compareCodePoints,
+  lstripSlash,
+  stripSlash,
+  type WorkspaceStateDict,
+} from '@struktoai/mirage-core'
 
 export type { WorkspaceStateDict }
 
@@ -108,7 +113,7 @@ function historyEntries(events: unknown[]): Record<string, Uint8Array> {
 
 function historyFromEntries(entries: Record<string, Uint8Array>): unknown[] {
   const events: unknown[] = []
-  for (const treePath of Object.keys(entries).sort()) {
+  for (const treePath of Object.keys(entries).sort(compareCodePoints)) {
     if (!treePath.startsWith(HISTORY_PREFIX)) continue
     const data = entries[treePath]
     if (data === undefined) continue

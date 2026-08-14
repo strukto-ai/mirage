@@ -18,11 +18,11 @@ import pytest
 from dulwich.objects import Blob
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.add import (EXECUTABLE, REGULAR,
+from mirage.commands.cli.builtin.git.add import (EXECUTABLE, REGULAR, SYMLINK,
                                                  entry_mode, keep_addable,
                                                  staged_entry)
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack
-from mirage.types import FileStat, FileType
+from mirage.types import LINK_TARGET_KEY, FileStat, FileType
 
 
 def stat(mode: int | None) -> FileStat:
@@ -254,3 +254,56 @@ async def test_an_unknown_switch_is_refused_before_anything_is_read(git_rw):
     code, _out, err = await run(git_rw, "add -Z")
     assert code == 129
     assert err == b"error: unknown switch `Z'\n"
+
+
+def link_stat(target: str) -> FileStat:
+    """What the name plane reports about a symlink.
+
+    Args:
+        target (str): the link's target, verbatim as it was typed.
+    """
+    return FileStat(name="link",
+                    path="link",
+                    type=FileType.SYMLINK,
+                    size=len(target),
+                    extra={LINK_TARGET_KEY: target})
+
+
+def test_a_symlink_stages_as_120000():
+    assert entry_mode(link_stat("a.txt")) == SYMLINK
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_stages_its_target_not_the_target_content(
+        git_rw, repo_path: Path):
+    # Pinned against git 2.50: the blob is the target string and the
+    # mode is 120000. Reading through the link would store `one\n` under
+    # mode 100644, which is a second copy of a.txt, not a link.
+    await git_rw.execute("ln -s a.txt /repo/link")
+    assert (await run(git_rw, "add link"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        entry = repo.open_index()[b"link"]
+        assert entry.mode == SYMLINK
+        assert repo.object_store[entry.sha].data == b"a.txt"
+
+
+@pytest.mark.asyncio
+async def test_a_broken_symlink_stages_its_target(git_rw, repo_path: Path):
+    # git stores the target string whether or not anything is there, so
+    # a link to nothing stages exactly like a live one.
+    await git_rw.execute("ln -s nowhere /repo/broken")
+    assert (await run(git_rw, "add broken"))[0] == 0
+    with Repo(str(repo_path)) as repo:
+        entry = repo.open_index()[b"broken"]
+        assert entry.mode == SYMLINK
+        assert repo.object_store[entry.sha].data == b"nowhere"
+
+
+@pytest.mark.asyncio
+async def test_a_staged_symlink_is_not_reported_modified(git_rw):
+    # The staged blob is the target string; comparing it against the
+    # bytes behind the link would call every symlink modified.
+    await git_rw.execute("ln -s a.txt /repo/link")
+    assert (await run(git_rw, "add link"))[0] == 0
+    _code, out, _err = await run(git_rw, "status --porcelain")
+    assert out == b"A  link\n"

@@ -80,3 +80,4 @@ class SearchTarget:
 @dataclass(frozen=True, slots=True)
 class CompiledPredicate:
     condition: XmlElement | None
+    negatable: bool = False

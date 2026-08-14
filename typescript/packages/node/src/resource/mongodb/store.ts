@@ -20,6 +20,7 @@ import {
   type MongoFindOptions,
   type MongoIndexAccess,
   type MongoIterOptions,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { VERSION } from '../../version.ts'
 
@@ -93,7 +94,7 @@ export class MongoDBStore implements MongoDriver {
     const c = await this._client()
     const filter = kind === null ? undefined : { type: kind }
     const cols = await c.db(database).listCollections(filter).toArray()
-    return cols.map((col) => col.name as string).sort()
+    return cols.map((col) => col.name as string).sort(compareCodePoints)
   }
 
   async listCollectionsDetailed(

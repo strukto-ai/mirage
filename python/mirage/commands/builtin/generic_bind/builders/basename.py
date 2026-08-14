@@ -16,21 +16,17 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.basename import \
     basename as generic_basename
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def basename(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec] | None = None,
-    *texts: str,
-    stdin: bytes | None = None,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["basename"])
+async def basename(ops: CommandIO, accessor: Accessor,
+                   paths: list[PathSpec] | None, texts: list[str],
+                   opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["basename"])
     suffix = fl.as_str("suffix")
     return await generic_basename(
         *texts,

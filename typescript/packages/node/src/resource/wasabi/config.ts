@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+import {
+  normalizeFields,
+  redactConfigWithSchema,
+  type ConfigOf,
+  type RedactedConfig,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface WasabiConfig {
@@ -23,20 +30,6 @@ export interface WasabiConfig {
   profile?: string
   region?: string
   endpoint?: string
-  forcePathStyle?: boolean
-  keyPrefix?: string
-  timeoutMs?: number
-  proxy?: string
-}
-
-export interface WasabiConfigRedacted {
-  bucket: string
-  accessKeyId?: string
-  secretAccessKey?: string
-  sessionToken?: string
-  profile?: string
-  region: string
-  endpoint: string
   forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
@@ -56,6 +49,13 @@ const WasabiConfigSchema = z.object({
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
+
+// Only the redacted twin derives: the schema is the resolved shape, with
+// the region and endpoint the redactor fills in.
+export type WasabiConfigRedacted = RedactedConfig<
+  ConfigOf<typeof WasabiConfigSchema>,
+  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
+>
 
 export function resolvedWasabiEndpoint(config: WasabiConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint

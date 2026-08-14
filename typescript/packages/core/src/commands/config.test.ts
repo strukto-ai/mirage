@@ -89,7 +89,6 @@ describe('command()', () => {
       flags: { help: true },
       filetypeFns: null,
       cwd: '/',
-      resource: {} as never,
     })
     if (result === null) throw new Error('expected result')
     expect(new TextDecoder().decode(result[0] as Uint8Array)).toContain('Services:\n  drive\n')

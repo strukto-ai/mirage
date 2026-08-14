@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -51,6 +52,7 @@ async function quotedStringPattern(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<string> {
   const parts: string[] = []
   let prevEndRow: number | null = null
@@ -60,7 +62,7 @@ async function quotedStringPattern(
     }
     prevEndRow = child.endPosition?.row ?? 0
     if (child.type === NT.DQUOTE) continue
-    parts.push(escapeGlob(await expandNode(child, session, executeFn, callStack)))
+    parts.push(escapeGlob(await expandNode(child, session, executeFn, callStack, view)))
   }
   return parts.join('')
 }
@@ -80,6 +82,7 @@ export async function expandPattern(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
+  view?: SessionView,
 ): Promise<string> {
   const ntype = tsNode.type
   if (ntype === NT.WORD || ntype === NT.EXTGLOB_PATTERN) {
@@ -89,11 +92,11 @@ export async function expandPattern(
   }
   if (ntype === NT.RAW_STRING) return escapeGlob(tsNode.text.slice(1, -1))
   if (ntype === NT.ANSI_C_STRING) return escapeGlob(decodeAnsiC(tsNode.text.slice(2, -1)))
-  if (ntype === NT.STRING) return quotedStringPattern(tsNode, session, executeFn, callStack)
+  if (ntype === NT.STRING) return quotedStringPattern(tsNode, session, executeFn, callStack, view)
   if (ntype === NT.TRANSLATED_STRING) {
     for (const child of tsNode.namedChildren) {
       if (child.type === NT.STRING) {
-        return quotedStringPattern(child, session, executeFn, callStack)
+        return quotedStringPattern(child, session, executeFn, callStack, view)
       }
     }
     return ''
@@ -108,9 +111,9 @@ export async function expandPattern(
       // followed by the string node; the `$` is the translation marker,
       // not text (same rule as expandNode).
       if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
-      parts.push(await expandPattern(child, session, executeFn, callStack))
+      parts.push(await expandPattern(child, session, executeFn, callStack, view))
     }
     return parts.join('')
   }
-  return expandNode(tsNode, session, executeFn, callStack)
+  return expandNode(tsNode, session, executeFn, callStack, view)
 }

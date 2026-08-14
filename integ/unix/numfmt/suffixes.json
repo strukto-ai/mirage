@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_to_none_prints_every_digit",
+      "seq": 960020,
+      "note": "GNU 9.7 renders --to=none in fixed notation; this used to print 1e+24 in TypeScript.",
+      "targets": ["ram", "disk"],
+      "command": "numfmt --from=si 1Y",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000000000000000000000000\n",
+        "stderr": ""
+      },
+      "flags": ["from"]
+    },
+    {
+      "id": "numfmt_to_none_keeps_input_precision",
+      "seq": 960021,
+      "note": "GNU 9.7 echoes an unscaled value at the precision it was typed with.",
+      "targets": ["ram", "disk"],
+      "command": "numfmt 1.000",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "numfmt_iec_refuses_a_byte_suffix",
+      "seq": 960022,
+      "note": "GNU 9.7 takes one unit letter and nothing after it, so 1KiB is not a kilobyte; both languages used to accept it.",
+      "targets": ["ram", "disk"],
+      "command": "numfmt --from=iec 1KiB",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "numfmt: invalid suffix in input '1KiB': 'iB'\n"
+      },
+      "flags": ["from"]
+    },
+    {
+      "id": "numfmt_iec_i_demands_its_i",
+      "seq": 960023,
+      "note": "GNU 9.7 requires the trailing i under --from=iec-i.",
+      "targets": ["ram", "disk"],
+      "command": "numfmt --from=iec-i 1K",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "numfmt: missing 'i' suffix in input: '1K' (e.g Ki/Mi/Gi)\n"
+      },
+      "flags": ["from"]
+    },
+    {
+      "id": "numfmt_no_from_points_at_from",
+      "seq": 960024,
+      "note": "GNU 9.7 names --from when the suffix is a real unit but no scaling was requested.",
+      "targets": ["ram", "disk"],
+      "command": "numfmt 1K",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "numfmt: rejecting suffix in input: '1K' (consider using --from)\n"
+      }
+    }
+  ]
+}

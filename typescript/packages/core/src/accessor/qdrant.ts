@@ -24,6 +24,7 @@ import {
   type QdrantRow,
 } from '../core/qdrant/_client.ts'
 import type { QdrantConfigResolved } from '../resource/qdrant/config.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 type QdrantClientCtor = new (opts: {
   url?: string
@@ -122,7 +123,7 @@ export class QdrantAccessor extends Accessor {
   async listTables(): Promise<string[]> {
     const client = await this.getClient()
     const res = (await client.getCollections()) as { collections: { name: string }[] }
-    return res.collections.map((c) => c.name).sort()
+    return res.collections.map((c) => c.name).sort(compareCodePoints)
   }
 
   async tableExists(name: string): Promise<boolean> {
@@ -144,7 +145,7 @@ export class QdrantAccessor extends Accessor {
       if (value !== null && value !== undefined)
         values.add(String(value as string | number | boolean))
     }
-    return [...values].sort()
+    return [...values].sort(compareCodePoints)
   }
 
   async rowsMatching(

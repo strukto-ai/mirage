@@ -97,7 +97,7 @@ export async function handleHistory(
 ): Promise<Result> {
   const { flags, texts, error } = parseArgs(args)
   if (error !== null) return usageError(error)
-  const mount = registry.mountFor(HISTORY_PREFIX)
+  const mount = registry.tryMountFor(HISTORY_PREFIX)
   if (mount === null) {
     const err = ENC.encode('history: not enabled for this workspace\n')
     return [

@@ -140,6 +140,17 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     if (t !== undefined) pos += 1
     return t
   }
+  // Refuse an operator the line left without a right-hand side. GNU words
+  // the empty slot two ways and both name the operator, which is why this
+  // runs where the operator was just consumed rather than in primary(): by
+  // the time the recursion reaches a primary the token that needed an
+  // operand is gone.
+  const afterOperator = (op: string): void => {
+    const tok = peek()
+    if (tok === undefined) throw new FindParseError(`find: expected an expression after '${op}'`)
+    if (tok === ')')
+      throw new FindParseError(`find: expected an expression between '${op}' and ')'`)
+  }
 
   function primary(): PredNode {
     const tok = advance()
@@ -193,6 +204,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       const tok = peek()
       if (tok === '-not' || tok === '!') {
         advance()
+        afterOperator(tok)
         return { op: 'not', kid: factor() }
       }
       if (tok === '(') {
@@ -214,6 +226,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       const tok = peek()
       if (tok === '-a' || tok === '-and') {
         advance()
+        afterOperator(tok)
         factors.push(factor())
         continue
       }
@@ -227,8 +240,11 @@ export function parseFindExpression(tokens: string[]): FindExpr {
 
   function orExpr(): PredNode {
     const terms = [andExpr()]
-    while (peek() === '-o' || peek() === '-or') {
+    for (;;) {
+      const tok = peek()
+      if (tok !== '-o' && tok !== '-or') break
       advance()
+      afterOperator(tok)
       terms.push(andExpr())
     }
     const [firstTerm, ...restTerms] = terms

@@ -19,10 +19,12 @@ import {
   buildRuntime,
   candidates,
   DEFAULT_ENTRIES,
+  DEFAULT_PYTHON,
   runtimeBindingsFor,
   VFSRuntime,
 } from './table.ts'
 import { MontyRuntime } from './python/monty/index.ts'
+import { PythonRuntime } from './python/base.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import { QuickJsRuntime } from './js/quickjs.ts'
 
@@ -52,6 +54,14 @@ describe('runtime table', () => {
 
   it('default entries end with the vfs runtime', () => {
     expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
+  })
+
+  it('the default python engine is pyodide and leads the default world', () => {
+    // The one entry Python disagrees on, so it is named rather than
+    // left to a slot: Python registers monty.
+    expect(DEFAULT_PYTHON).toBe('pyodide')
+    expect(DEFAULT_ENTRIES[0]).toBe(DEFAULT_PYTHON)
+    expect(buildRuntime(DEFAULT_PYTHON)).toBeInstanceOf(PythonRuntime)
   })
 
   it('buildRuntime fails loud on unknown names', () => {

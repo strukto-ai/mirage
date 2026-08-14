@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ShellArray } from '../shell/array.ts'
 import type { FileStat } from '../types.ts'
 
 export type StatOverlay = (path: string, stat: FileStat) => FileStat
@@ -67,6 +68,35 @@ export interface MountView {
   rootOf(path: string): string
 }
 
+// The session-plane facts a command may consult, as one injected object.
+//
+// The `LinkView` pattern on the session plane: every method answers
+// through the plane's own writers (`workspace/session/state.ts`), so
+// reads arrive exactly as the shell sees them and writes clear readonly
+// plus the `preSession` policy gate. The plain `env` opts field every
+// command already receives stays the frozen process-view snapshot; this
+// view is the live, gated handle for the command that needs one, and it
+// is the whole capability: no member reaches the raw session behind it.
+// Reads are sync ($X expansion grade); writes are async because they
+// clear the gate.
+export interface SessionView {
+  // One variable's value, null when unset.
+  get(name: string): string | null
+  // A process-view copy of the whole environment.
+  snapshot(): Record<string, string>
+  // Write one variable through the session plane (readonly + preSession).
+  // General over variable shapes: a string stores a scalar, a ShellArray
+  // stores a whole array, and the door keeps the two storages exclusive.
+  // Writers with richer mechanics (subscripts, appends, holes) compute
+  // the resulting value on a copy and hand it here, so a denial never
+  // leaves a half-applied write.
+  set(name: string, value: string | ShellArray): Promise<void>
+  // Drop one variable through the session plane; a missing name is quiet.
+  unset(name: string): Promise<void>
+  // Whether `readonly` has marked the name.
+  isReadonly(name: string): boolean
+}
+
 // The symlink facts a command may consult, as one injected object.
 //
 // Symlinks live in the workspace namespace and no backend can see them,
@@ -93,4 +123,27 @@ export interface LinkView {
   // link's), null when it dangles or loops. Resolved through the
   // workspace too, for the same reason.
   targetStat(path: string): Promise<FileStat | null>
+}
+
+// The name plane's facts a command may consult, as one injected object.
+//
+// Everything here answers from the workspace's addressing authority (the
+// namespace node table plus the mount table), which no backend can see:
+// symlinks, mount boundaries, the chmod/chown/touch attr overlay, and the
+// child names the namespace owes a directory. One view per plane means a
+// command that grows a new name-plane need reads another field instead of
+// threading a new keyword through `executeCmd` and every builder. A
+// command opts in by reading `ns` off its opts; fields are absent when
+// the plane has nothing to offer (no links, no overlay) or outside a
+// workspace.
+export interface NamespaceView {
+  // The symlink facts; absent when the namespace holds no links, which
+  // is the fast path a walker checks before merging.
+  links?: LinkView
+  // Where the mount boundaries are (tar, zip, du).
+  mounts?: MountView
+  // The namespace attr merge for stat-rendering commands (ls).
+  statOverlay?: StatOverlay
+  // Child names the namespace owes a directory (mounts and links).
+  childMounts?: ChildMounts
 }

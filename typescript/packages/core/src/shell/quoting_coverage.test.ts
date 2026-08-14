@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // Direct port of tests/shell/test_quoting_coverage.py.
@@ -232,7 +232,6 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
     it('grep pattern with escaped embedded quote', async () => {
       const ws = await makeQuotingWs()
       const mount2 = ws.mount('/data/')
-      if (mount2 === null) throw new Error('/data/ mount missing')
       const ws2Ram = mount2.resource as RAMResource
       ws2Ram.store.files.set('/quote.txt', ENC.encode('she said "hi"\n'))
       const r = await run(ws, 'grep "she said \\"hi\\"" /data/quote.txt')
@@ -620,6 +619,158 @@ describe('an empty splat element is still a word', () => {
     const ws = await makeQuotingWs()
     const r = await run(ws, line)
     expect(r.out).toBe(expected)
+    await ws.close()
+  })
+})
+
+// ── quoted globs stay literal ──────────────────────────────
+
+async function makeGlobbableWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ram = new RAMResource()
+  ram.store.files.set('/a.txt', ENC.encode('hello\n'))
+  ram.store.files.set('/b.txt', ENC.encode('world\n'))
+
+  const registry = new OpsRegistry()
+  registry.registerResource(ram)
+
+  const ws = new Workspace(
+    { '/data': ram },
+    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+  )
+  ws.getSession(ws.defaultSessionId).cwd = '/'
+  return ws
+}
+
+describe('quoted globs stay literal', () => {
+  it.each([
+    ["chmod 644 '/data/*.txt'"],
+    ['chmod 644 "/data/*.txt"'],
+    ['chmod 644 /data/\\*.txt'],
+    ['p=\'/data/*.txt\'; chmod 644 "$p"'],
+  ])('%s addresses the literal name', async (line) => {
+    const ws = await makeGlobbableWs()
+    const io = await ws.execute(line)
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toBe("chmod: cannot access '/data/*.txt': No such file or directory\n")
+    await ws.close()
+  })
+
+  it('touch creates the literal name', async () => {
+    const ws = await makeGlobbableWs()
+    const io = await ws.execute("touch '/data/*.txt' && ls /data")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('*.txt\na.txt\nb.txt\n')
+    await ws.close()
+  })
+
+  it('rm removes only the literal name', async () => {
+    const ws = await makeGlobbableWs()
+    await ws.execute("touch '/data/*.txt'")
+    const io = await ws.execute("rm '/data/*.txt' && ls /data")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('a.txt\nb.txt\n')
+    await ws.close()
+  })
+
+  it('for loop iterates once literally', async () => {
+    const ws = await makeGlobbableWs()
+    const r = await run(ws, 'for f in \'/data/*.txt\'; do echo "$f"; done')
+    expect(r.out).toBe('/data/*.txt\n')
+    await ws.close()
+  })
+
+  it('unquoted suffix still globs', async () => {
+    const ws = await makeGlobbableWs()
+    const r = await run(ws, 'echo "/data/"*.txt')
+    expect(r.out).toBe('/data/a.txt /data/b.txt\n')
+    await ws.close()
+  })
+
+  it('quoted star in a concatenation stays literal', async () => {
+    const ws = await makeGlobbableWs()
+    const r = await run(ws, "echo '/data/*'.txt")
+    expect(r.out).toBe('/data/*.txt\n')
+    await ws.close()
+  })
+
+  it('unquoted variable value still globs', async () => {
+    const ws = await makeGlobbableWs()
+    const r = await run(ws, "p='/data/*.txt'; echo $p")
+    expect(r.out).toBe('/data/a.txt /data/b.txt\n')
+    await ws.close()
+  })
+
+  it('quoted brace alternative stays literal', async () => {
+    const ws = await makeGlobbableWs()
+    const r = await run(ws, "echo {'/data/*.txt',ok}")
+    expect(r.out).toBe('/data/*.txt ok\n')
+    await ws.close()
+  })
+})
+
+// ── quoting is per character, not per word ─────────────────
+//
+// Every expectation below is GNU bash 5.2.37's, pinned in docker
+// debian:stable-slim against the same file set.
+
+async function makeMetacharWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ram = new RAMResource()
+  for (const name of ['*a.txt', 'xa.txt', 'a.txt', '?b.txt', '[c].txt']) {
+    ram.store.files.set(`/${name}`, ENC.encode('x\n'))
+  }
+  const registry = new OpsRegistry()
+  registry.registerResource(ram)
+  const ws = new Workspace(
+    { '/data': ram },
+    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+  )
+  ws.getSession(ws.defaultSessionId).cwd = '/data'
+  return ws
+}
+
+describe('metacharacters are quoted one at a time', () => {
+  it.each([
+    // A quoted star is a literal star in a pattern the `?` still drives.
+    ["echo '*'?.txt", '*a.txt\n'],
+    ['echo "*"?.txt', '*a.txt\n'],
+    ['echo \\*?.txt', '*a.txt\n'],
+    // Same metacharacter, one occurrence quoted and one not.
+    ["echo '*'*.txt", '*a.txt\n'],
+    ["echo '?'*.txt", '?b.txt\n'],
+    // Quote every metacharacter and the word never globs at all.
+    ["echo '*?'.txt", '*?.txt\n'],
+    ["echo a'*'.txt", 'a*.txt\n'],
+    // A quoted `[` cannot open a class, and `]` alone is not special.
+    ["echo '['c].txt", '[c].txt\n'],
+    // The quotes decide, never the value.
+    ['p=\'*\'; echo "$p"?.txt', '*a.txt\n'],
+    ["p='*'; echo $p?.txt", '*a.txt ?b.txt [c].txt a.txt xa.txt\n'],
+    // A bracket class the user typed is not an escape: it still globs.
+    ['echo [*]?.txt', '*a.txt\n'],
+    ["echo '[*]'?.txt", '[*]?.txt\n'],
+  ])('%s', async (line, out) => {
+    const ws = await makeMetacharWs()
+    expect(stdoutStr(await ws.execute(line))).toBe(out)
+    await ws.close()
+  })
+
+  it('falls back to the word after quote removal when nothing matches', async () => {
+    const ws = await makeMetacharWs()
+    const io = await ws.execute("echo '*'?.zzz")
+    expect(stdoutStr(io)).toBe('*?.zzz\n')
+    expect(io.exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('removes only what bash removes', async () => {
+    // The regression this pins: reading the word as a whole would let the
+    // quoted `*` match too, and rm would take xa.txt with it.
+    const ws = await makeMetacharWs()
+    const io = await ws.execute("rm '/data/*'?.txt")
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(await ws.execute('ls -1 /data'))).toBe('?b.txt\n[c].txt\na.txt\nxa.txt\n')
     await ws.close()
   })
 })

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
@@ -23,7 +24,7 @@ from mirage.resource.mem0.config import Mem0Config
 from mirage.resource.mem0.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
 
-_MEM0_OPS = {
+_MEM0_OPS: dict[str, Callable[..., Any]] = {
     "read_bytes": IO.read_bytes,
     "read_stream": IO.read_stream,
     "readdir": IO.readdir,

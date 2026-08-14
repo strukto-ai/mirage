@@ -15,6 +15,7 @@
 import git from 'isomorphic-git'
 
 import { IOResult } from '../../../../io/types.ts'
+import type { SessionView } from '../../../../ops/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -35,6 +36,7 @@ import { report } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
 import { fatal } from './util.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -43,6 +45,11 @@ const ENC = new TextEncoder()
 const ROOT_NOTE = ' (initial)'
 const DEFAULT_NAME = 'mirage'
 const DEFAULT_EMAIL = 'mirage@localhost'
+// The environment git reads an identity from. There is no config file behind a
+// mount, so these are the only real source.
+const AUTHOR_NAME = 'GIT_AUTHOR_NAME'
+const AUTHOR_EMAIL = 'GIT_AUTHOR_EMAIL'
+const FALLBACK_EMAIL = 'EMAIL'
 
 /** An author string split into the two halves git records separately. */
 interface Identity {
@@ -55,14 +62,30 @@ interface Identity {
 /**
  * Who to record as author and committer.
  *
- * git reads `user.name` and `user.email` from a config file it finds by walking
- * the filesystem and the user's home directory. Neither is reachable from a
- * mount, so the identity is taken from `--author` when given and is otherwise a
- * stated default rather than a guess at the operator's own name.
+ * Three sources, in git's own order: `--author` outranks the environment, and
+ * the environment outranks the fallback. git reads `GIT_AUTHOR_NAME` and
+ * `GIT_AUTHOR_EMAIL`, with `EMAIL` as the fallback address, all pinned against
+ * git 2.50.
+ *
+ * Two deliberate divergences, both because a config file is not reachable from
+ * a mount. `user.name`/`user.email` are never consulted, so the environment is
+ * the only place a real identity can come from; and where git refuses to commit
+ * with no identity at all, mirage records a stated default rather than a guess
+ * at the operator's name. The committer is the author here, where git tracks
+ * `GIT_COMMITTER_*` separately.
+ *
+ * Read through the session plane's door rather than the frozen `inv.env`
+ * snapshot, so a hidden name reads as unset exactly as it does in the shell.
  */
-function identity(fl: FlagView): Identity {
+function identity(fl: FlagView, session: SessionView | undefined): Identity {
   const author = fl.asStr('author')
   if (author === undefined || author === '') {
+    const name = session?.get(AUTHOR_NAME) ?? null
+    if (name !== null && name !== '') {
+      const email = session?.get(AUTHOR_EMAIL) ?? session?.get(FALLBACK_EMAIL) ?? null
+      const address = email !== null && email !== '' ? email : DEFAULT_EMAIL
+      return { name, email: address, line: `${name} <${address}>` }
+    }
     return {
       name: DEFAULT_NAME,
       email: DEFAULT_EMAIL,
@@ -109,7 +132,7 @@ async function buildCommit(
     return fresh
   }
   ensure('')
-  for (const [path, entry] of [...state.entries].sort(([a], [b]) => (a < b ? -1 : 1))) {
+  for (const [path, entry] of [...state.entries].sort(([a], [b]) => compareCodePoints(a, b))) {
     const cut = path.lastIndexOf('/')
     const dir = cut === -1 ? '' : path.slice(0, cut)
     for (let at = dir; at !== ''; ) {
@@ -141,7 +164,7 @@ async function buildCommit(
         type: 'tree',
       })
     }
-    entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    entries.sort((a, b) => compareCodePoints(a.path, b.path))
     written.set(dir, await git.writeTree({ ...repoArgs(repo), tree: entries as never }))
   }
   const tree = written.get('')
@@ -167,19 +190,17 @@ async function buildCommit(
  * into history.
  */
 export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
-  // The mount doors ride the one record; `opts` keeps its name so
-  // the body reads the same as when they were a parameter.
-  const opts = inv.ops ?? {}
+  const doors = inv.doors ?? {}
   const fl = new FlagView(inv.flags)
   try {
-    const dispatch = opts.dispatch
-    const statPath = opts.statPath
-    if (statPath === undefined || opts.mountRoot === undefined || dispatch === undefined) {
+    const dispatch = doors.dispatch
+    const statPath = doors.statPath
+    if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
     const message = fl.asStr('message')
     if (message === undefined || message === '') throw new MissingMessageError()
-    const repo = await opened(fl, statPath, opts.mountRoot, dispatch)
+    const repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
     if (state.conflicts.size > 0) throw new UnmergedIndexError()
     const head = await readHead(dispatch, repo.location.gitdir)
@@ -193,11 +214,13 @@ export async function commit(inv: CLIInvocation): Promise<CommandFnResult> {
         return held?.oid === entry.oid && held.mode === entry.mode
       })
     if (same) {
-      throw new NothingToCommitError(await renderReport(repo, dispatch, statPath, head))
+      throw new NothingToCommitError(
+        await renderReport(repo, dispatch, statPath, head, doors.ns?.links ?? null),
+      )
     }
     const parents =
       before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
-    const who = identity(fl)
+    const who = identity(fl, doors.sessionView)
     const when = Math.floor(Date.now() / 1000)
     const oid = await buildCommit(repo, state, message, who, parents, when)
     if (head.ref !== null) await writeRef(dispatch, repo.location.commondir, head.ref, oid)

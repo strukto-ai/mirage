@@ -180,10 +180,7 @@ def _render_man_index(session: Session, registry: MountRegistry) -> str:
             continue
         if m.resource.name not in by_kind:
             by_kind[m.resource.name] = m
-    try:
-        cwd_mount: MountEntry | None = registry.mount_for(session.cwd)
-    except ValueError:
-        cwd_mount = None
+    cwd_mount = registry.try_mount_for(session.cwd)
     cwd_kind: str | None = None
     if cwd_mount is not None and cwd_mount.prefix != DEV_PREFIX:
         cwd_kind = cwd_mount.resource.name

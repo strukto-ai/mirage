@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
+from typing import Callable
 
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic.cp import parse_cp_flags
@@ -21,13 +21,14 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes, transfer_primitives)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec, PrimitiveCopy
 
 
 async def run_cp(
         scopes: list[PathSpec],
         flag_kwargs: dict[str, FlagValue],
-        dispatch: Callable[..., Any],
+        dispatch: DispatchFn,
         storage_key: Callable[[PathSpec], str] | None = None) -> CrossResult:
     """Copy operands that span mounts via the shared generic cp.
 
@@ -38,7 +39,7 @@ async def run_cp(
     Args:
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared cp spec.
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (DispatchFn): Workspace operation dispatcher.
         storage_key (Callable | None): Maps an operand to its storage
             identity so two prefixes over one store compare equal.
     """

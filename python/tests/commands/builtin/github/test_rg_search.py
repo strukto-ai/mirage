@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.github.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
@@ -66,11 +67,12 @@ async def test_rg_root_large_tree_uses_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=narrowed)
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    stdout, io = await rg(accessor, [_root()],
-                          "import",
-                          c=True,
-                          w=True,
-                          index=index)
+    stdout, io = await rg(
+        accessor, [_root()], ['import'],
+        CommandOpts(index=index, flags={
+            'c': True,
+            'w': True
+        }))
     spy.assert_awaited_once()
     text = (await materialize(stdout)).decode()
     assert io.exit_code == 0
@@ -84,7 +86,8 @@ async def test_rg_subdir_uses_search(mock_github_api, github_env, monkeypatch):
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await rg(accessor, [_subdir()], "import", w=True, index=index)
+    await rg(accessor, [_subdir()], ['import'],
+             CommandOpts(index=index, flags={'w': True}))
     spy.assert_awaited_once()
 
 
@@ -97,7 +100,8 @@ async def test_rg_regex_skips_search(mock_github_api, github_env, monkeypatch):
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await rg(accessor, [_root()], "imp.*rt", w=True, index=index)
+    await rg(accessor, [_root()], ['imp.*rt'],
+             CommandOpts(index=index, flags={'w': True}))
     spy.assert_not_awaited()
 
 
@@ -108,7 +112,8 @@ async def test_rg_regex_without_literal_skips_search(mock_github_api,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await rg(accessor, [_root()], "imp|exp", w=True, index=index)
+    await rg(accessor, [_root()], ['imp|exp'],
+             CommandOpts(index=index, flags={'w': True}))
     spy.assert_not_awaited()
 
 
@@ -118,7 +123,8 @@ async def test_rg_small_tree_skips_search(mock_github_api, github_env,
     accessor, index = github_env
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await rg(accessor, [_root()], "import", w=True, index=index)
+    await rg(accessor, [_root()], ['import'],
+             CommandOpts(index=index, flags={'w': True}))
     spy.assert_not_awaited()
 
 
@@ -127,7 +133,8 @@ async def test_rg_scope_error_when_too_many_files(mock_github_api, github_env,
                                                   monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_GLOBALS, "SCOPE_ERROR", 1)
-    stdout, io = await rg(accessor, [_root()], "import", w=True, index=index)
+    stdout, io = await rg(accessor, [_root()], ['import'],
+                          CommandOpts(index=index, flags={'w': True}))
     assert io.exit_code == 1
     assert b"narrow the path" in (io.stderr or b"")
 
@@ -141,5 +148,5 @@ async def test_rg_without_word_flag_skips_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
-    await rg(accessor, [_root()], "import", index=index)
+    await rg(accessor, [_root()], ['import'], CommandOpts(index=index))
     spy.assert_not_awaited()

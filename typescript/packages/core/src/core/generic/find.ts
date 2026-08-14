@@ -27,6 +27,7 @@ import {
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../ops/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
@@ -179,7 +180,7 @@ export async function walkFind(
   const results: string[] = []
   const tree = prefixPathNodes(optionsTree(options), prefix)
   const needEmpty = treeHasEmpty(tree)
-  collected.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  collected.sort((a, b) => compareCodePoints(a.path, b.path))
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
     const stripped =

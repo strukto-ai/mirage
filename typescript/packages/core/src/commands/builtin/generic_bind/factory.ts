@@ -16,10 +16,11 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { type PathSpec } from '../../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { enotdir, isMissingPath } from '../../../utils/errors.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { type CommandIO, type StatOp, resolveGlobOf, supports } from './adapter.ts'
+import { type CommandIO, type StatOp, resolveGlobOf, supports, withHiddenGuard } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { defaultProvision } from './provision.ts'
 
@@ -37,6 +38,67 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
 
 function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return { ...ops, stat: cachedStat(ops.stat) }
+}
+
+// Honor a trailing slash on an operand. POSIX resolves `x/` as `x/.`, so
+// the operand has to name a directory: GNU answers `cat reg/` with "Not
+// a directory" where plain `cat reg` reads the file. Enforcing it on
+// `stat` covers every family at once, because the read chokepoint
+// (dirAwareStat) and the metadata commands (ls/du/find/stat) all reach
+// the backend through this slot, and each one already renders whatever
+// strerror it gets in its own GNU voice.
+//
+// A missing path is left alone: its own ENOENT is already GNU's answer
+// (`cat dangle/` is "No such file or directory"). The link half is the
+// router's, not this wrapper's: by the time an operand arrives here a
+// trailing slash has already resolved the final symlink, so `dlink/`
+// stats the directory it points at and passes.
+function slashCheckedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
+  return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
+    const result = await stat(accessor, path, index)
+    if (path.rawPath.endsWith('/') && result.type !== FileType.DIRECTORY) {
+      throw enotdir(path)
+    }
+    return result
+  }
+}
+
+// A listing never reaches the stat wrapper, and on a keyed store it cannot tell
+// "not a directory" from "no keys under this prefix" on its own: `ls flink/`
+// answered with an empty listing and exit 0 where GNU says "Not a directory".
+// One stat decides it, and only for an operand actually typed with a slash.
+function slashCheckedReaddir<A extends Accessor>(
+  readdir: CommandIO<A>['readdir'],
+  stat: StatOp<A>,
+): CommandIO<A>['readdir'] {
+  return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
+    if (path.rawPath.endsWith('/')) {
+      // Only a stat that ANSWERS can refuse. On a prefix or synthetic
+      // store a directory is the set of keys under it rather than an
+      // object, so a miss here is not evidence of a non-directory and
+      // the listing is the authority (see "absence takes two
+      // channels"); slack's per-channel directories stat as nothing.
+      // The index rides along: a synthetic backend resolves a path
+      // through it and cannot stat without one (chroma answers "missing
+      // index"), so dropping it here turns the probe into a crash.
+      let entry: FileStat | null = null
+      try {
+        entry = await stat(accessor, path, index)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+      }
+      if (entry !== null && entry.type !== FileType.DIRECTORY) throw enotdir(path)
+    }
+    return readdir(accessor, path, index)
+  }
+}
+
+function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  return {
+    ...ops,
+    stat: slashCheckedStat(ops.stat),
+    readdir: slashCheckedReaddir(ops.readdir, ops.stat),
+  }
 }
 
 function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
@@ -67,15 +129,36 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
   const commands: RegisteredCommand[] = []
   for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
-    const baseOps = (opsOver[b.name] ?? ops) as CommandIO
+    // Hidden-path enforcement wraps here, once for every generic
+    // command; the raw adapter stays untouched for the ops tables,
+    // whose door does its own enforcement.
+    const baseOps = withHiddenGuard((opsOver[b.name] ?? ops) as CommandIO)
     // A backend missing an op a command cannot run without (cp/mv/tee/
     // gunzip/...) doesn't get the command registered, rather than getting
     // one that crashes when invoked.
     if (!supports(baseOps, b.requirements ?? [])) continue
-    const cmdOps =
-      b.read === true ? withReadCache(baseOps) : b.write === true ? baseOps : withStatCache(baseOps)
+    const cmdOps = withSlashGuard(
+      b.read === true
+        ? withReadCache(baseOps)
+        : b.write === true
+          ? baseOps
+          : withStatCache(baseOps),
+    )
+    // A glob resolved by one backend cannot see a nested mount root or a
+    // symlink: the mount keys live in another resource and no resource
+    // stores a link. The adapter is built once per backend and the names
+    // are session-scoped, so the fact is stamped on per invocation and
+    // every builder keeps calling resolveGlobOf(ops) unchanged.
     const fn: CommandFn = (accessor, paths, texts, opts) =>
-      b.fn(cmdOps, accessor, paths, texts, opts)
+      b.fn(
+        opts.ns?.childMounts === undefined
+          ? cmdOps
+          : { ...cmdOps, globChildren: opts.ns.childMounts },
+        accessor,
+        paths,
+        texts,
+        opts,
+      )
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)

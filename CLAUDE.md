@@ -24,6 +24,7 @@ Run Python commands from `python/`, TypeScript commands from `typescript/`.
 - Keep Python and TypeScript layout, architecture, and semantics mirrored as much as practical.
 - When changing one implementation, check the other for the matching pattern or feature. If one side is more correct, use it to improve the weaker side instead of copying a bad design.
 - For major Python or TypeScript changes, consider adding or updating integration coverage under `integ/`.
+- **The layout half of that rule is gated.** `scripts/check_layout_parity.py` diffs the module-name sets of every `mirage/<pkg>/` against its TypeScript counterpart (core/node/browser unioned onto one namespace, plus cli/server/agents by prefix), folding camelCase, hyphens and a leading underscore so a rename reads as a rename rather than a missing module; `__init__.py` and `index.ts` are skipped because only Python needs one per directory. Intentional differences live in `spec/layout_exceptions.json` with a reason, and a stale entry fails as loudly as a new gap. `--strict` (what CI runs) does not demand zero: it fails when the count moves off the committed `baseline` in *either* direction, so new drift is blocked and closing a divergence has to be locked in by lowering the number. Run it without `--strict` for the full advisory report; that report is how layout work gets scoped.
 - **mirage ships no filetype renderers, and no factory for them.** Parquet, ORC, feather/arrow/ipc and hdf5/h5 rendering are gone, along with the `parquet`/`hdf5`/`pdf` extras, the `hyparquet`/`apache-arrow`/`h5wasm` dependencies, and the whole `commands/builtin/filetype_factory/` package in both languages (with its `filetype_read` / `filetypeRead` op knobs). A file with an unregistered extension is read as raw bytes. The one surviving extension point is registration on a mount: a command or op carrying a `filetype` resolves as `(name, filetype)` before `(name, resource)` before `(name,)`. `examples/{python,typescript}/filetype/` register a `.tally` renderer end to end and are gated in CI against `integ/truth/*/filetype.txt`; `tests/commands/custom/test_filetype_fns.py` and `test_unregister_removes_all_filetypes` cover the unit path.
 
 ## Module Layout
@@ -60,15 +61,22 @@ agent discovers state, the CLI is how it acts.
   subject is a repository that lives on a mount, so it reads that repository
   through the op dispatcher like any command. That is what makes `git` work on a
   RAM mount, a disk mount or an object store without knowing which. It reaches
-  the dispatcher through `CLIVerbOpts` (`dispatch`, `stat_path`, `mount_root`),
-  which `handle_cli`/`handleCli` puts on `inv.ops`; the field is None/absent
-  outside a workspace, and a verb that never reads it cannot touch a mount, so
-  this stays opt-in per verb rather than ambient. The door is one field read
-  rather than a parameter list the dispatcher inspects, because every leaf takes
-  exactly one `CLIInvocation` and nothing is threaded through keyword injection.
+  the dispatcher through `CLIDoors`, one door per state plane: `dispatch` and
+  `stat_path` for data, `ns` for the name plane (mount boundaries, links, attr
+  overlay), and `session_view` for session state. The mount prefix is
+  `ns.mounts.root_of`, not a fourth field. `handle_cli`/`handleCli` puts the
+  record on `inv.doors`; the field is None/absent outside a workspace, and a
+  verb that never reads it cannot touch a mount, so this stays opt-in per verb
+  rather than ambient. The door is one field read rather than a parameter list
+  the dispatcher inspects, because every leaf takes exactly one `CLIInvocation`
+  and nothing is threaded through keyword injection. Every field is spelled the
+  way `CommandOpts` (`commands/config.py`) spells it, so one fact reached from a
+  CLI leaf and reached from a command handler has one name; meta-tests pin that
+  (`tests/commands/cli/test_doors_parity.py`, and a compile-time mapped type in
+  `commands/cli/types.test.ts`).
   Do not give an account CLI a mount, and do not give `git` a `config_model`.
   Nuance: an account CLI verb MAY read an unrelated workspace file the user
-  named on the line through `inv.ops.dispatch` (himalaya's `--attach` reads the
+  named on the line through `inv.doors.dispatch` (himalaya's `--attach` reads the
   attachment path this way); what it must not do is treat a mount as a second
   view of its own account's data.
 
@@ -322,35 +330,26 @@ they bite:
   backend, so a backend author never implements, stores, or forwards one. This
   is the whole point of keeping them in the namespace; do not push link
   awareness down into a resource or an accessor.
-- **A command opts in by naming the parameter, nothing else.** Declare
-  `links: LinkView | None = None` on the wrapper and the generic and the
-  dispatcher starts passing it; delete the parameter and it stops. `execute_cmd`
-  offers the fact to every handler and `accepts_kwarg` (`utils/params.py`)
-  decides delivery from the signature, so there is no allowlist, spec field, or
-  registry that can fall out of step. A bare `**kwargs` deliberately does not
-  count as consent: every wrapper has one, and it is the opaque bag of the
-  user's typed command-line flags, forwarded wholesale to the generic. Counting
-  it would file a live namespace object among the parsed flags of every command
-  in the repo. This is the same rule already stated for `stdin`/`index`/`prefix`
-  under "Command wrappers and flags", and `stat_overlay` is delivered the same
-  way.
-  `LinkView` bundles every link fact (`stat_at`, `children`, `subtree`,
-  `resolve`, `exists`, `target_stat`) so a command that grows a new need adds a
-  field read, not a new keyword threaded through `execute_cmd`, the builder and
-  the generic. Families wired today: `ls`, `stat`, `find`, `du`, `file`.
-  `exists` and `target_stat` answer through the op dispatcher, not one
+- **A command consumes a fact by reading the `opts` field, nothing else.**
+  Every namespace fact (`links`, `stat_overlay`, `stat_path`, `readdir_path`,
+  `child_mounts`, `mounts`) rides `CommandOpts` into every handler, identically
+  in both languages; the generic that wants one reads `opts.links` and the rest
+  ignore it, so there is no opt-in registry, spec field, or signature
+  convention that can fall out of step. `LinkView` bundles every link fact
+  (`stat_at`, `children`, `subtree`, `resolve`, `exists`, `target_stat`) so a
+  command that grows a new need adds a field read, not a new keyword threaded
+  through `execute_cmd`, the builder and the generic. Families reading links
+  today: `ls`, `stat`, `find`, `du`, `file` — in the generics, so a bespoke
+  wrapper that delegates (as all of them now do) inherits link awareness for
+  free. `exists` and `target_stat` answer through the op dispatcher, not one
   backend's stat, so a link that points into another mount resolves correctly.
-- **A bespoke command in one of those families must declare it too.** The
-  opt-in is the whole mechanism, so a backend that ships its own `find`/`ls`/
-  `du`/`stat`/`file` and omits the parameter still runs, still exits 0, and
-  simply cannot see a link, which nothing notices until someone makes one on
-  that backend. `tests/commands/test_links_optin.py` asserts it instead: it
-  derives the link-aware names from the generic builders and fails naming any
-  registered command that shadows one without accepting `links`. TypeScript
-  needs no equivalent because wrappers forward the whole `opts` object, so a
-  generic reads `opts.links` whatever the wrapper declares; the bespoke email
-  find routes through `findGeneric`/`walkFind` like the factory, so no TS
-  command walks its own tree any more.
+- **A CLI verb that walks a tree itself has to lstat through the same door**,
+  which on that tier is `CLIDoors.ns.links`. A walk built on `stat_path` alone
+  dereferences, so a link reads as its target and a broken one reads as absent.
+  `git`'s worktree walk did both until it opted in, which is why `git add`
+  stored a symlink as a regular file holding its target's bytes (real git
+  stores mode `120000` with the target as the blob) and why `git status` never
+  listed a broken one.
 - **Merge links in the generic, above the native-op/walk fork.** `find` and `du`
   each have two paths: a backend with a native op (`find_core`, `du_size`/
   `du_entries`) and a backend walked by `readdir`. Link merging lives in one
@@ -631,8 +630,8 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
 - Don't add too many printings or comments in the code.
 - Don't add README.md unless I ask you to do so.
 - Use uv add to install new dependencies.
-- **Command wrappers and flags.** The dispatcher passes parsed command-line flags as keyword arguments. Wrappers must declare dispatcher-injected parameters (`stdin`, `index`, `prefix`) explicitly in their signature — never fish them out of `**flags` with `.get()`. Treat `**flags: FlagValue` as an opaque bag of true command-line flags and forward it wholesale to the generic command. A wrapper must not name a flag it cannot receive: the parser maps every spelling onto one canonical dest (the long form whenever an option declares one), so a parameter named after a short spelling with a long twin is permanently unfilled — `tests/commands/test_no_dead_flag_params.py` fails on one. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through `FlagView` (`fl = FlagView(flags)` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains, and never a raw `kwargs`/`_extra` read either (`tests/commands/test_no_raw_flag_reads.py` matches all three bag names). **A PATH-typed flag reaches a python command as a `PathSpec`, not a string** — the executor promotes it (`workspace/executor/command/flags.py`), so read it with `fl.as_paths(name)`; `as_str` reads it as absent and the operand is silently never used. TypeScript's bag carries the resolved virtual-path string instead, so its twin is `fl.asStr(name)`.
-- **Generic commands own flag interpretation.** Backend wrappers are wiring only (glob resolution, backend I/O injection, pass-through of `texts` and `flags`); all flag semantics live in the generic command for that family, mirroring the TS generics. Adding or changing a flag should touch the spec and the generic, not N wrappers.
+- **Command handlers take `(accessor, paths, texts, opts)` — the same four positionals in both languages.** The dispatcher (`Mount.execute_cmd` / `Mount.executeCmd`) constructs one `CommandOpts` per invocation carrying stdin, the flag bag, cwd, the mount prefix, the index, and every namespace fact; the provision path builds the same bag with `command`/`spec` set (`ProvisionFn` has the same four-positional shape). Handlers never declare a flag or an injected fact as a parameter — `tests/commands/test_no_dead_flag_params.py` pins the exact signature. When a wrapper genuinely needs a flag value itself (e.g. a search push-down), read it through a spec-bound `FlagView` (`fl = FlagView(opts.flags, spec=SPECS["grep"])` then `fl.as_bool("F")`, `fl.as_int("m")`, `fl.as_str("type")`, `fl.as_list("e")`) or a shared domain accessor like `pattern_arg` — never raw `flags.get(...)` / isinstance chains, and never a raw `kwargs`/`_extra` read either (`tests/commands/test_no_raw_flag_reads.py`). To override a flag before delegating, pass `dataclasses.replace(opts, flags=bag)` down, never a hand-built `CommandOpts`. **A PATH-typed flag reaches a python command as a `PathSpec`, not a string** — the executor promotes it (`workspace/executor/command/flags.py`), so read it with `fl.as_paths(name)`; `as_str` reads it as absent and the operand is silently never used. TypeScript's bag carries the resolved virtual-path string instead, so its twin is `fl.asStr(name)`.
+- **Generic commands own flag interpretation.** Backend wrappers are wiring only (glob resolution, backend I/O injection, pass-through of `texts` and `opts`); all flag semantics live in the generic command for that family, mirroring the TS generics. Adding or changing a flag should touch the spec and the generic, not N wrappers. Every literal `FlagView` query name must be a dest of a spec bound in the same module — `tests/commands/test_flag_query_names.py` and `commands/flag_query_names.test.ts` fail on a typo'd spelling without needing the code path to run.
 - **Generics parse flags once into a frozen struct.** Each generic defines a `@dataclass(frozen=True, slots=True)` flag struct plus a module-level `parse_flags(fl, ...)` (mirroring the TS `parseFlags` struct); the function body reads only struct attributes, never string keys. Construct the FlagView with the command's spec (`FlagView(flags, spec=SPECS["grep"])`) so a typo in a flag name raises KeyError instead of silently reading as False/None.
 - **Never annotate anything as `object`** — not a parameter, not a return, not a type argument (`dict[str, object]`, `Callable[..., object]`). `object` reads as "we did not decide": it accepts bytes where JSON was meant and a PathSpec where a flag value was meant, so every use site pays for it with an isinstance chain back to the set the author had in mind. Name the real type instead:
   - a parsed command-line flag is `FlagValue` (`mirage.commands.spec.types`) — `**flags: FlagValue`, `Mapping[str, FlagValue]`, `FlagValue | None` for a single raw read. The TypeScript side has always called it `FlagValue` too (`commands/spec/types.ts`); keep the two spellings identical.
@@ -640,3 +639,22 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   - a path is `str | PathSpec`, a backend handle is `accessor: Accessor` (`mirage.accessor.base`), an index is `index: IndexCacheStore | None` (`mirage.cache.index`), a stat function is `StatFn` (`mirage.types`). Ignored variadics are still typed (`*texts: str`).
   - a sentinel is a one-member `Enum`, never `object()`; that keeps it distinguishable from the real values sharing the variable.
     `tests/commands/test_no_object_annotations.py` enforces this and carries the only exemptions: four Python protocol methods (`__setattr__`, `__contains__`, `Mapping.pop`) whose signatures the language fixes, and one guard whose whole job is to catch a value the annotations already claim cannot arrive. Adding to that allowlist needs the same kind of reason.
+- **Every session write goes through `SessionView.set`.** A deployment refuses a
+  name (`AWS_*`, a credential) with a `pre_session` rule, and a writer that
+  reaches `session.env` directly makes that rule advisory. `export` and a plain
+  assignment always cleared the gate; the expansion-time writers did not, so
+  `${X:=d}`, `$((X=5))`, `(( ))`, `printf -v` and `for ((X=0; ...))` each wrote
+  past every policy. The view is threaded into expansion explicitly rather than
+  read from ambient state, and defaults to `None` (correct outside a workspace,
+  where the env is the only state there is). Reads (`$X`) stay sync; only the
+  writers await. `tests/workspace/expand/test_session_gate.py` and
+  `integ/session/writers.json` hold the line in both languages.
+- **The record client is a substrate, not a session detail.** Sessions, the
+  namespace node table and workspace metadata are three tables that persist the
+  same way, so the keyed-record clients live in `workspace/record/`
+  (`DiskRecordClient` with an `O_CREAT|O_EXCL` lockfile and `rename(2)`,
+  `S3RecordClient` with If-Match CAS) and import none of the three. They used to
+  live inside the session package, which made the other two import upward into
+  it; a layering test in each language fails if that returns. The two clients
+  deliberately do not merge: different concurrency contract, different blob
+  layout, different key shape.

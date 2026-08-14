@@ -25,7 +25,9 @@ def test_session_defaults():
     s = Session(session_id="test")
     assert s.session_id == "test"
     assert s.cwd == "/"
-    assert s.env == {}
+    # bash exports `$PWD` from startup, so even a session that never
+    # ran `cd` has one.
+    assert s.env == {"PWD": "/"}
     assert s.functions == {}
     assert s.last_exit_code == 0
     assert s._stdin_buffer is None
@@ -75,7 +77,7 @@ def test_session_to_dict():
     d = s.to_dict()
     assert d["session_id"] == "s1"
     assert d["cwd"] == "/data"
-    assert d["env"] == {"K": "V"}
+    assert d["env"] == {"K": "V", "PWD": "/data"}
     assert "created_at" in d
 
 
@@ -140,7 +142,7 @@ def test_fork_copies_every_field_including_mount_modes():
     forked = original.fork()
     assert forked.session_id == "orig"
     assert forked.cwd == "/disk"
-    assert forked.env == {"FOO": "bar"}
+    assert forked.env == {"FOO": "bar", "PWD": "/disk"}
     assert forked.mount_modes == {
         "/s3": MountMode.READ,
         "/dev": MountMode.EXEC,
@@ -180,9 +182,27 @@ def test_fork_overrides_apply_without_mutating_original():
     original = Session(session_id="orig", cwd="/disk", env={"FOO": "bar"})
     forked = original.fork(cwd="/ram", env={"BAZ": "qux"})
     assert forked.cwd == "/ram"
-    assert forked.env == {"BAZ": "qux"}
+    # `$PWD` follows the caller-supplied cwd rather than staying stale.
+    assert forked.env == {"BAZ": "qux", "PWD": "/ram"}
     assert original.cwd == "/disk"
-    assert original.env == {"FOO": "bar"}
+    assert original.env == {"FOO": "bar", "PWD": "/disk"}
+
+
+def test_fork_drops_the_logical_cwd_when_the_caller_overrides_cwd():
+    # A caller-supplied cwd has no typed spelling behind it, so carrying
+    # the source's logical name over would make the fork's `pwd` describe
+    # a directory it is not in -- the bug an `execute(cwd=...)` call hit.
+    original = Session(session_id="orig",
+                       cwd="/data/deep/real",
+                       logical_cwd="/data/lk")
+    assert original.fork(cwd="/ram").logical_cwd is None
+    assert original.fork().logical_cwd == "/data/lk"
+
+
+def test_fork_keeps_an_explicit_logical_cwd_beside_a_cwd_override():
+    original = Session(session_id="orig", cwd="/a")
+    forked = original.fork(cwd="/data/deep/real", logical_cwd="/data/lk")
+    assert forked.logical_cwd == "/data/lk"
 
 
 def test_fork_deep_copies_mutable_containers():
@@ -221,7 +241,7 @@ def test_snapshot_and_restore_undo_a_child_shell():
     session.script_name = "run.sh"
     session.restore(saved)
     assert session.cwd == "/data"
-    assert session.env == {"A": "1"}
+    assert session.env == {"A": "1", "PWD": "/data"}
     assert session.functions == {}
     assert session.script_name is None
 

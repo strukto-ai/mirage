@@ -19,6 +19,7 @@ import pytest
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gmail.grep import grep
 from mirage.commands.builtin.gmail.rg import rg
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -43,10 +44,8 @@ async def test_grep_word_uses_native_search():
     accessor = AsyncMock()
     with patch("mirage.commands.builtin.gmail.grep.search_messages",
                new=AsyncMock(return_value=ROWS)) as spy:
-        await grep(accessor, [_label_scope()],
-                   "hello",
-                   w=True,
-                   index=RAMIndexCacheStore())
+        await grep(accessor, [_label_scope()], ['hello'],
+                   CommandOpts(index=RAMIndexCacheStore(), flags={'w': True}))
     spy.assert_awaited_once()
 
 
@@ -64,9 +63,8 @@ async def test_grep_without_word_flag_skips_native_search():
             patch("mirage.commands.builtin.gmail.grep.resolve_glob",
                   new=AsyncMock(return_value=[])):
         with pytest.raises(UsageError):
-            await grep(accessor, [_label_scope()],
-                       "hello",
-                       index=RAMIndexCacheStore())
+            await grep(accessor, [_label_scope()], ['hello'],
+                       CommandOpts(index=RAMIndexCacheStore()))
     spy.assert_not_awaited()
 
 
@@ -75,10 +73,8 @@ async def test_rg_word_uses_native_search():
     accessor = AsyncMock()
     with patch("mirage.commands.builtin.gmail.rg.search_messages",
                new=AsyncMock(return_value=ROWS)) as spy:
-        await rg(accessor, [_label_scope()],
-                 "hello",
-                 w=True,
-                 index=RAMIndexCacheStore())
+        await rg(accessor, [_label_scope()], ['hello'],
+                 CommandOpts(index=RAMIndexCacheStore(), flags={'w': True}))
     spy.assert_awaited_once()
 
 
@@ -93,7 +89,6 @@ async def test_rg_without_word_flag_skips_native_search():
             patch("mirage.commands.builtin.gmail.rg.resolve_glob",
                   new=AsyncMock(return_value=[])):
         with pytest.raises(UsageError):
-            await rg(accessor, [_label_scope()],
-                     "hello",
-                     index=RAMIndexCacheStore())
+            await rg(accessor, [_label_scope()], ['hello'],
+                     CommandOpts(index=RAMIndexCacheStore()))
     spy.assert_not_awaited()

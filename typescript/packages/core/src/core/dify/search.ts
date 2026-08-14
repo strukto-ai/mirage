@@ -24,6 +24,7 @@ import { resolvePath } from './path.ts'
 import { segmentText } from './read.ts'
 import { normalizeSlug, scalarString } from './tree.ts'
 import { walk } from './walk.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const ENC = new TextEncoder()
 
@@ -111,14 +112,14 @@ async function metadataConditions(
     conditions.push({
       name: accessor.config.slugMetadataName,
       comparison_operator: 'in',
-      value: [...slugValues].sort(),
+      value: [...slugValues].sort(compareCodePoints),
     })
   }
   if (nameValues.length > 0) {
     conditions.push({
       name: 'document_name',
       comparison_operator: 'in',
-      value: [...nameValues].sort(),
+      value: [...nameValues].sort(compareCodePoints),
     })
   }
   return conditions

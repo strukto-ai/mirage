@@ -15,48 +15,22 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.tree import tree as generic_tree
+from mirage.commands.builtin.generic.tree import tree_generic
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import MountView, ReaddirPath, StatPath
 from mirage.types import PathSpec
 
 
-async def tree(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    L: str | None = None,
-    a: bool = False,
-    args_I: str | None = None,
-    d: bool = False,
-    P: str | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    stat_path: StatPath | None = None,
-    readdir_path: ReaddirPath | None = None,
-    mounts: MountView | None = None,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def tree(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("tree: no resource")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_tree(
-        paths[0],
-        readdir=partial(ops.readdir, accessor),
-        stat=partial(ops.stat, accessor),
-        max_depth=int(L) if L is not None else None,
-        show_hidden=a,
-        ignore_pattern=args_I,
-        dirs_only=d,
-        match_pattern=P,
-        index=index,
-        stat_path=stat_path,
-        readdir_path=readdir_path,
-        mounts=mounts,
-    )
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await tree_generic(resolved, list(texts), opts,
+                              partial(ops.readdir, accessor),
+                              partial(ops.stat, accessor))
 
 
 BUILDER = Builder('tree', tree, None, False, None)

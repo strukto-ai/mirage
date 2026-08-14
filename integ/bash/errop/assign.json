@@ -119,6 +119,36 @@
         "stdout": "zz\ninner=zz\nouter=[]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "errop_assign_over_an_array_keeps_the_tail",
+      "seq": 500010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "unset ERRA9; ERRA9=(\"\" 9); echo \"${ERRA9:=x}\"; echo \"[${ERRA9[@]}]\"; unset ERRA9",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n[x 9]\n",
+        "stderr": ""
+      }
     }
   ]
 }

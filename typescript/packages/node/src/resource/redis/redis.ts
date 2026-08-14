@@ -26,6 +26,7 @@ import {
   type RegisteredOp,
   type Resource,
   stripSlash,
+  compareCodePoints,
 } from '@struktoai/mirage-core'
 import { REDIS_COMMANDS } from '../../commands/builtin/redis/index.ts'
 import type { RedisClientType } from 'redis'
@@ -239,7 +240,7 @@ export class RedisResource extends BaseResource implements Resource {
       const data = await this.store.getFile(key)
       if (data !== null) files[key] = data
     }
-    const dirs = [...(await this.store.listDirs())].sort()
+    const dirs = [...(await this.store.listDirs())].sort(compareCodePoints)
     const c = await this.store.client()
     const attrs: Record<string, Record<string, string>> = {}
     const attrsStrip = `${this.keyPrefix}attrs:`.length

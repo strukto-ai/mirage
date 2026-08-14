@@ -63,11 +63,32 @@ describe('specWordKinds', () => {
     expect(specWordKinds(specOf('head'), ['-5', 'file.txt'])).toEqual([null, PATH])
   })
 
-  it('find ignore tokens are not classified', () => {
+  // Expression syntax is TEXT, never left to the shape heuristic: the
+  // rest slot's PATH kind read "(" as the bare path "/(", handing find a
+  // phantom start point on top of the real one.
+  it('find ignore tokens are TEXT', () => {
     const kinds = specWordKinds(specOf('find'), ['/data', '(', '-name', '*.txt', ')'])
     expect(kinds[0]).toBe(PATH)
-    expect(kinds[1]).toBeNull()
-    expect(kinds[4]).toBeNull()
+    expect(kinds[1]).toBe(TEXT)
+    expect(kinds[4]).toBe(TEXT)
+  })
+
+  it('bare ! is TEXT, in every position an expression can start', () => {
+    expect(specWordKinds(specOf('find'), ['/data', '!', '-empty'])).toEqual([PATH, TEXT, null])
+    expect(specWordKinds(specOf('find'), ['/data', '-empty', '!', '-name', 'x'])).toEqual([
+      PATH,
+      null,
+      TEXT,
+      null,
+      TEXT,
+    ])
+    expect(specWordKinds(specOf('find'), ['!', '-empty'])).toEqual([TEXT, null])
+  })
+
+  // The override this replaced matched by value, so it re-nulled a `!`
+  // sitting in an option's value slot as readily as a grammar token.
+  it('! as a -name pattern keeps the TEXT of its slot', () => {
+    expect(specWordKinds(specOf('find'), ['/data', '-name', '!'])).toEqual([PATH, null, TEXT])
   })
 
   it('duplicate word gets TEXT and PATH by slot', () => {

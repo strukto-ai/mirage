@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../../../utils/sort.ts'
+
 // git exits 128 for every fatal, which is neither the argparse usage exit (2)
 // nor the generic command failure (1) the CLI dispatcher applies to a thrown
 // handler error. Leaves therefore return this code themselves rather than
@@ -227,7 +229,7 @@ export class IgnoredPathsError extends GitError {
   override readonly code = 1
 
   constructor(paths: readonly string[]) {
-    const listed = [...paths].sort().join('\n')
+    const listed = [...paths].sort(compareCodePoints).join('\n')
     super(
       `The following paths are ignored by one of your .gitignore files:\n` +
         `${listed}\nhint: Use -f if you really want to add them.\n${ADVICE_IGNORED}`,
@@ -368,7 +370,7 @@ export class UnknownPathspecError extends GitError {
  */
 function conflictBlock(header: string, paths: readonly string[], advice: string): string {
   const listed = [...paths]
-    .sort()
+    .sort(compareCodePoints)
     .map((path) => `\t${path}`)
     .join('\n')
   return `${header}\n${listed}\n${advice}`

@@ -54,15 +54,15 @@ def patched(monkeypatch):
         seen["args"] = (folder, uid)
         return ORIGINAL
 
-    async def fake_send_raw(config, raw):
+    async def fake_deliver(config, raw, save=None):
         seen["raw"] = raw
-        return BytesParser(policy=default_policy).parsebytes(raw)
+        return BytesParser(policy=default_policy).parsebytes(raw), ""
 
     async def fake_close(self):
         seen["closed"] = True
 
     monkeypatch.setitem(reply.__globals__, "fetch_message", fake_fetch)
-    monkeypatch.setattr(util_module, "send_raw", fake_send_raw)
+    monkeypatch.setattr(util_module, "deliver", fake_deliver)
     monkeypatch.setattr(EmailAccessor, "close", fake_close)
     return seen
 

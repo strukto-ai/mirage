@@ -34,7 +34,7 @@ async function statCommand(
   return statGeneric(
     resolved,
     opts,
-    overlaidStat((p) => s3Stat(accessor, p, opts.index ?? undefined), opts.statOverlay),
+    overlaidStat((p) => s3Stat(accessor, p, opts.index ?? undefined), opts.ns?.statOverlay),
   )
 }
 

@@ -16,6 +16,7 @@ import type { RAMAccessor } from '../../../accessor/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 import { norm } from '../utils.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 export function entries(
   accessor: RAMAccessor,
@@ -25,7 +26,7 @@ export function entries(
   const prefix = rstripSlash(p) + '/'
   const entries: [string, number][] = []
   let total = 0
-  const sortedKeys = [...accessor.store.files.keys()].sort()
+  const sortedKeys = [...accessor.store.files.keys()].sort(compareCodePoints)
   for (const key of sortedKeys) {
     if (key === p || key.startsWith(prefix)) {
       const data = accessor.store.files.get(key)

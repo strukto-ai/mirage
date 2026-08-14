@@ -38,7 +38,7 @@ describe('Namespace facade (addressing)', () => {
   it('mountFor returns the owning mount', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     const mount = ws.namespace.mountFor('/data/a.txt')
-    expect(mount?.prefix).toBe('/data/')
+    expect(mount.prefix).toBe('/data/')
     await ws.close()
   })
 })

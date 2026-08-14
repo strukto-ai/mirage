@@ -19,9 +19,10 @@ import {
   isFsError,
   operandSpelling,
 } from '../../../../utils/errors.ts'
-import { DEFAULT_DIR_MODE, parseMode } from '../../../../utils/mode.ts'
+import { DEFAULT_DIR_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/types.ts'
+import { mkdirLinkRefusal } from '../../utils/slash_links.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const MKDIR_BUILDER: Builder = {
@@ -51,7 +52,7 @@ export const MKDIR_BUILDER: Builder = {
     if (modeText !== null) {
       // Symbolic clauses build on what mirage renders for a new directory,
       // since there is no umask to subtract from.
-      mode = parseMode(modeText, DEFAULT_DIR_MODE)
+      mode = parseChmod(modeText, DEFAULT_DIR_MODE)
       if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
       if (setAttrs === undefined) {
         throw new Error('mkdir: --mode is not supported on this backend')
@@ -60,7 +61,13 @@ export const MKDIR_BUILDER: Builder = {
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const lines: string[] = []
     const errors: string[] = []
+    const links = opts.ns?.links ?? null
     for (const p of resolved) {
+      const collision = await mkdirLinkRefusal(p, links, { parents })
+      if (collision.taken) {
+        if (collision.message !== null) errors.push(collision.message)
+        continue
+      }
       try {
         await mkdir(accessor, p, parents)
       } catch (err) {

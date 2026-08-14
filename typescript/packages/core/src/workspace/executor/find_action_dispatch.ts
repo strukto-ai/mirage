@@ -56,7 +56,7 @@ export async function applyFindActions(
       (a, b) => (b.match(/\//g) ?? []).length - (a.match(/\//g) ?? []).length,
     )
     for (const path of ordered) {
-      const mount = registry.mountFor(path)
+      const mount = registry.tryMountFor(path)
       if (mount === null) {
         errors.push(enc.encode(`find: cannot delete '${path}': no mount\n`))
         continue
@@ -86,7 +86,7 @@ export async function applyFindActions(
   } else if (hasLs) {
     outputMatches = []
     for (const path of matches) {
-      const mount = registry.mountFor(path)
+      const mount = registry.tryMountFor(path)
       if (mount === null) {
         errors.push(enc.encode(`find: cannot ls '${path}': no mount\n`))
         continue
@@ -107,7 +107,7 @@ export async function applyFindActions(
           {
             stdin: null,
             cwd,
-            ...(childMounts !== null ? { childMounts } : {}),
+            ...(childMounts !== null ? { ns: { childMounts } } : {}),
             ...(statPath !== null ? { statPath } : {}),
           },
         )

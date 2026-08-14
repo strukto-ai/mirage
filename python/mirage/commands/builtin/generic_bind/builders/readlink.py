@@ -13,31 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.readlink import \
-    readlink as generic_readlink
+from mirage.commands.builtin.generic.readlink import readlink_generic
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def readlink(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    f: bool = False,
-    e: bool = False,
-    m: bool = False,
-    n: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def readlink(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+                   texts: list[str],
+                   opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("readlink: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_readlink(paths, f=f, e=e, m=m, n=n)
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await readlink_generic(resolved, list(texts), opts)
 
 
 BUILDER = Builder('readlink', readlink, None, False, None)

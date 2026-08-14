@@ -14,29 +14,17 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Any
+
+from mirage.workspace.record.types import RecordFields
 
 # One session's durable fields: the JSON-able ``Session.to_dict()``
 # payload (session_id, cwd, env, created_at, mount_modes). Volatile
 # shell state (functions, arrays, stdin buffers) never persists.
-SessionFields = dict[str, Any]
-
-# Shared cap for every generation-CAS retry loop (session flush,
-# workspace meta): losing this many times in a row on a rarely written
-# record is a bug to surface, not contention to absorb.
-CAS_MAX_RETRIES = 3
-
-
-def generation_of(fields: SessionFields | None) -> int:
-    """A stored record's CAS generation; a missing record or a legacy
-    record without the field counts as 0.
-
-    Args:
-        fields (SessionFields | None): the stored record, or None.
-    """
-    if fields is None:
-        return 0
-    return int(fields.get("generation", 0))
+# A session's stored shape is one keyed record like any other, so the
+# alias and the CAS helpers come from the record tier rather than being
+# restated here. The name stays SessionFields at this seam because that
+# is what a SessionStore stores.
+SessionFields = RecordFields
 
 
 class SessionStore(ABC):

@@ -15,55 +15,20 @@
 from functools import partial
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.ls import ls as generic_ls
+from mirage.commands.builtin.generic.ls import ls_generic
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
 from mirage.core.history.readdir import readdir
 from mirage.core.history.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.ops.types import LinkView
-from mirage.types import LsSortBy, PathSpec
+from mirage.types import PathSpec
 
 
 @command("ls", resource="history", spec=SPECS["ls"])
-async def ls(
-    accessor: HistoryAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    args_l: bool = False,
-    args_1: bool = False,
-    a: bool = False,
-    A: bool = False,
-    h: bool = False,
-    t: bool = False,
-    S: bool = False,
-    r: bool = False,
-    R: bool = False,
-    d: bool = False,
-    F: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    L: bool = False,
-    links: LinkView | None = None,
-    **_extra: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
-    return await generic_ls(
-        list(paths),
-        readdir=partial(readdir, accessor),
-        stat=partial(stat, accessor),
-        long=args_l,
-        one_per_line=args_1,
-        all_files=a or A,
-        human=h,
-        sort_by=sort_by,
-        reverse=r,
-        recursive=R,
-        list_dir=d,
-        classify=F,
-        index=index,
-        links=links,
-        deref=L,
-    )
+async def ls(accessor: HistoryAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    return await ls_generic(list(paths), list(texts), opts,
+                            partial(readdir, accessor),
+                            partial(stat, accessor))

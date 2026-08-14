@@ -35,7 +35,6 @@ async function runNl(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource,
   })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
@@ -128,7 +127,6 @@ describe('nl', () => {
       flags: {},
       filetypeFns: null,
       cwd: '/',
-      resource,
     })
     if (result === null) throw new Error('result null')
     const [, ioResult] = result

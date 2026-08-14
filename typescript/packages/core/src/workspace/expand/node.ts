@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
+import { visibleEnv } from '../session/state.ts'
+import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { shlexSplit } from '../../utils/shlex.ts'
@@ -23,7 +26,7 @@ import { evaluateArith } from '../../shell/arith.ts'
 import { ArithError } from '../../shell/errors.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, lookupVar } from './variable.ts'
+import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
 export type ExecuteFn = (
@@ -145,6 +148,7 @@ async function substituteDollarRefs(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<string> {
   const acc: TSNodeLike[] = []
   collectDollarNodes(node, acc)
@@ -155,7 +159,7 @@ async function substituteDollarRefs(
   for (const c of acc) {
     if (c.startIndex === undefined || c.endIndex === undefined) continue
     out += text.slice(pos, c.startIndex - base)
-    out += await expandNode(c, session, executeFn, callStack)
+    out += await expandNode(c, session, executeFn, callStack, view)
     pos = c.endIndex - base
   }
   return out + text.slice(pos)
@@ -171,6 +175,7 @@ export async function expandArith(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<string> {
   const parts: string[] = []
   for (const child of tsNode.children) {
@@ -182,7 +187,7 @@ export async function expandArith(
       child.type === NT.TERNARY_EXPRESSION ||
       child.type === NT.POSTFIX_EXPRESSION
     ) {
-      parts.push(await expandArith(child, session, executeFn, callStack))
+      parts.push(await expandArith(child, session, executeFn, callStack, view))
     } else if (ARITH_OPERATORS.has(child.type)) {
       parts.push(child.text)
     } else if (child.type === NT.NUMBER) {
@@ -192,32 +197,54 @@ export async function expandArith(
       child.type === NT.EXPANSION ||
       child.type === NT.COMMAND_SUBSTITUTION
     ) {
-      parts.push(await expandNode(child, session, executeFn, callStack))
+      parts.push(await expandNode(child, session, executeFn, callStack, view))
     } else if (child.type === NT.VARIABLE_NAME) {
       parts.push(child.text)
     } else {
-      parts.push(await expandNode(child, session, executeFn, callStack))
+      parts.push(await expandNode(child, session, executeFn, callStack, view))
     }
   }
   return parts.join(' ')
 }
 
+// Expand a tree-sitter node to the string it stands for.
 export async function expandNode(
   tsNode: TSNodeLike,
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
+  view?: SessionView,
+): Promise<string> {
+  return unmarkGlobs(await expandNodeMarked(tsNode, session, executeFn, callStack, view))
+}
+
+/**
+ * Expand a node, marking the glob characters quoting made literal.
+ *
+ * Same string as `expandNode`, except that a glob character quoting
+ * neutralized travels under its own mark. Only pathname
+ * expansion cares, so this is what `expandWords` reads while every other
+ * caller takes the unmarked wrapper above.
+ */
+export async function expandNodeMarked(
+  tsNode: TSNodeLike,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  view?: SessionView,
 ): Promise<string> {
   const ntype = tsNode.type
 
-  if (ntype === NT.WORD) return expandTilde(unescapeUnquoted(tsNode.text), homeDir(session))
+  if (ntype === NT.WORD) {
+    return expandTilde(unescapeUnquoted(markEscapedGlobs(tsNode.text)), homeDir(session))
+  }
   if (ntype === NT.NUMBER) return tsNode.text
   if (ntype === NT.COMMAND_NAME) {
     // The name is a word like any other: $CMD, "quoted", $(sub) all
     // expand. A bare word has one named child (or none) and falls
     // through to its own expansion rule.
     const child = tsNode.namedChildren[0]
-    if (child !== undefined) return expandNode(child, session, executeFn, callStack)
+    if (child !== undefined) return expandNodeMarked(child, session, executeFn, callStack, view)
     return tsNode.text
   }
 
@@ -236,8 +263,8 @@ export async function expandNode(
   if (ntype === NT.EXPANSION) {
     const prefix = foldedWhitespace(tsNode)
     const expandChild = (c: TSNodeLike): Promise<string> =>
-      expandNode(c, session, executeFn, callStack)
-    return prefix + (await expandBraces(tsNode, session, callStack, expandChild))
+      expandNode(c, session, executeFn, callStack, view)
+    return prefix + (await expandBraces(tsNode, session, callStack, expandChild, view))
   }
 
   if (ntype === NT.COMMAND_SUBSTITUTION) {
@@ -256,28 +283,31 @@ export async function expandNode(
       const sub = tsNode.namedChildren
       const only = sub[0]
       if (sub.length === 1 && only?.type === NT.SUBSHELL) {
-        const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack)
+        const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack, view)
         const expr = parenExpr.slice(1, -1)
+        let arith: { value: bigint; updates: Record<string, string> }
         try {
-          const { value, updates } = evaluateArith(expr, session.env)
-          Object.assign(session.env, updates)
-          return prefix + value.toString()
+          // Reads resolve against the visible env, so a hidden name
+          // counts as unset; the write-back below lands on the raw env
+          // (policy-ungated until expansion goes async), with the
+          // hidden gate applied inside expansionWrite.
+          arith = evaluateArith(expr, visibleEnv(session))
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
           return prefix + rawSub
         }
+        for (const [name, updated] of Object.entries(arith.updates)) {
+          await expansionWrite(session, view, name, updated)
+        }
+        return prefix + arith.value.toString()
       }
     }
-    const innerCmds = tsNode.namedChildren.filter(
-      (c) =>
-        c.type === NT.COMMAND ||
-        c.type === NT.PIPELINE ||
-        c.type === NT.LIST ||
-        c.type === NT.REDIRECTED_STATEMENT ||
-        c.type === NT.SUBSHELL,
-    )
-    if (innerCmds.length === 0) return prefix
-    const inner = innerCmds[0]?.text ?? ''
+    // The whole body goes to the evaluator: bash substitutes the full
+    // statement list, and picking child nodes dropped every statement
+    // after a `;` and every non-command statement (declarations,
+    // assignments, control flow).
+    const inner = rawSub.slice(2, -1)
+    if (inner.trim() === '') return prefix
     const io = await executeFn(inner, { sessionId: session.sessionId })
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
@@ -291,33 +321,35 @@ export async function expandNode(
 
   if (ntype === NT.ARITHMETIC_EXPANSION) {
     const prefix = foldedWhitespace(tsNode)
-    const expr = await expandArith(tsNode, session, executeFn, callStack)
+    const expr = await expandArith(tsNode, session, executeFn, callStack, view)
     let value: bigint
     let updates: Record<string, string>
     try {
-      ;({ value, updates } = evaluateArith(expr, session.env))
+      ;({ value, updates } = evaluateArith(expr, visibleEnv(session)))
     } catch (err) {
       if (err instanceof ArithError) return tsNode.text
       throw err
     }
-    Object.assign(session.env, updates)
+    for (const [name, updated] of Object.entries(updates)) {
+      await expansionWrite(session, view, name, updated)
+    }
     return prefix + value.toString()
   }
 
   if (ntype === NT.CONCATENATION) {
+    // Each piece carries its own quoting, which is the whole reason
+    // marks are per character: `'*'?.txt` joins a marked star to a live
+    // question mark and still globs, on the `?` alone. A $"..." arrives
+    // as an anonymous `$` token followed by the string node; the `$` is
+    // the translation marker, not text. A bare trailing `$` (a$) has no
+    // string after it and stays literal.
     const parts: string[] = []
     const children = tsNode.children
     for (let position = 0; position < children.length; position += 1) {
       const child = children[position]
       if (child === undefined) continue
-      // A $"..." in a concatenation arrives as an anonymous `$` token
-      // followed by the string node; the `$` is the translation
-      // marker, not text. A bare trailing `$` (a$) has no string after
-      // it and stays literal.
-      if (child.type === '$' && children[position + 1]?.type === NT.STRING) {
-        continue
-      }
-      parts.push(await expandNode(child, session, executeFn, callStack))
+      if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
+      parts.push(await expandNodeMarked(child, session, executeFn, callStack, view))
     }
     return parts.join('')
   }
@@ -335,9 +367,12 @@ export async function expandNode(
       }
       prevEndRow = child.endPosition?.row ?? 0
       if (child.type === NT.DQUOTE) continue
-      parts.push(await expandNode(child, session, executeFn, callStack))
+      parts.push(await expandNode(child, session, executeFn, callStack, view))
     }
-    return parts.join('')
+    // Everything the quotes enclose is literal, the text and any value
+    // expanded inside it alike: "$p"?.txt globs on the `?` while
+    // $p?.txt globs on whatever `p` holds too.
+    return markGlobs(parts.join(''))
   }
 
   if (ntype === NT.STRING_CONTENT) {
@@ -354,12 +389,12 @@ export async function expandNode(
 
   if (ntype === NT.RAW_STRING) {
     const raw = tsNode.text
-    return raw.slice(1, -1)
+    return markGlobs(raw.slice(1, -1))
   }
 
   if (ntype === NT.ANSI_C_STRING) {
     const raw = tsNode.text
-    return decodeAnsiC(raw.slice(2, -1))
+    return markGlobs(decodeAnsiC(raw.slice(2, -1)))
   }
 
   if (ntype === NT.TRANSLATED_STRING) {
@@ -368,7 +403,7 @@ export async function expandNode(
     // plain double-quote semantics.
     for (const child of tsNode.namedChildren) {
       if (child.type === NT.STRING) {
-        return expandNode(child, session, executeFn, callStack)
+        return expandNodeMarked(child, session, executeFn, callStack, view)
       }
     }
     return ''
@@ -382,7 +417,7 @@ export async function expandNode(
       const valPart = raw.slice(eq + 1)
       const valNodes = tsNode.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
       if (valNodes.length > 0 && valNodes[0] !== undefined) {
-        const expanded = await expandNode(valNodes[0], session, executeFn, callStack)
+        const expanded = await expandNode(valNodes[0], session, executeFn, callStack, view)
         return `${key}=${expanded}`
       }
       return `${key}=${valPart}`

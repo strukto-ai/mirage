@@ -24,6 +24,7 @@ import {
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import type { DeltaHook } from './base.ts'
 import { DIR_FINGERPRINT } from './constants.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 export function specFor(root: PathSpec, virtual: string): PathSpec {
   const cut = rstripSlash(root.virtual).length - root.resourcePath.length
@@ -44,12 +45,14 @@ export class ListingDeltaHook implements DeltaHook {
       entries.set(entry.virtual, entry)
       snapshot[entry.virtual] = entry.isDir ? DIR_FINGERPRINT : (entry.fingerprint ?? '')
     }
-    const serialized = JSON.stringify(snapshot, Object.keys(snapshot).sort())
+    const serialized = JSON.stringify(snapshot, Object.keys(snapshot).sort(compareCodePoints))
     if (checkpoint === null) return new Delta({ changes: [], checkpoint: serialized })
     const previous = JSON.parse(checkpoint) as Record<string, string>
     const observed = new Date()
     const changes: FileEvent[] = []
-    const paths = [...new Set([...Object.keys(snapshot), ...Object.keys(previous)])].sort()
+    const paths = [...new Set([...Object.keys(snapshot), ...Object.keys(previous)])].sort(
+      compareCodePoints,
+    )
     for (const virtual of paths) {
       const oldFingerprint = previous[virtual]
       const newFingerprint = snapshot[virtual]

@@ -16,6 +16,7 @@ import dataclasses
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.commands.builtin.generic.crossmount import is_cross_mount
+from mirage.commands.config import CommandOpts
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import parse_command, parse_to_kwargs
 from mirage.provision import Precision, ProvisionResult, combine_sum
@@ -59,11 +60,11 @@ def _mount_groups(registry: MountRegistry,
             # (find -name, ls *.txt) must not fabricate a mount group.
             unresolved.append(p)
             continue
-        try:
-            prefix = registry.mount_for(p.virtual).prefix
-        except ValueError:
+        mount = registry.try_mount_for(p.virtual)
+        if mount is None:
             unresolved.append(p)
             continue
+        prefix = mount.prefix
         idx = seen.get(prefix)
         if idx is None:
             seen[prefix] = len(groups)
@@ -132,9 +133,8 @@ async def handle_command_provision(
             break
     mount_path = first_scope.virtual if first_scope else session.cwd
 
-    try:
-        mount = registry.mount_for(mount_path)
-    except ValueError:
+    mount = registry.try_mount_for(mount_path)
+    if mount is None:
         # Pathless commands (seq, date, ...) still need a mount to
         # resolve their registration; any mount carries the general
         # commands, so fall back to the first one.
@@ -170,14 +170,18 @@ async def handle_command_provision(
         flag_kwargs = {}
         text_args = [p for p in parts[1:] if not isinstance(p, PathSpec)]
 
-    result = await cmd.provision_fn(mount.resource.accessor,
-                                    resource_scopes,
-                                    *text_args,
-                                    command=cmd_str,
-                                    prefix=mount.prefix.rstrip("/"),
-                                    index=mount.resource.index,
-                                    spec=spec,
-                                    **flag_kwargs)
+    # One typed bag, the provision-path twin of Mount.execute_cmd's
+    # (mirrors handleCommandProvision building CommandOpts in TS).
+    opts = CommandOpts(
+        flags=flag_kwargs,
+        cwd=session.cwd,
+        mount_prefix=mount.prefix.rstrip("/"),
+        command=cmd_str,
+        spec=spec,
+        index=mount.resource.index,
+    )
+    result = await cmd.provision_fn(mount.resource.accessor, resource_scopes,
+                                    text_args, opts)
     if not result.command:
         result.command = cmd_str
 

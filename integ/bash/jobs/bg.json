@@ -65,6 +65,70 @@
         "stdout": "bgdata\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "job_bg_cmdsub_reads_fork_cwd",
+      "seq": 502404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && echo $(pwd) > /data/zbgc.txt & wait) 2>/dev/null; cat /data/zbgc.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_bg_cmdsub_cd_no_leak",
+      "seq": 502406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(echo $(cd /data) > /data/zbgn.txt & wait) 2>/dev/null; pwd",
+      "expect": {
+        "exit": 0,
+        "stdout": "/\n",
+        "stderr": ""
+      }
     }
   ]
 }

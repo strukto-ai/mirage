@@ -20,15 +20,16 @@ import type { MountRegistry } from '../mount/registry.ts'
 
 // Find the spec that classifies a mount command's words. The cwd
 // mount's spec wins; the shared BUILTIN_SPECS table fills in when that
-// mount does not register the command. Every absolute path has a mount
-// (the workspace roots an implicit RAM mount), so mountFor only
-// returns null on a broken registry; the shared table still applies.
+// mount does not register the command. Every session cwd sits under a
+// mount (the workspace roots an implicit RAM mount), so mountFor never
+// fails here; if it ever does, the registry is broken and the error
+// should propagate (mirrors the Python docstring).
 export function specForCommand(
   name: string,
   registry: MountRegistry,
   cwd: string,
 ): CommandSpec | null {
-  const spec = registry.mountFor(cwd)?.specFor(name) ?? null
+  const spec = registry.mountFor(cwd).specFor(name)
   if (spec !== null) return spec
   return BUILTIN_SPECS[name] ?? null
 }
@@ -38,16 +39,16 @@ export function specForCommand(
 // Delegates to parseCommand so flag syntax (clusters, --flag=value,
 // multiple flags, providedBy) classifies identically to dispatch. Kinds
 // are positional, not value sets, so the same word can be TEXT in one slot
-// and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
-// ignored words (default classification applies).
+// and PATH in another (`grep '*.txt' *.txt`). Null marks a flag token,
+// whose own classification the default handles.
+//
+// parseCommand classifies ignoreTokens as TEXT itself, so there is
+// nothing to override here. A by-value override used to re-null them,
+// which was both redundant and position-blind: it matched an option's
+// value as readily as a grammar token, so `find /d -name '!'` lost the
+// TEXT the parser had correctly given the pattern.
 export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (ValueType | null)[] {
-  const parsed = parseCommand(spec, [...argv], '/')
-  const kinds: (ValueType | null)[] = [...parsed.wordKinds]
-  for (let i = 0; i < argv.length; i++) {
-    const word = argv[i]
-    if (word !== undefined && spec.ignoreTokens.has(word)) kinds[i] = null
-  }
-  return kinds
+  return [...parseCommand(spec, [...argv], '/').wordKinds]
 }
 
 // Per-position base directories for a spec that declares one. tar's -C

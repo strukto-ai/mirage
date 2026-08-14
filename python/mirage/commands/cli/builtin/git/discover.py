@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from typing import Any, Callable
 
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     InvalidGitFileError, NotARepositoryError, NoWorkingDirectoryError)
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.ops.types import MountRoot, StatPath
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileType
 
 GIT_DIR = ".git"
@@ -63,7 +63,7 @@ def _against(base: str, target: str) -> str:
     return _normalize(posixpath.normpath(posixpath.join(base, target)))
 
 
-async def _follow_gitfile(dispatch: Callable[..., Any], stat_path: StatPath,
+async def _follow_gitfile(dispatch: DispatchFn, stat_path: StatPath,
                           gitfile: str) -> str:
     """Read a ``.git`` file and return the directory it points at.
 
@@ -74,7 +74,7 @@ async def _follow_gitfile(dispatch: Callable[..., Any], stat_path: StatPath,
     file as if it were a directory is how this used to fail.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         stat_path (StatPath): dispatcher-backed stat, both channels.
         gitfile (str): absolute virtual path of the ``.git`` file.
     """
@@ -96,7 +96,7 @@ async def _follow_gitfile(dispatch: Callable[..., Any], stat_path: StatPath,
     return resolved
 
 
-async def _common_dir(dispatch: Callable[..., Any], gitdir: str) -> str:
+async def _common_dir(dispatch: DispatchFn, gitdir: str) -> str:
     """The shared git directory behind a per-worktree one.
 
     A linked worktree's git directory carries a ``commondir`` file
@@ -106,7 +106,7 @@ async def _common_dir(dispatch: Callable[..., Any], gitdir: str) -> str:
     own common directory.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of the git directory.
     """
     data = await read_optional(dispatch, posixpath.join(gitdir, COMMON_DIR))
@@ -116,7 +116,7 @@ async def _common_dir(dispatch: Callable[..., Any], gitdir: str) -> str:
     return _against(gitdir, target) if target else gitdir
 
 
-async def discover(dispatch: Callable[..., Any], stat_path: StatPath,
+async def discover(dispatch: DispatchFn, stat_path: StatPath,
                    mount_root: MountRoot, start: str) -> RepoLocation:
     """Find the repository governing a path, or raise git's own fatal.
 
@@ -137,7 +137,7 @@ async def discover(dispatch: Callable[..., Any], stat_path: StatPath,
     carried separately rather than derived again by each verb.
 
     Args:
-        dispatch (Callable): workspace op dispatcher, for the two files
+        dispatch (DispatchFn): workspace op dispatcher, for the two files
             that redirect a git directory.
         stat_path (StatPath): dispatcher-backed stat asking both channels
             a backend can answer on; None means nothing is there.

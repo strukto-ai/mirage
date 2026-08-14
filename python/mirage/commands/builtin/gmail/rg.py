@@ -13,16 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.gmail.io import resolve_glob
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.types import FlagView
 from mirage.core.gmail.read import read as gmail_read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.scope import detect_scope
@@ -34,16 +34,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 
 @command("rg", resource="gmail", spec=SPECS["rg"])
-async def rg(
-    accessor: GmailAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    prefix: str = "",
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["rg"])
+async def rg(accessor: GmailAccessor, paths: list[PathSpec], texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rg"])
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
@@ -75,14 +68,14 @@ async def rg(
                 return b"", IOResult(exit_code=1)
             return format_records(lines), IOResult()
 
-    resolved = await resolve_glob(accessor, paths, index) if paths else []
+    resolved = await resolve_glob(accessor, paths, opts.index) if paths else []
     return await generic_rg(
         resolved,
         texts,
-        flags,
-        readdir=bound_op(_readdir, accessor, index),
-        stat=bound_op(_stat, accessor, index),
-        read_bytes=bound_op(gmail_read, accessor, index),
+        opts.flags,
+        readdir=bound_op(_readdir, accessor, opts.index),
+        stat=bound_op(_stat, accessor, opts.index),
+        read_bytes=bound_op(gmail_read, accessor, opts.index),
         read_stream=None,
-        stdin=stdin,
+        stdin=opts.stdin,
     )

@@ -39,7 +39,6 @@ async function runFind(
       flags,
       filetypeFns: null,
       cwd: '/',
-      resource,
     },
   )
   if (result === null) return { lines: [], exitCode: -1 }

@@ -13,41 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.generic.comm import comm as generic_comm
+from mirage.commands.builtin.generic.comm import comm_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           bound_op)
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def comm(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    check_order: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(flags, spec=SPECS["comm"])
+async def comm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("comm: requires two paths")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_comm(
-        paths,
-        read_bytes=bound_op(ops.read_bytes, accessor, index),
-        suppress1=fl.as_bool("args_1"),
-        suppress2=fl.as_bool("2"),
-        suppress3=fl.as_bool("3"),
-        check_order=check_order or fl.as_bool("check_order"),
-        output_delimiter=fl.as_str("output_delimiter") or "\t",
-        total=fl.as_bool("total"),
-        zero_terminated=fl.as_bool("zero_terminated"),
-    )
+    resolved = await ops.resolve_glob(accessor, paths, opts.index)
+    return await comm_generic(resolved, list(texts), opts,
+                              bound_op(ops.read_bytes, accessor, opts.index))
 
 
 BUILDER = Builder('comm', comm, None, False, None, read=True)

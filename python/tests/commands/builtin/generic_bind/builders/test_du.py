@@ -16,6 +16,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
@@ -60,7 +61,8 @@ def _spec(virtual: str) -> PathSpec:
 
 
 async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
-    stream, io = await du(ops, object(), [_spec(path)], **flags)
+    stream, io = await du(ops, object(), [_spec(path)], [],
+                          CommandOpts(flags={**flags}))
     return ((await
              materialize(stream)).decode(), io.exit_code, (io.stderr
                                                            or b"").decode())
@@ -102,7 +104,8 @@ async def test_fallback_walk_lists_entries_for_a():
 async def test_missing_operand_is_reported_and_exits_one():
     """GNU names the operand it could not stat and still prints the rest."""
     ops = _ops()
-    stream, io = await du(ops, object(), [_spec("/nope"), _spec("/db")])
+    stream, io = await du(ops, object(),
+                          [_spec('/nope'), _spec('/db')], [], CommandOpts())
     out = (await materialize(stream)).decode()
     assert out == "2\t/db/sub\n5\t/db\n"
     assert io.exit_code == 1
@@ -113,7 +116,7 @@ async def test_missing_operand_is_reported_and_exits_one():
 @pytest.mark.asyncio
 async def test_no_operand_walks_the_working_directory():
     """GNU du with no operand summarises '.'; mirage uses the session cwd."""
-    stream, io = await du(_ops(), object(), [], cwd="/db")
+    stream, io = await du(_ops(), object(), [], [], CommandOpts(cwd='/db'))
     assert (await materialize(stream)).decode() == "2\t/db/sub\n5\t/db\n"
     assert io.exit_code == 0
 
@@ -150,6 +153,7 @@ async def test_exhausted_budget_reports_partial_output_and_exits_one():
 @pytest.mark.asyncio
 async def test_budget_is_shared_across_operands():
     ops = _ops(max_du_entries=1)
-    stream, io = await du(ops, object(), [_spec("/db"), _spec("/db/sub")])
+    stream, io = await du(ops, object(),
+                          [_spec('/db'), _spec('/db/sub')], [], CommandOpts())
     assert io.exit_code == 1
     assert len((await materialize(stream)).decode().splitlines()) == 2

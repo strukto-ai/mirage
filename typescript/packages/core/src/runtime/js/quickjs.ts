@@ -161,6 +161,7 @@ globalThis.std = {
 // matching the Python runtime's live file I/O.
 export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly name = 'quickjs'
+  override readonly confined = true
   readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null
   private workspaceBridge: BridgeDispatchFn | null = null

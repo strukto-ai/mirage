@@ -13,34 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno as host_errno
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_UNKNOWN
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
 from mirage.runtime.wasm.types import GuestStat
-from mirage.types import FileType
 from mirage.utils.path import owner_prefix
-
-
-def _mtime_ns(modified: str | None) -> int:
-    """Convert a FileStat ISO timestamp to epoch nanoseconds.
-
-    Args:
-        modified (str | None): ISO-8601 timestamp, or None when the
-            backend reports no mtime.
-    """
-    if not modified:
-        return 0
-    try:
-        ts = datetime.fromisoformat(modified)
-    except ValueError:
-        return 0
-    return int(ts.timestamp() * 1_000_000_000)
+from mirage.utils.stat_view import content_size, is_dir, mtime_ns
 
 
 class WasmVFS:
@@ -156,9 +139,12 @@ class WasmVFS:
         if build is not None:
             return build.stat(path)
         fs = self._core_call("stat", path)
-        return GuestStat(is_dir=fs.type == FileType.DIRECTORY,
-                         size=fs.size or 0,
-                         mtime_ns=_mtime_ns(fs.modified))
+        ns = mtime_ns(fs)
+        # The filestat record has no validity channel, so an unknown
+        # mtime and epoch zero both encode as 0 on this wire.
+        return GuestStat(is_dir=is_dir(fs),
+                         size=content_size(fs),
+                         mtime_ns=0 if ns is None else ns)
 
     def stat_or_none(self, path: str) -> GuestStat | None:
         try:
@@ -234,8 +220,9 @@ class WasmVFS:
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.
 
-        Core entries whose kind the backend does not report come back
-        FT_UNKNOWN; guests stat lazily when they care.
+        Core entries arrive kind-resolved (the door stats what the
+        backend does not slash-mark), so a guest's ``d_type`` is real
+        instead of FT_UNKNOWN paid off with one lazy stat per entry.
 
         Args:
             path (str): guest-absolute path.
@@ -248,14 +235,12 @@ class WasmVFS:
         return self._readdir_core(path)
 
     def _readdir_core(self, path: str) -> list[tuple[str, int]]:
-        names = self._core_call("readdir", path)
         entries: dict[str, int] = {}
-        for raw in names:
-            base = raw.rstrip("/").rsplit("/", 1)[-1]
+        for entry in self._require_core().readdir(path):
+            base = entry.path.rstrip("/").rsplit("/", 1)[-1]
             if not base:
                 continue
-            kind = FT_DIR if raw.endswith("/") else FT_UNKNOWN
-            entries[base] = kind
+            entries[base] = FT_DIR if entry.is_dir else FT_REG
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:
@@ -263,7 +248,7 @@ class WasmVFS:
 
         The core's readdir already carries mount structure (the door
         merges child mounts and links), so no prefix synthesis happens
-        here; mount entries arrive kind-unknown and guests stat lazily,
+        here; mount entries arrive kind-resolved by the core listing,
         which the door also answers for structure-only directories.
         """
         entries: dict[str, int] = {}

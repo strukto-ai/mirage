@@ -23,8 +23,6 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { ChildMounts } from '../../ops/types.ts'
-import { namespaceNames } from '../../ops/namespace_view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
@@ -36,7 +34,7 @@ import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
 import { resolveGlobs } from '../expand/globs.ts'
-import type { DispatchFn } from './cross_mount.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from './fanout.ts'
@@ -53,7 +51,8 @@ import { versionRequest } from '../../commands/config.ts'
 
 import { handleCli } from './command/cli.ts'
 import { pathStat } from './builtins/links.ts'
-import { dropServiceCaches, linkViewFor, mountRootOf, mountView } from './command/run.ts'
+import { dropServiceCaches, namespaceViewOf } from './command/run.ts'
+import { sessionView } from '../session/state.ts'
 import { optionError, parseFlags } from './command/flags.ts'
 import { executeShellFunction } from './command/functions.ts'
 import {
@@ -64,6 +63,7 @@ import {
 } from './command/routing.ts'
 import { runOnMount, type RunOnMountCtx } from './command/run.ts'
 import type { Result } from './command/types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 export { ReturnSignal } from './control.ts'
 
@@ -126,8 +126,10 @@ export async function handleCommand(
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
-  // A CLI that works on files rather than an API (`git`) reaches the mount
-  // through the facts below; the rest never read them.
+  // A CLI that works on files rather than an API (`git`) reaches the planes
+  // through the facts below; the rest never read them. They are the same
+  // ones `runOnMount` puts on `CommandOpts`, built the same way, so a CLI
+  // leaf and a command handler see one plane alike.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
     return handleCli(
@@ -139,7 +141,8 @@ export async function handleCommand(
         entries: registry.runtimeEntries,
         dispatch,
         statPath: (path: string) => pathStat(dispatch, path, null),
-        mountRoot: (path: string) => mountRootOf(registry, path),
+        ns: namespaceViewOf(registry, namespace ?? null, dispatch),
+        sessionView: sessionView(session, registry.policies),
       },
       () => dropServiceCaches(registry, cliInstall.spec.serves),
     )
@@ -222,20 +225,9 @@ export async function handleCommand(
     // lets the strategy runners execute each operand natively on its
     // owning mount.
     const csParsed = parseFlags(parts.slice(1), SPECS[cmdName] ?? null, cmdName, session.cwd)
-    const csFlags = csParsed[2]
-    const csTexts = findExprTokens ?? csParsed[1]
-    const csRefusal = optionError(
-      cmdName,
-      csParsed[4],
-      csParsed[5],
-      csParsed[6],
-      csParsed[7],
-      csParsed[8],
-      csParsed[9],
-      csParsed[10],
-      csParsed[11],
-      csParsed[12],
-    )
+    const csFlags = csParsed.flagKwargs
+    const csTexts = findExprTokens ?? csParsed.texts
+    const csRefusal = optionError(cmdName, csParsed)
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
       return [
@@ -250,7 +242,7 @@ export async function handleCommand(
       // expands the operand's glob. RELAY bypasses the mount command
       // wrappers entirely, so its glob operands must expand here; an
       // unmatched glob stays the literal word, like bash.
-      const expanded = await resolveGlobs(pathScopes, registry)
+      const expanded = await resolveGlobs(pathScopes, registry, false, namespace ?? null)
       csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
     }
     const runCtx: RunOnMountCtx = {
@@ -271,10 +263,8 @@ export async function handleCommand(
       runSingle,
       registry,
       session.cwd,
-      mountView(registry),
-      linkViewFor(namespace ?? null, dispatch),
+      namespaceViewOf(registry, namespace ?? null, dispatch),
       ensureOpen,
-      (parent: string) => namespaceNames(registry.mountPrefixes(), namespace ?? null, parent),
       (path: string) => pathStat(dispatch, path, null),
     )
     const [csStdout, csIo, csExec] = await handleCrossMount(
@@ -288,8 +278,10 @@ export async function handleCommand(
       cmdStr,
       makeStorageKey(registry),
     )
-    if (csParsed[3].length > 0) {
-      const csWarn = new TextEncoder().encode(csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''))
+    if (csParsed.warnings.length > 0) {
+      const csWarn = new TextEncoder().encode(
+        csParsed.warnings.map((w) => `${cmdName}: ${w}\n`).join(''),
+      )
       const csExisting = await materialize(csIo.stderr)
       csIo.stderr = concatBytes([csWarn, csExisting])
       csExec.stderr = concatBytes([csWarn, csExec.stderr])
@@ -299,7 +291,8 @@ export async function handleCommand(
     // operand mounts, regardless of which sub-run merged last.
     const mounts: MountEntry[] = []
     for (const s of pathScopes) {
-      const m = registry.mountFor(s.virtual)
+      // a scope outside any mount contributes nothing here
+      const m = registry.tryMountFor(s.virtual)
       if (m !== null) mounts.push(m)
     }
     csIo.producer = {
@@ -316,11 +309,12 @@ export async function handleCommand(
   if (routingScopes.length >= 2) {
     const mountPrefixes = new Set<string>()
     for (const s of routingScopes) {
-      const m = registry.mountFor(s.virtual)
+      // a scope outside any mount contributes nothing here
+      const m = registry.tryMountFor(s.virtual)
       if (m !== null) mountPrefixes.add(m.prefix)
     }
     if (mountPrefixes.size > 1) {
-      const prefixesStr = [...mountPrefixes].sort().join(', ')
+      const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
       const err = new TextEncoder().encode(
         `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
       )
@@ -368,33 +362,10 @@ export async function handleCommand(
     throw err
   }
 
-  const [
-    paths,
-    textsRaw,
-    flagKwargs,
-    parseWarnings,
-    invalidOptions,
-    ambiguousOptions,
-    optionErrorKinds,
-    needsValueOptions,
-    invalidValueOptions,
-    invalidIntOptions,
-    invalidFloatOptions,
-    missingRequiredOptions,
-    oldOptionNeedsValue,
-  ] = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
-  const refusal = optionError(
-    cmdName,
-    invalidOptions,
-    ambiguousOptions,
-    optionErrorKinds,
-    needsValueOptions,
-    invalidValueOptions,
-    invalidIntOptions,
-    invalidFloatOptions,
-    missingRequiredOptions,
-    oldOptionNeedsValue,
-  )
+  const parsedLine = parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const { paths, flagKwargs, warnings: parseWarnings } = parsedLine
+  const textsRaw = parsedLine.texts
+  const refusal = optionError(cmdName, parsedLine)
   if (refusal !== null) {
     const [msg, code] = refusal
     return [
@@ -425,8 +396,6 @@ export async function handleCommand(
   }
 
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
-    const fanChildMounts: ChildMounts = (parent: string) =>
-      namespaceNames(registry.mountPrefixes(), namespace ?? null, parent)
     const [fanOut, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -438,9 +407,7 @@ export async function handleCommand(
       cmdStr,
       stdin,
       ensureOpen,
-      mountView(registry),
-      linkViewFor(namespace ?? null, dispatch),
-      fanChildMounts,
+      namespaceViewOf(registry, namespace ?? null, dispatch),
       (path: string) => pathStat(dispatch, path, null),
     )
     if (warnBytes !== null) {

@@ -19,13 +19,14 @@ import type { CapacityResult } from '../../../types.ts'
 import { isMissingPath } from '../../../utils/errors.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { DispatchFn } from '../cross_mount.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { splitValueFlags } from './metadata.ts'
 import type { Result } from './scope.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 
 const SI_UNITS = ['B', 'K', 'M', 'G', 'T']
 const BLOCK_SUFFIX: Record<string, number> = {
@@ -184,7 +185,8 @@ async function targetMounts(
   session: Session,
   operands: (string | PathSpec)[],
 ): Promise<MountEntry[] | { missing: string }> {
-  const ordered = [...registry.allMounts()].sort((a, b) => a.prefix.localeCompare(b.prefix))
+  // Python is `sorted(registry.mounts(), key=lambda m: m.prefix)`.
+  const ordered = [...registry.allMounts()].sort((a, b) => compareCodePoints(a.prefix, b.prefix))
   if (operands.length === 0) return ordered
   const seen = new Set<string>()
   const out: MountEntry[] = []
@@ -201,7 +203,7 @@ async function targetMounts(
       }
       continue
     }
-    const mount = registry.mountFor(virtual)
+    const mount = registry.tryMountFor(virtual)
     if (mount === null) {
       return { missing: label }
     }

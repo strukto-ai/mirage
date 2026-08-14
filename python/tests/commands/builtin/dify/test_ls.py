@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.dify import COMMANDS
+from mirage.commands.config import CommandOpts
 from mirage.core.dify import stat, tree
 from mirage.io.types import materialize
 
@@ -26,7 +27,8 @@ async def test_ls_lists_virtual_tree_without_detail_calls(
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(stat, "get_document_detail", fail_get_detail)
 
-    stdout, io = await ls(dify_accessor, [knowledge_root], index=dify_index)
+    stdout, io = await ls(dify_accessor, [knowledge_root], [],
+                          CommandOpts(index=dify_index))
 
     assert await materialize(stdout) == b"README.md\nguides\n"
     assert io.exit_code == 0
@@ -38,9 +40,9 @@ async def test_ls_long_listing_uses_light_stat(monkeypatch, dify_accessor,
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(stat, "get_document_detail", fail_get_detail)
 
-    stdout, io = await ls(dify_accessor, [knowledge_root],
-                          args_l=True,
-                          index=dify_index)
+    stdout, io = await ls(
+        dify_accessor, [knowledge_root], [],
+        CommandOpts(index=dify_index, flags={'args_l': True}))
 
     output = await materialize(stdout)
     assert b"README.md" in output

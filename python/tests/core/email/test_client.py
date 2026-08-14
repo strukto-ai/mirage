@@ -18,7 +18,9 @@ import pytest
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email._client import (fetch_headers, fetch_message,
-                                       list_folders, list_message_uids)
+                                       list_folder_entries, list_folders,
+                                       list_message_uids, parse_folder_line,
+                                       quote_mailbox, select_folder)
 from mirage.core.email.config import EmailConfig
 
 MESSAGE = (b"From: alice@example.com\r\n"
@@ -65,6 +67,75 @@ async def test_list_folders(accessor):
     assert "INBOX" in folders
     assert "Sent" in folders
     assert "Drafts" in folders
+
+
+@pytest.mark.asyncio
+async def test_list_folder_entries_reports_special_use_attributes(accessor):
+    mock_imap = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.lines = [
+        b'(\\HasNoChildren) "/" "INBOX"',
+        b'(\\HasNoChildren \\Sent) "/" "[Gmail]/Sent Mail"',
+        b"LIST completed",
+    ]
+    mock_imap.list.return_value = mock_response
+    accessor._imap = mock_imap
+    accessor._imap.protocol = True
+
+    entries = await list_folder_entries(accessor)
+    assert entries == [
+        ("INBOX", ("\\HasNoChildren", )),
+        ("[Gmail]/Sent Mail", ("\\HasNoChildren", "\\Sent")),
+    ]
+
+
+def test_parse_folder_line_skips_the_completion_line():
+    assert parse_folder_line(b"LIST completed") is None
+
+
+def test_parse_folder_line_reads_a_name_holding_a_paren():
+    assert parse_folder_line(b'(\\HasNoChildren) "/" "Notes (old)"') == (
+        "Notes (old)", ("\\HasNoChildren", ))
+
+
+def test_parse_folder_line_reads_an_atom_mailbox():
+    # A mailbox is an astring, so a name needing no quoting may arrive
+    # bare. Splitting on quotes reads the delimiter as the name here.
+    assert parse_folder_line(b'(\\HasNoChildren \\Sent) "/" Sent') == (
+        "Sent", ("\\HasNoChildren", "\\Sent"))
+
+
+def test_parse_folder_line_reads_an_atom_after_a_nil_delimiter():
+    assert parse_folder_line(b"(\\HasNoChildren) NIL INBOX") == ("INBOX", (
+        "\\HasNoChildren", ))
+
+
+def test_parse_folder_line_unescapes_a_quoted_name():
+    assert parse_folder_line(b'(\\HasNoChildren) "/" "od\\"d"') == ('od"d', (
+        "\\HasNoChildren", ))
+
+
+def test_an_atom_sent_mailbox_survives_into_resolution():
+    # The whole point of the parse: this used to answer "/", which the
+    # sent copy would then have tried to APPEND into.
+    assert parse_folder_line(b'(\\Sent) "/" Sent')[0] == "Sent"
+
+
+def test_quote_mailbox_wraps_and_escapes():
+    assert quote_mailbox("Sent Items") == '"Sent Items"'
+    assert quote_mailbox('od"d') == '"od\\"d"'
+    assert quote_mailbox("back\\slash") == '"back\\\\slash"'
+
+
+@pytest.mark.asyncio
+async def test_select_quotes_a_mailbox_holding_a_space():
+    mock_imap = AsyncMock()
+    selected = MagicMock()
+    selected.result = "OK"
+    mock_imap.select.return_value = selected
+
+    await select_folder(mock_imap, "[Gmail]/Sent Mail")
+    mock_imap.select.assert_awaited_once_with('"[Gmail]/Sent Mail"')
 
 
 @pytest.mark.asyncio

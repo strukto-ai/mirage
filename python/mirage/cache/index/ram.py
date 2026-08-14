@@ -99,6 +99,11 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._expiry.pop(resource_path, None)
         self._children.pop(resource_path, None)
 
+    async def invalidate(self) -> None:
+        past = datetime.now(timezone.utc) - timedelta(seconds=1)
+        for key in list(self._expiry):
+            self._expiry[key] = past
+
     async def clear(self) -> None:
         self._entries.clear()
         self._children.clear()

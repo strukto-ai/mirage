@@ -1,8 +1,12 @@
 import fnmatch
 import io
 import zipfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -158,3 +162,42 @@ async def unzip(
 
 
 __all__ = ["unzip"]
+
+
+@dataclass(frozen=True, slots=True)
+class UnzipFlags:
+    overwrite: bool = False
+    list_only: bool = False
+    dest: "PathSpec | str | None" = None
+    quiet: bool = False
+    to_stdout: bool = False
+    test_only: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
+    fl = FlagView(flags, spec=SPECS["unzip"])
+    dest = fl.raw("d")
+    return UnzipFlags(
+        overwrite=fl.as_bool("o"),
+        list_only=fl.as_bool("args_l"),
+        dest=dest if isinstance(dest, (PathSpec, str)) else None,
+        quiet=fl.as_bool("q"),
+        to_stdout=fl.as_bool("p"),
+        test_only=fl.as_bool("t"),
+    )
+
+
+async def unzip_generic(paths, texts, opts: CommandOpts, read_bytes,
+                        write_bytes, mkdir_fn):
+    parsed = parse_flags(opts.flags)
+    return await unzip(paths,
+                       read_bytes=read_bytes,
+                       write_bytes=write_bytes,
+                       mkdir_fn=mkdir_fn,
+                       members=tuple(texts),
+                       o=parsed.overwrite,
+                       args_l=parsed.list_only,
+                       d=parsed.dest,
+                       q=parsed.quiet,
+                       p=parsed.to_stdout,
+                       t=parsed.test_only)

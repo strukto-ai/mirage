@@ -1,10 +1,13 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.types import IOResult
 from mirage.ops.types import ChildMounts, LinkView
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
@@ -18,6 +21,42 @@ Stat = Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]]
 LS_OK = 0
 LS_MINOR_PROBLEM = 1
 LS_FAILURE = 2
+
+
+@dataclass(frozen=True, slots=True)
+class LsFlags:
+    long: bool = False
+    one_per_line: bool = False
+    all_files: bool = False
+    human: bool = False
+    sort_by: LsSortBy = LsSortBy.NAME
+    reverse: bool = False
+    recursive: bool = False
+    list_dir: bool = False
+    classify: bool = False
+    deref: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
+    fl = FlagView(flags, spec=SPECS["ls"])
+    if fl.as_bool("t"):
+        sort_by = LsSortBy.TIME
+    elif fl.as_bool("S"):
+        sort_by = LsSortBy.SIZE
+    else:
+        sort_by = LsSortBy.NAME
+    return LsFlags(
+        long=fl.as_bool("args_l"),
+        one_per_line=fl.as_bool("args_1"),
+        all_files=fl.as_bool("a") or fl.as_bool("A"),
+        human=fl.as_bool("h"),
+        sort_by=sort_by,
+        reverse=fl.as_bool("r"),
+        recursive=fl.as_bool("R"),
+        list_dir=fl.as_bool("d"),
+        classify=fl.as_bool("F"),
+        deref=fl.as_bool("L"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,6 +679,48 @@ async def ls(
     return _finish(results, warnings)
 
 
+async def ls_generic(
+    paths: list[PathSpec],
+    texts: list[str],
+    opts: CommandOpts,
+    readdir: Readdir,
+    stat: Stat,
+) -> tuple[bytes, IOResult]:
+    """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
+
+    The wiring resolves globs, defaults the operands from the cwd, and
+    binds the backend ops (including the stat overlay); flag semantics
+    live here, and the namespace facts (links, child mounts) and index
+    ride ``opts``.
+
+    Args:
+        paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
+        texts (list[str]): Non-path words, unused by ls.
+        opts (CommandOpts): Flags and namespace facts from the
+            dispatcher.
+        readdir (Readdir): Bound readdir called as ``readdir(p, index)``.
+        stat (Stat): Bound (overlaid) stat called as ``stat(p, index)``.
+    """
+    parsed = parse_flags(opts.flags)
+    return await ls(
+        paths,
+        readdir=readdir,
+        stat=stat,
+        long=parsed.long,
+        one_per_line=parsed.one_per_line,
+        all_files=parsed.all_files,
+        human=parsed.human,
+        sort_by=parsed.sort_by,
+        reverse=parsed.reverse,
+        recursive=parsed.recursive,
+        list_dir=parsed.list_dir,
+        classify=parsed.classify,
+        index=opts.index,
+        links=opts.ns.links if opts.ns is not None else None,
+        deref=parsed.deref,
+        child_mounts=opts.ns.child_mounts if opts.ns is not None else None)
+
+
 __all__ = [
     "LS_FAILURE",
     "LS_MINOR_PROBLEM",
@@ -650,6 +731,7 @@ __all__ = [
     "exit_status_for",
     "format_simple",
     "ls",
+    "ls_generic",
     "probe_operand",
     "sort_stats",
     "walk",

@@ -33,7 +33,6 @@ import {
   RAMIndexCacheStore,
   materialize,
   stripSlash,
-  type Resource,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import * as readdirMod from '../../../core/email/readdir.ts'
@@ -74,7 +73,6 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null as unknown as Resource,
     index: new RAMIndexCacheStore(),
   })
   if (result === null) return []

@@ -15,45 +15,59 @@
 import functools
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
+from mirage.commands.builtin.utils.slash_links import (is_slashed_link,
+                                                       rm_link_refusal)
 from mirage.commands.builtin.utils.verbose import removal_lines
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-async def rm(
-    ops: CommandIO,
-    accessor: Accessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: bytes | None = None,
-    r: bool = False,
-    R: bool = False,
-    f: bool = False,
-    v: bool = False,
-    d: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
-    **kwargs,
-) -> tuple[ByteSource | None, IOResult]:
+async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(opts.flags, spec=SPECS["rm"])
+    f = fl.as_bool("f")
+    v = fl.as_bool("v")
+    d = fl.as_bool("d")
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("rm: missing operand")
-    paths = await ops.resolve_glob(accessor, paths, index)
-    recursive = r or R
+    paths = await ops.resolve_glob(accessor, paths, opts.index)
+    recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
     removed: dict[str, ByteSource] = {}
+    links = opts.ns.links if opts.ns is not None else None
     for p in paths:
+        if is_slashed_link(p, links):
+            refusal = await rm_link_refusal(p,
+                                            links,
+                                            recursive=recursive,
+                                            force=f)
+            if refusal is not None:
+                errors.append(refusal)
+            continue
         try:
             s = await ops.stat(accessor, p)
+        except NotADirectoryError:
+            # The operand carried a trailing slash and named something
+            # that is not a directory (a plain file, `rm reg/`).
+            if f:
+                continue
+            errors.append(f"rm: cannot remove '{p.raw_path}': "
+                          "Not a directory")
+            continue
         except FileNotFoundError:
             if f:
                 continue
             # GNU rm reports the operand and keeps removing the rest.
-            errors.append(f"rm: cannot remove '{p.virtual}': "
+            errors.append(f"rm: cannot remove '{p.raw_path}': "
                           "No such file or directory")
             continue
         entry_lines: list[str] = []
@@ -65,7 +79,7 @@ async def rm(
                 if v:
                     readdir = functools.partial(ops.readdir,
                                                 accessor,
-                                                index=index)
+                                                index=opts.index)
                     entry_lines = removal_lines(await walk(
                         readdir, functools.partial(ops.stat, accessor), p))
                 await ops.rm_r(accessor, p)
@@ -73,15 +87,15 @@ async def rm(
                 if ops.rmdir is None:
                     raise NotImplementedError(
                         "rm: directory remove not supported on this backend")
-                if await ops.readdir(accessor, p, index=index):
-                    errors.append(f"rm: cannot remove '{p.virtual}': "
+                if await ops.readdir(accessor, p, index=opts.index):
+                    errors.append(f"rm: cannot remove '{p.raw_path}': "
                                   "Directory not empty")
                     continue
                 await ops.rmdir(accessor, p)
                 entry_lines = [f"removed directory '{p.virtual}'"]
             else:
                 errors.append(
-                    f"rm: cannot remove '{p.virtual}': Is a directory")
+                    f"rm: cannot remove '{p.raw_path}': Is a directory")
                 continue
         else:
             await ops.require(Operation.UNLINK)(accessor, p)

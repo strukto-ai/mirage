@@ -37,25 +37,37 @@ export const RMDIR_BUILDER: Builder = {
     }
     const lines: string[] = []
     const errors: string[] = []
+    const links = opts.ns?.links ?? null
     for (const p of resolved) {
+      // rmdir(2) never follows, so a link operand never reaches the
+      // directory it points at. GNU words the two spellings apart: a bare
+      // link is the plain ENOTDIR, while one typed with a trailing slash
+      // gets rmdir's own "Symbolic link not followed", since the slash
+      // asked for a directory the call refuses to resolve. No backend can
+      // see a link, so the name plane answers.
+      if (links !== null && links.statAt(p.virtual) !== null) {
+        const detail = p.rawPath.endsWith('/') ? 'Symbolic link not followed' : 'Not a directory'
+        errors.push(`rmdir: failed to remove '${p.rawPath}': ${detail}`)
+        continue
+      }
       let isDir = false
       try {
         const st = await ops.stat(accessor, p, idx)
         isDir = st.type === FileType.DIRECTORY
       } catch {
-        errors.push(`rmdir: failed to remove '${p.virtual}': No such file or directory`)
+        errors.push(`rmdir: failed to remove '${p.rawPath}': No such file or directory`)
         continue
       }
       if (!isDir) {
-        errors.push(`rmdir: failed to remove '${p.virtual}': Not a directory`)
+        errors.push(`rmdir: failed to remove '${p.rawPath}': Not a directory`)
         continue
       }
       if ((await ops.readdir(accessor, p, idx)).length > 0) {
-        errors.push(`rmdir: failed to remove '${p.virtual}': Directory not empty`)
+        errors.push(`rmdir: failed to remove '${p.rawPath}': Directory not empty`)
         continue
       }
       await rmdir(accessor, p)
-      if (verbose) lines.push(`rmdir: removing directory, '${p.virtual}'`)
+      if (verbose) lines.push(`rmdir: removing directory, '${p.rawPath}'`)
     }
     const out = lines.length > 0 ? formatRecords(lines) : null
     const stderr =

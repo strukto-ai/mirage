@@ -1239,6 +1239,40 @@
         "stdout": "<x y>",
         "stderr": ""
       }
+    },
+    {
+      "id": "array_bad_subscript_keeps_scalar",
+      "seq": 603006,
+      "command": "ZBS=keep; (ZBS[-5]=1); echo \"rc=$? [$ZBS]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1 [keep]\n",
+        "stderr": "bash: ZBS[-5]: bad array subscript\n"
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder"
+      ]
     }
   ]
 }

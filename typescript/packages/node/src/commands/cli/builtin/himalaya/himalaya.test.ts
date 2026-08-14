@@ -12,16 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   cliSpecFor,
   enoent,
   materialize,
-  type CLIVerbOpts,
+  type CLIDoors,
   type IOResult,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { EmailAccessor } from '../../../../accessor/email.ts'
+import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { Workspace } from '../../../../workspace.ts'
 import {
@@ -43,10 +44,13 @@ import { searchEnvelopes } from './search.ts'
 import { send } from './send.ts'
 
 const sendRawMock = vi.hoisted(() => vi.fn())
+const listFolderEntriesMock = vi.hoisted(() => vi.fn())
+const appendMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./smtp.ts', () => ({ sendRaw: sendRawMock }))
 
 vi.mock('../../../../core/email/_client.ts', () => ({
+  listFolderEntries: listFolderEntriesMock,
   fetchRawMessage: vi.fn(() => Promise.resolve(new TextEncoder().encode('From: a@x\r\n\r\nbody'))),
   fetchMessage: vi.fn(() => Promise.resolve(ORIGINAL)),
   listMessageUids: vi.fn(() => Promise.resolve(['1', '2'])),
@@ -80,7 +84,7 @@ const HEADERS: Record<string, unknown> = {
   '2': { ...ORIGINAL, uid: '2', subject: 'alpha', date: 'Tue, 03 Feb 2026 10:00:00 +0000' },
 }
 
-const CONFIG = {
+const CONFIG: EmailConfig = {
   imapHost: 'h',
   imapPort: 993,
   smtpHost: 'h',
@@ -89,7 +93,25 @@ const CONFIG = {
   password: 'p',
   useSsl: false,
   maxMessages: 200,
+  saveCopy: true,
+  sentFolder: null,
 }
+
+// Every --send path now also files the sender's copy over IMAP, so the
+// account's IMAP side is stubbed for the whole file: without this the
+// verbs would reach for a real connection to host 'h'.
+beforeEach(() => {
+  listFolderEntriesMock.mockResolvedValue([
+    { name: 'INBOX', specialUse: null },
+    { name: 'Sent', specialUse: '\\Sent' },
+  ])
+  appendMock.mockReset()
+  appendMock.mockResolvedValue({ destination: 'Sent' })
+  vi.spyOn(EmailAccessor.prototype, 'getImap').mockResolvedValue({
+    append: appendMock,
+  } as unknown as Awaited<ReturnType<EmailAccessor['getImap']>>)
+  vi.spyOn(EmailAccessor.prototype, 'close').mockResolvedValue()
+})
 
 function leaf(...path: string[]) {
   let node = HIMALAYA
@@ -440,7 +462,7 @@ describe('himalaya verbs', () => {
     const files: Record<string, Uint8Array> = {
       '/scratch/note.txt': new TextEncoder().encode('the note body\n'),
     }
-    const ops: CLIVerbOpts = {
+    const doors: CLIDoors = {
       dispatch: (op: string, path: PathSpec) => {
         const data = files[path.virtual]
         if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
@@ -461,7 +483,7 @@ describe('himalaya verbs', () => {
         },
         stdin: null,
         env: {},
-        ops,
+        doors,
       }),
     )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
@@ -472,7 +494,7 @@ describe('himalaya verbs', () => {
   })
 
   it('compose --attach of a missing file names the path', async () => {
-    const ops: CLIVerbOpts = {
+    const doors: CLIDoors = {
       dispatch: (_op: string, path: PathSpec) => Promise.reject(enoent(path)),
     }
     await expect(
@@ -485,7 +507,7 @@ describe('himalaya verbs', () => {
           flags: { to: 'a@b.com', body: 'yo', attach: ['/scratch/gone.txt'] },
           stdin: null,
           env: {},
-          ops,
+          doors,
         }),
       ),
     ).rejects.toThrow('read attachment /scratch/gone.txt: No such file or directory')
@@ -589,6 +611,106 @@ describe('himalaya verbs', () => {
       to: 'a@b.com',
       subject: 'Hi',
     })
+  })
+
+  it('send files the sender copy in the mailbox the server tags \\Sent', async () => {
+    sendRawMock.mockClear()
+    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
+    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
+    const [, io] = (await send({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: {},
+      stdin: raw,
+      env: {},
+    })) as [Uint8Array, IOResult]
+    expect(appendMock).toHaveBeenCalledWith('Sent', Buffer.from(raw), ['\\Seen'])
+    expect(io.stderr).toBeNull()
+  })
+
+  it('send warns on stderr and still succeeds when the copy fails', async () => {
+    sendRawMock.mockClear()
+    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
+    appendMock.mockRejectedValue(new Error('Sent: no such mailbox'))
+    const raw = new TextEncoder().encode('From: me@x\nTo: a@b.com\nSubject: Hi\n\nyo')
+    const [out, io] = (await send({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: {},
+      stdin: raw,
+      env: {},
+    })) as [Uint8Array, IOResult]
+    // The message is already delivered, so the copy's failure is
+    // reported rather than raised.
+    expect(io.exitCode).toBe(0)
+    expect((JSON.parse(decode(await materialize(out))) as { status: string }).status).toBe('sent')
+    expect(decode(await materialize(io.stderr))).toBe(
+      'himalaya: sent copy not saved: Sent: no such mailbox\n',
+    )
+  })
+
+  it('compose --send files a copy too, and saveCopy off files none', async () => {
+    sendRawMock.mockClear()
+    sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
+    const compose = await import('./compose.ts').then((m) => m.compose)
+    const invocation = {
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true },
+      stdin: null,
+      env: {},
+    }
+    await compose(invocation)
+    expect(appendMock).toHaveBeenCalledTimes(1)
+    await compose({ ...invocation, config: { ...CONFIG, saveCopy: false } })
+    expect(appendMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('compose --save without --send files the message and sends nothing', async () => {
+    sendRawMock.mockClear()
+    const compose = await import('./compose.ts').then((m) => m.compose)
+    const [out, io] = (await compose({
+      config: CONFIG,
+      argv: [],
+      paths: [],
+      texts: [],
+      flags: { to: 'a@b.com', subject: 'Draft it', body: 'yo', save: 'Drafts' },
+      stdin: null,
+      env: {},
+    })) as [Uint8Array, IOResult]
+    expect(sendRawMock).not.toHaveBeenCalled()
+    expect(appendMock).toHaveBeenCalledWith('Drafts', expect.anything(), ['\\Seen'])
+    expect(JSON.parse(decode(await materialize(out)))).toEqual({
+      status: 'saved',
+      mailbox: 'Drafts',
+      to: 'a@b.com',
+      subject: 'Draft it',
+    })
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('a refused --save without --send fails loudly', async () => {
+    // Nothing was sent, so there is no delivered message a retry could
+    // duplicate: this one is an error, not a warning.
+    appendMock.mockRejectedValue(new Error('Drafts: no such mailbox'))
+    const compose = await import('./compose.ts').then((m) => m.compose)
+    await expect(
+      compose({
+        config: CONFIG,
+        argv: [],
+        paths: [],
+        texts: [],
+        flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' },
+        stdin: null,
+        env: {},
+      }),
+    ).rejects.toThrow('Drafts: no such mailbox')
   })
 
   it('send refuses an empty message before reaching SMTP', async () => {

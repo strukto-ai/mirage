@@ -13,16 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.head import head as generic_head
-from mirage.commands.builtin.generic.head import head_multi, parse_flags
-from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.head import head_generic
+from mirage.commands.builtin.generic_bind.adapter import (bound_op,
+                                                          dir_aware_stat)
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.history.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
-from mirage.core.history.read import read as history_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,28 +31,10 @@ from mirage.types import PathSpec
          resource="history",
          spec=SPECS["head"],
          aggregate=header_aggregate)
-async def head(
-    accessor: HistoryAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore = NULL_INDEX,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    try:
-        parsed = parse_flags(flags)
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=str(exc).encode())
-    if paths:
-        return head_multi(paths,
-                          read=bound_op(history_read, accessor, index),
-                          n=parsed.lines,
-                          c=parsed.bytes_,
-                          show_headers=(parsed.verbose or len(paths) > 1)
-                          and not parsed.quiet,
-                          zero_terminated=parsed.zero_terminated), IOResult()
-    source = _resolve_source(stdin, "head: missing operand")
-    return generic_head(source,
-                        n=parsed.lines,
-                        c=parsed.bytes_,
-                        zero_terminated=parsed.zero_terminated), IOResult()
+async def head(accessor: HistoryAccessor, paths: list[PathSpec],
+               texts: list[str],
+               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await head_generic(resolved, list(texts), opts,
+                              dir_aware_stat(IO, accessor, opts.index),
+                              bound_op(IO.read_stream, accessor, opts.index))

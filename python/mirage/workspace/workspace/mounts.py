@@ -127,10 +127,8 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
     ops.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.resource is removed.resource for m in remaining)
-    still_kind = any(m.resource.name == removed.resource.name
-                     for m in remaining)
-    if not still_kind:
-        ops._registry.unregister_resource(removed.resource.name)
+    # The mount owns its op table, so dropping the mount drops the ops
+    # with it; the facade keeps no second registry to clean up.
     if not still_instance:
         close = getattr(removed.resource, "close", None)
         if callable(close):

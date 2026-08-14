@@ -13,43 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import wc_aggregate
-from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
-                                                format_stdin, parse_flags)
-from mirage.commands.builtin.generic.wc import wc as generic_wc
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.wc import wc_generic
+from mirage.commands.builtin.generic_bind.adapter import dir_aware_stream
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
+from mirage.commands.builtin.history.io import IO
+from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.types import FlagValue
-from mirage.core.history.read import read as history_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 @command("wc", resource="history", spec=SPECS["wc"], aggregate=wc_aggregate)
-async def wc(
-    accessor: HistoryAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: ByteSource | None = None,
-    index: IndexCacheStore,
-    **flags: FlagValue,
-) -> tuple[ByteSource | None, IOResult]:
-    try:
-        parsed = parse_flags(flags)
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
-    if paths:
-        rows: list[tuple[WCCounts, str | None]] = []
-        totals = WCCounts()
-        for p in paths:
-            counts = await generic_wc(await history_read(accessor, p, index))
-            rows.append((counts, p.virtual))
-            totals.merge(counts)
-        return format_count_rows(rows, totals, len(paths), parsed), IOResult()
-    data = await _read_stdin_async(stdin)
-    if data is None:
-        raise ValueError("wc: missing operand")
-    counts = await generic_wc(data)
-    return format_stdin(counts, parsed), IOResult()
+async def wc(accessor: HistoryAccessor, paths: list[PathSpec],
+             texts: list[str],
+             opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
+    resolved = await resolve_or_empty(IO, accessor, paths, opts.index)
+    return await wc_generic(resolved, list(texts), opts,
+                            dir_aware_stream(IO, accessor, opts.index))

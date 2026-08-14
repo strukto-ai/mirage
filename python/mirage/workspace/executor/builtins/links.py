@@ -14,11 +14,10 @@
 
 import dataclasses
 import posixpath
-import time
-from collections.abc import Callable
-from typing import Any
 
+from mirage.commands.spec import SPECS, parse_command
 from mirage.io import IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import MISS_ERRORS
 from mirage.utils.path import CycleError
@@ -36,6 +35,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
 
 async def handle_ln(
     namespace: Namespace,
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -47,8 +47,13 @@ async def handle_ln(
     a namespace link name is never dereferenced nor treated as a directory
     to descend into, so both are already the effective behavior.
 
+    The write itself is a dispatch op, so session grants and admission
+    policies fire at the door; this handler keeps only the GNU operand
+    semantics and renders a refusal in ln's own words.
+
     Args:
         namespace (Namespace): addressing authority holding the link table.
+        dispatch (DispatchFn): op dispatcher.
         session (Session): session whose cwd resolves relative operands.
         args (list[str | PathSpec]): args after the command name.
     """
@@ -83,14 +88,21 @@ async def handle_ln(
         return fail(
             "ln", f"ln: failed to create symbolic link "
             f"'{word_text(operands[1])}': File exists\n")
-    await namespace.symlink(link_abs, target_typed, time.time())
+    try:
+        await dispatch("symlink",
+                       PathSpec.from_str_path(link_abs),
+                       target=target_typed)
+    except PermissionError:
+        return fail(
+            "ln", f"ln: failed to create symbolic link "
+            f"'{word_text(operands[1])}': Permission denied\n")
     out = None
     if "v" in flags:
         out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
     return ok("ln", out)
 
 
-async def resolve_path_stat(dispatch: Callable[..., Any],
+async def resolve_path_stat(dispatch: DispatchFn,
                             path: PathSpec) -> FileStat | None:
     """What a path is, asked on both channels a backend can answer on.
 
@@ -106,7 +118,7 @@ async def resolve_path_stat(dispatch: Callable[..., Any],
     here, a missing path does not.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         path (PathSpec): path to resolve.
     """
     try:
@@ -125,8 +137,7 @@ async def resolve_path_stat(dispatch: Callable[..., Any],
                     type=FileType.DIRECTORY)
 
 
-async def path_stat(dispatch: Callable[..., Any],
-                    virtual: str) -> FileStat | None:
+async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
     """Stat one virtual path through the workspace, None when absent.
 
     Resolves through the op dispatcher rather than one backend, so a path
@@ -135,7 +146,7 @@ async def path_stat(dispatch: Callable[..., Any],
     file is reported as itself, and None is GNU's missing-operand error.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path.
     """
     spec = PathSpec(virtual=virtual,
@@ -144,8 +155,7 @@ async def path_stat(dispatch: Callable[..., Any],
     return await resolve_path_stat(dispatch, spec)
 
 
-async def path_readdir(dispatch: Callable[..., Any],
-                       virtual: str) -> list[str]:
+async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
     """List one virtual path through the workspace, as virtual paths.
 
     Resolves through the op dispatcher rather than one backend, so a
@@ -154,7 +164,7 @@ async def path_readdir(dispatch: Callable[..., Any],
     mount lives in a resource the walker's own accessor cannot open.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path of the directory.
     """
     spec = PathSpec(virtual=virtual,
@@ -164,11 +174,11 @@ async def path_readdir(dispatch: Callable[..., Any],
     return list(entries)
 
 
-async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
+async def path_exists(dispatch: DispatchFn, virtual: str) -> bool:
     """Whether a resolved virtual path names something that exists.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path.
     """
     try:
@@ -177,7 +187,7 @@ async def path_exists(dispatch: Callable[..., Any], virtual: str) -> bool:
         return False
 
 
-async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
+async def link_target_stat(namespace: Namespace, dispatch: DispatchFn,
                            virtual: str) -> FileStat | None:
     """The stat of what a link points at, or None when it dangles.
 
@@ -194,7 +204,7 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
 
     Args:
         namespace (Namespace): addressing authority holding the links.
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path of the link.
     """
     try:
@@ -209,7 +219,7 @@ async def link_target_stat(namespace: Namespace, dispatch: Callable[..., Any],
 
 async def handle_readlink(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     session: Session,
     args: list[str | PathSpec],
 ) -> Result:
@@ -222,7 +232,7 @@ async def handle_readlink(
 
     Args:
         namespace (Namespace): addressing authority holding the links.
-        dispatch (Callable): op dispatcher, used for the existence check.
+        dispatch (DispatchFn): op dispatcher, used for the existence check.
         session (Session): current session, for the working directory.
         args (list[str | PathSpec]): the command's words after the name.
     """
@@ -237,6 +247,15 @@ async def handle_readlink(
         if canonical:
             # -f/-e/-m canonicalize: resolve every symlink (including a
             # trailing one) and normalize the path, GNU realpath-style.
+            # A link operand still clears the op door first: -m probes
+            # nothing, so without this a scoped session read an
+            # ungranted link's target out of the resolved path.
+            if namespace.is_link(abs_op):
+                try:
+                    await dispatch("readlink", PathSpec.from_str_path(abs_op))
+                except OSError:
+                    exit_code = 1
+                    continue
             try:
                 resolved = posixpath.normpath(namespace.follow(abs_op))
             except CycleError:
@@ -249,8 +268,14 @@ async def handle_readlink(
                 continue
             lines.append(resolved)
             continue
-        target = namespace.readlink(abs_op)
-        if target is None:
+        # The link entry is namespace state behind the op door: session
+        # grants and admission policies decide whether this session may
+        # read the target at all. EINVAL (not a link) and a refusal both
+        # land on GNU readlink's silent exit 1.
+        try:
+            target, _ = await dispatch("readlink",
+                                       PathSpec.from_str_path(abs_op))
+        except OSError:
             exit_code = 1
             continue
         lines.append(target)
@@ -262,11 +287,43 @@ async def handle_readlink(
             ExecutionNode(command="readlink", exit_code=exit_code))
 
 
+def follow_parent(namespace: Namespace, virtual: str) -> str:
+    """Resolve every component of a path but the last one.
+
+    POSIX resolves a path one component at a time, and only the last one
+    is exempt for an lstat-style command: ``stat dlink/f2`` reports
+    ``f2`` because ``dlink`` was resolved on the way to it, while
+    ``stat dlink`` reports the link. A no-follow command therefore still
+    needs its operand's directory prefix resolved.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        virtual (str): absolute virtual path.
+
+    Raises:
+        CycleError: when a prefix loops past the hop limit (ELOOP).
+    """
+    parent, _, name = virtual.rstrip("/").rpartition("/")
+    if not name:
+        return virtual
+    resolved = namespace.follow(parent or "/")
+    return resolved.rstrip("/") + "/" + name
+
+
 def follow_paths(
     namespace: Namespace,
     items: list[str | PathSpec],
+    follow_last: bool = True,
+    slash_follows: bool = True,
 ) -> list[str | PathSpec]:
     """Rewrite path operands through the symlink table (open(2) semantics).
+
+    The directory prefix always resolves; ``follow_last`` decides the
+    final component, which is the whole difference between open(2) and
+    lstat(2). A trailing slash overrides it per operand, because POSIX
+    reads ``dlink/`` as ``dlink/.`` and there is no ``.`` to reach
+    without resolving the link first (GNU: ``stat dlink`` is a symbolic
+    link, ``stat dlink/`` is a directory).
 
     Non-path items and paths that resolve to themselves pass through
     untouched. A rewritten spec keeps the user-typed form in ``raw_path``
@@ -276,6 +333,11 @@ def follow_paths(
     Args:
         namespace (Namespace): addressing authority holding the link table.
         items (list[str | PathSpec]): classified command parts.
+        follow_last (bool): whether the command resolves the final
+            component of its own accord (open(2) rather than lstat(2)).
+        slash_follows (bool): whether a trailing slash may override
+            ``follow_last``; False only for ``tar``, which strips the
+            slash before it stats.
 
     Raises:
         CycleError: when a path loops past the hop limit (ELOOP).
@@ -285,8 +347,10 @@ def follow_paths(
         if not isinstance(item, PathSpec):
             out.append(item)
             continue
+        last = follow_last or (slash_follows and item.raw_path.endswith("/"))
         try:
-            virtual = namespace.follow(item.virtual)
+            virtual = (namespace.follow(item.virtual)
+                       if last else follow_parent(namespace, item.virtual))
         except CycleError:
             raise CycleError(item.raw_path) from None
         if virtual == item.virtual:
@@ -301,14 +365,53 @@ def follow_paths(
     return out
 
 
+def accepts_line(name: str, args: tuple[str, ...], items: list[str | PathSpec],
+                 cwd: str) -> bool:
+    """Whether the command layer will act on this line as written.
+
+    A link entry lives in the namespace, so ``strip_link_operands``
+    removes it before the command runs, and the command layer can
+    neither see that nor undo it. GNU validates the whole line first and
+    removes nothing when it refuses: ``rm --bogus dlink`` reports the
+    option and ``unlink dlink other`` reports the extra operand, both
+    with every link still in place. So the strip runs only for a line
+    that layer accepts, and a refused one falls through to it unchanged
+    to be reported there. Option errors are the parser's, which reports
+    rather than raises them; unlink's one-operand grammar is its
+    builder's, and reporting it needs the operands to arrive intact.
+
+    Args:
+        name (str): command name.
+        args (tuple[str, ...]): the line's words after the name.
+        items (list[str | PathSpec]): classified command parts.
+        cwd (str): session working directory, which the parser resolves
+            path operands against.
+    """
+    spec = SPECS.get(name)
+    if spec is None:
+        return True
+    parsed = parse_command(spec, list(args), cwd)
+    if parsed.invalid_options or parsed.ambiguous_options:
+        return False
+    if name == "unlink":
+        return sum(1 for i in items if isinstance(i, PathSpec)) <= 1
+    return True
+
+
 async def strip_link_operands(
     namespace: Namespace,
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], int]:
-    """Unlink and drop ``rm`` operands that are symlinks.
+    """Unlink and drop ``rm``/``unlink`` operands that are symlinks.
 
     GNU ``rm`` removes the link itself and never follows it; a dangling
     link removes fine. Remaining operands stay for backend dispatch.
+
+    An operand typed with a trailing slash is deliberately kept: the
+    slash asked for a directory, and GNU refuses rather than removing
+    the link (``rm dlink/`` is "Is a directory", ``unlink dlink/`` is
+    "Not a directory"). Removing it here would delete exactly what the
+    slash was protecting, so the command reports it instead.
 
     Args:
         namespace (Namespace): addressing authority holding the link table.
@@ -321,7 +424,8 @@ async def strip_link_operands(
     removed = 0
     kept: list[str | PathSpec] = []
     for item in items:
-        if isinstance(item, PathSpec) and namespace.is_link(item.virtual):
+        if (isinstance(item, PathSpec) and not item.raw_path.endswith("/")
+                and namespace.is_link(item.virtual)):
             await namespace.unlink(item.virtual)
             removed += 1
             continue
@@ -329,12 +433,12 @@ async def strip_link_operands(
     return kept, removed
 
 
-async def _stat_or_none(dispatch: Callable[..., Any],
+async def _stat_or_none(dispatch: DispatchFn,
                         path: PathSpec) -> FileStat | None:
     """Stat a path via dispatch, mapping a missing file to ``None``.
 
     Args:
-        dispatch (Callable): op dispatcher.
+        dispatch (DispatchFn): op dispatcher.
         path (PathSpec): path to stat.
     """
     # A missing destination is an expected mv case (plain rename), not an
@@ -346,9 +450,55 @@ async def _stat_or_none(dispatch: Callable[..., Any],
     return stat
 
 
+async def _slashed_link_refusal(
+    namespace: Namespace,
+    dispatch: DispatchFn,
+    src: PathSpec,
+    dst: PathSpec,
+    dst_stat: FileStat | None,
+) -> Result:
+    """GNU's refusal for an ``mv`` source that is a link typed with a slash.
+
+    rename(2) never follows, so the slash is not resolved away: POSIX
+    reads ``dlink/`` as ``dlink/.``, which asks for a directory the call
+    will not resolve, and GNU refuses with everything left in place --
+    where a bare ``dlink`` renames the link entry. Which of the four
+    wordings applies follows mv's own order, source stat before
+    destination type before the rename itself, and all four are pinned
+    against GNU coreutils 9.7.
+
+    Args:
+        namespace (Namespace): addressing authority holding the link table.
+        dispatch (DispatchFn): op dispatcher used to stat the target.
+        src (PathSpec): the slashed link source.
+        dst (PathSpec): destination as typed.
+        dst_stat (FileStat | None): the destination's stat, None when it
+            does not exist.
+    """
+    followed = namespace.follow(src.virtual)
+    target = await _stat_or_none(dispatch, PathSpec.from_str_path(followed))
+    if target is None:
+        return fail(
+            "mv", f"mv: cannot stat '{src.raw_path}': "
+            "No such file or directory\n")
+    if target.type != FileType.DIRECTORY:
+        return fail("mv",
+                    f"mv: cannot stat '{src.raw_path}': Not a directory\n")
+    if dst_stat is not None and dst_stat.type != FileType.DIRECTORY:
+        return fail(
+            "mv", f"mv: cannot overwrite non-directory '{dst.raw_path}' "
+            f"with directory '{src.raw_path}'\n")
+    landing = dst.raw_path
+    if dst_stat is not None:
+        landing = landing.rstrip("/") + "/" + posixpath.basename(src.virtual)
+    return fail(
+        "mv", f"mv: cannot move '{src.raw_path}' to '{landing}': "
+        "Not a directory\n")
+
+
 async def prepare_mv(
     namespace: Namespace,
-    dispatch: Callable[..., Any],
+    dispatch: DispatchFn,
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None, Result
            | None]:
@@ -363,7 +513,7 @@ async def prepare_mv(
 
     Args:
         namespace (Namespace): addressing authority holding the node table.
-        dispatch (Callable): op dispatcher used to stat the destination.
+        dispatch (DispatchFn): op dispatcher used to stat the destination.
         items (list[str | PathSpec]): classified command parts.
 
     Returns:
@@ -390,6 +540,9 @@ async def prepare_mv(
         target_dst = dst.virtual
 
     if namespace.is_link(src.virtual):
+        if src.raw_path.endswith("/"):
+            return items, None, None, await _slashed_link_refusal(
+                namespace, dispatch, src, dst, stat)
         await namespace.unlink(target_dst)
         await namespace.rename(src.virtual, target_dst)
         return items, None, None, ok("mv")
@@ -405,6 +558,7 @@ async def prepare_mv(
 
 
 __all__ = [
+    "accepts_line",
     "follow_paths",
     "handle_ln",
     "handle_readlink",

@@ -159,4 +159,40 @@ describe('parseFindExpression', () => {
     const nots: string[] = Array.from({ length: 500 }, () => '-not')
     expect(() => parseFindExpression([...nots, '-name', 'x'])).toThrow(FindParseError)
   })
+
+  // GNU findutils 4.10.0, pinned on debian:stable-slim. Reachable only
+  // since `!` became an expression token: a dangling `!` used to be a start
+  // point, so find printed the whole tree and blamed a missing path.
+  it('names the operator a line left without a right-hand side', () => {
+    const cases: [string[], string][] = [
+      [['!'], '!'],
+      [['-not'], '-not'],
+      [['-name', 'a', '!'], '!'],
+      [['-name', 'a', '-not'], '-not'],
+      [['!', '!'], '!'],
+      [['-name', 'a', '-a'], '-a'],
+      [['-name', 'a', '-and'], '-and'],
+      [['-name', 'a', '-o'], '-o'],
+      [['-name', 'a', '-or'], '-or'],
+    ]
+    for (const [toks, op] of cases) {
+      expect(() => parseFindExpression(toks)).toThrow(`find: expected an expression after '${op}'`)
+    }
+  })
+
+  it('names both sides when a ) closes the empty slot', () => {
+    const cases: [string[], string][] = [
+      [['(', '!', ')'], '!'],
+      [['(', '-not', ')'], '-not'],
+      [['(', '-name', 'a', '-a', ')'], '-a'],
+      [['(', '-name', 'a', '-and', ')'], '-and'],
+      [['(', '-name', 'a', '-o', ')'], '-o'],
+      [['(', '-name', 'a', '-or', ')'], '-or'],
+    ]
+    for (const [toks, op] of cases) {
+      expect(() => parseFindExpression(toks)).toThrow(
+        `find: expected an expression between '${op}' and ')'`,
+      )
+    }
+  })
 })

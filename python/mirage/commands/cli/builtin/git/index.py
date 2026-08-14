@@ -14,19 +14,20 @@
 
 import posixpath
 from io import BytesIO
-from typing import IO, Any, BinaryIO, Callable, cast
+from typing import IO, BinaryIO, cast
 
 from dulwich.index import (ConflictedIndexEntry, IndexEntry, read_index_dict,
                            write_index_dict)
 
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
+from mirage.runtime.types import DispatchFn
 
 INDEX_FILE = "index"
 MERGE_HEAD = "MERGE_HEAD"
 
 
-async def read_index(dispatch: Callable[..., Any], gitdir: str) -> IndexState:
+async def read_index(dispatch: DispatchFn, gitdir: str) -> IndexState:
     """Read ``.git/index`` through the dispatcher.
 
     The index is the third thing ``status`` compares, and the only one
@@ -44,7 +45,7 @@ async def read_index(dispatch: Callable[..., Any], gitdir: str) -> IndexState:
     directory would show one checkout's staged changes in another.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of this checkout's git
             directory.
     """
@@ -69,7 +70,7 @@ async def read_index(dispatch: Callable[..., Any], gitdir: str) -> IndexState:
                       merging=merging is not None)
 
 
-async def write_index(dispatch: Callable[..., Any], gitdir: str,
+async def write_index(dispatch: DispatchFn, gitdir: str,
                       state: IndexState) -> None:
     """Write ``.git/index`` back through the dispatcher.
 
@@ -82,7 +83,7 @@ async def write_index(dispatch: Callable[..., Any], gitdir: str,
     index is small and written in one call.
 
     Args:
-        dispatch (Callable): workspace op dispatcher.
+        dispatch (DispatchFn): workspace op dispatcher.
         gitdir (str): absolute virtual path of this checkout's git
             directory.
         state (IndexState): what the index should now say.

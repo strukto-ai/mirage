@@ -23,7 +23,8 @@ import {
   oldOptionError,
   unknownOptionError,
 } from '../../../commands/spec/usage.ts'
-import type { CommandSpec, FlagValue } from '../../../commands/spec/types.ts'
+import type { CommandSpec } from '../../../commands/spec/types.ts'
+import type { ParsedCommand } from './types.ts'
 import { PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
@@ -62,23 +63,7 @@ export function parseFlags(
   // env-supplied int would go unchecked and an env-supplied path would
   // stay a bare string.
   env?: Readonly<Record<string, string>>,
-): [
-  PathSpec[],
-  string[],
-  Record<string, FlagValue>,
-  string[],
-  string[],
-  [string, readonly string[]][],
-  string[],
-  string[],
-  [string, string, readonly string[]][],
-  [string, string][],
-  [string, string][],
-  string[],
-  string | null,
-  string[],
-  string[],
-] {
+): ParsedCommand {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
   for (const item of parts) {
@@ -112,23 +97,23 @@ export function parseFlags(
         texts.push(value)
       }
     }
-    return [
+    return {
       paths,
       texts,
       flagKwargs,
-      parsed.warnings,
-      parsed.invalidOptions,
-      parsed.ambiguousOptions,
-      parsed.optionErrorKinds,
-      parsed.needsValueOptions,
-      parsed.invalidValueOptions,
-      parsed.invalidIntOptions,
-      parsed.invalidFloatOptions,
-      parsed.missingRequiredOptions,
-      parsed.oldOptionNeedsValue,
-      parsed.missingRequiredOperands,
-      parsed.typedDests,
-    ]
+      warnings: parsed.warnings,
+      invalidOptions: parsed.invalidOptions,
+      ambiguousOptions: parsed.ambiguousOptions,
+      optionErrorKinds: parsed.optionErrorKinds,
+      needsValueOptions: parsed.needsValueOptions,
+      invalidValueOptions: parsed.invalidValueOptions,
+      invalidIntOptions: parsed.invalidIntOptions,
+      invalidFloatOptions: parsed.invalidFloatOptions,
+      missingRequiredOptions: parsed.missingRequiredOptions,
+      oldOptionNeedsValue: parsed.oldOptionNeedsValue,
+      missingRequiredOperands: parsed.missingRequiredOperands,
+      typedDests: parsed.typedDests,
+    }
   }
 
   const paths: PathSpec[] = []
@@ -137,49 +122,63 @@ export function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, [], [], [], [], [], [], [], [], [], null, [], []]
+  return {
+    paths,
+    texts,
+    flagKwargs: {},
+    warnings: [],
+    invalidOptions: [],
+    ambiguousOptions: [],
+    optionErrorKinds: [],
+    needsValueOptions: [],
+    invalidValueOptions: [],
+    invalidIntOptions: [],
+    invalidFloatOptions: [],
+    missingRequiredOptions: [],
+    oldOptionNeedsValue: null,
+    missingRequiredOperands: [],
+    typedDests: [],
+  }
 }
 
 // GNU-shaped refusal for option errors the parser reported. find is
 // exempt: its expression tokens are validated by parseFindExpression,
-// which raises the GNU predicate error itself.
-export function optionError(
-  cmdName: string,
-  invalid: readonly string[],
-  ambiguous: readonly [string, readonly string[]][],
-  errorKinds: readonly string[],
-  needsValue: readonly string[],
-  invalidValue: readonly [string, string, readonly string[]][],
-  invalidInt: readonly [string, string][],
-  invalidFloat: readonly [string, string][],
-  missingRequired: readonly string[],
-  oldOptionNeedsValue: string | null = null,
-): [Uint8Array, number] | null {
+// which raises the GNU predicate error itself. Takes the whole
+// ParsedCommand, mirroring Python's `option_error(cmd_name, parsed)`.
+export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array, number] | null {
   if (cmdName === 'find') return null
   // An old-style cluster short of an argument outranks every scan error
   // below: tar counts the cluster's needs before argp validates a letter,
   // so `tar Qf` and `tar fQ` both name f, not Q.
-  if (oldOptionNeedsValue !== null) return oldOptionError(cmdName, oldOptionNeedsValue)
+  if (parsed.oldOptionNeedsValue !== null) {
+    return oldOptionError(cmdName, parsed.oldOptionNeedsValue)
+  }
   // Scan-order between unknown and ambiguous options: GNU stops at the
   // first offending token, so `grep --c --bogus` reports the ambiguity
   // and the reversed line reports --bogus.
-  const ambiguousFirst = ambiguous[0]
-  if (errorKinds[0] === 'ambiguous' && ambiguousFirst !== undefined) {
+  const ambiguousFirst = parsed.ambiguousOptions[0]
+  if (parsed.optionErrorKinds[0] === 'ambiguous' && ambiguousFirst !== undefined) {
     return ambiguousOptionError(cmdName, ...ambiguousFirst)
   }
-  if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
+  if (parsed.invalidOptions.length > 0) {
+    return unknownOptionError(cmdName, parsed.invalidOptions[0] ?? '')
+  }
   if (ambiguousFirst !== undefined) return ambiguousOptionError(cmdName, ...ambiguousFirst)
-  if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
+  if (parsed.needsValueOptions.length > 0) {
+    return missingValueError(cmdName, parsed.needsValueOptions[0] ?? '')
+  }
   // Numeric-typed values before choices, argparse's order (choices are
   // checked against the converted value), matching the walk's finishNode:
   // a non-numeric value on an int/float option that also declares choices
   // reports the conversion failure, not the choice list.
-  const badInt = invalidInt[0]
+  const badInt = parsed.invalidIntOptions[0]
   if (badInt !== undefined) return invalidIntError(cmdName, ...badInt)
-  const badFloat = invalidFloat[0]
+  const badFloat = parsed.invalidFloatOptions[0]
   if (badFloat !== undefined) return invalidFloatError(cmdName, ...badFloat)
-  const badValue = invalidValue[0]
+  const badValue = parsed.invalidValueOptions[0]
   if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
-  if (missingRequired.length > 0) return missingRequiredError(cmdName, missingRequired[0] ?? '')
+  if (parsed.missingRequiredOptions.length > 0) {
+    return missingRequiredError(cmdName, parsed.missingRequiredOptions[0] ?? '')
+  }
   return null
 }

@@ -189,7 +189,6 @@ describe('Workspace.snapshot / load — filenames with spaces and unicode', () =
   it('roundtrips RAM filenames containing spaces and unicode chars', async () => {
     const src = buildWorkspace()
     const srcMount = src.mount('/data/')
-    if (srcMount === null) throw new Error('/data/ mount missing')
     const srcRam = srcMount.resource as RAMResource
     const ENC = new TextEncoder()
     srcRam.store.files.set('/my file.txt', ENC.encode('with spaces'))
@@ -205,7 +204,6 @@ describe('Workspace.snapshot / load — filenames with spaces and unicode', () =
       shellParser: parser,
     })
     const dstMount = loaded.mount('/data/')
-    if (dstMount === null) throw new Error('/data/ mount missing')
     const dstRam = dstMount.resource as RAMResource
     const DEC = new TextDecoder()
     expect(DEC.decode(dstRam.store.files.get('/my file.txt'))).toBe('with spaces')
@@ -279,7 +277,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(def.env.FOO).toBe('bar')
     const w2 = ws2.sessionManager.get('worker')
     expect(w2.cwd).toBe('/data')
-    expect(w2.env).toEqual({ ROLE: 'bg' })
+    expect(w2.env).toEqual({ ROLE: 'bg', PWD: '/data' })
     const jobs2 = ws2.jobTable.listJobs()
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')

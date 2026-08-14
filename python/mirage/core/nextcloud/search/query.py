@@ -80,10 +80,10 @@ def compile_predicate(node: PredNode) -> CompiledPredicate | None:
     if isinstance(node, Name):
         if "[" in node.pattern:
             return None
-        return CompiledPredicate(name_condition(node))
+        return CompiledPredicate(name_condition(node), negatable=True)
     if isinstance(node, Type):
         if node.kind == FindType.DIRECTORY:
-            return CompiledPredicate(is_collection())
+            return CompiledPredicate(is_collection(), negatable=True)
         if node.kind == FindType.FILE:
             return CompiledPredicate(not_collection())
         return None
@@ -91,9 +91,17 @@ def compile_predicate(node: PredNode) -> CompiledPredicate | None:
         compiled = compile_predicate(node.kid)
         if compiled is None or compiled.condition is None:
             return None
+        # Nextcloud inverts a `<d:not>` by swapping the comparison inside it
+        # for its opposite, so the only thing it can negate is a single
+        # comparison; anything else raises server-side and comes back as a
+        # 500. Refusing here is what falls the whole find back to the scan
+        # walk, which has no such limit.
+        if not compiled.negatable:
+            return None
         return CompiledPredicate(negate(compiled.condition))
     if isinstance(node, (And, Or)):
         conditions: list[XmlElement] = []
+        negatable = False
         for kid in node.kids:
             compiled = compile_predicate(kid)
             if compiled is None:
@@ -103,11 +111,16 @@ def compile_predicate(node: PredNode) -> CompiledPredicate | None:
                     return None
                 continue
             conditions.append(compiled.condition)
+            negatable = compiled.negatable
         if not conditions:
             return CompiledPredicate(None) if isinstance(node, And) else None
         operation = (BooleanOperation.AND
                      if isinstance(node, And) else BooleanOperation.OR)
-        return CompiledPredicate(combine(operation, conditions))
+        # `combine` returns a lone condition unwrapped, so a one-armed group
+        # is still exactly whatever that arm was, negatable included. With two
+        # or more arms the result is a `<d:and>`/`<d:or>`, which is not.
+        return CompiledPredicate(combine(operation, conditions),
+                                 negatable=len(conditions) == 1 and negatable)
     return None
 
 

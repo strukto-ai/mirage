@@ -24,6 +24,7 @@ from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import VFSRuntime
 from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.utils.errors import NoMountError, no_mount
 from mirage.utils.path import owner_prefix
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
@@ -202,10 +203,29 @@ class MountRegistry:
         return m.resource, resource_path, m.mode
 
     def mount_for_prefix(self, prefix: str) -> MountEntry:
+        """The mount at exactly this prefix; raises NoMountError for none.
+
+        Callers that expect the miss branch on ``try_mount_for_prefix``
+        returning None instead of catching.
+        """
+        m = self.try_mount_for_prefix(prefix)
+        if m is None:
+            raise NoMountError(f"no mount with prefix {prefix!r}")
+        return m
+
+    def try_mount_for_prefix(self, prefix: str) -> MountEntry | None:
+        """The mount at exactly this prefix, or None when none matches.
+
+        The argument is normalized like ``mount``/``unmount`` take it, so
+        the registration spelling ("/data", "data/") finds the stored
+        "/data/" entry (mirrors the TS twin).
+        """
+        stripped = prefix.strip("/")
+        norm = "/" + stripped + "/" if stripped else "/"
         for m in self._mounts:
-            if m.prefix == prefix:
+            if m.prefix == norm:
                 return m
-        raise ValueError(f"no mount with prefix {prefix!r}")
+        return None
 
     def limit_override(self, prefix: str, name: str) -> Limit | None:
         """One mount's configured cap for a command or op name.
@@ -224,9 +244,7 @@ class MountRegistry:
         return None
 
     def is_mount_root(self, path: str) -> bool:
-        stripped = path.strip("/")
-        norm = "/" + stripped + "/" if stripped else "/"
-        return any(m.prefix == norm for m in self._mounts)
+        return self.try_mount_for_prefix(path) is not None
 
     def descendant_mounts(self, path: str) -> list[MountEntry]:
         """Mounts whose prefix is strictly under `path`.
@@ -251,11 +269,25 @@ class MountRegistry:
         return out
 
     def mount_for(self, path: str) -> MountEntry:
-        """Find the mount that handles this path."""
+        """The mount that handles this path; raises NoMountError for none.
+
+        The lookup contract pair: ``mount_for`` is for callers whose path
+        must be mounted (a miss is a broken invariant and propagates as a
+        typed NoMountError), ``try_mount_for`` is for callers with a real
+        fallback for the miss. Never catch around this method — call the
+        try variant instead.
+        """
+        m = self.try_mount_for(path)
+        if m is None:
+            raise no_mount(path)
+        return m
+
+    def try_mount_for(self, path: str) -> MountEntry | None:
+        """The mount that handles this path, or None when none does."""
         owner = owner_prefix((m.prefix for m in self._mounts), path)
         if owner is None:
-            raise ValueError(f"no mount matches path: {path!r}")
-        return self.mount_for_prefix(owner)
+            return None
+        return self.try_mount_for_prefix(owner)
 
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:
@@ -268,12 +300,17 @@ class MountRegistry:
     def mount_for_command(self, cmd_name: str) -> MountEntry | None:
         """Find a mount that has this command registered.
 
-        Prefers the virtual root mount, then searches other mounts.
+        Prefers the virtual root mount, then searches other mounts. The
+        /dev/ mount never claims a command: it carries the general set
+        like every mount, and letting it win would route pathless
+        commands to the device mount (mirrors the TS scan).
         """
         if (self._root is not None
                 and self._root.resolve_command(cmd_name) is not None):
             return self._root
         for m in self._mounts:
+            if m.prefix == DEV_PREFIX:
+                continue
             if m.resolve_command(cmd_name) is not None:
                 return m
         return None
@@ -332,10 +369,7 @@ class MountRegistry:
         else:
             mount_path = cwd
 
-        try:
-            mount = self.mount_for(mount_path)
-        except ValueError:
-            mount = None
+        mount = self.try_mount_for(mount_path)
 
         if mount is not None and mount.resolve_command(cmd_name) is None:
             if path_scopes:
@@ -411,7 +445,7 @@ class MountRegistry:
         try:
             resource, _, _ = self.resolve(path)
             return resource.name
-        except (ValueError, KeyError):
+        except NoMountError:
             return None
 
     def group_by_mount(

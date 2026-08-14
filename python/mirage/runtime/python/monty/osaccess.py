@@ -15,15 +15,17 @@
 import asyncio
 import errno
 from pathlib import PurePosixPath
-from typing import Any, Callable
+from typing import Any
 
 from mirage.runtime.errors import CrossMountError
+from mirage.runtime.handles import parse_mode
 from mirage.runtime.python.monty.binding import (MemoryFile, MontyFileHandle,
                                                  OSAccess, path_from_arg)
 from mirage.runtime.python.monty.constants import (EXDEV_MESSAGE,
                                                    FILE_EXISTS_MESSAGE)
 from mirage.runtime.python.monty.vfs import MontyVFS
 from mirage.runtime.resolver import MountResolver
+from mirage.runtime.types import DispatchFn
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -56,7 +58,7 @@ class MirageOSAccess(OSAccess):
 
     def __init__(self,
                  loop: asyncio.AbstractEventLoop,
-                 dispatch: Callable[..., Any] | None,
+                 dispatch: DispatchFn | None,
                  environ: dict[str, str],
                  resolver: MountResolver | None = None) -> None:
         super().__init__([], environ=dict(environ))
@@ -68,7 +70,10 @@ class MirageOSAccess(OSAccess):
         return self._vfs.read(virtual)
 
     def _list_remote(self, virtual: str) -> list[str] | None:
-        return self._vfs.readdir(virtual)
+        entries = self._vfs.readdir(virtual)
+        if entries is None:
+            return None
+        return [entry.path for entry in entries]
 
     def _tree_bytes(self, path: PurePosixPath) -> bytes | None:
         entry = self._get_entry(path)
@@ -164,9 +169,22 @@ class MirageOSAccess(OSAccess):
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         self._ensure_file(path)
-        if any(c in mode for c in ("w", "a", "x", "+")):
+        facts = parse_mode(mode)
+        if facts.writable:
             self._ensure_dir(path.parent)
-        return super().path_open(path, mode)
+        existed = self._get_entry(path) is not None
+        handle = super().path_open(path, mode)
+        # The mode's open-time effect on the mount, the same
+        # establishing op quickjs's shim and wasi's path_open dispatch:
+        # 'w' truncates what exists and creates what does not, 'a'
+        # creates what does not. Without it a bare open/close never
+        # flushes (there is no delta), so the file either kept its old
+        # bytes or never existed at all.
+        if existed and facts.truncate:
+            self._vfs.truncate(str(path))
+        elif not existed and facts.create:
+            self._vfs.create(str(path))
+        return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
         self._ensure_file(path_from_arg(path))
