@@ -18,6 +18,7 @@ import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
 import { visibleEnv } from '../session/state.ts'
+import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { shlexSplit } from '../../utils/shlex.ts'
@@ -206,7 +207,26 @@ export async function expandArith(
   return parts.join(' ')
 }
 
+// Expand a tree-sitter node to the string it stands for.
 export async function expandNode(
+  tsNode: TSNodeLike,
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  view?: SessionView,
+): Promise<string> {
+  return unmarkGlobs(await expandNodeMarked(tsNode, session, executeFn, callStack, view))
+}
+
+/**
+ * Expand a node, marking the glob characters quoting made literal.
+ *
+ * Same string as `expandNode`, except that a glob character quoting
+ * neutralized travels under its own mark. Only pathname
+ * expansion cares, so this is what `expandWords` reads while every other
+ * caller takes the unmarked wrapper above.
+ */
+export async function expandNodeMarked(
   tsNode: TSNodeLike,
   session: Session,
   executeFn: ExecuteFn,
@@ -215,14 +235,16 @@ export async function expandNode(
 ): Promise<string> {
   const ntype = tsNode.type
 
-  if (ntype === NT.WORD) return expandTilde(unescapeUnquoted(tsNode.text), homeDir(session))
+  if (ntype === NT.WORD) {
+    return expandTilde(unescapeUnquoted(markEscapedGlobs(tsNode.text)), homeDir(session))
+  }
   if (ntype === NT.NUMBER) return tsNode.text
   if (ntype === NT.COMMAND_NAME) {
     // The name is a word like any other: $CMD, "quoted", $(sub) all
     // expand. A bare word has one named child (or none) and falls
     // through to its own expansion rule.
     const child = tsNode.namedChildren[0]
-    if (child !== undefined) return expandNode(child, session, executeFn, callStack, view)
+    if (child !== undefined) return expandNodeMarked(child, session, executeFn, callStack, view)
     return tsNode.text
   }
 
@@ -315,19 +337,19 @@ export async function expandNode(
   }
 
   if (ntype === NT.CONCATENATION) {
+    // Each piece carries its own quoting, which is the whole reason
+    // marks are per character: `'*'?.txt` joins a marked star to a live
+    // question mark and still globs, on the `?` alone. A $"..." arrives
+    // as an anonymous `$` token followed by the string node; the `$` is
+    // the translation marker, not text. A bare trailing `$` (a$) has no
+    // string after it and stays literal.
     const parts: string[] = []
     const children = tsNode.children
     for (let position = 0; position < children.length; position += 1) {
       const child = children[position]
       if (child === undefined) continue
-      // A $"..." in a concatenation arrives as an anonymous `$` token
-      // followed by the string node; the `$` is the translation
-      // marker, not text. A bare trailing `$` (a$) has no string after
-      // it and stays literal.
-      if (child.type === '$' && children[position + 1]?.type === NT.STRING) {
-        continue
-      }
-      parts.push(await expandNode(child, session, executeFn, callStack, view))
+      if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
+      parts.push(await expandNodeMarked(child, session, executeFn, callStack, view))
     }
     return parts.join('')
   }
@@ -347,7 +369,10 @@ export async function expandNode(
       if (child.type === NT.DQUOTE) continue
       parts.push(await expandNode(child, session, executeFn, callStack, view))
     }
-    return parts.join('')
+    // Everything the quotes enclose is literal, the text and any value
+    // expanded inside it alike: "$p"?.txt globs on the `?` while
+    // $p?.txt globs on whatever `p` holds too.
+    return markGlobs(parts.join(''))
   }
 
   if (ntype === NT.STRING_CONTENT) {
@@ -364,12 +389,12 @@ export async function expandNode(
 
   if (ntype === NT.RAW_STRING) {
     const raw = tsNode.text
-    return raw.slice(1, -1)
+    return markGlobs(raw.slice(1, -1))
   }
 
   if (ntype === NT.ANSI_C_STRING) {
     const raw = tsNode.text
-    return decodeAnsiC(raw.slice(2, -1))
+    return markGlobs(decodeAnsiC(raw.slice(2, -1)))
   }
 
   if (ntype === NT.TRANSLATED_STRING) {
@@ -378,7 +403,7 @@ export async function expandNode(
     // plain double-quote semantics.
     for (const child of tsNode.namedChildren) {
       if (child.type === NT.STRING) {
-        return expandNode(child, session, executeFn, callStack, view)
+        return expandNodeMarked(child, session, executeFn, callStack, view)
       }
     }
     return ''

@@ -20,9 +20,12 @@ from mirage.accessor.base import NOOPAccessor
 from mirage.context import reset_current_session, set_current_session
 from mirage.types import HiddenPaths, PathSpec
 from mirage.utils.glob_walk import (DEFAULT_MAX_GLOB_MATCHES, expand_pattern,
-                                    has_glob, is_word_shaped,
-                                    make_resolve_glob, resolve_glob_with,
-                                    spell_match)
+                                    glob_pattern, has_glob, is_word_shaped,
+                                    literal_word, make_resolve_glob,
+                                    mark_escaped_globs, mark_globs,
+                                    resolve_glob_with, spell_match,
+                                    unmark_globs)
+from mirage.workspace.expand.node import _unescape_unquoted
 from mirage.workspace.session.session import Session
 
 TREE = {
@@ -74,6 +77,77 @@ def test_has_glob():
     assert has_glob("x?")
     assert has_glob("[ab]")
     assert not has_glob("page.md")
+
+
+def test_mark_globs_roundtrips_and_hides_from_has_glob():
+    marked = mark_globs("a*b?c[d")
+    assert not has_glob(marked)
+    assert unmark_globs(marked) == "a*b?c[d"
+    assert len(marked) == len("a*b?c[d")
+    # Nothing else moves, and a text with no glob character is untouched.
+    assert mark_globs("page.md") == "page.md"
+    assert unmark_globs("page.md") == "page.md"
+
+
+def test_mark_globs_is_per_character():
+    # The word bash globs on the `?` alone: only the star is quoted.
+    word = mark_globs("*") + "?.txt"
+    assert has_glob(word)
+    assert unmark_globs(word) == "*?.txt"
+    assert glob_pattern(word) == "[*]?.txt"
+
+
+def test_glob_pattern_makes_a_marked_char_literal():
+    assert glob_pattern(mark_globs("*")) == "[*]"
+    assert glob_pattern(mark_globs("?")) == "[?]"
+    assert glob_pattern(mark_globs("[")) == "[[]"
+    # A live glob character is left alone, so the two mix in one segment.
+    assert glob_pattern("*" + mark_globs("?")) == "*[?]"
+    assert glob_pattern("plain.txt") == "plain.txt"
+
+
+def test_mark_escaped_globs_reads_backslashes_like_bash():
+
+    def marked(text: str) -> bool:
+        return has_glob(_unescape_unquoted(mark_escaped_globs(text)))
+
+    assert marked("Demo_*")
+    assert marked("x?")
+    assert marked("[ab]")
+    assert not marked("page.md")
+    assert not marked("\\*.txt")
+    assert not marked("a\\?b")
+    assert not marked("\\[ab]")
+    assert marked("a\\*b*c")
+    # An escaped backslash does not quote what follows it.
+    assert marked("\\\\*")
+    assert not marked("\\\\\\*")
+    # A trailing backslash quotes nothing.
+    assert not marked("a\\")
+
+
+def test_literal_word_freezes_a_pattern_that_carried_marks():
+    spec = PathSpec(virtual="/data/" + mark_globs("*") + "?.txt",
+                    directory="/data/",
+                    resource_path=mark_globs("*") + "?.txt",
+                    pattern=mark_globs("*") + "?.txt",
+                    resolved=False)
+    out = literal_word(spec)
+    assert isinstance(out, PathSpec)
+    # The word after quote removal, and no pattern left to glob again.
+    assert out.virtual == "/data/*?.txt"
+    assert out.pattern is None
+    assert out.resolved
+
+
+def test_literal_word_leaves_an_unmarked_spec_untouched():
+    spec = PathSpec(virtual="/data/*.txt",
+                    directory="/data/",
+                    resource_path="*.txt",
+                    pattern="*.txt",
+                    resolved=False)
+    assert literal_word(spec) is spec
+    assert literal_word("plain") == "plain"
 
 
 @pytest.mark.asyncio

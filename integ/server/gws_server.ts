@@ -405,6 +405,15 @@ function parseDriveQuery(q: string): QueryClause[] {
   const parts: string[] = []
   for (let i = 0; i < q.length; i += 1) {
     const c = q[i] as string
+    // Drive escapes a quote inside a quoted value as \', so the splitter
+    // has to step over the pair the way the clause regexes below already
+    // do; toggling on it would end the value early and swallow the ` and `
+    // that follows into the same clause.
+    if (depth && c === '\\' && i + 1 < q.length) {
+      current += c + (q[i + 1] as string)
+      i += 1
+      continue
+    }
     if (c === "'") depth = !depth
     if (!depth && q.slice(i, i + 5) === ' and ') {
       parts.push(current)

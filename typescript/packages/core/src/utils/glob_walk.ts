@@ -22,10 +22,124 @@ import { compareCodePoints } from './sort.ts'
 
 export const GLOB_CHARS = ['*', '?', '[']
 
+// A quoted glob character keeps travelling as a character, under a
+// private mark, because bash tracks quoting per character and not per
+// word: `'*'?.txt` still globs, on the `?` alone, and matches only a
+// name starting with a literal star. A mark is one character wide, so
+// every length relation between a spec's virtual, directory,
+// resourcePath and rawPath keeps holding, and no mark is a glob
+// character, so `hasGlob` already answers "does this word still glob".
+// The marks are Unicode noncharacters, permanently unassigned and never
+// valid interchange text -- the same impossible input `brace.ts` assumes
+// away when it delimits its inert atoms with NUL.
+const GLOB_MARKS: Readonly<Record<string, string>> = {
+  '*': '\uFDD0',
+  '?': '\uFDD1',
+  '[': '\uFDD2',
+}
+const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(GLOB_MARKS).map(([ch, mark]) => [mark, ch]),
+)
+// One native pass, not a per-character rebuild: every expanded word is
+// marked and unmarked, so a JS-level loop made the cost quadratic in a
+// loop that grows one word (`while true; do export X=$X.; done`).
+const GLOB_CHAR_RE = /[*?[]/g
+const GLOB_MARK_RE = /[\uFDD0-\uFDD2]/g
+
 export const DEFAULT_MAX_GLOB_MATCHES = 10000
 
 export function hasGlob(segment: string): boolean {
   return GLOB_CHARS.some((ch) => segment.includes(ch))
+}
+
+// Quote every glob character, the way enclosing quotes would.
+export function markGlobs(text: string): string {
+  return text.replace(GLOB_CHAR_RE, (ch) => GLOB_MARKS[ch] ?? ch)
+}
+
+// The literal spelling: every quoted glob character as itself.
+export function unmarkGlobs(text: string): string {
+  return text.replace(GLOB_MARK_RE, (ch) => GLOB_CHAR_OF[ch] ?? ch)
+}
+
+// Whether text still carries a glob character quoting made literal.
+function hasGlobMarks(text: string): boolean {
+  return Object.keys(GLOB_CHAR_OF).some((mark) => text.includes(mark))
+}
+
+/**
+ * Mark the glob characters a backslash quotes in raw word text.
+ *
+ * Read the way bash reads an unquoted word: `\*` is a quoted star and
+ * `\\*` is a literal backslash followed by a live star. The backslash is
+ * left in place for the quote-removal pass that follows, which drops it
+ * and leaves the mark behind.
+ */
+export function markEscapedGlobs(text: string): string {
+  if (!text.includes('\\')) return text
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i] ?? ''
+    if (ch === '\\' && i + 1 < text.length) {
+      const next = text[i + 1] ?? ''
+      out += ch + (GLOB_MARKS[next] ?? next)
+      i += 2
+      continue
+    }
+    out += ch
+    i += 1
+  }
+  return out
+}
+
+/**
+ * A marked segment as the pattern fnmatch has to see.
+ *
+ * fnmatch has no escape character, so a quoted glob character is handed
+ * over as its own one-character class, exactly what `escapeGlob` builds
+ * for text that is literal throughout.
+ */
+export function globPattern(segment: string): string {
+  return segment.replace(GLOB_MARK_RE, (ch) => `[${GLOB_CHAR_OF[ch] ?? ch}]`)
+}
+
+// Drop the marks from a spec, leaving the literal path it names.
+function unmarkSpec(spec: PathSpec): PathSpec {
+  return new PathSpec({
+    virtual: unmarkGlobs(spec.virtual),
+    directory: unmarkGlobs(spec.directory),
+    resourcePath: unmarkGlobs(spec.resourcePath),
+    rawPath: unmarkGlobs(spec.rawPath),
+    pattern: spec.pattern === null ? null : unmarkGlobs(spec.pattern),
+    resolved: spec.resolved,
+  })
+}
+
+/**
+ * The word after quote removal, once glob resolution is over.
+ *
+ * The marks come off here, and a word still carrying a pattern is frozen
+ * as its literal: that pattern outlived its marks (an unmatched glob,
+ * `set -f`, a backend that could not resolve it), and reading the
+ * unmarked text as a pattern again would let a quoted metacharacter
+ * match -- `rm '/data/*'?.txt` would be back to reaching every name the
+ * live `?` alone would. A word that carried no marks is returned
+ * untouched.
+ */
+export function literalWord(item: string | PathSpec): string | PathSpec {
+  if (typeof item === 'string') return unmarkGlobs(item)
+  if (!hasGlobMarks(item.virtual) && !hasGlobMarks(item.pattern ?? '')) return item
+  const spec = unmarkSpec(item)
+  if (spec.pattern === null) return spec
+  return new PathSpec({
+    virtual: spec.virtual,
+    directory: spec.directory,
+    resourcePath: spec.resourcePath,
+    rawPath: spec.rawPath,
+    pattern: null,
+    resolved: true,
+  })
 }
 
 /**
@@ -99,15 +213,19 @@ export async function resolveGlobWith<A, I>(
         pathAllowed(m.virtual),
       )
       if (matched.length === 0 && isWordShaped(p)) {
+        // The literal is the word after quote removal, so the marks come
+        // off here.
         result.push(
-          new PathSpec({
-            virtual: p.virtual,
-            directory: p.directory,
-            resourcePath: p.resourcePath,
-            pattern: null,
-            resolved: true,
-            rawPath: p.rawPath,
-          }),
+          unmarkSpec(
+            new PathSpec({
+              virtual: p.virtual,
+              directory: p.directory,
+              resourcePath: p.resourcePath,
+              pattern: null,
+              resolved: true,
+              rawPath: p.rawPath,
+            }),
+          ),
         )
         continue
       }
@@ -146,10 +264,13 @@ export async function expandPattern<A, I>(
   }
   let first = segments.findIndex((seg) => hasGlob(seg))
   if (first < 0) first = segments.length - 1
-  const base = rstripSlash(prefix + segments.slice(0, first).join('/')) || '/'
+  // The head above the first glob segment is a real directory, so a glob
+  // character quoted inside it is part of the name to list.
+  const base = unmarkGlobs(rstripSlash(prefix + segments.slice(0, first).join('/')) || '/')
   let level = [base]
   for (const seg of segments.slice(first)) {
     const nextLevel: string[] = []
+    const matcher = globPattern(seg)
     for (const parent of level) {
       const spec = PathSpec.fromStrPath(parent, rekey(path.virtual, path.resourcePath, parent))
       let entries: string[]
@@ -161,14 +282,14 @@ export async function expandPattern<A, I>(
       }
       for (const e of entries) {
         const name = rstripSlash(e).split('/').pop() ?? ''
-        if (fnmatch(name, seg)) nextLevel.push(e)
+        if (fnmatch(name, matcher)) nextLevel.push(e)
       }
       if (children !== undefined) {
         // A nested mount root or a link is a real child of this parent
         // whether or not the backend could list it.
         const baseDir = rstripSlash(parent)
         for (const name of children(`${baseDir}/`)) {
-          if (fnmatch(name, seg)) nextLevel.push(`${baseDir}/${name}`)
+          if (fnmatch(name, matcher)) nextLevel.push(`${baseDir}/${name}`)
         }
       }
     }
@@ -185,6 +306,7 @@ export async function expandPattern<A, I>(
   // form and keep the resolved virtual.
   if (path.rawPath === path.virtual) return matches
   const walked = segments.length - first
+  const raw = unmarkGlobs(path.rawPath)
   return matches.map(
     (m) =>
       new PathSpec({
@@ -193,7 +315,7 @@ export async function expandPattern<A, I>(
         resourcePath: m.resourcePath,
         pattern: m.pattern,
         resolved: m.resolved,
-        rawPath: spellMatch(path.rawPath, m.virtual, walked),
+        rawPath: spellMatch(raw, m.virtual, walked),
       }),
   )
 }

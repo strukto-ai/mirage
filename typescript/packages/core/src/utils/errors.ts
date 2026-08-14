@@ -14,6 +14,7 @@
 
 import { gnuPhrase } from '../errors/posix.ts'
 import { dropTrailingSegments, respellOne } from './path.ts'
+import { quotesOperands, shellQuote } from './quote.ts'
 import { rstripSlash } from './slash.ts'
 
 export interface FsError extends Error {
@@ -305,12 +306,15 @@ export function operandSpelling(
 // (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
 // Python fs_error_line. Used by read-family commands that keep processing
 // remaining operands after one fails, where the caller holds the operand.
+// A command in SHELL_QUOTED_COMMANDS reports the operand shell-quoted when
+// it needs it ('*.txt'), the way GNU does; every other command reports it
+// bare.
 export function fsErrorLine(
   cmdName: string,
   path: string | { virtual: string; rawPath?: string },
   err: unknown,
 ): string {
-  const label = virtualOf(path)
+  const label = quotesOperands(cmdName) ? shellQuote(virtualOf(path)) : virtualOf(path)
   const strerror = gnuStrerror((err as { code?: string }).code)
   if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
   return `${cmdName}: ${label}\n`

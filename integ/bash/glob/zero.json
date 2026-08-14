@@ -30,7 +30,7 @@
       "command": "cat *.nope 2>&1",
       "expect": {
         "exit": 1,
-        "stdout": "cat: *.nope: No such file or directory\n",
+        "stdout": "cat: '*.nope': No such file or directory\n",
         "stderr": ""
       }
     }

@@ -16,7 +16,7 @@ import posixpath
 import re
 
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import has_glob
+from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
@@ -44,7 +44,11 @@ def classify_word(word: str, registry: MountRegistry,
     - Relative + no glob -> plain text (never a path)
     - No mount match -> plain text
     """
+    # Whether the word globs is read off the marks, but whether it looks
+    # like a path at all is a question about the name itself, so the
+    # shape tests below read the literal spelling.
     word_has_glob = has_glob(word)
+    shape = unmark_globs(word)
 
     if word.startswith("/"):
         mount = registry.try_mount_for(word)
@@ -87,8 +91,8 @@ def classify_word(word: str, registry: MountRegistry,
     # filename pattern (has alphanumeric, dot, or slash alongside
     # glob chars). Bare globs like *, ?, [a-z] are command
     # arguments (e.g. expr 4 * 3), not path patterns.
-    if word_has_glob and ("/" in word or not word.startswith(".")):
-        if not _FILENAME_CHAR.search(word) or _NON_PATH_CHAR.search(word):
+    if word_has_glob and ("/" in word or not shape.startswith(".")):
+        if not _FILENAME_CHAR.search(shape) or _NON_PATH_CHAR.search(shape):
             return word
         return relative_spec(word, registry, cwd)
 
@@ -99,7 +103,7 @@ def classify_word(word: str, registry: MountRegistry,
     #   cat file.txt   (file path — should resolve)
     #   for f in file.txt  (loop value — should stay text)
     # Users must use "./file.txt" or absolute paths for bare filenames.
-    if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
+    if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(shape):
         return relative_spec(word, registry, cwd)
 
     return word

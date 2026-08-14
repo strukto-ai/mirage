@@ -60,7 +60,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /data/sessvis/*.key: No such file or directory\n"
+        "stderr": "cat: '/data/sessvis/*.key': No such file or directory\n"
       }
     },
     {

@@ -26,6 +26,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
+from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.command.routing import (path_flag_scopes,
@@ -691,7 +692,10 @@ async def _run_argv(
                     # protects (GNU keeps it through `rm -rf dlink/`).
                     continue
                 if item.pattern:
-                    await namespace.unlink_glob(item.virtual)
+                    # A quoted metacharacter is a literal here too,
+                    # so the node table is matched with the same
+                    # pattern the backend resolved with.
+                    await namespace.unlink_glob(glob_pattern(item.virtual))
                 else:
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)

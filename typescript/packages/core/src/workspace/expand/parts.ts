@@ -16,6 +16,7 @@ import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
+import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -23,7 +24,13 @@ import { homeDir } from '../session/shell_dirs.ts'
 import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
 import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES, SPLIT_TYPES } from './constants.ts'
-import { expandNode, foldedWhitespace, unescapeUnquoted, type ExecuteFn } from './node.ts'
+import {
+  expandNode,
+  expandNodeMarked,
+  foldedWhitespace,
+  unescapeUnquoted,
+  type ExecuteFn,
+} from './node.ts'
 import { expandArrayAt, isMultiwordAt } from './variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
@@ -35,6 +42,11 @@ import type { TSNodeLike } from '../../shell/types.ts'
 // divergence: bash rewrites `$v{a,b}` to `$va $vb` before parameter
 // expansion; here the prefix keeps its own expansion (`prea preb`),
 // which is the useful reading.
+//
+// Quoting rides along per character: an atom keeps whatever marks its
+// own expansion produced, and the template's escapes are marked before
+// quote removal drops them, so `{'*',x}` stays literal while `{$p,x}`
+// keeps the value live.
 async function expandBraceWord(
   node: TSNodeLike,
   session: Session,
@@ -48,14 +60,16 @@ async function expandBraceWord(
     if (child.isNamed !== true || BRACE_LITERAL_TYPES.has(child.type)) {
       pieces.push(child.text)
     } else {
-      values.push(await expandNode(child, session, executeFn, callStack, view))
+      values.push(await expandNodeMarked(child, session, executeFn, callStack, view))
       pieces.push(makeInert(values.length - 1))
     }
   }
   const words = expandTemplate(pieces.join(''))
   if (words === null) return null
   const home = homeDir(session)
-  return words.map((w) => substitute(expandTilde(unescapeUnquoted(w), home), values))
+  return words.map((w) =>
+    substitute(expandTilde(unescapeUnquoted(markEscapedGlobs(w)), home), values),
+  )
 }
 
 function stringHasArrayAt(node: TSNodeLike): boolean {
@@ -106,10 +120,21 @@ async function expandStringWithArray(
   // count can. An empty expansion beside it does not rescue the word
   // either: with no parameters, "$u$@" is nothing.
   if (!splatYielded && fragments.length === 1 && fragments[0] === '') return []
-  return fragments
+  // Every fragment came from inside the quotes, so its glob characters
+  // are literal.
+  return fragments.map((f) => markGlobs(f))
 }
 
-export async function expandParts(
+/**
+ * Expand tree-sitter child nodes to words that still know their quoting.
+ *
+ * The words are exactly expandParts', except that a glob character
+ * quoting made literal travels under its own mark, so
+ * `"/data/"*.txt` still globs while `'/data/*'.txt` does not and
+ * `'/data/*'?.txt` globs on the `?` alone. Only pathname expansion reads
+ * these; everything else takes the unmarked `expandParts`.
+ */
+export async function expandWords(
   parts: TSNodeLike[],
   session: Session,
   executeFn: ExecuteFn,
@@ -133,7 +158,7 @@ export async function expandParts(
         continue
       }
     }
-    const expanded = await expandNode(p, session, executeFn, callStack, view)
+    const expanded = await expandNodeMarked(p, session, executeFn, callStack, view)
     if (p.type === NT.COMMAND_SUBSTITUTION) {
       for (const word of expanded.split(/\s+/)) {
         if (word !== '') result.push(word)
@@ -145,8 +170,6 @@ export async function expandParts(
         if (word !== '') result.push(word)
       }
     } else if (p.type === NT.STRING) {
-      // A quoted word stays a word even when it expands to "" (echo ""
-      // or "$EMPTY"), except "$@"/"${a[@]}" which yield zero words.
       // A quoted word stays a word even when it expands to '' (echo ""
       // or "$EMPTY"). The splats that yield zero words instead ("$@",
       // "${a[@]}") never reach here; they took the branch above.
@@ -164,6 +187,16 @@ export async function expandParts(
   return result
 }
 
+export async function expandParts(
+  parts: TSNodeLike[],
+  session: Session,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+): Promise<string[]> {
+  const words = await expandWords(parts, session, executeFn, callStack)
+  return words.map((w) => unmarkGlobs(w))
+}
+
 export async function expandAndClassify(
   words: TSNodeLike[],
   session: Session,
@@ -173,6 +206,10 @@ export async function expandAndClassify(
   callStack: CallStack | null = null,
   view?: SessionView,
 ): Promise<(string | PathSpec)[]> {
-  const expanded = await expandParts(words, session, executeFn, callStack, view)
+  // Words keep their glob marks, because the loop list is glob-resolved
+  // next (`resolveGlobs`, which is where the marks come off): `for f in
+  // '/data/*.txt'` iterates once over the name as typed, like bash,
+  // while `for f in '/data/*'?.txt` still globs on the `?`.
+  const expanded = await expandWords(words, session, executeFn, callStack, view)
   return expanded.map((w) => classifyWord(w, registry, cwd))
 }

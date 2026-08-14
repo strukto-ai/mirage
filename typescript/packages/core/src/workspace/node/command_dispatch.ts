@@ -85,6 +85,7 @@ import {
   prepareMv,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
+import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -877,7 +878,10 @@ async function runArgv(
         // protects (GNU keeps it through `rm -rf dlink/`).
         if (item.rawPath.endsWith('/')) continue
         if (item.pattern !== null) {
-          await namespace.unlinkGlob(item.virtual)
+          // A quoted metacharacter is a literal here too, so the node
+          // table is matched with the same pattern the backend resolved
+          // with.
+          await namespace.unlinkGlob(globPattern(item.virtual))
         } else {
           await namespace.unlink(item.virtual)
           await namespace.purgeUnder(item.virtual)

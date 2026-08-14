@@ -348,7 +348,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cat: /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/nope.jsonl: No such file or directory\n"
+        "stderr": "cat: '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/nope.jsonl': No such file or directory\n"
       }
     },
     {

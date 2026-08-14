@@ -20,7 +20,13 @@ import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { hasGlob as hasGlobChars, spellMatch } from '../../utils/glob_walk.ts'
+import {
+  globPattern,
+  hasGlob as hasGlobChars,
+  literalWord,
+  spellMatch,
+  unmarkGlobs,
+} from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -44,8 +50,9 @@ function namespaceChildren(
   pattern: string,
 ): string[] {
   const base = rstripSlash(directory)
+  const matcher = globPattern(pattern)
   return namespaceNames(registry.mountPrefixes(), links, directory)
-    .filter((name) => fnmatch(name, pattern))
+    .filter((name) => fnmatch(name, matcher))
     .map((name) => `${base}/${name}`)
 }
 
@@ -97,7 +104,7 @@ function toSpecs(
       virtual: base.virtual,
       directory: base.directory,
       resourcePath: base.resourcePath,
-      rawPath: spellMatch(item.rawPath, v, walked),
+      rawPath: spellMatch(unmarkGlobs(item.rawPath), v, walked),
     })
   })
 }
@@ -192,7 +199,9 @@ async function walkSegments(
   const segments = stripSlash(item.virtual).split('/')
   const first = segments.findIndex((seg) => hasGlobChars(seg))
   const walked = segments.length - first
-  let level: string[] = ['/' + segments.slice(0, first).join('/')]
+  // The head above the first glob segment is a real directory, so a glob
+  // character quoted inside it is part of the name to list.
+  let level: string[] = [unmarkGlobs('/' + segments.slice(0, first).join('/'))]
   for (const seg of segments.slice(first)) {
     const gathered: string[] = []
     for (const parent of level) {
@@ -215,8 +224,11 @@ async function walkSegments(
 // one.
 function matchRaw(item: PathSpec, match: PathSpec): PathSpec {
   if (item.rawPath === item.virtual || match.rawPath !== match.virtual) return match
-  if (!match.virtual.startsWith(item.directory)) return match
-  const rawDir = item.rawPath.slice(0, item.rawPath.lastIndexOf('/') + 1)
+  // A mark is one character wide, so the directory's marked and literal
+  // spellings are the same length and this cut holds either way; only the
+  // head that is carried over has to lose its marks.
+  if (!match.virtual.startsWith(unmarkGlobs(item.directory))) return match
+  const rawDir = unmarkGlobs(item.rawPath.slice(0, item.rawPath.lastIndexOf('/') + 1))
   const spelled = rawDir + match.virtual.slice(item.directory.length)
   return new PathSpec({
     virtual: match.virtual,
@@ -236,7 +248,7 @@ export async function resolveGlobs(
 ): Promise<(string | PathSpec)[]> {
   // set -f: skip resolution entirely, so every glob word keeps its
   // literal spelling like a zero-match glob.
-  if (noglob) return [...classified]
+  if (noglob) return classified.map((item) => literalWord(item))
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
@@ -252,11 +264,14 @@ export async function resolveGlobs(
       // root or a link under the globbed directory; with nothing for the
       // namespace to add it keeps the untouched pass-through it had.
       const midPath = hasGlobChars(item.directory)
+      // The parent directory is a real directory to list, so a glob
+      // character quoted inside it is part of its name.
+      const directory = unmarkGlobs(item.directory)
       // The parent is a symlink, so the backend holding the typed path
       // has nothing to list and levelMatches has to follow it first.
-      const linked = !midPath && listingDir(links, item.directory) !== item.directory
+      const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
-        midPath || linked ? [] : namespaceChildren(registry, links, item.directory, item.pattern)
+        midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
       if (!linked && mount.resource.glob === undefined && extra.length === 0) {
         result.push(item)
         continue
@@ -278,7 +293,7 @@ export async function resolveGlobs(
         if (midPath) {
           resolved = await walkSegments(withPrefix, mount, registry, links)
         } else if (linked) {
-          const found = await levelMatches(registry, mount, links, item.directory, item.pattern)
+          const found = await levelMatches(registry, mount, links, directory, item.pattern)
           resolved = toSpecs(
             [...new Set(found)].sort(compareCodePoints),
             withPrefix,
@@ -303,7 +318,9 @@ export async function resolveGlobs(
       result.push(item)
     }
   }
-  return result
+  // Resolution is over, so the quoting the marks carried has done its
+  // work: what leaves is the word after quote removal, matched or not.
+  return result.map((item) => literalWord(item))
 }
 
 // The fixed directory above a word's first glob segment.

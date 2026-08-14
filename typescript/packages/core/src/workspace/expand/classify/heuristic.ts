@@ -16,7 +16,7 @@ import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { posixNormpath } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import { hasGlob } from '../../../utils/glob_walk.ts'
+import { hasGlob, unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { relativeSpec } from './relative.ts'
 
 const FILENAME_CHAR = /[a-zA-Z0-9_./]/
@@ -33,7 +33,11 @@ export function classifyWord(
   registry: MountRegistry,
   cwd: string,
 ): string | PathSpec {
+  // Whether the word globs is read off the marks, but whether it looks
+  // like a path at all is a question about the name itself, so the shape
+  // tests below read the literal spelling.
   const wordHasGlob = hasGlob(word)
+  const shape = unmarkGlobs(word)
 
   if (word.startsWith('/')) {
     const mount = registry.tryMountFor(word)
@@ -76,14 +80,14 @@ export function classifyWord(
     })
   }
 
-  if (wordHasGlob && (word.includes('/') || !word.startsWith('.'))) {
-    if (!FILENAME_CHAR.test(word) || NON_PATH_CHAR.test(word)) {
+  if (wordHasGlob && (word.includes('/') || !shape.startsWith('.'))) {
+    if (!FILENAME_CHAR.test(shape) || NON_PATH_CHAR.test(shape)) {
       return word
     }
     return relativeSpec(word, registry, cwd)
   }
 
-  if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(word)) {
+  if (!wordHasGlob && word.includes('/') && RELATIVE_PATH.test(shape)) {
     return relativeSpec(word, registry, cwd)
   }
 

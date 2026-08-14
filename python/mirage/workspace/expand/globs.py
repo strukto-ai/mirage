@@ -18,7 +18,8 @@ from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
-from mirage.utils.glob_walk import has_glob, spell_match
+from mirage.utils.glob_walk import (glob_pattern, has_glob, literal_word,
+                                    spell_match, unmark_globs)
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
 from mirage.workspace.mount import MountRegistry
@@ -44,10 +45,11 @@ def _namespace_children(registry: MountRegistry, links: NamespaceLinks | None,
         pattern (str): the glob segment matched against child names.
     """
     base = directory.rstrip("/")
+    matcher = glob_pattern(pattern)
     return [
         f"{base}/{name}" for name in namespace_names(
             [m.prefix for m in registry.mounts()], links, directory)
-        if fnmatch(name, pattern)
+        if fnmatch(name, matcher)
     ]
 
 
@@ -219,7 +221,9 @@ async def _walk_segments(item: PathSpec, mount: MountEntry, prefix: str,
     segments = item.virtual.strip("/").split("/")
     first = next(i for i, seg in enumerate(segments) if has_glob(seg))
     walked = len(segments) - first
-    level = ["/" + "/".join(segments[:first])]
+    # The head above the first glob segment is a real directory, so a
+    # glob character quoted inside it is part of the name to list.
+    level = [unmark_globs("/" + "/".join(segments[:first]))]
     for seg in segments[first:]:
         gathered: list[str] = []
         for parent in level:
@@ -246,7 +250,7 @@ def _to_specs(virtuals: list[str], item: PathSpec, registry: MountRegistry,
         mount (MountEntry): the mount owning the word.
         walked (int): segment count from the word's first glob segment.
     """
-    raw = item.raw_path
+    raw = unmark_globs(item.raw_path)
     return [
         dataclasses.replace(PathSpec.from_str_path(
             v, mount_key(v,
@@ -273,9 +277,12 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
     raw = item.raw_path
     if raw == item.virtual or match.raw_path != match.virtual:
         return match
-    if not match.virtual.startswith(item.directory):
+    # A mark is one character wide, so the directory's marked and
+    # literal spellings are the same length and this cut holds either
+    # way; only the head that is carried over has to lose its marks.
+    if not match.virtual.startswith(unmark_globs(item.directory)):
         return match
-    raw_dir = raw[:raw.rfind("/") + 1]
+    raw_dir = unmark_globs(raw[:raw.rfind("/") + 1])
     spelled = raw_dir + match.virtual[len(item.directory):]
     return dataclasses.replace(match, raw_path=spelled)
 
@@ -304,7 +311,7 @@ async def resolve_globs(
             does. None outside a workspace.
     """
     if noglob:
-        return list(classified)
+        return [literal_word(item) for item in classified]
     result: list[str | PathSpec] = []
     for item in classified:
         if isinstance(item, PathSpec) and item.pattern:
@@ -322,25 +329,27 @@ async def resolve_globs(
                                        resource_path=mount_key(
                                            item.virtual, prefix))
             try:
+                # The parent directory is a real directory to list, so a
+                # glob character quoted inside it is part of its name.
+                directory = unmark_globs(item.directory)
                 if has_glob(item.directory):
                     resolved = await _walk_segments(item, mount, prefix,
                                                     registry, links)
-                elif _listing_dir(links, item.directory) != item.directory:
+                elif _listing_dir(links, directory) != directory:
                     # The parent is a symlink, so the backend holding the
                     # typed path has nothing to list; _level_matches
                     # follows it and spells the matches back.
                     resolved = _to_specs(
                         sorted(
-                            set(await
-                                _level_matches(registry, mount, links,
-                                               item.directory, pattern))),
+                            set(await _level_matches(registry, mount, links,
+                                                     directory, pattern))),
                         item, registry, mount, 1)
                 else:
                     resolved = _merge_namespace(
                         item,
                         list(await mount.resource.resolve_glob([item],
                                                                prefix=prefix)),
-                        _namespace_children(registry, links, item.directory,
+                        _namespace_children(registry, links, directory,
                                             pattern), prefix, registry, mount)
                 # bash with nullglob off: a zero-match glob stays the
                 # literal word instead of vanishing.
@@ -355,7 +364,9 @@ async def resolve_globs(
             result.append(item)
         else:
             result.append(item)
-    return result
+    # Resolution is over, so the quoting the marks carried has done its
+    # work: what leaves is the word after quote removal, matched or not.
+    return [literal_word(item) for item in result]
 
 
 def _glob_head(spec: PathSpec) -> str:
