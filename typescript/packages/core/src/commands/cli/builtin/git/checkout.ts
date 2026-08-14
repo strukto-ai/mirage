@@ -37,6 +37,7 @@ import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
+import type { LinkView } from '../../../../ops/types.ts'
 import type { Dispatch, IndexEntry } from './types.ts'
 import { checkOperands, fatal } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
@@ -127,13 +128,14 @@ async function switchTo(
   after: ReadonlyMap<string, TreeEntry>,
   keep: ReadonlySet<string>,
   held: ReadonlyMap<string, IndexEntry>,
+  links: LinkView | null,
 ): Promise<void> {
   for (const [path, entry] of after) {
     const old = before.get(path)
     if (old?.oid === entry.oid && old.mode === entry.mode) continue
     if (keep.has(path)) continue
     const { blob } = await git.readBlob({ ...repoArgs(repo), oid: entry.oid })
-    await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob)
+    await restoreEntry(dispatch, under(repo.location.worktree, path), entry.mode, blob, links)
   }
   for (const path of before.keys()) {
     if (after.has(path)) continue
@@ -242,7 +244,7 @@ export async function checkout(inv: CLIInvocation): Promise<CommandFnResult> {
     if (blocked.length > 0 || clobbered.length > 0) {
       throw new CheckoutConflictError(blocked, clobbered)
     }
-    await switchTo(repo, dispatch, before, after, dirty, state.entries)
+    await switchTo(repo, dispatch, before, after, dirty, state.entries, doors.ns?.links ?? null)
     const attached = creating || known.has(ref)
     if (creating) await writeRef(dispatch, repo.location.commondir, ref, oid)
     if (attached) await setHead(dispatch, repo.location.gitdir, ref)

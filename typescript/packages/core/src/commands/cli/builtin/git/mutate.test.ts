@@ -700,6 +700,52 @@ describe('symlinks', () => {
     const listing = await h.ws.execute('ls -l /repo/link')
     expect(DEC.decode(listing.stdout)).toContain('link -> numbers.txt')
   })
+
+  it('replaces a link with the regular file the other branch records', async () => {
+    // git 2.47: a path that is a symlink on one branch and a regular file on
+    // the other comes back as a regular file, and the file the link pointed at
+    // keeps its own content. Writing through the link instead dereferences it:
+    // the blob lands in numbers.txt, which no branch ever changed, and the link
+    // stays in the working tree while HEAD and the index say a file is there.
+    const h = await harness()
+    expect((await h.run('checkout -b linked'))[0]).toBe(0)
+    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m link'))[0]).toBe(0)
+    expect((await h.run('checkout -b plain'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    await write(h, 'thing', 'PLAIN\n')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    expect((await h.run('checkout linked'))[0]).toBe(0)
+    expect((await h.run('checkout plain'))[0]).toBe(0)
+    const listing = await h.ws.execute('ls -l /repo/thing')
+    expect(DEC.decode(listing.stdout).startsWith('lrwxrwxrwx')).toBe(false)
+    const content = await h.ws.execute('cat /repo/thing')
+    expect(DEC.decode(content.stdout)).toBe('PLAIN\n')
+    const kept = await h.ws.execute('cat /repo/numbers.txt')
+    expect(DEC.decode(kept.stdout)).not.toContain('PLAIN')
+  })
+
+  it('replaces a regular file with the link the other branch records', async () => {
+    // The mirror: the file must not survive under the link it was replaced by,
+    // or removing the link later uncovers content no branch records.
+    const h = await harness()
+    expect((await h.run('checkout -b plainfirst'))[0]).toBe(0)
+    await write(h, 'thing', 'PLAIN\n')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m plain'))[0]).toBe(0)
+    expect((await h.run('checkout -b linkedafter'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    expect((await h.run('add thing'))[0]).toBe(0)
+    expect((await h.run('commit -m link'))[0]).toBe(0)
+    expect((await h.run('checkout plainfirst'))[0]).toBe(0)
+    expect((await h.run('checkout linkedafter'))[0]).toBe(0)
+    await h.ws.execute('rm /repo/thing')
+    const listing = await h.ws.execute('ls /repo/thing')
+    expect(DEC.decode(listing.stderr)).toContain('No such file or directory')
+  })
 })
 
 describe('commit identity', () => {

@@ -46,6 +46,7 @@ from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 
 Tree = dict[bytes, tuple[int, bytes]]
@@ -150,7 +151,8 @@ def _overwritten(after: Tree, untracked: list[str]) -> list[str]:
 
 async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
                   before: Tree, after: Tree, keep: set[str],
-                  staged: dict[bytes, IndexEntry]) -> None:
+                  staged: dict[bytes,
+                               IndexEntry], links: LinkView | None) -> None:
     """Make the working tree and index match the tree being switched to.
 
     Only paths whose recorded content differs are touched, so a file
@@ -169,6 +171,9 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
             rewritten.
         staged (dict[bytes, IndexEntry]): the index as it stands, read
             for the entries of the paths being kept.
+        links (LinkView | None): the name plane's link facts, so an
+            entry that changes between a link and a file replaces what
+            is there rather than writing through it.
     """
     state = await read_index(dispatch, location.gitdir)
     state.entries.clear()
@@ -183,7 +188,7 @@ async def _switch(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
         await restore_entry(dispatch, posixpath.join(location.worktree, name),
-                            mode, blobs[sha])
+                            mode, blobs[sha], links)
     for path in set(before) - set(after):
         name = path.decode("utf-8", errors="replace")
         await remove_file(dispatch, posixpath.join(location.worktree, name))
@@ -282,7 +287,7 @@ async def checkout(
         if blocked or overwritten:
             raise CheckoutConflictError(blocked, overwritten)
         await _switch(dispatch, repo, location, before, after, dirty,
-                      state.entries)
+                      state.entries, links_of(doors))
         attached = creating or ref in known
         if creating:
             await write_ref(dispatch, location.commondir, ref.decode(),

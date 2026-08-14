@@ -16,6 +16,7 @@ import logging
 import posixpath
 
 from mirage.commands.cli.builtin.git.types import SYMLINK
+from mirage.ops.types import LinkView
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec
 from mirage.utils.errors import MISS_ERRORS
@@ -57,8 +58,11 @@ async def entry_bytes(dispatch: DispatchFn, path: str,
     return await read_file(dispatch, path)
 
 
-async def restore_entry(dispatch: DispatchFn, path: str, mode: int,
-                        blob: bytes) -> None:
+async def restore_entry(dispatch: DispatchFn,
+                        path: str,
+                        mode: int,
+                        blob: bytes,
+                        links: LinkView | None = None) -> None:
     """Materialize one tree entry into the working tree.
 
     A 120000 entry is a symlink whose blob is the target string, so it
@@ -67,17 +71,34 @@ async def restore_entry(dispatch: DispatchFn, path: str, mode: int,
     The namespace overwrites a link of the same name, which is what a
     checkout that changes where a link points needs.
 
+    Whatever is already there goes first when it is the other kind,
+    because the two live on different planes and neither replaces the
+    other. Writing a regular blob at a path the namespace holds a link
+    for follows the link and lands the content in the file it points
+    at, corrupting a path no branch touched while the link stays; and
+    linking over a regular file leaves that file behind the link, ready
+    to reappear when the link goes. git replaces the entry in both
+    directions. The check is a namespace lookup, so the ordinary
+    file-for-file case costs nothing.
+
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
         path (str): absolute virtual path to materialize at.
         mode (int): the tree entry's mode.
         blob (bytes): the entry's blob content.
+        links (LinkView | None): the name plane's link facts, None when
+            no namespace is wired.
     """
+    linked = links is not None and links.stat_at(path) is not None
     if mode == SYMLINK:
+        if not linked:
+            await remove_file(dispatch, path)
         await dispatch("symlink",
                        PathSpec.from_str_path(path),
                        target=blob.decode("utf-8", errors="replace"))
         return
+    if linked:
+        await remove_file(dispatch, path)
     await write_file(dispatch, path, blob)
 
 

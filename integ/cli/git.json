@@ -1259,6 +1259,48 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_checkout_replaces_a_link_with_a_regular_file",
+      "seq": 568249,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout -b swaplink > /dev/null 2>&1 && ln -s numbers.txt /repo/thing && git -C /repo add thing && git -C /repo commit -m link > /dev/null && git -C /repo checkout -b swapfile > /dev/null 2>&1 && rm /repo/thing && printf 'PLAIN\\n' > /repo/thing && git -C /repo add thing && git -C /repo commit -m plain > /dev/null && git -C /repo checkout swaplink > /dev/null 2>&1 && git -C /repo checkout swapfile > /dev/null 2>&1 && readlink /repo/thing; cat /repo/thing; cat /repo/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "PLAIN\none\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_replaces_a_regular_file_with_a_link",
+      "seq": 568250,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout swaplink > /dev/null 2>&1; readlink /repo/thing; rm /repo/thing; ls /repo/thing 2>&1; ln -s numbers.txt /repo/thing; git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "numbers.txt\nls: cannot access '/repo/thing': No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_swap_branch_cleanup",
+      "seq": 568251,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo checkout main > /dev/null 2>&1 && git -C /repo branch -D swaplink > /dev/null && git -C /repo branch -D swapfile > /dev/null && rm -f /repo/thing && git -C /repo status --porcelain",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }
