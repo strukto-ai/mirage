@@ -91,7 +91,30 @@ The bundle's default world is one RAM scratch mount at `/tmp`. Mount real resour
       - { name: monty, captures: [python, python3] }
 ```
 
-The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. The shell executor reports `workspace-write` confinement, since a command cannot reach anything but the mounts, which is what lets dsh's permission presets compose over it.
+The same blocks work in code, beside live instances, in `MirageService`'s `mounts`. The shell executor reports a `workspace-write` sandbox to dsh whenever every runtime in the world stays inside the VFS (each runtime's `reach` is `vfs`), which is what lets dsh's permission presets compose over it: a command cannot then reach anything but the mounts, under their modes. Adding a host-reaching runtime such as `local` python drops the claim, since a script could act outside the mounts, and dsh is told there is no sandbox rather than a false one.
+
+## Custom backends
+
+A mount is not limited to the builtin resources (`ram`, `s3`, `slack`, `redis`, ...). Register your own resource factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
+
+```ts
+import { registerResourceFactory } from '@struktoai/mirage-node'
+
+registerResourceFactory('acme', (config) => new AcmeResource(config))
+```
+
+```yaml
+- id: mirage
+  config:
+    mounts:
+      /acme: { resource: acme, mode: read, config: { token: !!js process.env.ACME_TOKEN } }
+```
+
+The registration must run before the workspace builds, since a `mounts` block only names a resource, it does not construct one. In a dsh bundle that means a small plugin the profile loads alongside `@struktoai/mirage-dsh` (or a plain import in code, before `MirageService` starts), not the declarative patch. A builtin name cannot be shadowed, so a custom backend needs its own name. Nothing else changes: the shell, the commands, and the sandbox claim treat a custom mount like any other.
+
+## Background commands
+
+A backgrounded command streams its output through a workspace console rather than arriving whole: each statement of a compound line lands as it finishes, and stdout and stderr keep their own channels. The unread backlog is bounded to the stdout budget, so a reader that never drains cannot grow it without limit; output past the budget is flagged lossy, with the freshest kept. Set `spillDir` on `MirageShellExecutor` to a workspace path (for example `/tmp` on a ram mount) and an overrunning command's full stdout and stderr are written there, so the agent can read the complete output back through the same VFS; unset, nothing spills.
 
 A concrete scenario: serving agents from a TypeScript server (an Express endpoint, say), where every request is assigned its own context and workspace, created on entry and gone with the response. What one 2 vCPU / 8 GB box holds then depends on the harness:
 
