@@ -290,9 +290,7 @@ describe('start', () => {
 describe('streaming', () => {
   it('delivers a compound line incrementally, before it finishes', async () => {
     const { shell } = await makeShell()
-    const proc = shell.start(
-      shell.resolve({ command: 'echo first; sleep 0.5; echo second' }),
-    )
+    const proc = shell.start(shell.resolve({ command: 'echo first; sleep 0.5; echo second' }))
     let acc = ''
     const deadline = Date.now() + 3000
     while (Date.now() < deadline && !acc.includes('first')) {
@@ -310,9 +308,7 @@ describe('streaming', () => {
 
   it('interleaves stdout and stderr in order, stderr marked', async () => {
     const { shell } = await makeShell()
-    const proc = shell.start(
-      shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2' }),
-    )
+    const proc = shell.start(shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2' }))
     await proc.done
     const delta = proc.readOutput().delta
     expect(delta).toContain('--- stderr ---')
@@ -337,9 +333,7 @@ describe('streaming', () => {
 describe('spill', () => {
   it('does not spill when no directory is configured', async () => {
     const { shell } = await makeShell({}, { stdoutMaxBytes: 12 })
-    const proc = shell.start(
-      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }),
-    )
+    const proc = shell.start(shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }))
     await proc.done
     const out = proc.readOutput()
     expect(out.lossy).toBe(true)

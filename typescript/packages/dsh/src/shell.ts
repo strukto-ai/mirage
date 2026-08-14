@@ -24,7 +24,13 @@ import type {
   ShellRunResult,
   ShellSandboxInfo,
 } from '@deepseek-ai/dsh-shell'
-import { Channel, JobConsole, RAMConsoleStore, exitOutcome, KILLED_OUTCOME } from '@struktoai/mirage-core'
+import {
+  Channel,
+  JobConsole,
+  RAMConsoleStore,
+  exitOutcome,
+  KILLED_OUTCOME,
+} from '@struktoai/mirage-core'
 import type { ConsoleChunk, ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tailCap } from './text.ts'

@@ -353,7 +353,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   it('streams the output to the console and returns empty stdout', async () => {
     const ws = await makeWs()
     const console_ = new JobConsole()
-    const result = (await ws.execute('echo hello', { sink: console_ }))
+    const result = await ws.execute('echo hello', { sink: console_ })
     // The bytes went to the console, so the result carries only the code.
     expect(result.exitCode).toBe(0)
     expect(stdoutStr(result)).toBe('')
@@ -376,7 +376,7 @@ describe('execute({ sink }): streaming output to a console', () => {
   it('routes stderr to the console on its own channel', async () => {
     const ws = await makeWs()
     const console_ = new JobConsole()
-    const result = (await ws.execute('echo oops >&2', { sink: console_ }))
+    const result = await ws.execute('echo oops >&2', { sink: console_ })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(await console_.snapshot(Channel.STDERR)).trim()).toBe('oops')
     await ws.close()
