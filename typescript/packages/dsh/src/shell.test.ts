@@ -334,6 +334,48 @@ describe('streaming', () => {
   })
 })
 
+describe('spill', () => {
+  it('does not spill when no directory is configured', async () => {
+    const { shell } = await makeShell({}, { stdoutMaxBytes: 12 })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    expect(out.stdoutSpillPath).toBeUndefined()
+  })
+
+  it('spills the full stdout to a readable workspace file when the delta overruns', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc; echo dddd' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    expect(out.stdoutSpillPath).toBeDefined()
+    // The delta kept only the tail; the spill file has the whole stream.
+    expect(out.delta).not.toContain('aaaa')
+    const full = await ws.fs.readFileText(out.stdoutSpillPath as string)
+    expect(full).toContain('aaaa')
+    expect(full).toContain('dddd')
+  })
+
+  it('spills stdout and stderr to separate files', async () => {
+    const { shell, ws } = await makeShell({}, { stdoutMaxBytes: 12, spillDir: '/data/spill' })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2; echo out3' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.stdoutSpillPath).toBeDefined()
+    expect(out.stderrSpillPath).toBeDefined()
+    expect(await ws.fs.readFileText(out.stdoutSpillPath as string)).toContain('out1')
+    expect(await ws.fs.readFileText(out.stderrSpillPath as string)).toContain('err1')
+  })
+})
+
 describe('sandbox facts', () => {
   it('stamps a full-enforcement workspace-write sandbox on a run result', async () => {
     const { shell } = await makeShell({ 'a.txt': 'x' })

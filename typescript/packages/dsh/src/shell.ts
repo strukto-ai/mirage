@@ -28,6 +28,7 @@ import { Channel, JobConsole, RAMConsoleStore, exitOutcome, KILLED_OUTCOME } fro
 import type { ConsoleChunk, ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tailCap } from './text.ts'
+import { SpillSink, type SpillTarget } from './spill.ts'
 import type {} from './service.ts'
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -35,6 +36,10 @@ const MAX_TIMEOUT_MS = 600_000
 const DEFAULT_STDOUT_MAX_BYTES = 200_000
 const DEFAULT_STDERR_MAX_BYTES = 64_000
 const STDERR_MARKER = '\n--- stderr ---\n'
+
+// Monotonic within the process, so concurrent background commands never
+// collide on a spill filename. Not reset, so it needs no time or randomness.
+let spillCounter = 0
 
 /** Configuration for the mirage shell executor. */
 export interface MirageShellConfig {
@@ -64,6 +69,18 @@ export interface MirageShellConfig {
    * session, per mirage's `ExecuteOptions` semantics.
    */
   sessionId?: string
+  /**
+   * When set, a background command whose streamed output overruns its
+   * delta budget spills its full stdout and stderr to files under this
+   * workspace directory, and `readOutput()` points at them so a reader
+   * can recover what the delta dropped. The directory is a workspace
+   * path (e.g. `/tmp` on a ram mount), so the agent reads the spill
+   * through the same VFS as everything else; the writes go through the
+   * workspace, so they appear in history like any other write. Unset
+   * (the default) means no spill: output that overruns is simply
+   * flagged `lossy`, the honest "no safe path available" answer.
+   */
+  spillDir?: string
 }
 
 function collect(text: string, maxBytes: number): CollectedOutput {
@@ -121,6 +138,7 @@ class MirageShellProcess implements ShellProcess {
   private readonly controller: AbortController
   private readonly console: JobConsole
   private readonly budget: number
+  private readonly spill: SpillSink | null
   private readonly sandboxInfo: ShellSandboxInfo | undefined
   private readonly consumed: Promise<void>
   private pending = ''
@@ -133,11 +151,13 @@ class MirageShellProcess implements ShellProcess {
     controller: AbortController,
     console_: JobConsole,
     budget: number,
+    spill: SpillSink | null,
     sandboxInfo: ShellSandboxInfo | undefined,
   ) {
     this.controller = controller
     this.console = console_
     this.budget = budget
+    this.spill = spill
     this.sandboxInfo = sandboxInfo
     this.consumed = this.consume()
     this.done = run.then(
@@ -151,11 +171,15 @@ class MirageShellProcess implements ShellProcess {
     // chunk that finish() appends.
     for await (const chunk of this.console.follow(0)) {
       if (chunk.channel === Channel.CONTROL) return
-      this.appendChunk(chunk)
+      await this.appendChunk(chunk)
     }
   }
 
-  private appendChunk(chunk: ConsoleChunk): void {
+  private async appendChunk(chunk: ConsoleChunk): Promise<void> {
+    // The full, uncapped stream goes to the spill sink (if enabled)
+    // before the delta is capped, so nothing dropped from the delta is
+    // lost to a reader that follows the spill path.
+    if (this.spill !== null) await this.spill.ingest(chunk.channel, chunk.data)
     const text = new TextDecoder().decode(chunk.data)
     // stderr rides the same delta as stdout, opened by a marker so the
     // reader can tell the two apart; a run of stderr chunks marks once.
@@ -176,6 +200,9 @@ class MirageShellProcess implements ShellProcess {
     if (capped.truncated) {
       this.pending = capped.text
       this.lossy = true
+      // The delta just dropped bytes; move the full stream to files so
+      // the reader can still recover them from the spill path.
+      if (this.spill !== null) await this.spill.begin()
     }
   }
 
@@ -206,7 +233,12 @@ class MirageShellProcess implements ShellProcess {
     this.pending = ''
     const lossy = this.lossy
     this.lossy = false
-    return { delta, lossy }
+    return {
+      delta,
+      lossy,
+      ...(this.spill?.stdoutPath !== undefined ? { stdoutSpillPath: this.spill.stdoutPath } : {}),
+      ...(this.spill?.stderrPath !== undefined ? { stderrSpillPath: this.spill.stderrPath } : {}),
+    }
   }
 
   kill(): boolean {
@@ -239,6 +271,7 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly stdoutMaxBytes: number
   private readonly stderrMaxBytes: number
   private readonly sessionId: string | undefined
+  private readonly spillDir: string | undefined
   private sessionReady: Promise<void> | null = null
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
@@ -249,12 +282,37 @@ export class MirageShellExecutor extends ShellExecutor {
     this.stdoutMaxBytes = config.stdoutMaxBytes ?? DEFAULT_STDOUT_MAX_BYTES
     this.stderrMaxBytes = config.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES
     this.sessionId = config.sessionId
+    this.spillDir = config.spillDir
   }
 
   // The workspace may still be building (declarative mounts resolve
   // asynchronously), so every execution awaits the service's `ready`.
   private workspace(): Promise<Workspace> {
     return this.ctx.mirage.ready
+  }
+
+  // A spill sink for one background command, or null when no spill
+  // directory is configured. The target reaches the live workspace so
+  // the full stream lands on a mount the agent can read back.
+  private newSpill(): SpillSink | null {
+    const dir = this.spillDir
+    if (dir === undefined) return null
+    const target: SpillTarget = {
+      ensureDir: async (d) => {
+        const ws = await this.workspace()
+        if (!(await ws.fs.exists(d))) await ws.fs.mkdir(d)
+      },
+      write: async (p, bytes) => {
+        const ws = await this.workspace()
+        await ws.fs.writeFile(p, bytes)
+      },
+      append: async (p, bytes) => {
+        const ws = await this.workspace()
+        await ws.fs.append(p, bytes)
+      },
+    }
+    spillCounter += 1
+    return new SpillSink(target, dir, `mirage-shell-${spillCounter.toString()}`)
   }
 
   /**
@@ -404,6 +462,7 @@ export class MirageShellExecutor extends ShellExecutor {
     // backlog itself, so the store keeps everything the follow loop has
     // not drained yet (which stays small when a reader keeps up).
     const console_ = new JobConsole(new RAMConsoleStore())
+    const spill = this.newSpill()
     if (spec.signal?.aborted === true) {
       controller.abort()
       return new MirageShellProcess(
@@ -411,6 +470,7 @@ export class MirageShellExecutor extends ShellExecutor {
         controller,
         console_,
         spec.stdoutMaxBytes,
+        spill,
         sandbox,
       )
     }
@@ -427,6 +487,6 @@ export class MirageShellExecutor extends ShellExecutor {
         ),
       )
       .finally(() => spec.signal?.removeEventListener('abort', onAbort))
-    return new MirageShellProcess(run, controller, console_, spec.stdoutMaxBytes, sandbox)
+    return new MirageShellProcess(run, controller, console_, spec.stdoutMaxBytes, spill, sandbox)
   }
 }
