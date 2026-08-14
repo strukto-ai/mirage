@@ -89,9 +89,7 @@ export async function handlePipe(
   }
 
   const lastIo = ios[ios.length - 1] ?? new IOResult()
-  lastIo.syncExitCode()
   if (session.shellOptions.pipefail === true) {
-    for (const io of ios) io.syncExitCode()
     let rightmostFailure = 0
     for (let k = ios.length - 1; k >= 0; k--) {
       const code = ios[k]?.exitCode ?? 0
@@ -111,7 +109,6 @@ export async function handlePipe(
     const io = ios[i]
     const child = childNodes[i]
     if (io === undefined || child === undefined) continue
-    io.syncExitCode()
     child.exitCode = io.exitCode
     const stderrBytes = await materialize(io.stderr)
     if (stderrBytes.byteLength > 0) mergedStderrParts.push(stderrBytes)

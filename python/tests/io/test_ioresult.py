@@ -44,7 +44,27 @@ def test_merge_combines_cache():
     asyncio.run(_run())
 
 
-def test_explicit_exit_code_clears_stream_source_issue_43():
+def test_merged_read_follows_a_late_settling_origin():
+    """The read is fresh however late the origin settles, with no sync.
+
+    This is grep's shape: merge happens while the stream is still lazy,
+    and exit_on_empty writes the origin only when the stream drains.
+    The early read before the settle is deliberate: the old
+    sync_exit_code() assigned through the setter, which severed the
+    link, so one too-early sync froze the provisional 0 forever.
+    """
+
+    async def _run():
+        origin = IOResult(exit_code=0)
+        merged = await IOResult().merge(origin)
+        assert merged.exit_code == 0
+        origin.exit_code = 1
+        assert merged.exit_code == 1
+
+    asyncio.run(_run())
+
+
+def test_explicit_exit_code_wins_and_detaches_issue_43():
 
     async def _run():
         inner = IOResult(exit_code=1)
@@ -52,7 +72,7 @@ def test_explicit_exit_code_clears_stream_source_issue_43():
         assert outer._stream_source is inner
         outer.exit_code = 0
         assert outer._stream_source is None
-        outer.sync_exit_code()
+        inner.exit_code = 2
         assert outer.exit_code == 0
 
     asyncio.run(_run())
@@ -68,7 +88,18 @@ def test_explicit_exit_code_survives_chain_with_failing_leaf_issue_43():
         merged = await merged.merge(b)
         merged = await merged.merge(c)
         merged.exit_code = 0
-        merged.sync_exit_code()
         assert merged.exit_code == 0
+
+    asyncio.run(_run())
+
+
+def test_chain_of_merges_stays_fresh_end_to_end():
+
+    async def _run():
+        origin = IOResult()
+        step = await IOResult().merge(origin)
+        top = await IOResult().merge(step)
+        origin.exit_code = 3
+        assert top.exit_code == 3
 
     asyncio.run(_run())

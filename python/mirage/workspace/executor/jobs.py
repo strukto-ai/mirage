@@ -111,7 +111,6 @@ async def handle_background(
             stderr = await io.materialize_stderr()
             if stderr:
                 await console.emit(Channel.STDERR, stderr)
-            io.sync_exit_code()
             return io, exec_node
         finally:
             reset_current_session(token)

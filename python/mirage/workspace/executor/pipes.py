@@ -89,10 +89,7 @@ async def handle_pipe(
             await close_quietly(s)
 
     last_io = ios[-1]
-    last_io.sync_exit_code()
     if session.shell_options.get("pipefail"):
-        for io in ios:
-            io.sync_exit_code()
         rightmost_failure = next(
             (io.exit_code for io in reversed(ios) if io.exit_code != 0), 0)
         if rightmost_failure != 0:
@@ -102,7 +99,6 @@ async def handle_pipe(
     merged_writes: dict[str, ByteSource] = {}
     merged_cache: list[str] = []
     for io, child in zip(ios, child_nodes):
-        io.sync_exit_code()
         child.exit_code = io.exit_code
         stderr_bytes = await materialize(io.stderr)
         if stderr_bytes:

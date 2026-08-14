@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.types import Producer
@@ -82,68 +82,78 @@ class OpReport:
         self.bytes = moved
 
 
-@dataclass
 class IOResult:
     """Returned by commands to tell workspace how to update cache.
+
+    ``exit_code`` is a delegating read, not a plain field, because a
+    streaming command's status can depend on its content: grep returns
+    ``(exit_on_empty(stream, io_A), io_A)`` with a provisional
+    ``io_A.exit_code = 0``, and the wrapper settles the real value on
+    ``io_A`` only when the stream is drained. ``merge()`` therefore
+    links the merged result to its right-hand original instead of
+    copying the number, and a read follows the link, so the value is
+    exactly as fresh as the origin at the moment it is read, however
+    many merges sit in between and however early or often it is read.
+    An explicit write (``io.exit_code = 124``) stores locally and
+    severs the link, so an aggregated or overridden status always
+    wins over the lazy one (issue #43). The one rule left for callers
+    is the one the shell's barriers already enforce: drain the stream
+    before treating the status as final.
 
     Args:
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
-        reads (dict[str, ByteSource]): Paths read with content or streams.
-        writes (dict[str, ByteSource]): Paths written with content or streams.
-        cache (list[str]): Paths worth caching (from reads or writes).
-        mutated (bool | None): whether this run changed service state,
-            when only the handler can tell. A CLI leaf declares
-            ``write`` statically because for almost every verb it is
-            static, but ``gh api`` carries its method on the line, so a
-            plain ``gh api /user`` is a read through a leaf that is
-            declared writable. None leaves the spec's answer standing.
+        reads (dict[str, ByteSource] | None): Paths read with content
+            or streams.
+        writes (dict[str, ByteSource] | None): Paths written with
+            content or streams.
+        cache (list[str] | None): Paths worth caching (from reads or
+            writes).
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
             producer, mirroring whose stream the shell shows. The
             workspace boundary hands it to the policy layer as
             context. Facts ride the envelope, policy decisions never
             do.
-        _stream_source (IOResult | None): Reference to the original IOResult
-            that owns the lazy stream. Needed because streaming commands
-            (e.g. grep) set exit_code lazily via exit_on_empty — the
-            exit_code is only finalized after the stream is consumed.
-            When merge() creates a new IOResult, the lazy mutation on
-            the original is invisible. _stream_source lets
-            sync_exit_code() walk back to the original and pull the
-            finalized value after materialization.
-
-            Example flow:
-              1. grep returns (exit_on_empty(stream, io_A), io_A)
-                 io_A.exit_code = 0 (provisional)
-              2. merge() creates io_B with _stream_source = io_A
-                 io_B.exit_code = 0 (snapshot)
-              3. Stream is consumed → exit_on_empty sets
-                 io_A.exit_code = 1
-              4. io_B.sync_exit_code() → reads io_A.exit_code = 1 →
-                 sets io_B.exit_code = 1
+        mutated (bool | None): whether this run changed service state,
+            when only the handler can tell. A CLI leaf declares
+            ``write`` statically because for almost every verb it is
+            static, but ``gh api`` carries its method on the line, so a
+            plain ``gh api /user`` is a read through a leaf that is
+            declared writable. None leaves the spec's answer standing.
     """
 
-    stdout: ByteSource | None = None
-    stderr: ByteSource | None = None
-    exit_code: int = 0
-    reads: dict[str, ByteSource] = field(default_factory=dict)
-    writes: dict[str, ByteSource] = field(default_factory=dict)
-    cache: list[str] = field(default_factory=list)
-    producer: Producer | None = None
-    mutated: bool | None = None
-    _stream_source: "IOResult | None" = field(default=None, repr=False)
+    def __init__(self,
+                 stdout: ByteSource | None = None,
+                 stderr: ByteSource | None = None,
+                 exit_code: int = 0,
+                 reads: dict[str, ByteSource] | None = None,
+                 writes: dict[str, ByteSource] | None = None,
+                 cache: list[str] | None = None,
+                 producer: Producer | None = None,
+                 mutated: bool | None = None) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self._exit_code = exit_code
+        self.reads: dict[str, ByteSource] = reads if reads is not None else {}
+        self.writes: dict[str,
+                          ByteSource] = writes if writes is not None else {}
+        self.cache: list[str] = cache if cache is not None else []
+        self.producer = producer
+        self.mutated = mutated
+        self._stream_source: IOResult | None = None
 
-    def __setattr__(self, name: str, value: object) -> None:
-        object.__setattr__(self, name, value)
-        # An explicit write to exit_code wins over any lazy _stream_source
-        # mirror. Without this, fan-out's aggregated exit code gets
-        # clobbered by sync_exit_code() following _stream_source from the
-        # last merged sub-IO (issue #43).
-        if name == "exit_code" and getattr(self, "_stream_source",
-                                           None) is not None:
-            object.__setattr__(self, "_stream_source", None)
+    @property
+    def exit_code(self) -> int:
+        if self._stream_source is not None:
+            return self._stream_source.exit_code
+        return self._exit_code
+
+    @exit_code.setter
+    def exit_code(self, value: int) -> None:
+        self._exit_code = value
+        self._stream_source = None
 
     async def materialize_stdout(self) -> bytes:
         self.stdout = await materialize(self.stdout)
@@ -159,18 +169,6 @@ class IOResult:
     async def stderr_str(self, errors: str = "replace") -> str:
         return (await self.materialize_stderr()).decode(errors=errors)
 
-    def sync_exit_code(self) -> None:
-        """Pull finalized exit code from the source IOResult.
-
-        Stream wrappers like exit_on_empty lazily set exit_code on
-        the original IOResult after consumption. When merge() creates
-        a new IOResult, the lazy mutation is invisible. Call this
-        after stream materialization to propagate the final value.
-        """
-        if self._stream_source is not None:
-            self._stream_source.sync_exit_code()
-            self.exit_code = self._stream_source.exit_code
-
     async def merge(self, other: "IOResult") -> "IOResult":
         # Fully consume stderr from both sides so it's never lost.
         left_stderr = await materialize(self.stderr)
@@ -178,14 +176,12 @@ class IOResult:
         merged_stderr: bytes | None = None
         if left_stderr or right_stderr:
             merged_stderr = left_stderr + right_stderr
-        # Sync lazy exit codes (e.g. from exit_on_empty) before
-        # snapshotting. Without this, callers that merge before
-        # materializing stdout would get a stale exit_code.
-        other.sync_exit_code()
+        # The exit code is not copied: the merged result reads it
+        # through the link, so a lazy status settling after this merge
+        # (exit_on_empty firing at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
             stderr=merged_stderr,
-            exit_code=other.exit_code,
             reads={
                 **self.reads,
                 **other.reads

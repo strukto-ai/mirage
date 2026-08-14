@@ -106,7 +106,6 @@ async def _expand_backtick_region(
             continue
         io = await execute_fn(text, session_id=session.session_id)
         parts.append((await io.stdout_str()).rstrip("\n"))
-        io.sync_exit_code()
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
     return "".join(parts)
@@ -313,7 +312,6 @@ async def expand_node_marked(
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last
         # one's status as its own (see assignment_status).
-        io.sync_exit_code()
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
         return prefix + text

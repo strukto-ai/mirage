@@ -125,7 +125,6 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
-      io.syncExitCode()
       return [io, execNode]
     }
     // The runner's task inherits the OUTER ambient session from its

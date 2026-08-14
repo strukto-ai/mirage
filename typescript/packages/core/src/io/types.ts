@@ -105,13 +105,18 @@ export class IOResult {
     this.streamSource = null
   }
 
+  // A delegating read: a streaming command's status can depend on its
+  // content (grep's exitOnEmpty settles the origin only when the stream
+  // drains), so a merged result follows the link instead of holding a
+  // copy, and the value is as fresh as the origin whenever it is read.
   get exitCode(): number {
+    if (this.streamSource !== null) return this.streamSource.exitCode
     return this._exitCode
   }
 
-  // An explicit write to exitCode wins over any lazy streamSource mirror.
-  // Without this, fanOutTraversal's aggregated exit code gets clobbered by
-  // syncExitCode() following streamSource from the last merged sub-IO.
+  // An explicit write stores locally and severs the link, so an
+  // aggregated or overridden status (fanOutTraversal, timeouts) always
+  // wins over the lazy one.
   set exitCode(v: number) {
     this._exitCode = v
     this.streamSource = null
@@ -137,13 +142,6 @@ export class IOResult {
     return decodeBytes(await this.materializeStderr(), errors)
   }
 
-  syncExitCode(): void {
-    if (this.streamSource !== null) {
-      this.streamSource.syncExitCode()
-      this.exitCode = this.streamSource.exitCode
-    }
-  }
-
   async merge(other: IOResult): Promise<IOResult> {
     const leftStderr = await materialize(this.stderr)
     const rightStderr = await materialize(other.stderr)
@@ -151,11 +149,12 @@ export class IOResult {
     if (leftStderr.byteLength > 0 || rightStderr.byteLength > 0) {
       mergedStderr = concat([leftStderr, rightStderr])
     }
-    other.syncExitCode()
+    // The exit code is not copied: the merged result reads it through
+    // the link, so a lazy status settling after this merge (exitOnEmpty
+    // firing at drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
       stderr: mergedStderr,
-      exitCode: other.exitCode,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],

@@ -49,7 +49,6 @@ export async function runCommandTree(
     execNode.exitCode = 1
     return [materialized, io, execNode]
   }
-  io.syncExitCode()
   // The boundary consultation: the envelope's producer facts become
   // the postExecute context; the built-in cap and any user policies
   // answer with Limits (tightest merged), enforced by guardOutput.

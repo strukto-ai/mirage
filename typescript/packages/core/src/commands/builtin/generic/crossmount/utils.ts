@@ -56,7 +56,6 @@ export async function runOperands(
       io.exitCode = 1
       data = new Uint8Array()
     }
-    io.syncExitCode()
     results.push({ scope, data, io })
   }
   return results

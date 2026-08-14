@@ -32,10 +32,7 @@ export async function applyBarrier(
   if (policy === BarrierPolicy.STREAM) return stdout
   if (policy === BarrierPolicy.STATUS) {
     await drain(stdout)
-    io.syncExitCode()
     return null
   }
-  const result = await materialize(stdout)
-  io.syncExitCode()
-  return result
+  return materialize(stdout)
 }

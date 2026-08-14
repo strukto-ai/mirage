@@ -126,7 +126,6 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
   const [ioResult, execNode] = result
   job.ioResult = ioResult
   job.executionNode = execNode
-  ioResult.syncExitCode()
   job.exitCode = ioResult.exitCode
   job.status = JobStatus.COMPLETED
   await job.console.finish(exitOutcome(job.exitCode))

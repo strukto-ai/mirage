@@ -125,7 +125,6 @@ async def execute_program(
             except Exception as exc:
                 drain_err = f"{exc}\n".encode()
                 stdout = None
-            io.sync_exit_code()
             if drain_err is not None:
                 existing = await materialize(io.stderr) or b""
                 io.stderr = existing + drain_err

@@ -23,8 +23,9 @@ import { Workspace } from './workspace.ts'
 // `grep -rEn pattern .` and `grep -rEn pattern /` returned exitCode=1 even
 // when matches were present in stdout, because the fan-out across descendant
 // mounts (e.g. /.bash_history, /dev) wrote the aggregated 0 onto mergedIo but
-// left streamSource pointing at a failing sub-IO, and a later syncExitCode()
-// clobbered the 0 back to 1.
+// left streamSource pointing at a failing sub-IO, whose lazy value clobbered
+// the 0 back to 1. The explicit write now severs the link, so the aggregated
+// status wins.
 
 const ENC = new TextEncoder()
 

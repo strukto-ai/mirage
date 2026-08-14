@@ -145,22 +145,27 @@ describe('IOResult.merge', () => {
   })
 })
 
-describe('IOResult.syncExitCode', () => {
-  it('pulls exit_code from the streamSource chain', async () => {
-    const inner = new IOResult({ exitCode: 0 })
-    const outer = await new IOResult().merge(inner)
-    inner.exitCode = 42
-    outer.syncExitCode()
-    expect(outer.exitCode).toBe(42)
+describe('IOResult exit code delegation', () => {
+  it('a merged read follows a late-settling origin, with no sync call', async () => {
+    // grep's shape: merge happens while the stream is still lazy, and
+    // exitOnEmpty writes the origin only when the stream drains. The
+    // early read is deliberate: the old syncExitCode() assigned through
+    // the setter, severing the link, so one too-early sync froze the
+    // provisional 0 forever.
+    const origin = new IOResult({ exitCode: 0 })
+    const merged = await new IOResult().merge(origin)
+    expect(merged.exitCode).toBe(0)
+    origin.exitCode = 1
+    expect(merged.exitCode).toBe(1)
   })
 
-  it('explicit exitCode assignment survives a later syncExitCode (issue #43)', async () => {
+  it('an explicit write wins over the origin and detaches (issue #43)', async () => {
     const inner = new IOResult({ exitCode: 1 })
     const outer = await new IOResult().merge(inner)
     expect(outer.streamSource).toBe(inner)
     outer.exitCode = 0
     expect(outer.streamSource).toBeNull()
-    outer.syncExitCode()
+    inner.exitCode = 2
     expect(outer.exitCode).toBe(0)
   })
 
@@ -172,7 +177,14 @@ describe('IOResult.syncExitCode', () => {
     merged = await merged.merge(b)
     merged = await merged.merge(c)
     merged.exitCode = 0
-    merged.syncExitCode()
     expect(merged.exitCode).toBe(0)
+  })
+
+  it('a chain of merges stays fresh end to end', async () => {
+    const origin = new IOResult()
+    const step = await new IOResult().merge(origin)
+    const top = await new IOResult().merge(step)
+    origin.exitCode = 3
+    expect(top.exitCode).toBe(3)
   })
 })

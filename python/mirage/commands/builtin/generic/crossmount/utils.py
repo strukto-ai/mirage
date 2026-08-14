@@ -70,7 +70,6 @@ async def run_operands(run_single: RunSingle,
             io.stderr = existing + fs_error_line(cmd_name, scope, exc).encode()
             io.exit_code = 1
             data = b""
-        io.sync_exit_code()
         results.append(OperandRun(scope, data, io))
     return results
 

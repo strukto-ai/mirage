@@ -128,7 +128,6 @@ async def _settle(run: JobRunner, job: Job) -> None:
         return
     job.io_result = io_result
     job.execution_node = exec_node
-    io_result.sync_exit_code()
     job.exit_code = io_result.exit_code
     job.status = JobStatus.COMPLETED
     await job.console.finish(exit_outcome(job.exit_code))

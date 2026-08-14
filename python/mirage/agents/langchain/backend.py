@@ -93,7 +93,6 @@ async def _command_error(
     io: IOResult,
     success_exit_codes: frozenset[int] = COMMAND_SUCCESS_EXIT_CODES,
 ) -> str | None:
-    io.sync_exit_code()
     if io.exit_code in success_exit_codes:
         return None
     stderr = (await io.stderr_str()).strip()

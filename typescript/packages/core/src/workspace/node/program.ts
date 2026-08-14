@@ -157,7 +157,6 @@ export async function executeProgram(
         }
         stdout = null
       }
-      ioResult.syncExitCode()
       if (drainErr !== null) {
         const existing = await materialize(ioResult.stderr)
         const added = new TextEncoder().encode(`${drainErr}\n`)

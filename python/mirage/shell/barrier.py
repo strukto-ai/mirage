@@ -44,9 +44,6 @@ async def apply_barrier(
         return stdout
     if policy is BarrierPolicy.STATUS:
         await drain(stdout)
-        io.sync_exit_code()
         return None
     # VALUE
-    result = await materialize(stdout)
-    io.sync_exit_code()
-    return result
+    return await materialize(stdout)
