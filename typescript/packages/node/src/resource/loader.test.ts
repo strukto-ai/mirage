@@ -74,16 +74,28 @@ describe('splitRef', () => {
 })
 
 describe('isModulePath', () => {
-  it('reads a path separator or a module suffix as a file', () => {
+  it('reads a relative or absolute source as a file', () => {
     expect(isModulePath('./tool.mjs')).toBe(true)
+    expect(isModulePath('../pkg/tool.ts')).toBe(true)
+    expect(isModulePath('/abs/tool.mjs')).toBe(true)
+    expect(isModulePath('./dist/index.js')).toBe(true)
+  })
+
+  it('reads a bare filename with a module suffix as a file', () => {
     expect(isModulePath('tool.mjs')).toBe(true)
     expect(isModulePath('tool.ts')).toBe(true)
     expect(isModulePath('tool.js')).toBe(true)
-    expect(isModulePath('my-clis/specs')).toBe(true)
   })
 
-  it('reads a bare package specifier as a specifier', () => {
+  // Node's bare specifiers carry slashes, so Python's `"/" in source`
+  // test would rebase an installed package under the config directory
+  // and then report it as a missing file.
+  it('reads a scoped or subpath package as a specifier, not a path', () => {
     expect(isModulePath('my-clis')).toBe(false)
+    expect(isModulePath('my-clis/specs')).toBe(false)
+    expect(isModulePath('@scope/my-clis')).toBe(false)
+    expect(isModulePath('@scope/my-clis/sub')).toBe(false)
+    expect(isModulePath('pkg/dist/index.js')).toBe(false)
   })
 })
 

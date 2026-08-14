@@ -745,6 +745,56 @@ describe('clis cli: reference', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // A class name is not proof: dispatch reads subcommands/aliases/options
+  // at every level, so a value that only answers to the name crashes on
+  // the first line an agent types instead of failing the create.
+  it('refuses an impostor class named CLISpec', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(
+      join(dir, 'impostor.mjs'),
+      'class CLISpec { constructor() { this.name = "tally" } }\n' +
+        'export const TALLY = new CLISpec()\n',
+    )
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { tally: { cli: `${join(dir, 'impostor.mjs')}:TALLY` } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('refuses a tree whose subcommand is malformed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(
+      join(dir, 'deep.mjs'),
+      'export const TALLY = {name: "tally", aliases: [], options: [],\n' +
+        '  subcommands: [{name: "sum", aliases: [], options: []}]}\n',
+    )
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { tally: { cli: `${join(dir, 'deep.mjs')}:TALLY` } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // The rebase must not touch a package specifier: Node resolves it, and
+  // scoped and subpath names carry slashes that Python's `/` test would
+  // have read as a path.
+  it('leaves scoped and subpath specifiers alone', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n' +
+        '  a:\n    cli: "@scope/my-clis:JIRA"\n' +
+        '  b:\n    cli: my-clis/specs:JIRA\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    expect(cfg.clis?.a?.cli).toBe('@scope/my-clis:JIRA')
+    expect(cfg.clis?.b?.cli).toBe('my-clis/specs:JIRA')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('reports a ref whose file is missing', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/data': { resource: 'ram' } },

@@ -903,6 +903,33 @@ async function resolveCliRef(ref: string, name: string): Promise<string | CLISpe
 }
 
 /**
+ * True when a value carries every field the CLI walker reads, at every
+ * level of the tree.
+ *
+ * This is the invariant `CLISpec`'s own constructor enforces, checked
+ * again here because the constructor that ran was not necessarily ours.
+ * The fields are the ones dispatch and `man` actually touch
+ * (`subcommands.find`, `aliases.includes`, `options.some`), so a value
+ * that passes cannot fail later reading a missing one. A class name is
+ * not enough on its own: any class called `CLISpec`, or an object with a
+ * `constructor` property that says so, would answer to that and then
+ * crash on the first line an agent types.
+ */
+function looksLikeCliSpec(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false
+  const node = value as Record<string, unknown>
+  if (typeof node.name !== 'string' || node.name === '' || /\s/.test(node.name)) return false
+  if (!Array.isArray(node.aliases) || !Array.isArray(node.options)) return false
+  if (!Array.isArray(node.subcommands)) return false
+  const runnable =
+    typeof node.fn === 'function' ||
+    (node.script !== null && node.script !== undefined) ||
+    node.subcommands.length > 0
+  if (!runnable) return false
+  return node.subcommands.every(looksLikeCliSpec)
+}
+
+/**
  * Check that a `cli:` reference resolved to a program tree.
  *
  * `instanceof` is the fast path, not the test. The referenced file lives
@@ -910,20 +937,13 @@ async function resolveCliRef(ref: string, name: string): Promise<string | CLISpe
  * and that project may resolve its own copy of `@struktoai/mirage-core`:
  * a real CLISpec carrying every method, built off a different class
  * object. Demanding `instanceof` would refuse exactly the case this
- * exists to serve. A hand-built object literal is still refused, because
- * it never ran the constructor that validates a tree.
- *
- * `constructor` is read through a type that admits it can be missing:
- * TypeScript types it as always present on `object`, but a null-prototype
- * export (`Object.create(null)`) has none and would crash the check it is
- * supposed to fail.
+ * exists to serve, so anything else is admitted on its shape instead,
+ * and refused at create time rather than when an agent first types the
+ * head word.
  */
 function asCliSpec(value: unknown, name: string, ref: string): CLISpec {
   if (value instanceof CLISpec) return value
-  if (value !== null && typeof value === 'object') {
-    const ctor = (value as { constructor?: { name?: string } }).constructor
-    if (ctor?.name === 'CLISpec') return value as CLISpec
-  }
+  if (looksLikeCliSpec(value)) return value as CLISpec
   throw new Error(`clis entry '${name}': ${ref} is not a CLISpec`)
 }
 

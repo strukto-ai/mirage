@@ -28,13 +28,28 @@ export const MODULE_SUFFIXES = ['.mjs', '.cjs', '.mts', '.cts', '.js', '.ts']
 
 /**
  * True when a ref's source is a file on disk rather than a package
- * specifier Node resolves for itself. Mirrors the `"/" in source or
- * source.endswith(".py")` test in `mirage/resource/loader.py`; the
- * config loader's `absolutizeCliRef` calls this same function so the
- * two cannot disagree about what a path is.
+ * specifier Node resolves for itself.
+ *
+ * This is Node's own rule, deliberately NOT Python's. Python's twin asks
+ * `"/" in source`, which is sound there because a module dotpath is
+ * dotted, so a slash can only mean a path. In Node a bare specifier
+ * carries slashes all the time (`@scope/pkg`, `pkg/subpath`), so the
+ * same test would rebase an installed package under the config
+ * directory and then report it as a missing file. A path is what Node
+ * calls a path: relative (`./`, `../`) or absolute. The one addition is
+ * a bare filename carrying a module suffix (`tool.mjs`), which mirrors
+ * the convenience Python allows for `tool.py`; it is restricted to
+ * sources with no slash so that `pkg/dist/index.js` stays a subpath
+ * export, and `./dist/index.js` says path by saying so.
+ *
+ * The config loader's `absolutizeCliRef` calls this same function, so
+ * the two cannot disagree about what a path is.
  */
 export function isModulePath(source: string): boolean {
-  return source.includes('/') || MODULE_SUFFIXES.some((suffix) => source.endsWith(suffix))
+  if (source.startsWith('./') || source.startsWith('../')) return true
+  if (source.startsWith('/') || isAbsolute(source)) return true
+  if (source.includes('/')) return false
+  return MODULE_SUFFIXES.some((suffix) => source.endsWith(suffix))
 }
 
 /** Split a `source:exportName` ref on its last colon. */
