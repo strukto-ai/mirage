@@ -287,6 +287,53 @@ describe('start', () => {
   })
 })
 
+describe('streaming', () => {
+  it('delivers a compound line incrementally, before it finishes', async () => {
+    const { shell } = await makeShell()
+    const proc = shell.start(
+      shell.resolve({ command: 'echo first; sleep 0.5; echo second' }),
+    )
+    let acc = ''
+    const deadline = Date.now() + 3000
+    while (Date.now() < deadline && !acc.includes('first')) {
+      acc += proc.readOutput().delta
+      if (!acc.includes('first')) await new Promise((r) => setTimeout(r, 15))
+    }
+    expect(acc).toContain('first')
+    // The sleep is still in flight, so the second statement has not run.
+    expect(acc).not.toContain('second')
+    expect(proc.status).toBe('running')
+    await proc.done
+    acc += proc.readOutput().delta
+    expect(acc).toContain('second')
+  })
+
+  it('interleaves stdout and stderr in order, stderr marked', async () => {
+    const { shell } = await makeShell()
+    const proc = shell.start(
+      shell.resolve({ command: 'echo out1; echo err1 >&2; echo out2' }),
+    )
+    await proc.done
+    const delta = proc.readOutput().delta
+    expect(delta).toContain('--- stderr ---')
+    expect(delta.indexOf('out1')).toBeLessThan(delta.indexOf('err1'))
+    expect(delta.indexOf('err1')).toBeLessThan(delta.indexOf('out2'))
+  })
+
+  it('caps the unread backlog and flags lossy, keeping the tail', async () => {
+    const { shell } = await makeShell({}, { stdoutMaxBytes: 12 })
+    const proc = shell.start(
+      shell.resolve({ command: 'echo aaaa; echo bbbb; echo cccc; echo dddd' }),
+    )
+    await proc.done
+    const out = proc.readOutput()
+    expect(out.lossy).toBe(true)
+    expect(out.delta).toContain('dddd')
+    expect(out.delta).not.toContain('aaaa')
+    expect(new TextEncoder().encode(out.delta).byteLength).toBeLessThanOrEqual(12)
+  })
+})
+
 describe('sandbox facts', () => {
   it('stamps a full-enforcement workspace-write sandbox on a run result', async () => {
     const { shell } = await makeShell({ 'a.txt': 'x' })

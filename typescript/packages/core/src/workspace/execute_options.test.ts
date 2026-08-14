@@ -16,9 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
+import { Channel, JobConsole } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace.ts'
 import { Workspace } from './workspace.ts'
+
+const DEC = new TextDecoder()
 
 const ENC = new TextEncoder()
 
@@ -342,6 +345,40 @@ describe('execute(): agent harness pattern', () => {
     if (settled[1].status === 'fulfilled') {
       expect(stdoutStr(settled[1].value).trim()).toBe('ok')
     }
+    await ws.close()
+  })
+})
+
+describe('execute({ sink }): streaming output to a console', () => {
+  it('streams the output to the console and returns empty stdout', async () => {
+    const ws = await makeWs()
+    const console_ = new JobConsole()
+    const result = (await ws.execute('echo hello', { sink: console_ })) as ExecuteResult
+    // The bytes went to the console, so the result carries only the code.
+    expect(result.exitCode).toBe(0)
+    expect(stdoutStr(result)).toBe('')
+    const streamed = DEC.decode(await console_.snapshot(Channel.STDOUT))
+    expect(streamed.trim()).toBe('hello')
+    await ws.close()
+  })
+
+  it('emits each statement of a compound line as its own chunk', async () => {
+    const ws = await makeWs()
+    const console_ = new JobConsole()
+    await ws.execute('echo a; echo b; echo c', { sink: console_ })
+    const [chunks] = await console_.readFrom(0)
+    const stdout = chunks.filter((c) => c.channel === Channel.STDOUT)
+    expect(stdout.length).toBe(3)
+    expect(stdout.map((c) => DEC.decode(c.data).trim())).toEqual(['a', 'b', 'c'])
+    await ws.close()
+  })
+
+  it('routes stderr to the console on its own channel', async () => {
+    const ws = await makeWs()
+    const console_ = new JobConsole()
+    const result = (await ws.execute('echo oops >&2', { sink: console_ })) as ExecuteResult
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(await console_.snapshot(Channel.STDERR)).trim()).toBe('oops')
     await ws.close()
   })
 })

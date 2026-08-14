@@ -16,6 +16,7 @@ import type { CacheConfig } from '../../cache/file/config.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -191,6 +192,19 @@ export interface ExecuteOptions {
    * Throws for a name that is not a workspace entry.
    */
   runtime?: string
+  /**
+   * Stream the line's output into this console as it is produced,
+   * instead of returning it whole. Each statement of a compound line
+   * emits as it finishes (a single command still lands in one chunk,
+   * since it has nothing to show before it completes), so a reader can
+   * watch a long or compound line run. When set, the returned
+   * `ExecuteResult` carries the exit code but empty stdout/stderr,
+   * because the bytes went to the console; the caller owns the console
+   * and decides when to `finish()` it (typically once this call
+   * resolves, with the exit outcome). Honored on the normal command
+   * tree; a whole-line runtime (a RemoteSandbox) still returns buffered.
+   */
+  sink?: JobConsole
   /**
    * @internal The typed line's routing decision, forwarded to nested
    * evals so inner lines never re-route.

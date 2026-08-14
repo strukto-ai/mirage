@@ -24,7 +24,8 @@ import type {
   ShellRunResult,
   ShellSandboxInfo,
 } from '@deepseek-ai/dsh-shell'
-import type { ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
+import { Channel, JobConsole, RAMConsoleStore, exitOutcome, KILLED_OUTCOME } from '@struktoai/mirage-core'
+import type { ConsoleChunk, ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
 import { tailCap } from './text.ts'
 import type {} from './service.ts'
@@ -75,6 +76,7 @@ function executeOptions(
   signal: AbortSignal,
   sessionId: string | undefined,
   fallbackWorkdir: string,
+  sink?: JobConsole,
 ): ExecuteOptions & { provision?: false } {
   const env = {
     ...(spec.env ?? {}),
@@ -92,14 +94,22 @@ function executeOptions(
     ...(cwd !== undefined ? { cwd } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(spec.stdin !== undefined ? { stdin: new TextEncoder().encode(spec.stdin) } : {}),
+    ...(sink !== undefined ? { sink } : {}),
   }
 }
 
 /**
- * A background command over the workspace executor. mirage buffers a
- * command's whole output internally, so reads deliver everything at
- * completion rather than incrementally; `kill()` aborts cooperatively (the
- * executor observes the signal between pipeline stages and inside sleep).
+ * A background command over the workspace executor, streamed through a
+ * `JobConsole`. The command runs with the console as its `sink`, so each
+ * statement of a compound line lands as it finishes rather than the whole
+ * line arriving at the end (a single command still shows up in one chunk,
+ * having nothing to emit before it completes). A background follow loop
+ * drains the console into `pending`, which `readOutput()` hands back and
+ * clears — consuming, so consecutive reads never re-deliver. Unread output
+ * is bounded to `budget` bytes: the head is dropped and `lossy` set once
+ * it overruns, keeping the tail, which is where the full stream spills to
+ * a file. `kill()` aborts cooperatively (the executor observes the signal
+ * between pipeline stages and inside sleep).
  */
 class MirageShellProcess implements ShellProcess {
   status: ShellProcessStatus = 'running'
@@ -109,55 +119,86 @@ class MirageShellProcess implements ShellProcess {
   readonly done: Promise<void>
 
   private readonly controller: AbortController
-  private readonly stdoutMaxBytes: number
-  private readonly stderrMaxBytes: number
+  private readonly console: JobConsole
+  private readonly budget: number
   private readonly sandboxInfo: ShellSandboxInfo | undefined
+  private readonly consumed: Promise<void>
   private pending = ''
   private lossy = false
+  private inStderr = false
   private settled = false
 
   constructor(
     run: Promise<ExecuteResult>,
     controller: AbortController,
-    stdoutMaxBytes: number,
-    stderrMaxBytes: number,
+    console_: JobConsole,
+    budget: number,
     sandboxInfo: ShellSandboxInfo | undefined,
   ) {
     this.controller = controller
-    this.stdoutMaxBytes = stdoutMaxBytes
-    this.stderrMaxBytes = stderrMaxBytes
+    this.console = console_
+    this.budget = budget
     this.sandboxInfo = sandboxInfo
+    this.consumed = this.consume()
     this.done = run.then(
-      (result) => {
-        this.finish(result)
-      },
-      (err: unknown) => {
-        this.fail(err)
-      },
+      (result) => this.settle(result, null),
+      (err: unknown) => this.settle(null, err),
     )
   }
 
-  private finish(result: ExecuteResult): void {
-    this.settled = true
-    this.status = 'completed'
-    this.exitCode = result.exitCode
-    // Per the contract, sandbox facts are stamped once the process
-    // settles, and independently of exit status.
-    if (this.sandboxInfo !== undefined) this.sandbox = this.sandboxInfo
-    const stdout = collect(result.stdoutText, this.stdoutMaxBytes)
-    const stderr = collect(result.stderrText, this.stderrMaxBytes)
-    this.lossy = stdout.truncated || stderr.truncated
-    this.pending += stdout.text
-    if (stderr.text !== '') this.pending += STDERR_MARKER + stderr.text
+  private async consume(): Promise<void> {
+    // follow() yields every chunk in sequence and ends on the CONTROL
+    // chunk that finish() appends.
+    for await (const chunk of this.console.follow(0)) {
+      if (chunk.channel === Channel.CONTROL) return
+      this.appendChunk(chunk)
+    }
   }
 
-  private fail(err: unknown): void {
+  private appendChunk(chunk: ConsoleChunk): void {
+    const text = new TextDecoder().decode(chunk.data)
+    // stderr rides the same delta as stdout, opened by a marker so the
+    // reader can tell the two apart; a run of stderr chunks marks once.
+    if (chunk.channel === Channel.STDERR) {
+      if (!this.inStderr) {
+        this.pending += STDERR_MARKER
+        this.inStderr = true
+      }
+      this.pending += text
+    } else {
+      this.inStderr = false
+      this.pending += text
+    }
+    // Bound the unread backlog: a reader that never drains cannot grow
+    // `pending` without limit. The tail is kept (the freshest output),
+    // matching what the buffered path did at completion.
+    const capped = tailCap(this.pending, this.budget)
+    if (capped.truncated) {
+      this.pending = capped.text
+      this.lossy = true
+    }
+  }
+
+  private async settle(result: ExecuteResult | null, err: unknown): Promise<void> {
     this.settled = true
-    this.status = 'killed'
-    this.signal = 'SIGTERM'
     if (this.sandboxInfo !== undefined) this.sandbox = this.sandboxInfo
-    const message = err instanceof Error ? err.message : String(err)
-    this.pending += STDERR_MARKER + message
+    let outcome: string
+    if (result !== null) {
+      this.status = 'completed'
+      this.exitCode = result.exitCode
+      outcome = exitOutcome(result.exitCode)
+    } else {
+      this.status = 'killed'
+      this.signal = 'SIGTERM'
+      const message = err instanceof Error ? err.message : String(err)
+      await this.console.emit(Channel.STDERR, new TextEncoder().encode(message))
+      outcome = KILLED_OUTCOME
+    }
+    // The CONTROL chunk ends the follow loop; awaiting `consumed`
+    // guarantees every chunk (the last one included) has landed in
+    // `pending` before `done` resolves, so a read after `done` is whole.
+    await this.console.finish(outcome)
+    await this.consumed
   }
 
   readOutput(): ShellProcessRead {
@@ -359,13 +400,17 @@ export class MirageShellExecutor extends ShellExecutor {
   start(spec: ShellExecSpec): ShellProcess {
     const sandbox = this.sandboxInfo()
     const controller = new AbortController()
+    // The console is the streaming conduit; the process bounds the unread
+    // backlog itself, so the store keeps everything the follow loop has
+    // not drained yet (which stays small when a reader keeps up).
+    const console_ = new JobConsole(new RAMConsoleStore())
     if (spec.signal?.aborted === true) {
       controller.abort()
       return new MirageShellProcess(
         Promise.reject(new Error('command aborted before start')),
         controller,
+        console_,
         spec.stdoutMaxBytes,
-        this.stderrMaxBytes,
         sandbox,
       )
     }
@@ -378,10 +423,10 @@ export class MirageShellExecutor extends ShellExecutor {
       .then((ws) =>
         ws.execute(
           spec.command,
-          executeOptions(spec, controller.signal, this.sessionId, this.workdir),
+          executeOptions(spec, controller.signal, this.sessionId, this.workdir, console_),
         ),
       )
       .finally(() => spec.signal?.removeEventListener('abort', onAbort))
-    return new MirageShellProcess(run, controller, spec.stdoutMaxBytes, this.stderrMaxBytes, sandbox)
+    return new MirageShellProcess(run, controller, console_, spec.stdoutMaxBytes, sandbox)
   }
 }

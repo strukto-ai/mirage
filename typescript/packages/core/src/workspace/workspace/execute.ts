@@ -216,6 +216,7 @@ export async function executeLine(
     runtimeBindings: env.runtimes.bindings,
     ...(routingDecision !== null ? { routingDecision } : {}),
     ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    ...(options.sink !== undefined ? { sink: options.sink } : {}),
   }
   try {
     return await runParsedLine(env, command, options, rootNode, deps, targetSession, stdin)
