@@ -381,4 +381,27 @@ describe('execute({ sink }): streaming output to a console', () => {
     expect(DEC.decode(await console_.snapshot(Channel.STDERR)).trim()).toBe('oops')
     await ws.close()
   })
+
+  it('sends a syntax error to the console, not the result', async () => {
+    const ws = await makeWs()
+    const console_ = new JobConsole()
+    // The syntax gate answers before the walk that emits, so this is
+    // output the console would never see without the drain.
+    const result = await ws.execute('case x', { sink: console_ })
+    expect(result.exitCode).toBe(2)
+    expect(stdoutStr(result)).toBe('')
+    expect(DEC.decode(result.stderr)).toBe('')
+    expect(DEC.decode(await console_.snapshot(Channel.STDERR))).toContain('syntax error')
+    await ws.close()
+  })
+
+  it("sends a failed command's stderr to the console", async () => {
+    const ws = await makeWs()
+    const console_ = new JobConsole()
+    const result = await ws.execute('cat /ram/missing.txt', { sink: console_ })
+    expect(result.exitCode).not.toBe(0)
+    expect(DEC.decode(result.stderr)).toBe('')
+    expect(DEC.decode(await console_.snapshot(Channel.STDERR))).toContain('missing.txt')
+    await ws.close()
+  })
 })

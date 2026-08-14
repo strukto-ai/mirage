@@ -201,8 +201,10 @@ export interface ExecuteOptions {
    * `ExecuteResult` carries the exit code but empty stdout/stderr,
    * because the bytes went to the console; the caller owns the console
    * and decides when to `finish()` it (typically once this call
-   * resolves, with the exit outcome). Honored on the normal command
-   * tree; a whole-line runtime (a RemoteSandbox) still returns buffered.
+   * resolves, with the exit outcome). Every path answers this way, so
+   * the console is the line's whole output: a line a whole-line runtime
+   * (a RemoteSandbox) served, a syntax error, a policy denial and a
+   * failed line all arrive there rather than in the result.
    */
   sink?: JobConsole
   /**

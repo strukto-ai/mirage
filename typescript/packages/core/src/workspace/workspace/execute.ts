@@ -17,6 +17,8 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
+import { Channel } from '../../shell/console/types.ts'
+import type { JobConsole } from '../../shell/console/job_console.ts'
 import type { Resource } from '../../resource/base.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table.ts'
@@ -115,14 +117,53 @@ async function deniedResult(
 }
 
 /**
+ * Move a buffered result into the sink, so a caller that gave one reads
+ * the whole line there.
+ *
+ * Most of a line streams as it runs, but several paths answer with bytes
+ * in hand and never reach the walk that emits: a whole-line runtime
+ * returns its own buffer, and the syntax gate, a policy denial and a
+ * failed line all return before or around the tree. Draining here rather
+ * than at each of those keeps the contract one rule instead of five, and
+ * a path added later cannot forget it. Nothing is emitted twice: a line
+ * that did stream returns empty, which is the same fact this reads.
+ *
+ * @param sink console the caller passed as `ExecuteOptions.sink`.
+ * @param result the line's result, buffered or already streamed.
+ */
+async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<ExecuteResult> {
+  if (result.stdout.byteLength === 0 && result.stderr.byteLength === 0) return result
+  if (result.stdout.byteLength > 0) await sink.emit(Channel.STDOUT, result.stdout)
+  if (result.stderr.byteLength > 0) await sink.emit(Channel.STDERR, result.stderr)
+  return new ExecuteResult(new Uint8Array(), new Uint8Array(), result.exitCode)
+}
+
+/**
  * The body of `Workspace.execute`; see its docstring for the argument
- * contract. Order of gates: hydrate stores, drain any queued drift
- * check, parse, syntax gate, provision branch, policy, then the
- * strategies (whole-line runtime or command tree). Failures fold into
- * the line's result via `failureResult`, except the kinds that are the
- * caller's problem (abort, drift), which propagate.
+ * contract. Runs the line, then honors the sink contract for every path
+ * `runLine` can answer on.
  */
 export async function executeLine(
+  env: ExecuteEnv,
+  command: string,
+  options: ExecuteOptions,
+): Promise<ExecuteResult | ProvisionResult> {
+  const result = await runLine(env, command, options)
+  const sink = options.sink
+  // A provision run answers with a plan, not output, so it has nothing
+  // to stream.
+  if (sink === undefined || !(result instanceof ExecuteResult)) return result
+  return drainToSink(sink, result)
+}
+
+/**
+ * Order of gates: hydrate stores, drain any queued drift check, parse,
+ * syntax gate, provision branch, policy, then the strategies (whole-line
+ * runtime or command tree). Failures fold into the line's result via
+ * `failureResult`, except the kinds that are the caller's problem (abort,
+ * drift), which propagate.
+ */
+async function runLine(
   env: ExecuteEnv,
   command: string,
   options: ExecuteOptions,

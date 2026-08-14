@@ -36,6 +36,7 @@ import {
   ScriptSource,
 } from '../runtime/policy/index.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
+import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace.ts'
@@ -743,6 +744,27 @@ describe('whole-line runtimes', () => {
       const forced = await ws.execute('echo hi', { runtime: 'sandbox' })
       expect(DEC.decode(refused.stdout)).toBe('hi\n')
       expect(DEC.decode(forced.stdout)).toBe('box:echo hi')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a sink receives the line the runtime served', async () => {
+    const parser = await getTestParser()
+    const box = new LineBox()
+    box.captures = ['*']
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+    )
+    const console_ = new JobConsole()
+    try {
+      // The runtime buffers and never touches the sink itself, so
+      // without the drain a streaming caller reads nothing at all.
+      const result = await ws.execute('echo hi', { sink: console_ })
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('')
+      expect(DEC.decode(await console_.snapshot(Channel.STDOUT))).toBe('box:echo hi')
     } finally {
       await ws.close()
     }
