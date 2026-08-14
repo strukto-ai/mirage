@@ -324,3 +324,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
     result = await runtime.eval("1 + 1", session="s1")
     assert result.value == 2
     await runtime.close()
+
+
+def test_reach_is_vfs():
+    assert MontyRuntime.reach == "vfs"

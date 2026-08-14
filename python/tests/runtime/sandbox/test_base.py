@@ -190,3 +190,7 @@ async def test_remote_line_invalidates_local_read_caches():
         assert looked.entry is None
     finally:
         await ws.close()
+
+
+def test_reach_is_remote():
+    assert RemoteSandbox.reach == "remote"

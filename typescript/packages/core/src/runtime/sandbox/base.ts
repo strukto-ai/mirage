@@ -38,6 +38,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime
   implements LineExecutor
 {
+  // Lines execute on the provider's machine and act on that machine's
+  // world (its filesystem, its network); the workspace gate never sees
+  // those effects, however well isolated the sandbox itself is.
+  override readonly reach = 'remote'
   readonly [LINE_EXECUTOR] = true as const
   declare config: NormalizedSandboxConfig<C>
   // Connect-once latch: the first captured line connects; later lines

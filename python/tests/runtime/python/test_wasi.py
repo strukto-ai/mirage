@@ -234,3 +234,7 @@ async def test_wasi_session_narrowing_reaches_the_guest():
     r = await ws.execute(f'python3 -c "{code}"')
     assert (await r.stdout_str()) == ""
     await ws.close()
+
+
+def test_reach_is_vfs():
+    assert WasiRuntime.reach == "vfs"

@@ -20,7 +20,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.policy.types import PolicyScript
 from mirage.runtime.sandbox.config import SandboxConfig
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunResult, RuntimeReach
 
 
 class RemoteSandbox(Runtime, LineExecutorMixin):
@@ -42,6 +42,11 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     provider's own config class.
     """
 
+    # Lines execute on the provider's machine and act on that
+    # machine's world (its filesystem, its network); the workspace
+    # gate never sees those effects, however well isolated the
+    # sandbox itself is.
+    reach: RuntimeReach = "remote"
     captures: tuple[str, ...] = ("*", )
     config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
     config: SandboxConfig

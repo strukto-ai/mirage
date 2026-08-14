@@ -143,3 +143,14 @@ def test_vfs_is_a_pure_routing_marker():
     assert not isinstance(vfs, LineExecutorMixin)
     assert not hasattr(vfs, "run_line")
     assert not hasattr(vfs, "run")
+
+
+def test_vfs_marker_reach_is_vfs():
+    assert VFSRuntime.reach == "vfs"
+
+
+def test_default_world_reaches_only_the_vfs():
+    # The default world's sandbox story rests on every entry keeping
+    # its effects behind the workspace gate; `local` (process reach)
+    # is deliberately not a default entry.
+    assert all(NAMED[name].reach == "vfs" for name in DEFAULT_ENTRIES)

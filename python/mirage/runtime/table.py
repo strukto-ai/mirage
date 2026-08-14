@@ -23,7 +23,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
-from mirage.runtime.types import ScriptSource
+from mirage.runtime.types import RuntimeReach, ScriptSource
 
 # One source of truth, preference order (sandboxed first, host last).
 # The command -> runtime mapping is derived from each class's captures,
@@ -55,6 +55,9 @@ class VFSRuntime(Runtime):
     """
 
     name = "vfs"
+    # A vfs-routed line runs on the workspace executor itself: it IS
+    # the gate, so there is no door around it.
+    reach: RuntimeReach = "vfs"
     captures: tuple[str, ...] = ()
 
     def __init__(

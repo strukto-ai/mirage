@@ -90,9 +90,9 @@ describe('MirageService', () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     const ctx = new Context()
     await ctx.plugin(MirageService, { workspace: ws }).await()
-    expect(ctx.mirage.confined).toBe(true)
+    expect(ctx.mirage.vfsOnly).toBe(true)
     ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
-    expect(ctx.mirage.confined).toBe(false)
+    expect(ctx.mirage.vfsOnly).toBe(false)
     await ws.close()
   })
 
@@ -113,10 +113,10 @@ describe('MirageService', () => {
     })
     await fiber.await()
     expect(() => ctx.mirage.workspace).toThrow('not ready')
-    expect(ctx.mirage.confined).toBe(false)
+    expect(ctx.mirage.vfsOnly).toBe(false)
     release()
     await ctx.mirage.ready
-    expect(ctx.mirage.confined).toBe(false)
+    expect(ctx.mirage.vfsOnly).toBe(false)
     await fiber.dispose()
   })
 
