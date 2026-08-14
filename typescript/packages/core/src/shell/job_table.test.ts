@@ -15,7 +15,14 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { ExecutionNode } from '../workspace/types.ts'
-import { Channel } from './console/index.ts'
+import {
+  Channel,
+  type ConsoleChunk,
+  type ConsoleStore,
+  JobConsole,
+  RAMConsoleStore,
+  type ReadResult,
+} from './console/index.ts'
 import { Job, type JobResult, type JobRunner, JobStatus, JobTable } from './job_table.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
@@ -43,6 +50,53 @@ function deaf(release: { fire?: () => void }): JobRunner {
     })
     return [new IOResult(), new ExecutionNode()] as JobResult
   }
+}
+
+/**
+ * A store whose appends park until the test opens the gate. Stands in
+ * for a store that genuinely suspends: the window between a job's
+ * status flipping and its final chunks landing becomes arbitrarily
+ * wide.
+ */
+class GatedStore implements ConsoleStore {
+  private readonly inner = new RAMConsoleStore()
+
+  constructor(private readonly gate: Promise<void>) {}
+
+  async append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    await this.gate
+    return this.inner.append(channel, data)
+  }
+
+  async readFrom(seq: number, limit?: number): Promise<ReadResult> {
+    return this.inner.readFrom(seq, limit)
+  }
+
+  get closed(): boolean {
+    return this.inner.closed
+  }
+
+  async wait(seq: number): Promise<void> {
+    return this.inner.wait(seq)
+  }
+
+  async close(): Promise<void> {
+    return this.inner.close()
+  }
+}
+
+/** A live job whose console appends are parked behind the gate. */
+function gatedJob(table: JobTable, gate: Promise<void>): Job {
+  const job = new Job({
+    id: 1,
+    command: 'deaf',
+    abort: new AbortController(),
+    cwd: '/',
+    console: new JobConsole(new GatedStore(gate)),
+    task: new Promise<void>(() => undefined),
+  })
+  table.loadJob(job)
+  return job
 }
 
 /** A runner that never finishes on its own; only an abort ends it. */
@@ -213,6 +267,56 @@ describe('JobTable.wait', () => {
 })
 
 // Port of tests/shell/test_background_jobs.py::test_wait_all_survives_failing_task.
+describe('JobTable.wait ordering', () => {
+  it('joins a kill that is still appending its marker', async () => {
+    let open!: () => void
+    const gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const jt = new JobTable()
+    const job = gatedJob(jt, gate)
+    const killP = jt.kill(job.id)
+    // kill's synchronous prefix has already flipped the status; the
+    // marker appends are parked behind the gate.
+    expect(job.status).toBe(JobStatus.KILLED)
+    let settled = false
+    const waiter = jt.wait(job.id).then((j) => {
+      settled = true
+      return j
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // A wait that trusted the status field would have resolved here and
+    // let the caller snapshot without the marker.
+    expect(settled).toBe(false)
+    open()
+    await killP
+    const waited = await waiter
+    expect(dec(await waited.console.snapshot(Channel.STDERR))).toBe('Killed')
+  })
+
+  it('waitAll joins a killed job that is still appending its marker', async () => {
+    let open!: () => void
+    const gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const jt = new JobTable()
+    const job = gatedJob(jt, gate)
+    const killP = jt.kill(job.id)
+    expect(job.status).toBe(JobStatus.KILLED)
+    let settled = false
+    const allP = jt.waitAll().then((jobs) => {
+      settled = true
+      return jobs
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+    open()
+    await killP
+    await allP
+    expect(dec(await job.console.snapshot(Channel.STDERR))).toBe('Killed')
+  })
+})
+
 describe('JobTable.waitAll', () => {
   it('survives a failing task — mixed success/failure both land in the table', async () => {
     const jt = new JobTable()

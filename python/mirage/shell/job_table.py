@@ -243,18 +243,33 @@ class JobTable:
     async def wait(self, job_id: int) -> Job:
         """Block until a job ends, then return it.
 
+        Joined on the console's ending chunk, never on the status field:
+        ``kill`` and ``_settle`` both flip the status before their final
+        appends, so a status-based return could let the caller snapshot
+        and reap the job before ``Killed`` or the ending chunk is
+        persisted (a waiter on another loop today, any store that
+        suspends tomorrow). A restored job has no task and its console
+        already holds the ending chunk, so it returns without waiting.
+
         Args:
             job_id (int): the job to wait for.
         """
         job = self._jobs[job_id]
-        if job.status != JobStatus.RUNNING:
+        if job.task is None:
             return job
         await job.console.wait_finished()
         return job
 
     async def wait_all(self) -> list[Job]:
+        """Join every job in the table, returning the ones still running.
+
+        Every job, not only the running ones: a killed job's ``Killed``
+        marker can still be in flight (see ``wait``), and bare ``wait``
+        snapshots each console right after this returns. Joining a
+        finished job costs one read.
+        """
         running = self.running_jobs()
-        for job in running:
+        for job in self.list_jobs():
             await self.wait(job.id)
         return running
 

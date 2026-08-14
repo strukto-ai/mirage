@@ -220,21 +220,38 @@ export class JobTable {
     return running
   }
 
-  /** Block until a job ends, then return it. */
+  /**
+   * Block until a job ends, then return it.
+   *
+   * Joined on the console's ending chunk, never on the status field:
+   * kill() and settle() both flip the status before their final
+   * appends, and every await yields a microtask, so a status-based
+   * return could let the caller snapshot and reap the job before
+   * `Killed` or the ending chunk is persisted. A restored job has no
+   * task and its console already holds the ending chunk, so it
+   * returns without waiting.
+   */
   async wait(jobId: number): Promise<Job> {
     const job = this.jobs.get(jobId)
     if (job === undefined) {
       throw new Error(`unknown job: ${jobId.toString()}`)
     }
-    if (job.status !== JobStatus.RUNNING) return job
     if (job.task === null) return job
     await job.console.waitFinished()
     return job
   }
 
+  /**
+   * Join every job in the table, returning the ones still running.
+   *
+   * Every job, not only the running ones: a killed job's `Killed`
+   * marker can still be in flight (see wait()), and bare `wait`
+   * snapshots each console right after this returns. Joining a
+   * finished job costs one read.
+   */
   async waitAll(): Promise<Job[]> {
     const running = this.runningJobs()
-    for (const job of running) {
+    for (const job of this.listJobs()) {
       await this.wait(job.id)
     }
     return running
