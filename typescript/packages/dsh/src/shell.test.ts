@@ -286,3 +286,44 @@ describe('start', () => {
     expect(await ws.fs.exists('/data/out.txt')).toBe(false)
   })
 })
+
+describe('sandbox facts', () => {
+  it('stamps a full-enforcement workspace-write sandbox on a run result', async () => {
+    const { shell } = await makeShell({ 'a.txt': 'x' })
+    const result = await shell.run(shell.resolve({ command: 'cat /data/a.txt' }))
+    expect(result.sandbox).toEqual({
+      mode: 'workspace-write',
+      denied: false,
+      enforcement: 'full',
+      runnerFailed: false,
+    })
+  })
+
+  it('reports the sandbox independently of exit status', async () => {
+    const { shell } = await makeShell()
+    const result = await shell.run(shell.resolve({ command: 'cat /data/nope' }))
+    expect(result.exitCode).not.toBe(0)
+    expect(result.sandbox?.mode).toBe('workspace-write')
+    expect(result.sandbox?.denied).toBe(false)
+  })
+
+  it('omits the sandbox once a runtime executes beyond the workspace', async () => {
+    const { shell, ws } = await makeShell()
+    ws.addRuntime(new LocalRuntime({ captures: ['python'] }))
+    const result = await shell.run(shell.resolve({ command: 'true' }))
+    expect(result.sandbox).toBeUndefined()
+  })
+
+  it('stamps the sandbox on a settled background process', async () => {
+    const { shell } = await makeShell({ 'a.txt': 'bg' })
+    const proc = shell.start(shell.resolve({ command: 'cat /data/a.txt' }))
+    expect(proc.sandbox).toBeUndefined()
+    await proc.done
+    expect(proc.sandbox).toEqual({
+      mode: 'workspace-write',
+      denied: false,
+      enforcement: 'full',
+      runnerFailed: false,
+    })
+  })
+})

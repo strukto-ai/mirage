@@ -22,6 +22,7 @@ import type {
   ShellProcessRead,
   ShellProcessStatus,
   ShellRunResult,
+  ShellSandboxInfo,
 } from '@deepseek-ai/dsh-shell'
 import type { ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core'
 import type { Workspace } from '@struktoai/mirage-node'
@@ -104,11 +105,13 @@ class MirageShellProcess implements ShellProcess {
   status: ShellProcessStatus = 'running'
   exitCode: number | null = null
   signal: NodeJS.Signals | null = null
+  sandbox?: ShellSandboxInfo
   readonly done: Promise<void>
 
   private readonly controller: AbortController
   private readonly stdoutMaxBytes: number
   private readonly stderrMaxBytes: number
+  private readonly sandboxInfo: ShellSandboxInfo | undefined
   private pending = ''
   private lossy = false
   private settled = false
@@ -118,10 +121,12 @@ class MirageShellProcess implements ShellProcess {
     controller: AbortController,
     stdoutMaxBytes: number,
     stderrMaxBytes: number,
+    sandboxInfo: ShellSandboxInfo | undefined,
   ) {
     this.controller = controller
     this.stdoutMaxBytes = stdoutMaxBytes
     this.stderrMaxBytes = stderrMaxBytes
+    this.sandboxInfo = sandboxInfo
     this.done = run.then(
       (result) => {
         this.finish(result)
@@ -136,6 +141,9 @@ class MirageShellProcess implements ShellProcess {
     this.settled = true
     this.status = 'completed'
     this.exitCode = result.exitCode
+    // Per the contract, sandbox facts are stamped once the process
+    // settles, and independently of exit status.
+    if (this.sandboxInfo !== undefined) this.sandbox = this.sandboxInfo
     const stdout = collect(result.stdoutText, this.stdoutMaxBytes)
     const stderr = collect(result.stderrText, this.stderrMaxBytes)
     this.lossy = stdout.truncated || stderr.truncated
@@ -147,6 +155,7 @@ class MirageShellProcess implements ShellProcess {
     this.settled = true
     this.status = 'killed'
     this.signal = 'SIGTERM'
+    if (this.sandboxInfo !== undefined) this.sandbox = this.sandboxInfo
     const message = err instanceof Error ? err.message : String(err)
     this.pending += STDERR_MARKER + message
   }
@@ -223,6 +232,27 @@ export class MirageShellExecutor extends ShellExecutor {
     return this.ctx.mirage.vfsOnly ? 'workspace-write' : undefined
   }
 
+  /**
+   * The sandbox facts to stamp on this run's result and process handle,
+   * or undefined when the world is not fully workspace-bound (no claim).
+   *
+   * `enforcement` is 'full': when every runtime reaches only the vfs, the
+   * workspace gate cannot be bypassed, so unlike an OS sandbox on an older
+   * kernel there is no promised effect it fails to govern. `denied` is
+   * false because mirage has no out-of-band denial channel: a refused write
+   * (a read-only mount) fails in-band as an ordinary command error with a
+   * nonzero exit, the way EROFS would, not as a separate sandbox verdict,
+   * so there is nothing here to distinguish from the command's own failure.
+   * `runnerFailed` is false because the workspace executor is the runner
+   * and a failure to run surfaces as a rejected/aborted execution, not a
+   * runner that never started.
+   */
+  private sandboxInfo(): ShellSandboxInfo | undefined {
+    const mode = this.sandboxMode
+    if (mode === undefined) return undefined
+    return { mode, denied: false, enforcement: 'full', runnerFailed: false }
+  }
+
   resolve(request: ShellExecRequest): ShellExecSpec {
     // Bound to a session, an unspecified workdir stays empty so the
     // session's own cwd governs; filling the default here would turn
@@ -260,6 +290,7 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   async run(spec: ShellExecSpec): Promise<ShellRunResult> {
+    const sandbox = this.sandboxInfo()
     // An already-aborted signal never fires its listener, so answer before
     // dispatch: the command must not run at all.
     if (spec.signal?.aborted === true) {
@@ -271,6 +302,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: { text: '', truncated: false },
         stderr: { text: '', truncated: false },
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     }
     const controller = new AbortController()
@@ -302,6 +334,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: collect(result.stdoutText, spec.stdoutMaxBytes),
         stderr: collect(result.stderrText, this.stderrMaxBytes),
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     } catch (err) {
       if (!controller.signal.aborted) throw err
@@ -315,6 +348,7 @@ export class MirageShellExecutor extends ShellExecutor {
         timeoutMs: spec.timeoutMs,
         stdout: { text: '', truncated: false },
         stderr: { text: '', truncated: false },
+        ...(sandbox !== undefined ? { sandbox } : {}),
       }
     } finally {
       clearTimeout(timer)
@@ -323,6 +357,7 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   start(spec: ShellExecSpec): ShellProcess {
+    const sandbox = this.sandboxInfo()
     const controller = new AbortController()
     if (spec.signal?.aborted === true) {
       controller.abort()
@@ -331,6 +366,7 @@ export class MirageShellExecutor extends ShellExecutor {
         controller,
         spec.stdoutMaxBytes,
         this.stderrMaxBytes,
+        sandbox,
       )
     }
     const onAbort = (): void => {
@@ -346,6 +382,6 @@ export class MirageShellExecutor extends ShellExecutor {
         ),
       )
       .finally(() => spec.signal?.removeEventListener('abort', onAbort))
-    return new MirageShellProcess(run, controller, spec.stdoutMaxBytes, this.stderrMaxBytes)
+    return new MirageShellProcess(run, controller, spec.stdoutMaxBytes, this.stderrMaxBytes, sandbox)
   }
 }
