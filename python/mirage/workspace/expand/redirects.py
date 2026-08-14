@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import (ProcessSubDirection, get_process_sub_body,
@@ -70,6 +71,7 @@ async def expand_heredoc_body(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> str:
     """Structurally expand an unquoted heredoc body.
 
@@ -98,8 +100,11 @@ async def expand_heredoc_body(
         if child.type == NT.HEREDOC_CONTENT:
             pieces.append((get_text(child), True))
         else:
-            pieces.append((await expand_node(child, session, execute_fn,
-                                             call_stack), False))
+            pieces.append((await expand_node(child,
+                                             session,
+                                             execute_fn,
+                                             call_stack,
+                                             view=view), False))
         for text, literal in pieces:
             if not text:
                 continue
@@ -134,6 +139,7 @@ async def expand_redirects(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> tuple[list[Redirect], Any]:
     """Expand redirect targets: heredoc vars, target words, pipelines.
 
@@ -162,12 +168,18 @@ async def expand_redirects(
             if (r.kind == RedirectKind.HEREDOC and r.expand_vars
                     and r.target_node is not None
                     and r.target_node.type == NT.HEREDOC_REDIRECT):
-                body = await expand_heredoc_body(r.target_node, session,
-                                                 execute_fn, call_stack)
+                body = await expand_heredoc_body(r.target_node,
+                                                 session,
+                                                 execute_fn,
+                                                 call_stack,
+                                                 view=view)
             elif (r.kind == RedirectKind.HERESTRING
                   and r.target_node is not None):
-                body = await expand_node(r.target_node, session, execute_fn,
-                                         call_stack)
+                body = await expand_node(r.target_node,
+                                         session,
+                                         execute_fn,
+                                         call_stack,
+                                         view=view)
             elif isinstance(body, str) and r.expand_vars:
                 for var, val in visible_env(session).items():
                     body = body.replace("$" + var, val)
@@ -211,8 +223,11 @@ async def expand_redirects(
                 contained_code=2)
         target_node = r.target_node
         if target_node is not None:
-            target_str = await expand_node(target_node, session, execute_fn,
-                                           call_stack)
+            target_str = await expand_node(target_node,
+                                           session,
+                                           execute_fn,
+                                           call_stack,
+                                           view=view)
             # A redirect target is a path by definition (the operator is
             # the context), so force classification like a PATH-kind word;
             # classify_word alone leaves extensionless relative targets as

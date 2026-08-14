@@ -142,8 +142,12 @@ async def execute_command(
         key, _, raw_val = atext.partition("=")
         val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
         if val_nodes:
-            v = await expand_node(val_nodes[0], session, execute_fn,
-                                  call_stack)
+            v = await expand_node(val_nodes[0],
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=session_view(session,
+                                                    registry.policies))
         else:
             v = raw_val
         prefix_assignments.append((key, v))
@@ -218,8 +222,13 @@ async def _dispatch_command_body(
         for child in node.named_children:
             if child.type == NT.HERESTRING_REDIRECT:
                 for sc in child.named_children:
-                    content = await expand_node(sc, session, execute_fn,
-                                                call_stack)
+                    content = await expand_node(sc,
+                                                session,
+                                                execute_fn,
+                                                call_stack,
+                                                view=session_view(
+                                                    session,
+                                                    registry.policies))
                     stdin = encode_text(content) + b"\n"
                     break
 
@@ -248,8 +257,13 @@ async def _dispatch_command_body(
         stdin = b"".join(proc_sub_parts)
     parts = clean_parts
 
-    argv = await expand_argv(parts, session, execute_fn, call_stack, registry,
-                             namespace)
+    argv = await expand_argv(parts,
+                             session,
+                             execute_fn,
+                             call_stack,
+                             registry,
+                             namespace,
+                             view=session_view(session, registry.policies))
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
@@ -533,7 +547,8 @@ async def _run_argv(
         return await handle_echo(args)
 
     if name == SB.PRINTF:
-        return await handle_printf(args, session)
+        return await handle_printf(
+            args, session, session_view(session, namespace.registry.policies))
 
     if name == SB.SLEEP:
         return await handle_sleep(args, cancel=cancel)

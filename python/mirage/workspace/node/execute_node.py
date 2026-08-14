@@ -100,6 +100,7 @@ async def _eval_cfor_expr(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> int:
     """Evaluate one C-style for expression slot.
 
@@ -112,6 +113,8 @@ async def _eval_cfor_expr(
             in its env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
+        view (SessionView | None): the session plane's gated door the
+            assignments land through; None outside a workspace.
 
     Raises:
         ArithError: re-raised with the expression text prepended, so
@@ -119,10 +122,11 @@ async def _eval_cfor_expr(
         ReadonlyError: the expression assigns to a readonly variable,
             which aborts the loop the same way an invalid expression
             does.
+        PolicyDenied: a pre_session rule refused one of the writes.
     """
     if expr is None:
         return default
-    text = await expand_arith(expr, session, execute_fn, call_stack)
+    text = await expand_arith(expr, session, execute_fn, call_stack, view=view)
     try:
         # Reads resolve against the visible env so a hidden name counts
         # as unset; a hidden write refuses through the session door
@@ -134,7 +138,13 @@ async def _eval_cfor_expr(
         ensure_var_visible(session, name)
         if name in session.readonly_vars:
             raise ReadonlyError(name)
-    session.env.update(updates)
+    # Through the door, so a pre_session rule governs an arithmetic
+    # assignment exactly as it governs `X=1`.
+    for name, updated in updates.items():
+        if view is None:
+            session.env[name] = updated
+        else:
+            await view.set(name, updated)
     return int(value)
 
 
@@ -160,9 +170,18 @@ async def _expand_array_items(
         namespace (Namespace): addressing authority holding the links.
         cs (CallStack | None): function-call scope, if any.
     """
+    # The session plane's door, bound once for the line: every
+    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
+    # so a pre_session rule governs those exactly as it governs `X=d`.
+    view = session_view(session, registry.policies)
     values = list(array_node.named_children)
-    classified = await expand_and_classify(values, session, execute_fn,
-                                           registry, session.cwd, cs)
+    classified = await expand_and_classify(values,
+                                           session,
+                                           execute_fn,
+                                           registry,
+                                           session.cwd,
+                                           cs,
+                                           view=view)
     resolved = await resolve_globs(classified,
                                    registry,
                                    noglob=bool(
@@ -201,11 +220,18 @@ async def _recurse_reassociated(
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
+    # The session plane's door, bound once for the line: every
+    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
+    # so a pre_session rule governs those exactly as it governs `X=d`.
+    view = session_view(session, registry.policies)
     if node is not right:
         return await recurse(node, session, stdin, call_stack)
-    expanded, pipe_node = await expand_redirects(redirects, session,
-                                                 execute_fn, registry,
-                                                 call_stack)
+    expanded, pipe_node = await expand_redirects(redirects,
+                                                 session,
+                                                 execute_fn,
+                                                 registry,
+                                                 call_stack,
+                                                 view=view)
     stdout, io, exec_node = await handle_redirect(recurse, dispatch, right,
                                                   expanded, session, stdin,
                                                   call_stack)
@@ -228,14 +254,21 @@ async def _recurse_pipe_stderr(
     stdin: Any = None,
     call_stack: CallStack | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    # The session plane's door, bound once for the line: every
+    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
+    # so a pre_session rule governs those exactly as it governs `X=d`.
+    view = session_view(session, registry.policies)
     if node not in targets or node_kind(node) != NodeKind.REDIRECT:
         return await recurse(node, session, stdin, call_stack)
     command, redirects = get_redirects(node)
     redirects.append(
         Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT))
-    expanded, pipe_node = await expand_redirects(redirects, session,
-                                                 execute_fn, registry,
-                                                 call_stack)
+    expanded, pipe_node = await expand_redirects(redirects,
+                                                 session,
+                                                 execute_fn,
+                                                 registry,
+                                                 call_stack,
+                                                 view=view)
     stdout, io, exec_node = await handle_redirect(recurse, dispatch, command,
                                                   expanded, session, stdin,
                                                   call_stack)
@@ -276,6 +309,10 @@ async def execute_node(
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.
     """
+    # The session plane's door, bound once for the line: every
+    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
+    # so a pre_session rule governs those exactly as it governs `X=d`.
+    view = session_view(session, registry.policies)
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
     cs = call_stack if call_stack is not None else CallStack()
@@ -376,8 +413,12 @@ async def execute_node(
                               execute_fn, registry, redirects, right)
             return await handle_pipe(wrapped, commands, stderr_flags, session,
                                      stdin, cs)
-        expanded_redirects, pipe_node = await expand_redirects(
-            redirects, session, execute_fn, registry, cs)
+        expanded_redirects, pipe_node = await expand_redirects(redirects,
+                                                               session,
+                                                               execute_fn,
+                                                               registry,
+                                                               cs,
+                                                               view=view)
         stdout, io, exec_node = await handle_redirect(recurse, dispatch,
                                                       command,
                                                       expanded_redirects,
@@ -412,7 +453,7 @@ async def execute_node(
     if (kind == NodeKind.COMPOUND and node.children
             and node.children[0].type == NT.ARITH_OPEN):
         text = get_text(node)
-        expr = await expand_arith(node, session, execute_fn, cs)
+        expr = await expand_arith(node, session, execute_fn, cs, view=view)
         try:
             # Reads resolve against the visible env so a hidden name
             # counts as unset; a hidden write refuses below, in this
@@ -439,7 +480,15 @@ async def execute_node(
                                       stderr=err), ExecutionNode(command=text,
                                                                  exit_code=1,
                                                                  stderr=err)
-        session.env.update(updates)
+        try:
+            for name, updated in updates.items():
+                await view.set(name, updated)
+        except PolicyDenied as exc:
+            err = f"bash: {exc.strerror}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=text,
+                                                             exit_code=1,
+                                                             stderr=err)
         code = 0 if value != 0 else 1
         return None, IOResult(exit_code=code), ExecutionNode(command=text,
                                                              exit_code=code)
@@ -479,15 +528,21 @@ async def execute_node(
         eval_expr = partial(_eval_cfor_expr,
                             session=session,
                             execute_fn=execute_fn,
-                            call_stack=cs)
+                            call_stack=cs,
+                            view=view)
         return await handle_cfor(recurse, exprs, body, eval_expr, session,
                                  stdin, cs)
 
     # ── for / select ────────────────────────────
     if kind in (NodeKind.FOR, NodeKind.SELECT):
         var, values, body = get_for_parts(node)
-        classified = await expand_and_classify(values, session, execute_fn,
-                                               registry, session.cwd, cs)
+        classified = await expand_and_classify(values,
+                                               session,
+                                               execute_fn,
+                                               registry,
+                                               session.cwd,
+                                               cs,
+                                               view=view)
         # The loop word list is consumed by the shell (WordPolicy.SHELL):
         # globs resolve to matches before iteration starts.
         classified = await resolve_globs(
@@ -524,11 +579,11 @@ async def execute_node(
     # ── case ────────────────────────────────────
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
-        word = await expand_node(word_node, session, execute_fn, cs)
+        word = await expand_node(word_node, session, execute_fn, cs, view=view)
         case_items = []
         for pattern_nodes, body, terminator in get_case_items(node):
             patterns = [
-                await expand_pattern(p, session, execute_fn, cs)
+                await expand_pattern(p, session, execute_fn, cs, view=view)
                 for p in pattern_nodes
             ]
             case_items.append((patterns, body, terminator))
@@ -569,7 +624,11 @@ async def execute_node(
                     staged.append(
                         (key.removesuffix("+"), key.endswith("+"), items))
                     continue
-                expanded = await expand_node(child, session, execute_fn, cs)
+                expanded = await expand_node(child,
+                                             session,
+                                             execute_fn,
+                                             cs,
+                                             view=view)
                 assignments.append(expanded)
             elif child.type in (NT.SIMPLE_EXPANSION, NT.EXPANSION,
                                 NT.CONCATENATION, NT.WORD, NT.VARIABLE_NAME,
@@ -578,7 +637,11 @@ async def execute_node(
                 # A bare `readonly NAME` / `export NAME` operand parses as
                 # a variable_name, not a word, and a quoted assignment
                 # (`export 'FOO=bar'`) as a plain string operand.
-                expanded = await expand_node(child, session, execute_fn, cs)
+                expanded = await expand_node(child,
+                                             session,
+                                             execute_fn,
+                                             cs,
+                                             view=view)
                 if not expanded:
                     continue
                 if (not opts_done and expanded.startswith("-")
@@ -659,13 +722,21 @@ async def execute_node(
     if kind == NodeKind.TEST:
         opener = node.children[0].type if node.children else "["
         if opener == "[[":
-            tree = await expand_double_bracket(node, session, execute_fn, cs)
+            tree = await expand_double_bracket(node,
+                                               session,
+                                               execute_fn,
+                                               cs,
+                                               view=view)
             return await handle_test(dispatch,
                                      namespace,
                                      tree,
                                      session,
                                      name="[[")
-        test_argv = await expand_test_expr(node, session, execute_fn, cs)
+        test_argv = await expand_test_expr(node,
+                                           session,
+                                           execute_fn,
+                                           cs,
+                                           view=view)
         return await handle_test(dispatch,
                                  namespace,
                                  test_argv,
@@ -740,7 +811,11 @@ async def execute_node(
             return None, IOResult(exit_code=code), ExecutionNode(
                 command=text, exit_code=code)
         if val_nodes:
-            val = await expand_node(val_nodes[0], session, execute_fn, cs)
+            val = await expand_node(val_nodes[0],
+                                    session,
+                                    execute_fn,
+                                    cs,
+                                    view=view)
         else:
             val = text.partition("=")[2]
         if subscript_node is not None:

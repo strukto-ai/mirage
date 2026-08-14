@@ -139,9 +139,10 @@ async function evalCforExpr(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<number> {
   if (expr === null) return dflt
-  const text = await expandArith(expr, session, executeFn, callStack)
+  const text = await expandArith(expr, session, executeFn, callStack, view)
   let value: bigint
   let updates: Record<string, string>
   try {
@@ -157,7 +158,12 @@ async function evalCforExpr(
     ensureVarVisible(session, name)
     if (session.readonlyVars.has(name)) throw new ReadonlyError(name)
   }
-  Object.assign(session.env, updates)
+  // Through the door, so a preSession rule governs an arithmetic assignment
+  // exactly as it governs `X=1`.
+  for (const [name, updated] of Object.entries(updates)) {
+    if (view === undefined) session.env[name] = updated
+    else await view.set(name, updated)
+  }
   return Number(value)
 }
 
@@ -179,6 +185,7 @@ async function expandArrayItems(
     registry,
     session.cwd,
     callStack,
+    sessionView(session, registry.policies),
   )
   const resolved = await resolveGlobs(
     classified,
@@ -208,6 +215,7 @@ async function recurseReassociated(
     executeFn,
     registry,
     callStack,
+    sessionView(session, registry.policies),
   )
   let [stdout, io, execNode] = await handleRedirect(
     recurse,
@@ -249,6 +257,7 @@ async function recursePipeStderr(
     executeFn,
     registry,
     callStack,
+    sessionView(session, registry.policies),
   )
   let [stdout, io, execNode] = await handleRedirect(
     recurse,
@@ -415,6 +424,7 @@ export async function executeNode(
       executeFn,
       registry,
       callStack,
+      sessionView(session, registry.policies),
     )
     let [stdout, io, execNode] = await handleRedirect(
       recurse,
@@ -451,7 +461,13 @@ export async function executeNode(
 
   if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
     const text = getText(node)
-    const expr = await expandArith(node, session, executeFn, callStack)
+    const expr = await expandArith(
+      node,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     let value: bigint
     let updates: Record<string, string>
     try {
@@ -489,7 +505,19 @@ export async function executeNode(
         ]
       }
     }
-    Object.assign(session.env, updates)
+    try {
+      for (const [name, updated] of Object.entries(updates)) {
+        await sessionView(session, registry.policies).set(name, updated)
+      }
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
     const code = value !== 0n ? 0 : 1
     return [
       null,
@@ -534,7 +562,8 @@ export async function executeNode(
 
   if (kind === NodeKind.CFOR) {
     const [exprs, body] = getCforParts(node)
-    const evalExpr: CforEval = (e, d) => evalCforExpr(e, d, session, executeFn, callStack)
+    const evalExpr: CforEval = (e, d) =>
+      evalCforExpr(e, d, session, executeFn, callStack, sessionView(session, registry.policies))
     return handleCfor(recurse, exprs, body, evalExpr, session, stdin, callStack)
   }
 
@@ -547,6 +576,7 @@ export async function executeNode(
       registry,
       session.cwd,
       callStack,
+      sessionView(session, registry.policies),
     )
     // The loop word list is consumed by the shell (WordPolicy.SHELL):
     // globs resolve to matches before iteration starts.
@@ -590,12 +620,26 @@ export async function executeNode(
 
   if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
-    const word = await expandNode(wordNode, session, executeFn, callStack)
+    const word = await expandNode(
+      wordNode,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     const items: [string[], TSNodeLike[], string][] = []
     for (const [patternNodes, body, terminator] of getCaseItems(node)) {
       const patterns: string[] = []
       for (const patternNode of patternNodes) {
-        patterns.push(await expandPattern(patternNode, session, executeFn, callStack))
+        patterns.push(
+          await expandPattern(
+            patternNode,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          ),
+        )
       }
       items.push([patterns, body, terminator])
     }
@@ -644,7 +688,15 @@ export async function executeNode(
           })
           continue
         }
-        assignments.push(await expandNode(child, session, executeFn, callStack))
+        assignments.push(
+          await expandNode(
+            child,
+            session,
+            executeFn,
+            callStack,
+            sessionView(session, registry.policies),
+          ),
+        )
       } else if (
         child.type === NT.SIMPLE_EXPANSION ||
         child.type === NT.EXPANSION ||
@@ -659,7 +711,13 @@ export async function executeNode(
         child.type === NT.ANSI_C_STRING ||
         child.type === NT.TRANSLATED_STRING
       ) {
-        const expanded = await expandNode(child, session, executeFn, callStack)
+        const expanded = await expandNode(
+          child,
+          session,
+          executeFn,
+          callStack,
+          sessionView(session, registry.policies),
+        )
         if (expanded === '') continue
         if (!optsDone && expanded.startsWith('-') && expanded.length > 1) {
           flagWords.push(expanded)
@@ -737,10 +795,22 @@ export async function executeNode(
   if (kind === NodeKind.TEST) {
     const opener = node.children[0]?.type ?? '['
     if (opener === '[[') {
-      const tree = await expandDoubleBracket(node, session, executeFn, callStack)
+      const tree = await expandDoubleBracket(
+        node,
+        session,
+        executeFn,
+        callStack,
+        sessionView(session, registry.policies),
+      )
       return handleTest(dispatch, deps.namespace, tree, session, '[[')
     }
-    const expanded = await expandTestExpr(node, session, executeFn, callStack)
+    const expanded = await expandTestExpr(
+      node,
+      session,
+      executeFn,
+      callStack,
+      sessionView(session, registry.policies),
+    )
     return handleTest(dispatch, deps.namespace, expanded, session, '[')
   }
 
@@ -824,7 +894,13 @@ export async function executeNode(
     }
     let val = text.slice(eq + 1)
     if (firstVal !== undefined) {
-      val = await expandNode(firstVal, session, executeFn, callStack)
+      val = await expandNode(
+        firstVal,
+        session,
+        executeFn,
+        callStack,
+        sessionView(session, registry.policies),
+      )
     }
     if (subscriptNode !== null) {
       let idxText = ''

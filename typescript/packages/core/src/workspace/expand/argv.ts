@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -80,8 +81,9 @@ export async function expandArgv(
   callStack: CallStack | null,
   registry: MountRegistry,
   namespace: NamespaceLinks | null = null,
+  view?: SessionView,
 ): Promise<Argv> {
-  const expanded = await expandParts(parts, session, executeFn, callStack)
+  const expanded = await expandParts(parts, session, executeFn, callStack, view)
   if (expanded.length === 0) return new Argv('', [], [])
   // A command name may span several leading words (git-style, e.g.
   // `gws docs documents get`); the registry says how many.

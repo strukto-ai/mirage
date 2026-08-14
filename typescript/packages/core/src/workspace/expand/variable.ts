@@ -26,6 +26,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import type { SessionView } from '../../ops/types.ts'
 import type { Session } from '../session/session.ts'
 import { ensureVarVisible, visibleArrays, visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -113,7 +114,7 @@ function unbound(name: string): ExitSignal {
  * (`ensureVarVisible`) is applied here, and the refusal takes the
  * fatal expansion-error shape `${var:?}` uses.
  */
-export function guardExpansionWrite(session: Session, ...names: string[]): void {
+function guardExpansionWrite(session: Session, ...names: string[]): void {
   for (const name of names) {
     try {
       ensureVarVisible(session, name)
@@ -665,11 +666,44 @@ function valueOp(op: string, val: string, groups: string[], env: Record<string, 
   return val
 }
 
+/**
+ * One expansion-time write, through the session plane's door.
+ *
+ * `${X:=d}` and `$((X=5))` are assignments the shell performs while expanding
+ * a word rather than while running a command, and they used to land on the raw
+ * session env. That made a `preSession` rule one `${X:=d}` away from
+ * irrelevant: a deployment refusing `AWS_*` still had `${AWS_PROFILE:=prod}`
+ * write it. They go through the door now, so one rule covers every spelling.
+ *
+ * Without a door (a unit test outside a workspace) the write lands directly,
+ * with the hidden half still applied: skipping that would let the write-back
+ * clobber a value the host's wiring reads.
+ */
+export async function expansionWrite(
+  session: Session,
+  view: SessionView | undefined,
+  name: string,
+  value: string,
+): Promise<void> {
+  guardExpansionWrite(session, name)
+  if (view === undefined) {
+    session.env[name] = value
+    return
+  }
+  try {
+    await view.set(name, value)
+  } catch (err) {
+    if (!(err instanceof PolicyDenied)) throw err
+    throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+  }
+}
+
 export async function expandBraces(
   node: TSNodeLike,
   session: Session,
   callStack: CallStack | null,
   expandChild: ExpandChild,
+  view?: SessionView,
 ): Promise<string> {
   const p = parseBraces(node)
   if (node.children.some((c) => c.type === '}' && c.isMissing)) {
@@ -792,8 +826,7 @@ export async function expandBraces(
       // as $((X=5)) and printf -v. The hidden gate still applies, or
       // the write-back would clobber the value the host's wiring
       // reads.
-      guardExpansionWrite(session, p.varName)
-      session.env[p.varName] = defaultVal
+      await expansionWrite(session, view, p.varName, defaultVal)
     }
     return defaultVal
   }

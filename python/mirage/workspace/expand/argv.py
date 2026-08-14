@@ -20,6 +20,7 @@ from typing import Any
 import tree_sitter
 
 from mirage.commands.spec.types import ValueType
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.types import PathSpec, word_text
 from mirage.workspace.expand.classify import classify_parts
@@ -84,6 +85,7 @@ async def expand_argv(
     call_stack: CallStack | None,
     registry: MountRegistry,
     namespace: Namespace | None = None,
+    view: SessionView | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -102,7 +104,11 @@ async def expand_argv(
             links, so a glob word sees links and nested mount roots the
             way a listing does.
     """
-    expanded = await expand_parts(parts, session, execute_fn, call_stack)
+    expanded = await expand_parts(parts,
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=view)
     if not expanded:
         return Argv(name="", args=(), operands=())
     # A command name may span several leading words (git-style, e.g.

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
@@ -97,6 +98,46 @@ def guard_expansion_write(session: Session, *names: str) -> None:
             raise ExitSignal(1,
                              stderr=f"bash: {exc.strerror}\n".encode(),
                              contained_code=1) from exc
+
+
+async def expansion_write(session: Session, view: SessionView | None,
+                          name: str, value: str) -> None:
+    """One expansion-time write, through the session plane's door.
+
+    ``${X:=d}`` and ``$((X=5))`` are assignments the shell performs
+    while expanding a word rather than while running a command, and
+    they used to land on the raw session env. That made a
+    ``pre_session`` rule one ``${X:=d}`` away from irrelevant: a
+    deployment refusing ``AWS_*`` still had ``${AWS_PROFILE:=prod}``
+    write it. They go through the door now, so one rule covers every
+    spelling.
+
+    Without a door (a unit test outside a workspace) the write lands
+    directly, with the hidden half still applied: skipping that would
+    let the write-back clobber a value the host's wiring reads.
+
+    Args:
+        session (Session): shell session the write lands on.
+        view (SessionView | None): the session plane's gated door,
+            None outside a workspace.
+        name (str): the variable being written.
+        value (str): the value to store.
+
+    Raises:
+        ExitSignal: the name is hidden, or a pre_session rule refused
+            the write; either way the line dies with status 1, the
+            shape ``${var:?}`` uses.
+    """
+    guard_expansion_write(session, name)
+    if view is None:
+        session.env[name] = value
+        return
+    try:
+        await view.set(name, value)
+    except PolicyDenied as exc:
+        raise ExitSignal(1,
+                         stderr=f"bash: {exc.strerror}\n".encode(),
+                         contained_code=1) from exc
 
 
 def _lookup_var(var: str,
@@ -569,9 +610,11 @@ def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
     return val
 
 
-async def expand_braces(node: tree_sitter.Node, session: Session,
+async def expand_braces(node: tree_sitter.Node,
+                        session: Session,
                         call_stack: CallStack | None,
-                        expand_child: ExpandChild) -> str:
+                        expand_child: ExpandChild,
+                        view: SessionView | None = None) -> str:
     """Expand ${VAR}, ${VAR<op>...}, ${a[i]}, ${#a[@]}, etc.
 
     Args:
@@ -683,13 +726,7 @@ async def expand_braces(node: tree_sitter.Node, session: Session,
                     and call_stack.get_local(p.var_name) is not None):
                 call_stack.set_local(p.var_name, default)
             else:
-                # ${X:=} writes the raw session env, not the visible
-                # view (which is read-only): the known policy-ungated
-                # session write, same as $((X=5)) and printf -v. The
-                # hidden gate still applies, or the write-back would
-                # clobber the value the host's wiring reads.
-                guard_expansion_write(session, p.var_name)
-                session.env[p.var_name] = default
+                await expansion_write(session, view, p.var_name, default)
         return default
     if p.op == ":-":
         return val if val else (groups[0] if groups else "")

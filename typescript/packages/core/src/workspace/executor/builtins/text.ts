@@ -20,6 +20,7 @@ import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
 import type { Session } from '../../session/session.ts'
+import type { SessionView } from '../../../ops/types.ts'
 import { ensureVarVisible, visibleEnv } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
@@ -852,19 +853,32 @@ function runPrintf(fmt: string, args: string[]): [string, string[]] {
  * unless the whole assignment succeeds: a readonly name or an
  * out-of-range subscript leaves the variable exactly as it was.
  */
-function assignPrintfTarget(
+async function assignPrintfTarget(
   session: Session,
+  view: SessionView | undefined,
   name: string,
   subscript: string | undefined,
   value: string,
-): 'ok' | 'denied' | 'readonly' | 'subscript' {
+): Promise<'ok' | 'denied' | 'readonly' | 'subscript'> {
   try {
     // The hidden half of the session door, in this builtin's
-    // status-string voice: a hidden name is not printf's to write.
+    // status-string voice: a hidden name is not printf's to write, and
+    // hiding never explains itself.
     ensureVarVisible(session, name)
   } catch (err) {
     if (!(err instanceof PolicyDenied)) throw err
     return 'denied'
+  }
+  // The gated half. A scalar write is a whole variable, which is what the
+  // door speaks in; an element write keeps the direct path, since the door
+  // has no way to say "element 3 of this array". A preSession refusal is
+  // thrown, not collapsed into a status, so the rule's own words reach the
+  // user as they do from `export`.
+  if (subscript === undefined && view !== undefined) {
+    if (sessionEntry(session.arrays, name) === undefined) {
+      await view.set(name, value)
+      return 'ok'
+    }
   }
   if (session.readonlyVars.has(name)) return 'readonly'
   if (subscript === undefined) {
@@ -912,7 +926,11 @@ function assignPrintfTarget(
  * still reports the format's own errors first, then fails with status 1
  * and leaves the variable untouched.
  */
-export function handlePrintf(args: string[], session: Session): Result {
+export async function handlePrintf(
+  args: string[],
+  session: Session,
+  view?: SessionView,
+): Promise<Result> {
   let target: string | null = null
   let parsed: RegExpExecArray | null = null
   if (args.length >= 2 && args[0] === '-v') {
@@ -945,7 +963,18 @@ export function handlePrintf(args: string[], session: Session): Result {
   const errBytes = errors.length > 0 ? new TextEncoder().encode(errors.join('')) : null
   if (target !== null && parsed !== null) {
     const base = parsed[1] ?? ''
-    const status = assignPrintfTarget(session, base, parsed[2], output)
+    let status: 'ok' | 'denied' | 'readonly' | 'subscript'
+    try {
+      status = await assignPrintfTarget(session, view, base, parsed[2], output)
+    } catch (err) {
+      if (!(err instanceof PolicyDenied)) throw err
+      const denied = new TextEncoder().encode(errors.join('') + `bash: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: denied }),
+        new ExecutionNode({ command: 'printf', exitCode: 1, stderr: denied }),
+      ]
+    }
     if (status !== 'ok') {
       const detail =
         status === 'readonly'

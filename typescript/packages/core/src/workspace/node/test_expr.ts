@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { CondNode } from '../executor/builtins/condition/index.ts'
@@ -44,9 +45,10 @@ export async function expandTestExpr(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<string[]> {
   const result: string[] = []
-  await flatten(node, result, session, executeFn, cs)
+  await flatten(node, result, session, executeFn, cs, view)
   return result
 }
 
@@ -62,13 +64,14 @@ async function flatten(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<boolean> {
   for (const child of node.children) {
     const ctype = child.type
     if (ctype === '[' || ctype === ']' || ctype === '[[' || ctype === ']]') continue
     if (ctype === NT.ERROR) {
       if (child.children.some((g) => g.isNamed !== true && g.type === ';')) return false
-      if (!(await flatten(child, out, session, executeFn, cs))) return false
+      if (!(await flatten(child, out, session, executeFn, cs, view))) return false
       continue
     }
     if (child.isNamed !== true) {
@@ -78,17 +81,17 @@ async function flatten(
     if (CONTAINER_TYPES.has(ctype)) {
       const negative = negativeNumberChild(child)
       if (negative !== null) {
-        out.push('-' + (await expandNode(negative, session, executeFn, cs)))
+        out.push('-' + (await expandNode(negative, session, executeFn, cs, view)))
         continue
       }
-      if (!(await flatten(child, out, session, executeFn, cs))) return false
+      if (!(await flatten(child, out, session, executeFn, cs, view))) return false
       continue
     }
     if (ctype === NT.TEST_OPERATOR) {
       out.push(child.text)
       continue
     }
-    const expanded = await expandNode(child, session, executeFn, cs)
+    const expanded = await expandNode(child, session, executeFn, cs, view)
     if (SPLIT_TYPES.has(ctype)) {
       out.push(...expanded.split(/\s+/).filter((w) => w !== ''))
       continue
@@ -128,10 +131,11 @@ export async function expandDoubleBracket(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<CondNode> {
   const first = node.namedChildren[0]
   if (first === undefined) return { kind: 'word', value: '' }
-  return buildCond(first, session, executeFn, cs)
+  return buildCond(first, session, executeFn, cs, view)
 }
 
 /** Recursively translate one expression node into a CondNode. */
@@ -140,20 +144,21 @@ async function buildCond(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<CondNode> {
   const ntype = node.type
   if (ntype === NT.PARENTHESIZED_EXPRESSION) {
     const inner = node.namedChildren[0]
     if (inner === undefined) return { kind: 'word', value: '' }
-    return buildCond(inner, session, executeFn, cs)
+    return buildCond(inner, session, executeFn, cs, view)
   }
   if (ntype === NT.UNARY_EXPRESSION || ntype === NT.NEGATION_EXPRESSION) {
-    return buildUnary(node, session, executeFn, cs)
+    return buildUnary(node, session, executeFn, cs, view)
   }
   if (ntype === NT.BINARY_EXPRESSION) {
-    return buildBinary(node, session, executeFn, cs)
+    return buildBinary(node, session, executeFn, cs, view)
   }
-  return { kind: 'word', value: await expandNode(node, session, executeFn, cs) }
+  return { kind: 'word', value: await expandNode(node, session, executeFn, cs, view) }
 }
 
 /** Translate a unary/negation expression node. */
@@ -162,6 +167,7 @@ async function buildUnary(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<CondNode> {
   const negated = node.children.some((c) => c.type === '!')
   let op: string | null = null
@@ -174,14 +180,16 @@ async function buildUnary(
     }
   }
   if (op === null && operandNode !== null && negated) {
-    return { kind: 'not', inner: await buildCond(operandNode, session, executeFn, cs) }
+    return { kind: 'not', inner: await buildCond(operandNode, session, executeFn, cs, view) }
   }
   if (op === null) {
-    const value = operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs)
+    const value =
+      operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs, view)
     const word: CondNode = { kind: 'word', value }
     return negated ? { kind: 'not', inner: word } : word
   }
-  const operand = operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs)
+  const operand =
+    operandNode === null ? '' : await expandNode(operandNode, session, executeFn, cs, view)
   const unary: CondNode = { kind: 'unary', op, operand }
   return negated ? { kind: 'not', inner: unary } : unary
 }
@@ -192,6 +200,7 @@ async function buildBinary(
   session: Session,
   executeFn: ExecuteFn,
   cs: CallStack | null,
+  view?: SessionView,
 ): Promise<CondNode> {
   let op: string | null = null
   const operands: TSNodeLike[] = []
@@ -209,8 +218,8 @@ async function buildBinary(
   const left = operands[0]
   const right = operands[1]
   if ((op === '&&' || op === '||') && left !== undefined && right !== undefined) {
-    const leftCond = await buildCond(left, session, executeFn, cs)
-    const rightCond = await buildCond(right, session, executeFn, cs)
+    const leftCond = await buildCond(left, session, executeFn, cs, view)
+    const rightCond = await buildCond(right, session, executeFn, cs, view)
     return op === '&&'
       ? { kind: 'and', left: leftCond, right: rightCond }
       : { kind: 'or', left: leftCond, right: rightCond }
@@ -218,11 +227,11 @@ async function buildBinary(
   if (op === null || left === undefined || right === undefined) {
     const textParts: string[] = []
     for (const operand of operands) {
-      textParts.push(await expandNode(operand, session, executeFn, cs))
+      textParts.push(await expandNode(operand, session, executeFn, cs, view))
     }
     return { kind: 'word', value: textParts.join(' ') }
   }
-  const leftText = await expandNode(left, session, executeFn, cs)
+  const leftText = await expandNode(left, session, executeFn, cs, view)
   if (op === '=~' && right.type === NT.REGEX) {
     const raw = right.text
     // After =~ tree-sitter lexes even a quoted operand as one regex
@@ -241,9 +250,9 @@ async function buildBinary(
     // fnmatches unconditionally. A wholly-literal pattern matches
     // exactly itself, which is what the equality the old whole-node
     // boolean spelled out reduced to.
-    const pattern = await expandPattern(right, session, executeFn, cs)
+    const pattern = await expandPattern(right, session, executeFn, cs, view)
     return { kind: 'binary', left: leftText, op, right: pattern, rightLiteral: false }
   }
-  const rightText = await expandNode(right, session, executeFn, cs)
+  const rightText = await expandNode(right, session, executeFn, cs, view)
   return { kind: 'binary', left: leftText, op, right: rightText, rightLiteral: false }
 }

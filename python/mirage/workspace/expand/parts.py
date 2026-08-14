@@ -18,6 +18,7 @@ from typing import Any
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
@@ -45,6 +46,7 @@ async def _expand_string_with_array(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> list[str]:
     """Expand a string containing one or more "${a[@]...}" into words.
 
@@ -80,7 +82,11 @@ async def _expand_string_with_array(
                 fragments.extend(words[1:-1])
                 fragments.append(words[-1])
             continue
-        text = await expand_node(child, session, execute_fn, call_stack)
+        text = await expand_node(child,
+                                 session,
+                                 execute_fn,
+                                 call_stack,
+                                 view=view)
         fragments[-1] = fragments[-1] + text
     if fragments == [""] and not splat_yielded:
         # A splat that yielded nothing, with no text around it, is no word
@@ -97,6 +103,7 @@ async def _expand_brace_word(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> list[str] | None:
     """Brace-expand a concatenation or brace_expression into words.
 
@@ -120,8 +127,11 @@ async def _expand_brace_word(
         if not child.is_named or child.type in BRACE_LITERAL_TYPES:
             pieces.append(get_text(child))
         else:
-            values.append(await expand_node(child, session, execute_fn,
-                                            call_stack))
+            values.append(await expand_node(child,
+                                            session,
+                                            execute_fn,
+                                            call_stack,
+                                            view=view))
             pieces.append(make_inert(len(values) - 1))
     words = expand_template("".join(pieces))
     if words is None:
@@ -138,23 +148,34 @@ async def expand_parts(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> list[str]:
     """Expand a list of tree-sitter child nodes to strings."""
     result = []
     for p in parts:
         if p.type == NT.STRING and _string_has_array_at(p):
-            words = await _expand_string_with_array(p, session, execute_fn,
-                                                    call_stack)
+            words = await _expand_string_with_array(p,
+                                                    session,
+                                                    execute_fn,
+                                                    call_stack,
+                                                    view=view)
             result.extend(words)
             continue
         if p.type in BRACE_WORD_TYPES:
-            brace_words = await _expand_brace_word(p, session, execute_fn,
-                                                   call_stack)
+            brace_words = await _expand_brace_word(p,
+                                                   session,
+                                                   execute_fn,
+                                                   call_stack,
+                                                   view=view)
             if brace_words is not None:
                 # Empty unquoted words vanish, like bash: {,x} -> x.
                 result.extend(w for w in brace_words if w)
                 continue
-        expanded = await expand_node(p, session, execute_fn, call_stack)
+        expanded = await expand_node(p,
+                                     session,
+                                     execute_fn,
+                                     call_stack,
+                                     view=view)
         if p.type == NT.COMMAND_SUBSTITUTION:
             for word in expanded.split():
                 if word:
@@ -185,11 +206,16 @@ async def expand_and_classify(
     registry: MountRegistry,
     cwd: str,
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> list[str | PathSpec]:
     """Expand words, classify as PathSpec or text.
 
     Used by for/select where concrete values are needed
     before iteration.
     """
-    expanded = await expand_parts(words, session, execute_fn, call_stack)
+    expanded = await expand_parts(words,
+                                  session,
+                                  execute_fn,
+                                  call_stack,
+                                  view=view)
     return [classify_word(w, registry, cwd) for w in expanded]

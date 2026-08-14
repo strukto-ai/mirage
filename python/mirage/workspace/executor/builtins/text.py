@@ -18,6 +18,7 @@ import re
 from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.array import array_extent, array_set
 from mirage.shell.bytes import byte_char, encode_text
@@ -647,8 +648,9 @@ def _convert(conv: str, raw: str | None, flags: str, width: int | None,
     return _format_float(value_f, conv, flags, width, precision), err, False
 
 
-def _assign_printf_target(session: Session, name: str, subscript: str | None,
-                          value: str) -> str:
+async def _assign_printf_target(session: Session, view: SessionView | None,
+                                name: str, subscript: str | None,
+                                value: str) -> str:
     """Assign ``value`` to a ``printf -v`` target (scalar or ``name[idx]``).
 
     A bare name assigns element 0 when the name already holds an array,
@@ -658,19 +660,34 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
 
     Args:
         session (Session): shell session whose variables are written.
+        view (SessionView | None): the session plane's door, which the
+            scalar write clears; None outside a workspace.
         name (str): the target's base variable name.
         subscript (str | None): the ``[...]`` text, or None for a scalar.
         value (str): the formatted text to store.
 
     Returns:
         str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
+
+    Raises:
+        PolicyDenied: a pre_session rule refused the write; the caller
+            renders the rule's own message.
     """
     try:
         # The hidden half of the session door, in this builtin's
-        # status-string voice: a hidden name is not printf's to write.
+        # status-string voice: a hidden name is not printf's to write,
+        # and hiding never explains itself.
         ensure_var_visible(session, name)
     except PolicyDenied:
         return "denied"
+    # The gated half. A scalar write is a whole variable, which is what
+    # the door speaks in; an element write keeps the direct path, since
+    # the door has no way to say "element 3 of this array". A
+    # pre_session refusal is raised, not collapsed into a status, so the
+    # rule's own words reach the user as they do from `export`.
+    if subscript is None and view is not None and name not in session.arrays:
+        await view.set(name, value)
+        return "ok"
     if name in session.readonly_vars:
         return "readonly"
     if subscript is None:
@@ -702,6 +719,7 @@ def _assign_printf_target(session: Session, name: str, subscript: str | None,
 async def handle_printf(
     args: list[str],
     session: Session,
+    view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -752,7 +770,15 @@ async def handle_printf(
     err_bytes = "".join(errors).encode() if errors else b""
     if target is not None and parsed is not None:
         base, subscript = parsed.group(1), parsed.group(2)
-        status = _assign_printf_target(session, base, subscript, output)
+        try:
+            status = await _assign_printf_target(session, view, base,
+                                                 subscript, output)
+        except PolicyDenied as exc:
+            err_bytes += f"bash: {exc.strerror}\n".encode()
+            return None, IOResult(
+                exit_code=1, stderr=err_bytes), ExecutionNode(command="printf",
+                                                              exit_code=1,
+                                                              stderr=err_bytes)
         if status != "ok":
             if status == "readonly":
                 refusal = f"bash: {base}: readonly variable\n"

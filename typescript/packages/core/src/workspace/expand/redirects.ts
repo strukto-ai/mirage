@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { SessionView } from '../../ops/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
@@ -71,6 +72,7 @@ async function expandHeredocBody(
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
+  view?: SessionView,
 ): Promise<string> {
   let bodyNode: TSNodeLike | null = null
   let dash = false
@@ -93,7 +95,7 @@ async function expandHeredocBody(
     if (child.type === NT.HEREDOC_CONTENT) {
       pieces.push([child.text, true])
     } else {
-      pieces.push([await expandNode(child, session, executeFn, callStack), false])
+      pieces.push([await expandNode(child, session, executeFn, callStack, view), false])
     }
     for (const [text, literal] of pieces) {
       if (text === '') continue
@@ -137,6 +139,7 @@ export async function expandRedirects(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,
+  view?: SessionView,
 ): Promise<[Redirect[], TSNodeLike | null]> {
   const expanded: Redirect[] = []
   for (const r of redirects) {
@@ -149,9 +152,9 @@ export async function expandRedirects(
         heredocNode !== null &&
         heredocNode.type === NT.HEREDOC_REDIRECT
       ) {
-        body = await expandHeredocBody(heredocNode, session, executeFn, callStack)
+        body = await expandHeredocBody(heredocNode, session, executeFn, callStack, view)
       } else if (r.kind === RedirectKind.HERESTRING && heredocNode !== null) {
-        body = await expandNode(heredocNode, session, executeFn, callStack)
+        body = await expandNode(heredocNode, session, executeFn, callStack, view)
       } else if (typeof body === 'string' && r.expandVars) {
         let s: string = body
         for (const [k, v] of Object.entries(visibleEnv(session))) {
@@ -215,7 +218,7 @@ export async function expandRedirects(
     const targetNode = r.targetNode as TSNodeLike | null
     let targetScope: unknown = r.target
     if (targetNode !== null) {
-      const targetStr = await expandNode(targetNode, session, executeFn, callStack)
+      const targetStr = await expandNode(targetNode, session, executeFn, callStack, view)
       targetScope = classifyBarePath(targetStr, registry, session.cwd)
     }
     expanded.push(

@@ -17,6 +17,7 @@ from typing import Any
 
 import tree_sitter
 
+from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
@@ -51,6 +52,7 @@ async def _quoted_string_pattern(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
+    view: SessionView | None = None,
 ) -> str:
     """A double-quoted pattern segment: everything in it is literal.
 
@@ -73,7 +75,11 @@ async def _quoted_string_pattern(
         prev_end_row = child.end_point[0]
         if child.type == NT.DQUOTE:
             continue
-        expanded = await expand_node(child, session, execute_fn, call_stack)
+        expanded = await expand_node(child,
+                                     session,
+                                     execute_fn,
+                                     call_stack,
+                                     view=view)
         parts.append(escape_glob(expanded))
     return "".join(parts)
 
@@ -83,6 +89,7 @@ async def expand_pattern(
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
+    view: SessionView | None = None,
 ) -> str:
     """Expand one pattern word into the matcher's glob dialect.
 
@@ -111,13 +118,19 @@ async def expand_pattern(
     if ntype == NT.ANSI_C_STRING:
         return escape_glob(decode_ansi_c(get_text(ts_node)[2:-1]))
     if ntype == NT.STRING:
-        return await _quoted_string_pattern(ts_node, session, execute_fn,
-                                            call_stack)
+        return await _quoted_string_pattern(ts_node,
+                                            session,
+                                            execute_fn,
+                                            call_stack,
+                                            view=view)
     if ntype == NT.TRANSLATED_STRING:
         for child in ts_node.named_children:
             if child.type == NT.STRING:
-                return await _quoted_string_pattern(child, session, execute_fn,
-                                                    call_stack)
+                return await _quoted_string_pattern(child,
+                                                    session,
+                                                    execute_fn,
+                                                    call_stack,
+                                                    view=view)
         return ""
     if ntype == NT.CONCATENATION:
         parts = []
@@ -129,7 +142,14 @@ async def expand_pattern(
             if (child.type == "$" and position + 1 < len(children)
                     and children[position + 1].type == NT.STRING):
                 continue
-            parts.append(await expand_pattern(child, session, execute_fn,
-                                              call_stack))
+            parts.append(await expand_pattern(child,
+                                              session,
+                                              execute_fn,
+                                              call_stack,
+                                              view=view))
         return "".join(parts)
-    return await expand_node(ts_node, session, execute_fn, call_stack)
+    return await expand_node(ts_node,
+                             session,
+                             execute_fn,
+                             call_stack,
+                             view=view)
