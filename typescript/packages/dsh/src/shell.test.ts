@@ -354,10 +354,11 @@ describe('spill', () => {
     await proc.done
     const out = proc.readOutput()
     expect(out.lossy).toBe(true)
-    expect(out.stdoutSpillPath).toBeDefined()
+    const stdoutPath = out.stdoutSpillPath
+    if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
     // The delta kept only the tail; the spill file has the whole stream.
     expect(out.delta).not.toContain('aaaa')
-    const full = await ws.fs.readFileText(out.stdoutSpillPath as string)
+    const full = await ws.fs.readFileText(stdoutPath)
     expect(full).toContain('aaaa')
     expect(full).toContain('dddd')
   })
@@ -369,10 +370,12 @@ describe('spill', () => {
     )
     await proc.done
     const out = proc.readOutput()
-    expect(out.stdoutSpillPath).toBeDefined()
-    expect(out.stderrSpillPath).toBeDefined()
-    expect(await ws.fs.readFileText(out.stdoutSpillPath as string)).toContain('out1')
-    expect(await ws.fs.readFileText(out.stderrSpillPath as string)).toContain('err1')
+    const stdoutPath = out.stdoutSpillPath
+    const stderrPath = out.stderrSpillPath
+    if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
+    if (stderrPath === undefined) throw new Error('expected a stderr spill path')
+    expect(await ws.fs.readFileText(stdoutPath)).toContain('out1')
+    expect(await ws.fs.readFileText(stderrPath)).toContain('err1')
   })
 })
 
