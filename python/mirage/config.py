@@ -180,6 +180,10 @@ class RedisConsoleBlock(BaseModel):
     type: Literal["redis"]
     url: str = "redis://localhost:6379/0"
     key_prefix: str = "mirage:console:"
+    # Keys expire this long after a console's last append, so finished
+    # jobs cannot accumulate in Redis forever. null keeps them until
+    # deleted by hand.
+    ttl_seconds: int | None = Field(default=86400, gt=0)
 
 
 ConsoleBlock = Annotated[
@@ -648,8 +652,11 @@ def _redis_console(block: RedisConsoleBlock, job_id: int) -> JobConsole:
 
     The key carries a fresh nonce beside the job id, because job ids
     restart at 1 when the table empties and a reused stream would
-    replay the previous job's chunks. The workspace closes what this
-    builds at teardown (``JobTable.close_consoles``).
+    replay the previous job's chunks. The minted prefix is published as
+    the store's ``key_prefix`` (reachable as ``job.console.store``), so
+    an embedder can hand a reader in another process the console's
+    address. The workspace closes what this builds at teardown
+    (``JobTable.close_consoles``).
 
     Args:
         block (RedisConsoleBlock): the console config.
@@ -659,8 +666,8 @@ def _redis_console(block: RedisConsoleBlock, job_id: int) -> JobConsole:
         raise ImportError("A redis console requires the 'redis' extra. "
                           "Install with: pip install mirage-ai[redis]")
     prefix = f"{block.key_prefix}{uuid.uuid4().hex[:12]}:{job_id}:"
-    return JobConsole(
-        store=RedisConsoleStore(url=block.url, key_prefix=prefix))
+    return JobConsole(store=RedisConsoleStore(
+        url=block.url, key_prefix=prefix, ttl_seconds=block.ttl_seconds))
 
 
 def _build_console_factory(block: RedisConsoleBlock) -> ConsoleFactory:

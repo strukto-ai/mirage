@@ -24,6 +24,10 @@ def test_append_script_loads_from_the_lua_file():
     assert "INCR" in APPEND_LUA
     assert "XADD" in APPEND_LUA
     assert "'-0'" in APPEND_LUA
+    # The ending flag and the TTL refresh both live in the script, so
+    # they stay atomic with the append itself.
+    assert "EXISTS" in APPEND_LUA
+    assert "EXPIRE" in APPEND_LUA
 
 
 def test_block_interval_is_short():

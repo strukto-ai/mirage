@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { Channel } from '../../shell/console/index.ts'
-import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table.ts'
+import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 

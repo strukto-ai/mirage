@@ -41,7 +41,7 @@ import {
   redactConfigWithSchema,
   resourceStateRequiresOverride,
 } from '../../resource/secrets.ts'
-import { Job, JobStatus } from '../../shell/job_table.ts'
+import { Job, JobStatus } from '../../shell/job_table/index.ts'
 import {
   Channel,
   type ConsoleChunk,

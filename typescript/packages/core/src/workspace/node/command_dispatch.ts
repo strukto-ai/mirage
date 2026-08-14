@@ -28,7 +28,7 @@ import {
   getText,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import type { JobTable } from '../../shell/job_table.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { classifyBarePath } from '../expand/classify/index.ts'

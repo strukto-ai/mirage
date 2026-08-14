@@ -141,3 +141,49 @@ async def test_wait_finished_joins_late_control(prefix, store):
     await store.append(Channel.CONTROL, b"exit:0")
     await asyncio.wait_for(joiner, 2)
     await reader_store.close()
+
+
+@pytest.mark.asyncio
+async def test_append_after_ending_is_dropped(store):
+    """The ending is terminal in the store, not only in this process.
+
+    An emit that raced a kill past ``JobConsole``'s local guard arrives
+    here after the CONTROL chunk; the append script must refuse it so
+    no chunk ever lands past the ending.
+    """
+    await store.append(Channel.STDOUT, b"out")
+    await store.append(Channel.CONTROL, b"exit:0")
+    late = await store.append(Channel.STDERR, b"late")
+    chunks, nxt, _ = await store.read_from(0)
+    assert [c.channel for c in chunks] == [Channel.STDOUT, Channel.CONTROL]
+    assert nxt == 2
+    # The drop reports the last real chunk rather than minting a seq.
+    assert late.seq == chunks[-1].seq
+
+
+@pytest.mark.asyncio
+async def test_ttl_bounds_retention(prefix):
+    s = RedisConsoleStore(url=REDIS_URL, key_prefix=prefix, ttl_seconds=60)
+    client = aioredis.from_url(REDIS_URL)
+    try:
+        assert s.key_prefix == prefix
+        await s.append(Channel.STDOUT, b"x")
+        assert await client.ttl(f"{prefix}stream") > 0
+        assert await client.ttl(f"{prefix}seq") > 0
+        await s.append(Channel.CONTROL, b"exit:0")
+        assert await client.ttl(f"{prefix}ended") > 0
+    finally:
+        await client.aclose()
+        await s.clear()
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_no_ttl_by_default(prefix, store):
+    await store.append(Channel.STDOUT, b"x")
+    client = aioredis.from_url(REDIS_URL)
+    try:
+        assert await client.ttl(f"{prefix}stream") == -1
+        assert await client.ttl(f"{prefix}seq") == -1
+    finally:
+        await client.aclose()

@@ -14,54 +14,14 @@
 
 import asyncio
 import logging
-import time
-from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
 
-from mirage.io.types import IOResult
 from mirage.shell.console import (KILLED_OUTCOME, Channel, JobConsole,
                                   exit_outcome)
-from mirage.workspace.types import ExecutionNode
+from mirage.shell.job_table.constants import KILLED_EXIT_CODE
+from mirage.shell.job_table.types import (ConsoleFactory, Job, JobRunner,
+                                          JobStatus)
 
 logger = logging.getLogger(__name__)
-
-KILLED_EXIT_CODE = 137
-
-
-class JobStatus(str, Enum):
-    RUNNING = "running"
-    COMPLETED = "completed"
-    KILLED = "killed"
-
-
-@dataclass
-class Job:
-    """One background command, and everything it has printed.
-
-    Output lives in ``console`` rather than in byte fields, so a reader
-    can watch a job while it runs instead of waiting for it to end.
-    """
-
-    id: int
-    command: str
-    task: asyncio.Task[Any] | None
-    cwd: str
-    status: JobStatus = JobStatus.RUNNING
-    exit_code: int = 0
-    console: JobConsole = field(default_factory=JobConsole)
-    execution_node: ExecutionNode | None = None
-    io_result: IOResult | None = None
-    created_at: float = field(default_factory=time.time)
-    agent: str = "unknown"
-    session_id: str = ""
-
-
-JobRunner = Callable[[Job], Coroutine[Any, Any, tuple[IOResult,
-                                                      ExecutionNode]]]
-
-ConsoleFactory = Callable[[int], JobConsole]
 
 
 def cancel_job(job: Job) -> None:

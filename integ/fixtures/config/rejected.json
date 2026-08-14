@@ -115,6 +115,20 @@
         "mounts": { "/d": { "resource": "ram" } },
         "console": { "type": "disk" }
       }
+    },
+    {
+      "name": "console block: url not a string",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "url": 123 }
+      }
+    },
+    {
+      "name": "console block: zero ttl",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "ttl_seconds": 0 }
+      }
     }
   ]
 }

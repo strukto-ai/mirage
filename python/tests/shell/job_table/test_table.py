@@ -20,7 +20,8 @@ import pytest
 from mirage.io import IOResult
 from mirage.shell.console import Channel, JobConsole, RAMConsoleStore
 from mirage.shell.console.types import ConsoleChunk, ReadResult
-from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.job_table.table import JobTable
+from mirage.shell.job_table.types import Job, JobStatus
 from mirage.workspace.types import ExecutionNode
 
 
@@ -152,7 +153,7 @@ async def test_close_consoles_leaves_default_consoles_alone():
     job = table.submit(command="deaf", run=_run_forever, cwd="/")
     await table.kill(job.id)
     await table.close_consoles()
-    assert job.console._store.closed is False
+    assert job.console.store.closed is False
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedisClientType } from 'redis'
-import type { Channel, ConsoleChunk, ConsoleStore, ReadResult } from '@struktoai/mirage-core'
+import {
+  Channel,
+  type ConsoleChunk,
+  type ConsoleStore,
+  type ReadResult,
+} from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../../../optional_peer.ts'
 import { APPEND_LUA, POLL_MS } from './constants.ts'
 
@@ -25,6 +30,8 @@ interface StreamEntry {
 export interface RedisConsoleStoreOptions {
   url?: string
   keyPrefix?: string
+  /** Expire the keys this long after the last append; absent keeps them. */
+  ttlSeconds?: number
 }
 
 function sleep(ms: number): Promise<void> {
@@ -44,27 +51,41 @@ function sleep(ms: number): Promise<void> {
  *
  * The job owns its keys: a factory must hand every job a prefix nothing
  * else has written, because a reused stream replays the previous job's
- * chunks, ending chunk included.
+ * chunks, ending chunk included. `keyPrefix` stays public because it is
+ * the console's address: an embedder reads it off a job's store and
+ * hands it to the process that should attach.
+ *
+ * The ending chunk is terminal in the store itself, not only in this
+ * process: the append script refuses any append once a CONTROL chunk
+ * landed, so an emit that raced a kill past `JobConsole`'s local guard
+ * is dropped server-side instead of landing after the ending.
  *
  * `wait` polls the seq counter rather than blocking server-side the way
  * Python's XREAD BLOCK does: node-redis serializes commands on one
  * connection, so a blocking read would wedge the job's own appends
  * behind it, and a second connection costs more than a short poll.
  * There is no retention trim, so readFrom never reports a truncated
- * cursor.
+ * cursor; retention is bounded by `ttlSeconds` instead, refreshed on
+ * every append, so a console expires that long after its job's last
+ * write.
  */
 export class RedisConsoleStore implements ConsoleStore {
   readonly url: string
+  readonly keyPrefix: string
   private readonly streamKey: string
   private readonly counterKey: string
+  private readonly endedKey: string
+  private readonly ttlSeconds: number
   private clientPromise: Promise<RedisClientType> | null = null
   private isClosed = false
 
   constructor(options: RedisConsoleStoreOptions = {}) {
     this.url = options.url ?? 'redis://localhost:6379/0'
-    const prefix = options.keyPrefix ?? 'mirage:console:'
-    this.streamKey = `${prefix}stream`
-    this.counterKey = `${prefix}seq`
+    this.keyPrefix = options.keyPrefix ?? 'mirage:console:'
+    this.streamKey = `${this.keyPrefix}stream`
+    this.counterKey = `${this.keyPrefix}seq`
+    this.endedKey = `${this.keyPrefix}ended`
+    this.ttlSeconds = options.ttlSeconds ?? 0
   }
 
   get closed(): boolean {
@@ -90,13 +111,26 @@ export class RedisConsoleStore implements ConsoleStore {
     return this.clientPromise
   }
 
+  /**
+   * Append one chunk, atomically against the console's ending.
+   *
+   * A dropped append (the console already ended) reports the last real
+   * chunk's seq; `JobConsole.emit` ignores the return and the drop is
+   * exactly its documented after-the-ending semantics.
+   */
   async append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
     const c = await this.client()
     const ts = Date.now() / 1000
     const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
     const count = (await c.eval(APPEND_LUA, {
-      keys: [this.streamKey, this.counterKey],
-      arguments: [channel, buf, String(ts)],
+      keys: [this.streamKey, this.counterKey, this.endedKey],
+      arguments: [
+        channel,
+        buf,
+        String(ts),
+        channel === Channel.CONTROL ? '1' : '0',
+        String(this.ttlSeconds),
+      ],
     })) as number
     return { seq: count - 1, ts, channel, data }
   }
@@ -174,7 +208,7 @@ export class RedisConsoleStore implements ConsoleStore {
   /** Delete the console's keys (test and integ teardown only). */
   async clear(): Promise<void> {
     const c = await this.client()
-    await c.del([this.streamKey, this.counterKey])
+    await c.del([this.streamKey, this.counterKey, this.endedKey])
   }
 
   private chunk(entry: StreamEntry): ConsoleChunk {

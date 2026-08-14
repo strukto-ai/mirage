@@ -26,6 +26,7 @@ from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
+from mirage.shell.console.redis import RedisConsoleStore
 from mirage.types import ConsistencyPolicy
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -664,11 +665,15 @@ async def test_console_redis_block_builds_factory():
     first = factory(1)
     second = factory(1)
     assert isinstance(first, JobConsole)
+    assert isinstance(first.store, RedisConsoleStore)
+    assert isinstance(second.store, RedisConsoleStore)
     # Fresh keys per console: job ids restart at 1 when the table
     # empties, so two consoles built for "job 1" must not share a
-    # stream (a shared one would replay the first job's chunks).
-    assert first._store._stream != second._store._stream
-    assert first._store._stream.startswith("test_console:")
+    # stream (a shared one would replay the first job's chunks). The
+    # minted prefix is public: it is the address an embedder hands to
+    # a reader in another process.
+    assert first.store.key_prefix != second.store.key_prefix
+    assert first.store.key_prefix.startswith("test_console:")
 
 
 @pytest.mark.asyncio

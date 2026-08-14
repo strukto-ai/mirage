@@ -127,4 +127,44 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
       [Channel.CONTROL, 'exit:0'],
     ])
   })
+
+  it('drops appends after the ending chunk', async () => {
+    // The ending is terminal in the store, not only in this process:
+    // an emit that raced a kill past JobConsole's local guard arrives
+    // here after the CONTROL chunk and must not land past the ending.
+    const store = makeStore(`test:console:${randomUUID()}:`)
+    await store.append(Channel.STDOUT, ENC.encode('out'))
+    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
+    const late = await store.append(Channel.STDERR, ENC.encode('late'))
+    const [chunks, next] = await store.readFrom(0)
+    expect(chunks.map((c) => c.channel)).toEqual([Channel.STDOUT, Channel.CONTROL])
+    expect(next).toBe(2)
+    // The drop reports the last real chunk rather than minting a seq.
+    expect(late.seq).toBe(chunks[chunks.length - 1]?.seq)
+  })
+
+  it('ttl bounds retention and no ttl keeps keys', async () => {
+    const prefix = `test:console:${randomUUID()}:`
+    const store = new RedisConsoleStore({ url: REDIS_URL, keyPrefix: prefix, ttlSeconds: 60 })
+    opened.push(store)
+    expect(store.keyPrefix).toBe(prefix)
+    await store.append(Channel.STDOUT, ENC.encode('x'))
+    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
+    const bare = makeStore(`test:console:${randomUUID()}:`)
+    await bare.append(Channel.STDOUT, ENC.encode('x'))
+    const { createClient } = await import('redis')
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    const ttls = await Promise.all([
+      client.ttl(`${prefix}stream`),
+      client.ttl(`${prefix}seq`),
+      client.ttl(`${prefix}ended`),
+      client.ttl(`${bare.keyPrefix}stream`),
+    ])
+    await client.quit()
+    expect(ttls[0]).toBeGreaterThan(0)
+    expect(ttls[1]).toBeGreaterThan(0)
+    expect(ttls[2]).toBeGreaterThan(0)
+    expect(ttls[3]).toBe(-1)
+  })
 })

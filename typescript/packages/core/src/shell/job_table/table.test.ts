@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../io/types.ts'
-import { ExecutionNode } from '../workspace/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { ExecutionNode } from '../../workspace/types.ts'
 import {
   Channel,
   type ConsoleChunk,
@@ -22,8 +22,9 @@ import {
   JobConsole,
   RAMConsoleStore,
   type ReadResult,
-} from './console/index.ts'
-import { Job, type JobResult, type JobRunner, JobStatus, JobTable } from './job_table.ts'
+} from '../console/index.ts'
+import { JobTable } from './table.ts'
+import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -386,7 +387,6 @@ describe('JobTable.popCompleted', () => {
     const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     await jt.wait(j.id)
     await jt.closeConsoles()
-    const store = (j.console as unknown as { store: { closed: boolean } }).store
-    expect(store.closed).toBe(false)
+    expect(j.console.store.closed).toBe(false)
   })
 })

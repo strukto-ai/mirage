@@ -2289,7 +2289,9 @@ def _redis_console(url: str, prefix: str, job_id: int) -> JobConsole:
         job_id (int): the job the console is being built for.
     """
     key_prefix = f"{prefix}{uuid.uuid4().hex[:8]}-{job_id}:"
-    return JobConsole(store=RedisConsoleStore(url=url, key_prefix=key_prefix))
+    # Battery keys must not accumulate in the shared redis db.
+    return JobConsole(store=RedisConsoleStore(
+        url=url, key_prefix=key_prefix, ttl_seconds=3600))
 
 
 def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:

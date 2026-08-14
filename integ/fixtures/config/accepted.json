@@ -102,7 +102,14 @@
       "name": "console block: redis form, every key",
       "config": {
         "mounts": { "/d": { "resource": "ram" } },
-        "console": { "type": "redis", "url": "redis://localhost:6379/5", "key_prefix": "c:" }
+        "console": { "type": "redis", "url": "redis://localhost:6379/5", "key_prefix": "c:", "ttl_seconds": 3600 }
+      }
+    },
+    {
+      "name": "console block: null ttl keeps keys forever",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "ttl_seconds": null }
       }
     }
   ]

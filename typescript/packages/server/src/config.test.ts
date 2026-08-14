@@ -19,6 +19,7 @@ import {
   DiskWorkspaceStateStore,
   RAMNamespaceStore,
   RAMWorkspaceStateStore,
+  RedisConsoleStore,
   RedisFileCacheStore,
   RedisNamespaceStore,
   RedisWorkspaceStateStore,
@@ -536,13 +537,18 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     const factory = args.options.consoleFactory
     expect(factory).toBeDefined()
-    const streamOf = (jobId: number): string =>
-      (factory?.(jobId) as unknown as { store: { streamKey: string } }).store.streamKey
-    const first = streamOf(1)
-    const second = streamOf(1)
+    const prefixOf = (jobId: number): string => {
+      const store = factory?.(jobId).store
+      if (!(store instanceof RedisConsoleStore)) throw new Error('expected a RedisConsoleStore')
+      return store.keyPrefix
+    }
+    const first = prefixOf(1)
+    const second = prefixOf(1)
     // Fresh keys per console: job ids restart at 1 when the table
     // empties, so two consoles built for "job 1" must not share a
-    // stream (a shared one would replay the first job's chunks).
+    // stream (a shared one would replay the first job's chunks). The
+    // minted prefix is public: it is the address an embedder hands to
+    // a reader in another process.
     expect(first).not.toBe(second)
     expect(first.startsWith('test_console:')).toBe(true)
   })

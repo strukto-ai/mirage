@@ -14,7 +14,7 @@
 
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Resource } from '../../resource/base.ts'
-import type { JobTable } from '../../shell/job_table.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { WatchManager } from './watch.ts'

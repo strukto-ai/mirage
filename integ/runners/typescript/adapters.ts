@@ -155,6 +155,8 @@ function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
       new RedisConsoleStore({
         url,
         keyPrefix: `${prefix}${randomBytes(4).toString('hex')}-${jobId.toString()}:`,
+        // Battery keys must not accumulate in the shared redis db.
+        ttlSeconds: 3600,
       }),
     )
 }

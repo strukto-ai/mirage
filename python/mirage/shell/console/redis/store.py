@@ -35,25 +35,40 @@ class RedisConsoleStore:
 
     The job owns its keys: a factory must hand every job a prefix
     nothing else has written, because a reused stream replays the
-    previous job's chunks, ending chunk included.
+    previous job's chunks, ending chunk included. ``key_prefix`` stays
+    public because it is the console's address: an embedder reads it off
+    a job's store and hands it to the process that should attach.
+
+    The ending chunk is terminal in the store itself, not only in this
+    process: the append script refuses any append once a CONTROL chunk
+    landed, so an emit that raced a kill past ``JobConsole``'s local
+    guard is dropped server-side instead of landing after the ending.
 
     ``wait`` blocks server-side (XREAD BLOCK) in short rounds so a
     local ``close`` is noticed within one round. There is no retention
-    trim, so ``read_from`` never reports a truncated cursor.
+    trim, so ``read_from`` never reports a truncated cursor; retention
+    is bounded by ``ttl_seconds`` instead, refreshed on every append,
+    so a console expires that long after its job's last write.
 
     Args:
         url (str): Redis connection URL.
         key_prefix (str): namespace for this one console's keys.
+        ttl_seconds (int | None): expire the keys this long after the
+            last append. None keeps them until deleted by hand.
     """
 
     def __init__(
         self,
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:console:",
+        ttl_seconds: int | None = None,
     ) -> None:
+        self.key_prefix = key_prefix
         self._client = aioredis.from_url(url)
         self._stream = f"{key_prefix}stream"
         self._counter = f"{key_prefix}seq"
+        self._ended = f"{key_prefix}ended"
+        self._ttl = ttl_seconds
         self._append_script = self._client.register_script(APPEND_LUA)
         self._closed = False
 
@@ -62,10 +77,23 @@ class RedisConsoleStore:
         return self._closed
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
+        """Append one chunk, atomically against the console's ending.
+
+        A dropped append (the console already ended) reports the last
+        real chunk's seq; ``JobConsole.emit`` ignores the return and the
+        drop is exactly its documented after-the-ending semantics.
+
+        Args:
+            channel (Channel): which stream the bytes came from.
+            data (bytes): the payload.
+        """
         ts = time.time()
-        count = await self._append_script(keys=[self._stream, self._counter],
-                                          args=[channel.value, data,
-                                                repr(ts)])
+        ended = "1" if channel == Channel.CONTROL else "0"
+        count = await self._append_script(
+            keys=[self._stream, self._counter, self._ended],
+            args=[channel.value, data,
+                  repr(ts), ended,
+                  str(self._ttl or 0)])
         return ConsoleChunk(seq=int(cast("int", count)) - 1,
                             ts=ts,
                             channel=channel,
@@ -107,7 +135,7 @@ class RedisConsoleStore:
 
     async def clear(self) -> None:
         """Delete the console's keys (test and integ teardown only)."""
-        await self._client.delete(self._stream, self._counter)
+        await self._client.delete(self._stream, self._counter, self._ended)
 
     def _chunk(self, entry: tuple[bytes, dict[bytes, bytes]]) -> ConsoleChunk:
         """Decode one XRANGE entry back into a chunk.

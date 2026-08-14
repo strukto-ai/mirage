@@ -15,7 +15,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
-import { JobStatus } from '../../shell/job_table.ts'
+import { JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
