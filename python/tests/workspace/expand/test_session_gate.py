@@ -86,3 +86,36 @@ async def test_a_name_no_rule_covers_still_writes(guarded, line: str,
                                                   name: str, expected: bytes):
     await guarded.execute(line)
     assert await value_of(guarded, name) == expected
+
+
+@pytest.mark.asyncio
+async def test_a_subscripted_printf_target_clears_the_gate(guarded):
+    # `printf -v name[i]` writes the session's array table, so it is a
+    # session write like any other. Taking the direct path for it left
+    # `printf -v 'AWS_KEY[0]'` as the one spelling a pre_session rule
+    # could not refuse.
+    result = await guarded.execute("printf -v 'AWS_KEY[0]' %s x")
+    assert result.exit_code != 0
+    assert b"not yours to set" in (result.stderr or b"")
+    read = await guarded.execute('echo "[${AWS_KEY[0]}]"')
+    assert (read.stdout or b"").strip() == b"[]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        # bash 5.2: an arithmetic assignment to an array name writes
+        # element 0 and leaves the rest of the array alone, and so does
+        # a `${name:=}` default. Writing the whole variable as a scalar
+        # instead discards every other element.
+        ("A=(1 2 3); echo $((A=5)) >/dev/null; echo \"${A[@]}\"", b"5 2 3"),
+        ('C=("" 9); echo "${C:=x}" >/dev/null; echo "${C[@]}"', b"x 9"),
+        ("B=(1 2 3); printf -v B %s X; echo \"${B[@]}\"", b"X 2 3"),
+        ("D=(1 2 3); printf -v 'D[1]' %s Y; echo \"${D[@]}\"", b"1 Y 3"),
+    ],
+)
+async def test_an_expansion_write_keeps_the_other_elements(
+        guarded, line: str, expected: bytes):
+    result = await guarded.execute(line)
+    assert (result.stdout or b"").strip() == expected

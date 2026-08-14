@@ -21,13 +21,14 @@ import {
   arrayIndices,
   arraySlice,
   arrayValues,
+  arrayWith,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
-import type { Session } from '../session/session.ts'
+import { type Session, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { ensureVarVisible, visibleArrays, visibleEnv } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
@@ -686,12 +687,19 @@ export async function expansionWrite(
   value: string,
 ): Promise<void> {
   guardExpansionWrite(session, name)
+  // A name already holding an array takes the write at element 0 and
+  // keeps its other elements, which is bash: `a=(1 2 3)` then
+  // `$((a=5))` leaves `5 2 3`. Storing the value as a scalar instead
+  // would discard every element after the first.
+  const held = sessionEntry(session.arrays, name)
+  const stored: string | ShellArray = held === undefined ? value : arrayWith(held, 0, value)
   if (view === undefined) {
-    session.env[name] = value
+    if (typeof stored === 'string') setSessionEntry(session.env, name, stored)
+    else setSessionEntry(session.arrays, name, stored)
     return
   }
   try {
-    await view.set(name, value)
+    await view.set(name, stored)
   } catch (err) {
     if (!(err instanceof PolicyDenied)) throw err
     throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)

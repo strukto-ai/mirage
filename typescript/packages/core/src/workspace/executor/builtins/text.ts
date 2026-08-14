@@ -14,7 +14,7 @@
 
 import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
-import { arrayExtent, arraySet } from '../../../shell/array.ts'
+import { arrayExtent, arrayWith, type ShellArray } from '../../../shell/array.ts'
 import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { arrayIndex } from '../../expand/variable.ts'
 import { sessionEntry, setSessionEntry } from '../../session/session.ts'
@@ -869,42 +869,42 @@ async function assignPrintfTarget(
     if (!(err instanceof PolicyDenied)) throw err
     return 'denied'
   }
-  // The gated half. A scalar write is a whole variable, which is what the
-  // door speaks in; an element write keeps the direct path, since the door
-  // has no way to say "element 3 of this array". A preSession refusal is
-  // thrown, not collapsed into a status, so the rule's own words reach the
-  // user as they do from `export`.
-  if (subscript === undefined && view !== undefined) {
-    if (sessionEntry(session.arrays, name) === undefined) {
-      await view.set(name, value)
-      return 'ok'
-    }
-  }
   if (session.readonlyVars.has(name)) return 'readonly'
+  const held = sessionEntry(session.arrays, name)
+  let stored: string | ShellArray
   if (subscript === undefined) {
-    const existing = sessionEntry(session.arrays, name)
-    if (existing === undefined) setSessionEntry(session.env, name, value)
-    else arraySet(existing, 0, value)
+    // A bare name over an array is element 0, as bash has it.
+    stored = held === undefined ? value : arrayWith(held, 0, value)
+  } else {
+    let arr = held
+    if (arr === undefined) {
+      // An existing scalar becomes element 0, even when empty: bash
+      // resolves `x[-1]` against the length-1 array that produces.
+      const scalar = sessionEntry(session.env, name)
+      arr = scalar === undefined ? [] : [scalar]
+    }
+    let idx = arrayIndex(subscript, visibleEnv(session))
+    if (idx < 0) idx += arrayExtent(arr)
+    if (idx < 0) return 'subscript'
+    stored = arrayWith(arr, idx, value)
+  }
+  // The gated half. The door speaks in whole variables, so an element write
+  // states itself as the array it produces rather than taking a direct path
+  // around the gate: `printf -v 'AWS_KEY[0]'` is a write to AWS_KEY, and a
+  // preSession rule refusing that name has to see it. The refusal is thrown,
+  // not collapsed into a status, so the rule's own words reach the user as
+  // they do from `export`.
+  if (view !== undefined) {
+    await view.set(name, stored)
     return 'ok'
   }
-  const existing = sessionEntry(session.arrays, name)
-  const fromScalar = existing === undefined
-  let arr = existing
-  if (arr === undefined) {
-    // An existing scalar becomes element 0, even when empty: bash
-    // resolves `x[-1]` against the length-1 array that produces.
-    const scalar = sessionEntry(session.env, name)
-    arr = scalar === undefined ? [] : [scalar]
-  }
-  let idx = arrayIndex(subscript, visibleEnv(session))
-  if (idx < 0) idx += arrayExtent(arr)
-  if (idx < 0) return 'subscript'
-  arraySet(arr, idx, value)
-  if (fromScalar) {
+  if (typeof stored === 'string') {
+    setSessionEntry(session.env, name, stored)
+  } else {
+    setSessionEntry(session.arrays, name, stored)
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.env[name]
   }
-  setSessionEntry(session.arrays, name, arr)
   return 'ok'
 }
 

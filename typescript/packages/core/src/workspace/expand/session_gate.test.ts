@@ -92,3 +92,44 @@ describe('every session writer clears the pre_session gate', () => {
     })
   }
 })
+
+describe('a session write states itself as a whole variable', () => {
+  it('refuses a subscripted printf target', async () => {
+    // `printf -v name[i]` writes the session's array table, so it is a
+    // session write like any other. Taking the direct path for it left
+    // `printf -v 'AWS_KEY[0]'` as the one spelling a pre_session rule
+    // could not refuse.
+    const ws = await guarded()
+    try {
+      const result = await ws.execute("printf -v 'AWS_KEY[0]' %s x")
+      expect(result.exitCode).not.toBe(0)
+      expect(DEC.decode(result.stderr)).toContain('not yours to set')
+      const after = await ws.execute('echo "[${AWS_KEY[0]}]"')
+      expect(DEC.decode(after.stdout).trim()).toBe('[]')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // bash 5.2: an arithmetic assignment to an array name writes element
+  // 0 and leaves the rest of the array alone, and so does a `${name:=}`
+  // default. Writing the whole variable as a scalar instead discards
+  // every element after the first.
+  const KEPT: [string, string][] = [
+    ['A=(1 2 3); echo $((A=5)) >/dev/null; echo "${A[@]}"', '5 2 3'],
+    ['C=("" 9); echo "${C:=x}" >/dev/null; echo "${C[@]}"', 'x 9'],
+    ['B=(1 2 3); printf -v B %s X; echo "${B[@]}"', 'X 2 3'],
+    ['D=(1 2 3); printf -v \'D[1]\' %s Y; echo "${D[@]}"', '1 Y 3'],
+  ]
+  for (const [line, expected] of KEPT) {
+    it(`keeps the other elements: ${line}`, async () => {
+      const ws = await guarded()
+      try {
+        const result = await ws.execute(line)
+        expect(DEC.decode(result.stdout).trim()).toBe(expected)
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+})

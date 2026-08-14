@@ -78,6 +78,20 @@ export function arraySet(arr: ShellArray, idx: number, value: string): void {
   arr.splice(idx, 1, value)
 }
 
+/**
+ * A copy of `arr` with `value` assigned at `idx`.
+ *
+ * What a writer hands the session plane's door: the door speaks in whole
+ * variables, so an element write states itself as the array the write
+ * produces. Building it on a copy is what keeps a refusal from leaving
+ * the element applied.
+ */
+export function arrayWith(arr: ShellArray, idx: number, value: string): ShellArray {
+  const updated = [...arr]
+  arraySet(updated, idx, value)
+  return updated
+}
+
 /** Append values after the highest assigned index, as `arr+=(...)`. */
 export function arrayAppend(arr: ShellArray, values: string[]): void {
   arr.push(...values)

@@ -22,7 +22,8 @@ from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
-                                array_indices, array_slice, array_values)
+                                array_indices, array_slice, array_values,
+                                array_with)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
@@ -116,6 +117,11 @@ async def expansion_write(session: Session, view: SessionView | None,
     directly, with the hidden half still applied: skipping that would
     let the write-back clobber a value the host's wiring reads.
 
+    A name already holding an array takes the write at element 0 and
+    keeps its other elements, which is bash: ``a=(1 2 3)`` then
+    ``$((a=5))`` leaves ``5 2 3``. Storing the value as a scalar
+    instead would discard every element after the first.
+
     Args:
         session (Session): shell session the write lands on.
         view (SessionView | None): the session plane's gated door,
@@ -129,11 +135,17 @@ async def expansion_write(session: Session, view: SessionView | None,
             shape ``${var:?}`` uses.
     """
     guard_expansion_write(session, name)
+    held = session.arrays.get(name)
+    stored: str | ShellArray = (value if held is None else array_with(
+        held, 0, value))
     if view is None:
-        session.env[name] = value
+        if isinstance(stored, str):
+            session.env[name] = stored
+        else:
+            session.arrays[name] = stored
         return
     try:
-        await view.set(name, value)
+        await view.set(name, stored)
     except PolicyDenied as exc:
         raise ExitSignal(1,
                          stderr=f"bash: {exc.strerror}\n".encode(),

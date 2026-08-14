@@ -170,6 +170,25 @@
         "stdout": "x 5\nx 5 z 2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "writers_subscripted_printf_refuses_a_hidden_name",
+      "seq": 922010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "printf -v 'SLACK_TOKEN[0]' %s leak",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bash: SLACK_TOKEN: permission denied\n"
+      }
     }
   ]
 }
