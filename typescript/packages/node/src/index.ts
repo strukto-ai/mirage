@@ -24,7 +24,7 @@ export { DISK_PROMPT } from './resource/disk/prompt.ts'
 export { DISK_OPS } from './ops/disk/index.ts'
 export { DiskObserverStore } from './observe/disk_store.ts'
 export { RedisObserverStore, type RedisObserverStoreOptions } from './observe/redis_store.ts'
-export { RedisConsoleStore, type RedisConsoleStoreOptions } from './shell/console/redis.ts'
+export { RedisConsoleStore, type RedisConsoleStoreOptions } from './shell/console/redis/index.ts'
 export { DiskNamespaceStore } from './workspace/namespace/disk.ts'
 export {
   RedisNamespaceStore,

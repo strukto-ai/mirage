@@ -101,6 +101,20 @@
         "mounts": { "/d": { "resource": "ram" } },
         "store": { "type": "ram", "observer": { "type": "s3", "bucket": "b" } }
       }
+    },
+    {
+      "name": "console block: unknown key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "prefix": "c:" }
+      }
+    },
+    {
+      "name": "console block: unknown type",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "disk" }
+      }
     }
   ]
 }

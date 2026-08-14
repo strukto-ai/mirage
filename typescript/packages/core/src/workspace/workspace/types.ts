@@ -74,10 +74,10 @@ export interface WorkspaceOptions {
   /**
    * Builds each background job's console from its job id, so job
    * output can live somewhere a reader in another process reaches
-   * (a Redis stream). Unset means an in-memory console per job. What
-   * the factory builds stays the caller's to close after the
-   * workspace closes; a console outlives its job-table entry, so the
-   * workspace never closes one.
+   * (a Redis stream). Unset means an in-memory console per job. The
+   * workspace tracks what the factory builds and closes it at
+   * close(); a console still outlives its job-table entry, so a reap
+   * never closes one.
    */
   consoleFactory?: ConsoleFactory
   observe?: ObserverStore

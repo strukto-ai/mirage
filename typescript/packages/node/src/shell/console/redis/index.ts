@@ -12,24 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defineConfig } from 'tsup'
-
-export default defineConfig({
-  entry: ['src/index.ts'],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
-  platform: 'node',
-  // Lua scripts are read at runtime relative to the emitted bundle, so
-  // they must sit beside it in dist just as they sit beside their
-  // module in src.
-  onSuccess:
-    'cp src/workspace/session/cas.lua dist/cas.lua && ' +
-    'cp src/shell/console/redis/append.lua dist/append.lua',
-})
+export { RedisConsoleStore, type RedisConsoleStoreOptions } from './store.ts'

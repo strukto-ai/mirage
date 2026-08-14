@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 // integ/runtime holds the runtime suite (its own schema and runners,
 // integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
-const CASE_DIRS = ['unix', 'bash', 'crossmount', 'resources', 'cli', 'session']
+const CASE_DIRS = ['unix', 'bash', 'crossmount', 'resources', 'cli', 'session', 'console']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -65,6 +65,10 @@ export interface Target {
   dataset?: string
   agentId?: string
   facet?: string
+  // Where background-job consoles live: { type: 'redis' } puts each
+  // job's console on its own Redis stream (REDIS_URL). Only the ram
+  // opener consults it; main.ts refuses it on any other resource.
+  console?: { type?: string }
   clis?: string[]
   // Scope an installed account CLI to this mount's folder, so the CLI and
   // the mount are pointed at the same place.

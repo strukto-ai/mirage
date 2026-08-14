@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto'
 import { Channel, JobConsole } from '@struktoai/mirage-core'
 import { afterEach, describe, expect, it } from 'vitest'
-import { RedisConsoleStore } from './redis.ts'
+import { RedisConsoleStore } from './store.ts'
 
 const REDIS_URL = process.env.REDIS_URL ?? ''
 const ENC = new TextEncoder()
@@ -85,6 +85,27 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
     await store.close()
     await waiter
+  })
+
+  it('pins the wire schema shared with the Python twin', async () => {
+    // Both implementations assert this same shape (entry id (seq+1)-0,
+    // fields c/d/t, the seq counter), which is what lets a reader in
+    // the other language attach to a stream this one wrote.
+    const prefix = `test:console:${randomUUID()}:`
+    const store = makeStore(prefix)
+    await store.append(Channel.STDOUT, ENC.encode('payload'))
+    const { createClient } = await import('redis')
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    const entries = await client.xRange(`${prefix}stream`, '-', '+')
+    const counter = await client.get(`${prefix}seq`)
+    await client.quit()
+    expect(counter).toBe('1')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.id).toBe('1-0')
+    expect(entries[0]?.message.c).toBe('stdout')
+    expect(entries[0]?.message.d).toBe('payload')
+    expect(Number(entries[0]?.message.t)).toBeGreaterThan(0)
   })
 
   it('follow across two instances ends at the control chunk', async () => {

@@ -527,6 +527,34 @@ describe('configToWorkspaceArgs', () => {
       }),
     ).toThrow(/unknown guard key/)
   })
+
+  it('console redis block builds a factory that mints fresh keys', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      console: { type: 'redis', url: 'redis://localhost:6379/5', key_prefix: 'test_console:' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const factory = args.options.consoleFactory
+    expect(factory).toBeDefined()
+    const streamOf = (jobId: number): string =>
+      (factory?.(jobId) as unknown as { store: { streamKey: string } }).store.streamKey
+    const first = streamOf(1)
+    const second = streamOf(1)
+    // Fresh keys per console: job ids restart at 1 when the table
+    // empties, so two consoles built for "job 1" must not share a
+    // stream (a shared one would replay the first job's chunks).
+    expect(first).not.toBe(second)
+    expect(first.startsWith('test_console:')).toBe(true)
+  })
+
+  it('console ram block leaves consoles in memory', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      console: { type: 'ram' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.consoleFactory).toBeUndefined()
+  })
 })
 
 describe('clis section', () => {

@@ -18,6 +18,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+import redis.asyncio as aioredis
 
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
@@ -109,9 +110,31 @@ async def test_follow_across_instances(prefix, store):
 
 
 @pytest.mark.asyncio
+async def test_wire_schema_is_pinned(prefix, store):
+    """The exact bytes on the wire, shared with the TypeScript twin.
+
+    Both implementations assert this same shape (entry id ``(seq+1)-0``,
+    fields ``c``/``d``/``t``, the ``seq`` counter), which is what lets a
+    reader in the other language attach to a stream this one wrote.
+    """
+    await store.append(Channel.STDOUT, b"payload")
+    client = aioredis.from_url(REDIS_URL)
+    entries = await client.xrange(f"{prefix}stream", "-", "+")
+    counter = await client.get(f"{prefix}seq")
+    await client.aclose()
+    assert counter == b"1"
+    (entry_id, fields), = entries
+    assert entry_id == b"1-0"
+    assert fields[b"c"] == b"stdout"
+    assert fields[b"d"] == b"payload"
+    assert float(fields[b"t"]) > 0
+
+
+@pytest.mark.asyncio
 async def test_wait_finished_joins_late_control(prefix, store):
     reader_store = RedisConsoleStore(url=REDIS_URL, key_prefix=prefix)
-    joiner = asyncio.create_task(JobConsole(store=reader_store).wait_finished())
+    joiner = asyncio.create_task(
+        JobConsole(store=reader_store).wait_finished())
     await store.append(Channel.STDOUT, b"still going")
     await asyncio.sleep(0.05)
     assert not joiner.done()

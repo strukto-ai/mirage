@@ -18,19 +18,8 @@ from typing import cast
 import redis.asyncio as aioredis
 from redis import exceptions as redis_exceptions
 
+from mirage.shell.console.redis.constants import APPEND_LUA, BLOCK_MS
 from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
-
-# INCR hands out the dense seq and XADD stores the chunk under the
-# stream id ``(seq+1)-0`` in one atomic step, so two appends racing
-# (a kill marker against a runner's last emit) cannot collide on an id.
-APPEND_LUA = """
-local n = redis.call('INCR', KEYS[2])
-redis.call('XADD', KEYS[1], tostring(n) .. '-0',
-           'c', ARGV[1], 'd', ARGV[2], 't', ARGV[3])
-return n
-"""
-
-BLOCK_MS = 250
 
 
 class RedisConsoleStore:
@@ -74,9 +63,9 @@ class RedisConsoleStore:
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
         ts = time.time()
-        count = await self._append_script(
-            keys=[self._stream, self._counter],
-            args=[channel.value, data, repr(ts)])
+        count = await self._append_script(keys=[self._stream, self._counter],
+                                          args=[channel.value, data,
+                                                repr(ts)])
         return ConsoleChunk(seq=int(cast("int", count)) - 1,
                             ts=ts,
                             channel=channel,

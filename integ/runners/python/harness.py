@@ -24,7 +24,8 @@ from mirage.types import FileStat, PathSpec
 
 # integ/runtime holds the runtime suite (its own schema and runners,
 # integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
-CASE_DIRS = ("unix", "bash", "crossmount", "resources", "cli", "session")
+CASE_DIRS = ("unix", "bash", "crossmount", "resources", "cli", "session",
+             "console")
 
 
 def integ_root() -> Path:

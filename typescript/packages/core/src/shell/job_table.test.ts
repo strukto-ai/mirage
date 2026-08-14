@@ -365,4 +365,28 @@ describe('JobTable.popCompleted', () => {
     expect(jt.get(j.id)).toBeNull()
     expect(dec(await console_.snapshot(Channel.STDOUT))).toBe('kept')
   })
+
+  it('closeConsoles releases factory-built stores', async () => {
+    const stores: RAMConsoleStore[] = []
+    const factory = (): JobConsole => {
+      const store = new RAMConsoleStore()
+      stores.push(store)
+      return new JobConsole(store)
+    }
+    const jt = new JobTable(factory)
+    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    await jt.wait(j.id)
+    await jt.closeConsoles()
+    expect(stores).toHaveLength(1)
+    expect(stores.every((s) => s.closed)).toBe(true)
+  })
+
+  it('closeConsoles leaves default consoles alone', async () => {
+    const jt = new JobTable()
+    const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    await jt.wait(j.id)
+    await jt.closeConsoles()
+    const store = (j.console as unknown as { store: { closed: boolean } }).store
+    expect(store.closed).toBe(false)
+  })
 })

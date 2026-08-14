@@ -12,24 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defineConfig } from 'tsup'
+import { readFileSync } from 'node:fs'
 
-export default defineConfig({
-  entry: ['src/index.ts'],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
-  platform: 'node',
-  // Lua scripts are read at runtime relative to the emitted bundle, so
-  // they must sit beside it in dist just as they sit beside their
-  // module in src.
-  onSuccess:
-    'cp src/workspace/session/cas.lua dist/cas.lua && ' +
-    'cp src/shell/console/redis/append.lua dist/append.lua',
-})
+// INCR hands out the dense seq and XADD stores the chunk under the
+// stream id `(seq+1)-0` in one atomic step, so two appends racing (a
+// kill marker against a runner's last emit) cannot collide on an id.
+// Shipped next to this module in src and copied beside the bundle in
+// dist (tsup onSuccess); byte-identical to the Python append.lua.
+export const APPEND_LUA = readFileSync(new URL('./append.lua', import.meta.url), 'utf8')
+
+export const POLL_MS = 100

@@ -138,6 +138,7 @@ export class JobTable {
   private readonly jobs = new Map<number, Job>()
   private nextId = 1
   private readonly consoleFactory: ConsoleFactory | null
+  private factoryConsoles: JobConsole[] = []
 
   /**
    * @param consoleFactory builds each new job's console from its job
@@ -145,9 +146,11 @@ export class JobTable {
    *   every job a fresh backing: ids restart at 1 when the table
    *   empties (GNU numbering), so a store keyed on the id alone gets
    *   reused, and a reused stream replays the previous job's chunks,
-   *   ending chunk included. What the factory builds stays the
-   *   embedder's to close: the table never closes a console, because a
-   *   console outlives its table entry.
+   *   ending chunk included. The table tracks what the factory builds
+   *   and closeConsoles() releases it at workspace teardown, because a
+   *   config-provisioned store (a Redis client per job) is invisible
+   *   to the embedder; a console still outlives its table entry, so
+   *   reap() never closes one.
    */
   constructor(consoleFactory: ConsoleFactory | null = null) {
     this.consoleFactory = consoleFactory
@@ -172,8 +175,13 @@ export class JobTable {
     // Without this, reaping after a targeted `wait` would leave a
     // later `wait %1` pointing at nothing.
     if (this.jobs.size === 0) this.nextId = 1
-    const jobConsole =
-      this.consoleFactory === null ? new JobConsole() : this.consoleFactory(this.nextId)
+    let jobConsole: JobConsole
+    if (this.consoleFactory === null) {
+      jobConsole = new JobConsole()
+    } else {
+      jobConsole = this.consoleFactory(this.nextId)
+      this.factoryConsoles.push(jobConsole)
+    }
     const job = new Job({
       id: this.nextId,
       command: init.command,
@@ -239,6 +247,23 @@ export class JobTable {
       await this.kill(job.id)
     }
     return running
+  }
+
+  /**
+   * Close every console the factory built, releasing its store.
+   *
+   * Called by workspace teardown after killAll(). Only tracked,
+   * factory-built consoles are closed: the default in-memory ones hold
+   * nothing, while a factory-provisioned store keeps a client open per
+   * job, and in Node an open client holds the process alive. Closing
+   * also releases any reader still parked on one.
+   */
+  async closeConsoles(): Promise<void> {
+    const consoles = this.factoryConsoles
+    this.factoryConsoles = []
+    for (const jobConsole of consoles) {
+      await jobConsole.close()
+    }
   }
 
   /**

@@ -52,6 +52,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // happens before any resource closes so a job cannot keep touching one
   // that is already gone.
   await deps.jobTable.killAll()
+  await deps.jobTable.closeConsoles()
   const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
   for (const task of drainTasks) {
     await task

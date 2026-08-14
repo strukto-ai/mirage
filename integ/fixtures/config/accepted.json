@@ -90,6 +90,20 @@
         "mounts": { "/d": { "resource": "ram" } },
         "clis": { "tool": { "script": "tool.py", "runtime": "py", "config": { "token": "t" } } }
       }
+    },
+    {
+      "name": "console block: ram form",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "ram" }
+      }
+    },
+    {
+      "name": "console block: redis form, every key",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "console": { "type": "redis", "url": "redis://localhost:6379/5", "key_prefix": "c:" }
+      }
     }
   ]
 }

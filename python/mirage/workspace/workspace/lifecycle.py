@@ -93,6 +93,7 @@ async def close_async(ws) -> None:
             return
         await ws._watch.detach()
         await ws.job_table.kill_all()
+        await ws.job_table.close_consoles()
         drain_tasks = list(ws._cache._drain_tasks.values())
         for line_runtime in ws._runtimes.entries:
             await line_runtime.close()

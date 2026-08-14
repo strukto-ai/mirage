@@ -14,23 +14,12 @@
 
 import type { RedisClientType } from 'redis'
 import type { Channel, ConsoleChunk, ConsoleStore, ReadResult } from '@struktoai/mirage-core'
-import { loadOptionalPeer } from '../../optional_peer.ts'
-
-// INCR hands out the dense seq and XADD stores the chunk under the
-// stream id `(seq+1)-0` in one atomic step, so two appends racing (a
-// kill marker against a runner's last emit) cannot collide on an id.
-const APPEND_LUA = `
-local n = redis.call('INCR', KEYS[2])
-redis.call('XADD', KEYS[1], tostring(n) .. '-0',
-           'c', ARGV[1], 'd', ARGV[2], 't', ARGV[3])
-return n
-`
-
-const POLL_MS = 100
+import { loadOptionalPeer } from '../../../optional_peer.ts'
+import { APPEND_LUA, POLL_MS } from './constants.ts'
 
 interface StreamEntry {
   id: { toString: () => string }
-  message: Record<string, Buffer>
+  message: Partial<Record<string, Buffer>>
 }
 
 export interface RedisConsoleStoreOptions {
@@ -154,6 +143,7 @@ export class RedisConsoleStore implements ConsoleStore {
     // and a wait arriving later must not reconnect a discarded store.
     if (this.isClosed) return
     const c = await this.client()
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() flips it across awaits
     while (!this.isClosed) {
       let raw: string | null
       try {
@@ -161,6 +151,7 @@ export class RedisConsoleStore implements ConsoleStore {
       } catch (err) {
         // close() tore down the client under a parked reader; that is
         // the documented way a wait ends early.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() flips it across awaits
         if (this.isClosed) return
         throw err
       }
@@ -187,12 +178,11 @@ export class RedisConsoleStore implements ConsoleStore {
   }
 
   private chunk(entry: StreamEntry): ConsoleChunk {
-    const seqPart = entry.id.toString().split('-')[0] ?? '1'
     return {
-      seq: Number(seqPart) - 1,
-      ts: Number(entry.message['t']?.toString() ?? '0'),
-      channel: (entry.message['c']?.toString() ?? 'stdout') as Channel,
-      data: new Uint8Array(entry.message['d'] ?? Buffer.alloc(0)),
+      seq: Number(entry.id.toString().split('-')[0]) - 1,
+      ts: Number(entry.message.t?.toString() ?? '0'),
+      channel: (entry.message.c?.toString() ?? 'stdout') as Channel,
+      data: new Uint8Array(entry.message.d ?? Buffer.alloc(0)),
     }
   }
 }

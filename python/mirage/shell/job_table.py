@@ -163,13 +163,17 @@ class JobTable:
                 backing: ids restart at 1 when the table empties (GNU
                 numbering), so a store keyed on the id alone gets
                 reused, and a reused stream replays the previous job's
-                chunks, ending chunk included. What the factory builds
-                stays the embedder's to close: the table never closes a
-                console, because a console outlives its table entry.
+                chunks, ending chunk included. The table tracks what the
+                factory builds and ``close_consoles`` releases it at
+                workspace teardown, because a config-provisioned store
+                (a Redis client per job) is invisible to the embedder;
+                a console still outlives its table entry, so ``reap``
+                never closes one.
         """
         self._jobs: dict[int, Job] = {}
         self._next_id: int = 1
         self._console_factory = console_factory
+        self._factory_consoles: list[JobConsole] = []
 
     def submit(
         self,
@@ -197,8 +201,11 @@ class JobTable:
             # empties. Without this, reaping after a targeted `wait`
             # would leave a later `wait %1` pointing at nothing.
             self._next_id = 1
-        console = (JobConsole() if self._console_factory is None else
-                   self._console_factory(self._next_id))
+        if self._console_factory is None:
+            console = JobConsole()
+        else:
+            console = self._console_factory(self._next_id)
+            self._factory_consoles.append(console)
         job = Job(id=self._next_id,
                   command=command,
                   task=None,
@@ -274,6 +281,20 @@ class JobTable:
         for job in running:
             await self.kill(job.id)
         return running
+
+    async def close_consoles(self) -> None:
+        """Close every console the factory built, releasing its store.
+
+        Called by workspace teardown after ``kill_all``. Only tracked,
+        factory-built consoles are closed: the default in-memory ones
+        hold nothing, while a factory-provisioned store keeps a client
+        open per job (in Node an open client holds the process alive).
+        Closing also releases any reader still parked on one.
+        """
+        consoles = self._factory_consoles
+        self._factory_consoles = []
+        for console in consoles:
+            await console.close()
 
     async def wait(self, job_id: int) -> Job:
         """Block until a job ends, then return it.
