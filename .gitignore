@@ -236,3 +236,8 @@ models/
 docs/plan/
 docs/plans/
 docs/learnings/
+
+# Scratch dir the cli_ref battery writes its generated configs into; it
+# lives under integ/ so a relative ref reaches the fixtures and the JS
+# ones resolve mirage through integ/node_modules.
+integ/.cli-ref.*

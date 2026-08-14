@@ -421,6 +421,7 @@ export {
   register as registerResourceFactory,
   type ResourceFactory,
 } from './resource/registry.ts'
+export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './resource/loader.ts'
 export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
 export { REDIS_COMMANDS } from './commands/builtin/redis/index.ts'
 export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'

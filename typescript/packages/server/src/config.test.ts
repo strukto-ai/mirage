@@ -27,8 +27,8 @@ import {
 } from '@struktoai/mirage-node'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   checkWorkspaceConfigFile,
@@ -626,6 +626,108 @@ describe('clis section', () => {
       clis: { sl: { cli: 'slack', runtime: 'monty' } },
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
+  })
+})
+
+// Mirrors python/tests/config/test_loader.py's `cli: ./tool.py:TREE`
+// cases. A `cli` value carrying a colon points at code rather than
+// naming a registered spec, which is what lets a deployment install its
+// own program tree from YAML instead of from a host program.
+describe('clis cli: reference', () => {
+  // The fixture lives in a tmpdir with no node_modules of its own, so it
+  // imports core's built entry by URL. A real deployment's file sits in
+  // its own project and writes the bare specifier. Core is ESM-only with
+  // no `require` condition, so createRequire cannot resolve it and the
+  // path is spelled against this monorepo's layout.
+  const CORE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../core/dist/index.js'),
+  ).href
+  const SPEC =
+    `import {CLISpec} from ${JSON.stringify(CORE)}\n` +
+    "export const TALLY = new CLISpec({name: 'tally', fn: async () => ({exitCode: 0})})\n"
+
+  it('loads a spec out of a file next to the config', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(join(dir, 'tally.mjs'), SPEC)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\n' +
+        'clis:\n  tally:\n    cli: ./tally.mjs:TALLY\n    config:\n      unit: kg\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    const args = await configToWorkspaceArgs(cfg)
+    const [spec, config] = args.options.clis?.tally ?? []
+    expect(spec).toBeInstanceOf(CLISpec)
+    expect((spec as CLISpec).name).toBe('tally')
+    expect(config).toEqual({ unit: 'kg' })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // The rebase is the whole reason a relative ref is usable: without it
+  // the pointer reaches loadAttr relative and resolves against whatever
+  // directory the server happens to be running in.
+  it('rebases a relative ref onto the config file directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(join(dir, 'tally.mjs'), SPEC)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n  tally:\n    cli: ./tally.mjs:TALLY\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    expect(cfg.clis?.tally?.cli).toBe(`${join(dir, 'tally.mjs')}:TALLY`)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // A package specifier is Node's to resolve, not the filesystem's, so
+  // it must survive the rebase untouched.
+  it('leaves a package specifier alone', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nclis:\n  jira:\n    cli: my-clis:JIRA\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    expect(cfg.clis?.jira?.cli).toBe('my-clis:JIRA')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('a bare name still travels as a name', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { sl: { cli: 'slack' } },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.clis?.sl?.[0]).toBe('slack')
+  })
+
+  it('refuses a ref that resolves to something other than a CLISpec', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(join(dir, 'nope.mjs'), 'export const TALLY = {name: "tally"}\n')
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { tally: { cli: `${join(dir, 'nope.mjs')}:TALLY` } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/is not a CLISpec/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reports a ref whose file is missing', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { tally: { cli: '/nonexistent/tally.mjs:TALLY' } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/cannot load script/)
+  })
+
+  it('reports a ref whose export is missing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ref-'))
+    writeFileSync(join(dir, 'other.mjs'), 'export const OTHER = 1\n')
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { tally: { cli: `${join(dir, 'other.mjs')}:TALLY` } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/"TALLY" not found in/)
+    rmSync(dir, { recursive: true, force: true })
   })
 })
 

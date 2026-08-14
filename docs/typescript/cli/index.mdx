@@ -65,10 +65,22 @@ The record carries both views of the line: the process view (`argv`,
 `stdin`, `env`) and the parsed view (`config`, `paths`, `texts`,
 `flags`).
 
-In YAML, `cli:` references that spec by builtin or registered name.
-Unlike the Python package there is no string loader, so a spec written
-in TypeScript is registered from code (`registerCliSpec`) rather than
-named by module path.
+In YAML, `cli:` references that spec by builtin or registered name, by
+`package/module:ATTR` specifier, or by `./file.mjs:ATTR` path. A relative
+path resolves next to the config file, the same build-context rule
+`script:` follows.
+
+The referenced file is imported by Node, so it is JavaScript or
+TypeScript, not Python: `.mjs` is the spelling with no caveats, a `.js`
+file follows its nearest `package.json` `type`, and a `.ts` file rides
+Node's own type stripping. Stripping is not compiling, so a `.ts` spec
+using `enum`, a parameter property, a runtime `namespace` or a legacy
+decorator is refused at load; ship those precompiled or as `.mjs`.
+
+Unlike Python's loader this resolution happens in the config layer rather
+than in `cliSpecFor`, because that function lives in `core`, which has no
+filesystem and is synchronous. Installing a spec from code is still
+`registerCliSpec` or `workspace.registerCli`.
 
 ### A CLI as a script
 

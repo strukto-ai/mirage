@@ -90,6 +90,20 @@
         "mounts": { "/d": { "resource": "ram" } },
         "clis": { "tool": { "script": "tool.py", "runtime": "py", "config": { "token": "t" } } }
       }
+    },
+    {
+      "name": "clis entry: the cli form takes a file reference",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "clis": { "tally": { "cli": "./cli/tally.py:TALLY", "config": { "unit": "kg" } } }
+      }
+    },
+    {
+      "name": "clis entry: the cli form takes a module reference",
+      "config": {
+        "mounts": { "/d": { "resource": "ram" } },
+        "clis": { "jira": { "cli": "my_clis:JIRA" } }
+      }
     }
   ]
 }

@@ -17,6 +17,9 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 import {
   buildResource,
+  isModulePath,
+  loadAttr,
+  splitRef,
   CLISpec,
   Limit,
   ConsistencyPolicy,
@@ -630,7 +633,9 @@ function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
   }
   if (isPlainObject(raw.clis)) {
     for (const block of Object.values(raw.clis)) {
-      if (isPlainObject(block)) absolutizeScriptKey(block, base)
+      if (!isPlainObject(block)) continue
+      absolutizeScriptKey(block, base)
+      absolutizeCliRef(block, base)
     }
   }
 }
@@ -641,6 +646,24 @@ function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void
   if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
     entry.script = join(base, script.trim())
   }
+}
+
+/**
+ * Rebase one `clis` entry's path-form `cli` reference onto `base`.
+ *
+ * `cli: ./tool.mjs:TREE` means "next to the config file", the same
+ * build-context rule `script:` follows; without this the pointer reaches
+ * `loadAttr` relative and resolves against the server process's cwd. A
+ * package specifier (`my-clis:JIRA`) is left alone: Node resolves it,
+ * not the filesystem. The split is `splitRef`/`isModulePath`, the same
+ * pair `loadAttr` uses, so the two cannot disagree about what a path is.
+ */
+function absolutizeCliRef(entry: Record<string, unknown>, base: string): void {
+  const ref = entry.cli
+  if (typeof ref !== 'string' || !ref.includes(':')) return
+  const [source, attr] = splitRef(ref)
+  if (!isModulePath(source) || isAbsolute(source)) return
+  entry.cli = `${join(base, source)}:${attr}`
 }
 
 /**
@@ -762,6 +785,8 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   }
   const index = buildIndex(cfg.index)
   const stateStore = buildStateStore(cfg.store)
+  const cliEntries =
+    cfg.clis !== undefined && cfg.clis !== null ? await buildCliEntries(cfg.clis) : undefined
   return {
     resources,
     options: {
@@ -786,15 +811,40 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cfg.guards !== undefined && cfg.guards !== null
         ? { guards: parseGuards(cfg.guards) }
         : {}),
-      ...(cfg.clis !== undefined && cfg.clis !== null ? { clis: buildCliEntries(cfg.clis) } : {}),
+      ...(cliEntries !== undefined ? { clis: cliEntries } : {}),
     },
     kernelMounts,
   }
 }
 
-function buildCliEntries(
+/** Resolve a `cli:` value: a bare name stays a name, a ref loads a spec. */
+async function resolveCliRef(ref: string, name: string): Promise<string | CLISpec> {
+  if (!ref.includes(':')) return ref
+  return asCliSpec(await loadAttr(ref), name, ref)
+}
+
+/**
+ * Check that a `cli:` reference resolved to a program tree.
+ *
+ * `instanceof` is the fast path, not the test. The referenced file lives
+ * in someone else's project, which is the whole point of the ref form,
+ * and that project may resolve its own copy of `@struktoai/mirage-core`:
+ * a real CLISpec carrying every method, built off a different class
+ * object. Demanding `instanceof` would refuse exactly the case this
+ * exists to serve. A hand-built object literal is still refused, because
+ * it never ran the constructor that validates a tree.
+ */
+function asCliSpec(value: unknown, name: string, ref: string): CLISpec {
+  if (value instanceof CLISpec) return value
+  if (value !== null && typeof value === 'object' && value.constructor?.name === 'CLISpec') {
+    return value as CLISpec
+  }
+  throw new Error(`clis entry '${name}': ${ref} is not a CLISpec`)
+}
+
+async function buildCliEntries(
   clis: Record<string, CLIBlock>,
-): Record<string, [string | CLISpec, Record<string, unknown> | null]> {
+): Promise<Record<string, [string | CLISpec, Record<string, unknown> | null]>> {
   const out: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
   for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
     // The raw config arrives as unvalidated YAML: the CLIBlock type is
@@ -822,13 +872,19 @@ function buildCliEntries(
     if (block.config !== undefined && !isPlainObject(block.config)) {
       throw new Error(`clis entry '${name}': config must be a mapping`)
     }
+    // A `cli` value carrying a colon points at code the way `resource:`
+    // never does: `./tool.mjs:TALLY` (a file) or `my-clis:JIRA` (a
+    // package specifier). A bare name stays a name for the workspace to
+    // resolve against the registered specs. Mirrors the `":" in name`
+    // branch of Python's `cli_spec_for`, one layer up: `cliSpecFor`
+    // lives in core, which has no filesystem and is synchronous.
     const entry = hasScript
       ? new CLISpec({
           name,
           script: loadScriptSource(block.script as string),
           runtime: block.runtime ?? null,
         })
-      : (block.cli as string)
+      : await resolveCliRef(block.cli as string, name)
     out[name] = [entry, block.config ?? {}]
   }
   return out
