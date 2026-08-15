@@ -79,3 +79,9 @@ jobs:
       # so new drift is blocked and a closed divergence has to be locked in.
       - name: Layout parity
         run: ./python/.venv/bin/python scripts/check_layout_parity.py --strict
+
+      # The docs build parses frontmatter as YAML and stops on the first page
+      # it cannot read, so an unquoted description holding ": " fails the
+      # deploy with no local signal at all.
+      - name: Docs frontmatter
+        run: ./python/.venv/bin/python scripts/check_docs_frontmatter.py
