@@ -34,33 +34,38 @@
 
 Mirage 是 **面向 AI Agent 的統一虛擬檔案系統**：它把 S3、Google Drive、Slack、Gmail、Redis 等服務和資料來源並排掛載為同一個檔案系統。任何已經會用 bash 的 LLM 都可以開箱即用地對每個後端進行讀取、grep 和管線操作，不需要學習新的詞彙。
 
-```ts
-const ws = new Workspace({
-  '/data':  new RAMResource(),
-  '/s3':    new S3Resource({ bucket: 'logs' }),
-  '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-})
+```python
+ws = Workspace(
+    {
+        "/tmp":   (RAMResource(), MountMode.EXEC),
+        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+    },
+    # monty 捕獲 python，腳本在工作區內以沙箱方式執行
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+)
 
-await ws.execute('grep -r alert /slack/channels/general__C04QX/ | wc -l')
-await ws.execute('cp /s3/report.csv /data/local.csv')
-await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
+# 一次 grep 掃遍所有資料來源
+await ws.execute("grep -rln session /redis /tmp")
 
-// 命令是可擴充的：可以註冊新命令，也可以針對特定資源 + 檔案類型
-// 覆寫某個命令，例如對 S3 上的 Parquet 檔案執行 `cat` 會把資料列渲染為 JSON。
-ws.command('summarize', ...)
-ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
+# 執行放在 Slack 裡的腳本，把報告寫入 Redis
+await ws.execute(
+    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
+)
 
-await ws.execute('summarize /data/local.csv')
-await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
+# 以頭部命令名安裝一個型別化 CLI：依名稱分派，而不是依路徑，
+# 並且像其他程式一樣可以透過 `man`、`type`、`which` 發現
+ws.register_cli("slack", SLACK, {"token": slack_bot_token})
+await ws.execute('slack send-message --channel general --text "report is up"')
 ```
 
 ## 關於
 
 - **一個介面，而不是 N 個 SDK 和 M 個 MCP。** 每個服務都使用同一套檔案系統語意，管線可以像在本機磁碟上一樣跨服務組合。
-- **約 50 個內建後端：** RAM、Disk、Redis、S3 / R2 / OCI / Supabase / GCS、Gmail / GDrive / GDocs / GSheets / GSlides、GitHub / Linear / Notion / Trello、Slack / Discord / Email、MongoDB / Postgres / LanceDB、SSH 等，並排掛載在同一個根目錄下。
+- **約 50 個內建後端：** RAM、Disk、Redis、S3 / R2 / OCI / Supabase / GCS、Gmail / GDrive / GDocs / GSheets / GSlides、GitHub / Linear / Notion / Trello、Slack / Discord / Email、MongoDB / GridFS / Postgres / LanceDB / Qdrant、SSH 等，並排掛載在同一個根目錄下。
 - **可攜的工作區：** 克隆、快照和版本化工作區；Agent 執行可以在機器之間遷移，而不必重啟或重新設定系統。
 - **可嵌入：** Python 和 TypeScript SDK 直接執行在 FastAPI、Express、瀏覽器應用或任何非同步執行環境的行程內，不需要獨立的行程。
-- **Agent 整合：** 透過 SDK 支援 OpenAI Agents SDK、Vercel AI SDK、LangChain、Pydantic AI、CAMEL 和 OpenHands；透過輕量 CLI + daemon 支援 Claude Code 和 Codex 等編碼 Agent。
+- **Agent 整合：** 透過 SDK 支援 OpenAI Agents SDK、Vercel AI SDK、LangChain、Pydantic AI、CAMEL 和 OpenHands；編碼 Agent 則透過原生轉接器、可安裝外掛、MCP 或 FUSE 接入。
 
 ## 架構
 
@@ -153,13 +158,13 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Agent 框架
 
-Mirage 可以作為沙箱或工具層接入 Agent 框架。`read` 等 POSIX 操作也可以按資源和檔案類型自訂，例如讀取 PDF 會回傳解析後的頁面，而不是原始位元組。
+Mirage 可以作為沙箱或工具層接入 Agent 框架。`read` 等 POSIX 操作也可以按資源和檔案類型自訂：Mirage 不內建任何檔案類型渲染器，因此某種格式如何渲染完全取決於你註冊的實作，而針對特定資源和副檔名註冊的命令優先於通用命令。
 
-|            | 整合                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python     | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents)、[LangChain](https://docs.mirage.strukto.ai/python/agents/langchain)、[Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai)、[CAMEL](https://docs.mirage.strukto.ai/python/agents/camel)、[OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands)、[Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
-| TypeScript | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel)、[OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai)、[LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain)、[Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| 編碼 Agent | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code)、[Codex](https://docs.mirage.strukto.ai/python/agents/codex)、[OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode)、[Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                                                                                                     |
+|            | 整合                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python     | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents)、[LangChain](https://docs.mirage.strukto.ai/python/agents/langchain)、[Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai)、[CAMEL](https://docs.mirage.strukto.ai/python/agents/camel)、[OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands)、[Agno](https://docs.mirage.strukto.ai/python/agents/agno)      |
+| TypeScript | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel)、[OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai)、[LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain)、[Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                              |
+| 編碼 Agent | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code)、[Codex](https://docs.mirage.strukto.ai/typescript/agents/codex)、[DeepSeek Harness](https://docs.mirage.strukto.ai/typescript/agents/dsh)、[Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build)、[OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode)、[Pi](https://docs.mirage.strukto.ai/typescript/agents/pi) |
 
 ## 快取
 

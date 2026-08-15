@@ -34,34 +34,38 @@
 
 Mirage는 **AI 에이전트를 위한 통합 가상 파일 시스템**입니다. S3, Google Drive, Slack, Gmail, Redis 같은 서비스와 데이터 소스를 나란히 하나의 파일 시스템으로 마운트합니다. bash를 이미 아는 LLM이라면 새로운 어휘 없이 바로 모든 백엔드를 읽고, grep하고, 파이프로 연결할 수 있습니다.
 
-```ts
-const ws = new Workspace({
-  '/data':  new RAMResource(),
-  '/s3':    new S3Resource({ bucket: 'logs' }),
-  '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-})
+```python
+ws = Workspace(
+    {
+        "/tmp":   (RAMResource(), MountMode.EXEC),
+        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+    },
+    # monty가 python을 가로채므로 스크립트는 워크스페이스 안에서 샌드박스로 실행된다
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+)
 
-await ws.execute('grep -r alert /slack/channels/general__C04QX/ | wc -l')
-await ws.execute('cp /s3/report.csv /data/local.csv')
-await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
+# grep 한 번으로 모든 소스를 훑는다
+await ws.execute("grep -rln session /redis /tmp")
 
-// 명령은 확장 가능합니다. 새 명령을 등록하거나 리소스 + 파일 타입별로
-// 명령을 재정의할 수 있습니다. 예: S3의 Parquet 파일에 `cat`을 실행하면
-// 행을 JSON으로 렌더링합니다.
-ws.command('summarize', ...)
-ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
+# Slack에 있는 스크립트를 실행하고 리포트를 Redis에 기록한다
+await ws.execute(
+    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
+)
 
-await ws.execute('summarize /data/local.csv')
-await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
+# 헤드 워드로 타입이 있는 CLI를 설치한다: 경로가 아니라 이름으로 디스패치되고,
+# 다른 프로그램처럼 `man`, `type`, `which`로 찾을 수 있다
+ws.register_cli("slack", SLACK, {"token": slack_bot_token})
+await ws.execute('slack send-message --channel general --text "report is up"')
 ```
 
 ## 소개
 
 - **N개의 SDK와 M개의 MCP 대신 하나의 인터페이스.** 모든 서비스가 동일한 파일 시스템 의미론을 사용하며, 파이프라인은 로컬 디스크에서처럼 자연스럽게 서비스 간에 조합됩니다.
-- **약 50개의 내장 백엔드:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH 등을 하나의 루트 아래 나란히 마운트합니다.
+- **약 50개의 내장 백엔드:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH 등을 하나의 루트 아래 나란히 마운트합니다.
 - **이식 가능한 워크스페이스:** 워크스페이스를 클론, 스냅샷, 버전 관리할 수 있습니다. 에이전트 실행을 재시작이나 재설정 없이 머신 간에 옮길 수 있습니다.
 - **임베딩 가능:** Python과 TypeScript SDK가 FastAPI, Express, 브라우저 앱 또는 모든 비동기 런타임의 프로세스 안에서 직접 실행됩니다. 별도 프로세스가 필요 없습니다.
-- **에이전트 통합:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, OpenHands는 SDK로, Claude Code와 Codex 같은 코딩 에이전트는 경량 CLI + 데몬으로 지원합니다.
+- **에이전트 통합:** SDK를 통해 OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, OpenHands를 지원하며, 코딩 에이전트는 네이티브 어댑터, 설치형 플러그인, MCP 또는 FUSE로 연결된다.
 
 ## 아키텍처
 
@@ -154,13 +158,13 @@ mirage workspace load demo.tar --id demo-restored
 
 ## 에이전트 프레임워크
 
-Mirage는 샌드박스 또는 도구 레이어로 에이전트 프레임워크에 연결됩니다. `read` 같은 POSIX 연산도 리소스와 파일 타입별로 커스터마이즈할 수 있습니다. 예를 들어 PDF를 읽으면 원시 바이트 대신 파싱된 페이지를 돌려받습니다.
+Mirage는 샌드박스 또는 도구 계층으로 에이전트 프레임워크에 연결된다. `read` 같은 POSIX 연산도 리소스와 파일 타입별로 커스터마이즈할 수 있다: Mirage는 파일 타입 렌더러를 전혀 포함하지 않으므로 형식은 등록한 방식대로 렌더링되며, 특정 리소스와 확장자에 등록한 명령이 일반 명령보다 우선한다.
 
-|               | 통합                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python        | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
-| TypeScript    | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| 코딩 에이전트 | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/python/agents/codex), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                                                                                                     |
+|               | 통합                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python        | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno)      |
+| TypeScript    | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                              |
+| 코딩 에이전트 | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [DeepSeek Harness](https://docs.mirage.strukto.ai/typescript/agents/dsh), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi) |
 
 ## 캐시
 

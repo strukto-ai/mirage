@@ -34,31 +34,35 @@
 
 Mirage is **a Unified Virtual File System for AI Agents**: it mounts services and data sources like S3, Google Drive, Slack, Gmail, and Redis side-by-side as one filesystem. Any LLM that already knows bash can read, grep, and pipe across every backend out of the box, with zero new vocabulary.
 
-```ts
-const ws = new Workspace({
-  '/data':  new RAMResource(),
-  '/s3':    new S3Resource({ bucket: 'logs' }),
-  '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-})
+```python
+ws = Workspace(
+    {
+        "/tmp":   (RAMResource(), MountMode.EXEC),
+        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+    },
+    # monty captures python, so scripts run sandboxed inside the workspace
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+)
 
-await ws.execute('grep -r alert /slack/channels/general__C04QX/ | wc -l')
-await ws.execute('cp /s3/report.csv /data/local.csv')
-await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
+# one grep sweeps every source
+await ws.execute("grep -rln session /redis /tmp")
 
-// Commands are extensible: register new commands, or override one per
-// resource + filetype. Mirage ships no filetype renderers, so a format
-// like Parquet renders however you register it.
-ws.command('summarize', ...)
-ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
+# run a script that lives in Slack, file the report into Redis
+await ws.execute(
+    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
+)
 
-await ws.execute('summarize /data/local.csv')
-await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
+# install a typed CLI under a head word: dispatched by name, not by path,
+# and discoverable through `man`, `type` and `which` like any other program
+ws.register_cli("slack", SLACK, {"token": slack_bot_token})
+await ws.execute('slack send-message --channel general --text "report is up"')
 ```
 
 ## About
 
 - **One interface instead of N SDKs and M MCPs.** Every service speaks the same filesystem semantics, and pipelines compose across services as naturally as on a local disk.
-- **Around 50 built-in backends:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH, and more, mounted side-by-side under a single root.
+- **Around 50 built-in backends:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH, and more, mounted side-by-side under a single root.
 - **Portable workspaces:** clone, snapshot, and version a workspace; agent runs move between machines without restarting or reconfiguring the system.
 - **Embeddable:** the Python and TypeScript SDKs run in-process inside FastAPI, Express, browser apps, or any async runtime; no separate process required.
 - **Agent integrations:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, and OpenHands via the SDKs; coding agents through native adapters, installable plugins, MCP, or FUSE.
@@ -154,13 +158,13 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Agent Frameworks
 
-Mirage plugs into agent frameworks as a sandbox or tool layer. POSIX operations such as `read` can also be customized per resource and filetype, e.g. reading a PDF returns parsed pages instead of raw bytes.
+Mirage plugs into agent frameworks as a sandbox or tool layer. POSIX operations such as `read` can also be customized per resource and filetype: Mirage ships no filetype renderers, so a format renders however you register it, and a command registered for one resource and extension wins over the generic one.
 
-|               | Integrations                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python        | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
-| TypeScript    | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| Coding agents | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                      |
+|               | Integrations                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python        | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno)      |
+| TypeScript    | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                              |
+| Coding agents | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [DeepSeek Harness](https://docs.mirage.strukto.ai/typescript/agents/dsh), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi) |
 
 ## Cache
 

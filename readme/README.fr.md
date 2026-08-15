@@ -34,34 +34,38 @@
 
 Mirage est **un système de fichiers virtuel unifié pour les agents IA** : il monte des services et des sources de données comme S3, Google Drive, Slack, Gmail et Redis côte à côte dans un même système de fichiers. Tout LLM qui connaît déjà bash peut lire, chercher avec grep et chaîner des pipes sur chaque backend dès le départ, sans vocabulaire nouveau.
 
-```ts
-const ws = new Workspace({
-  '/data':  new RAMResource(),
-  '/s3':    new S3Resource({ bucket: 'logs' }),
-  '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-})
+```python
+ws = Workspace(
+    {
+        "/tmp":   (RAMResource(), MountMode.EXEC),
+        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+    },
+    # monty capture python : les scripts s'exécutent en bac à sable dans l'espace de travail
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+)
 
-await ws.execute('grep -r alert /slack/channels/general__C04QX/ | wc -l')
-await ws.execute('cp /s3/report.csv /data/local.csv')
-await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
+# un seul grep balaie toutes les sources
+await ws.execute("grep -rln session /redis /tmp")
 
-// Les commandes sont extensibles : on peut enregistrer de nouvelles commandes,
-// ou en redéfinir une par ressource + type de fichier, p. ex. `cat` sur un
-// Parquet S3 rend les lignes en JSON.
-ws.command('summarize', ...)
-ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
+# exécute un script hébergé dans Slack, écrit le rapport dans Redis
+await ws.execute(
+    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
+)
 
-await ws.execute('summarize /data/local.csv')
-await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
+# installe un CLI typé sous un mot-clé : dispatché par nom, pas par chemin,
+# et découvrable via `man`, `type` et `which` comme tout autre programme
+ws.register_cli("slack", SLACK, {"token": slack_bot_token})
+await ws.execute('slack send-message --channel general --text "report is up"')
 ```
 
 ## À propos
 
 - **Une seule interface au lieu de N SDK et M MCP.** Chaque service parle la même sémantique de système de fichiers, et les pipelines se composent entre services aussi naturellement que sur un disque local.
-- **Une cinquantaine de backends intégrés :** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH et plus encore, montés côte à côte sous une même racine.
+- **Une cinquantaine de backends intégrés :** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH et plus encore, montés côte à côte sous une même racine.
 - **Espaces de travail portables :** cloner, snapshotter et versionner un espace de travail ; les exécutions d'agents se déplacent entre machines sans redémarrage ni reconfiguration du système.
 - **Embarquable :** les SDK Python et TypeScript s'exécutent dans le processus, au sein de FastAPI, Express, d'applications navigateur ou de tout runtime asynchrone ; aucun processus séparé n'est requis.
-- **Intégrations d'agents :** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL et OpenHands via les SDK ; les agents de code comme Claude Code et Codex via le CLI léger + daemon.
+- **Intégrations d'agents :** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL et OpenHands via les SDK ; les agents de code via des adaptateurs natifs, des plugins installables, MCP ou FUSE.
 
 ## Architecture
 
@@ -154,13 +158,13 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Frameworks d'agents
 
-Mirage s'intègre aux frameworks d'agents comme bac à sable ou couche d'outils. Les opérations POSIX comme `read` peuvent aussi être personnalisées par ressource et type de fichier, p. ex. la lecture d'un PDF renvoie des pages interprétées plutôt que des octets bruts.
+Mirage s'intègre aux frameworks d'agents comme bac à sable ou couche d'outils. Les opérations POSIX telles que `read` peuvent aussi être personnalisées par ressource et par type de fichier : Mirage n'embarque aucun moteur de rendu de format, donc un format s'affiche selon ce que vous enregistrez, et une commande enregistrée pour une ressource et une extension l'emporte sur la commande générique.
 
-|                | Intégrations                                                                                                                                                                                                                                                                                                                                                                                                               |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python         | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
-| TypeScript     | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| Agents de code | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/python/agents/codex), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                                                                                                     |
+|                | Intégrations                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python         | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno)      |
+| TypeScript     | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                              |
+| Agents de code | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [DeepSeek Harness](https://docs.mirage.strukto.ai/typescript/agents/dsh), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi) |
 
 ## Cache
 

@@ -34,33 +34,38 @@
 
 Mirage là **hệ thống tệp ảo thống nhất cho AI Agent**: nó gắn các dịch vụ và nguồn dữ liệu như S3, Google Drive, Slack, Gmail và Redis cạnh nhau thành một hệ thống tệp duy nhất. Bất kỳ LLM nào đã biết bash đều có thể đọc, grep và nối pipe trên mọi backend ngay từ đầu, không cần từ vựng mới.
 
-```ts
-const ws = new Workspace({
-  '/data':  new RAMResource(),
-  '/s3':    new S3Resource({ bucket: 'logs' }),
-  '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-})
+```python
+ws = Workspace(
+    {
+        "/tmp":   (RAMResource(), MountMode.EXEC),
+        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+    },
+    # monty bắt python, nên script chạy trong sandbox bên trong workspace
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+)
 
-await ws.execute('grep -r alert /slack/channels/general__C04QX/ | wc -l')
-await ws.execute('cp /s3/report.csv /data/local.csv')
-await ws.execute('wc -l $(find /s3/data -name "*.jsonl")')
+# một lệnh grep quét mọi nguồn
+await ws.execute("grep -rln session /redis /tmp")
 
-// Lệnh có thể mở rộng: đăng ký lệnh mới, hoặc ghi đè một lệnh theo
-// resource + loại tệp, ví dụ `cat` trên tệp Parquet ở S3 trả về các hàng dạng JSON.
-ws.command('summarize', ...)
-ws.command('cat', { resource: 's3', filetype: 'parquet' }, ...)
+# chạy script nằm trong Slack, ghi báo cáo vào Redis
+await ws.execute(
+    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
+)
 
-await ws.execute('summarize /data/local.csv')
-await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
+# cài một CLI có kiểu dưới một từ khóa: điều phối theo tên, không theo đường dẫn,
+# và có thể khám phá qua `man`, `type`, `which` như mọi chương trình khác
+ws.register_cli("slack", SLACK, {"token": slack_bot_token})
+await ws.execute('slack send-message --channel general --text "report is up"')
 ```
 
 ## Giới thiệu
 
 - **Một giao diện thay vì N SDK và M MCP.** Mọi dịch vụ đều dùng cùng một ngữ nghĩa hệ thống tệp, và pipeline kết hợp giữa các dịch vụ tự nhiên như trên đĩa cục bộ.
-- **Khoảng 50 backend tích hợp sẵn:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH và nhiều hơn nữa, được gắn cạnh nhau dưới một gốc duy nhất.
+- **Khoảng 50 backend tích hợp sẵn:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH và nhiều hơn nữa, được gắn cạnh nhau dưới một gốc duy nhất.
 - **Workspace di động:** clone, snapshot và đánh phiên bản workspace; phiên chạy agent di chuyển giữa các máy mà không cần khởi động lại hay cấu hình lại hệ thống.
 - **Nhúng được:** SDK Python và TypeScript chạy ngay trong tiến trình của FastAPI, Express, ứng dụng trình duyệt hoặc bất kỳ runtime bất đồng bộ nào; không cần tiến trình riêng.
-- **Tích hợp agent:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL và OpenHands qua SDK; các coding agent như Claude Code và Codex qua CLI nhẹ + daemon.
+- **Tích hợp agent:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL và OpenHands qua các SDK; các agent lập trình qua adapter gốc, plugin cài được, MCP hoặc FUSE.
 
 ## Kiến trúc
 
@@ -153,13 +158,13 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Framework agent
 
-Mirage tích hợp vào các framework agent như một sandbox hoặc lớp công cụ. Các thao tác POSIX như `read` cũng có thể được tùy biến theo resource và loại tệp, ví dụ đọc một tệp PDF trả về các trang đã phân tích thay vì byte thô.
+Mirage cắm vào các framework agent như một lớp sandbox hoặc công cụ. Các thao tác POSIX như `read` cũng có thể tùy biến theo tài nguyên và loại tệp: Mirage không đi kèm bộ render định dạng nào, nên một định dạng hiển thị đúng theo cách bạn đăng ký, và lệnh đăng ký cho một tài nguyên và phần mở rộng cụ thể sẽ thắng lệnh chung.
 
-|              | Tích hợp                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Python       | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno) |
-| TypeScript   | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                         |
-| Coding agent | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/python/agents/codex), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi)                                                                                                                                                     |
+|              | Tích hợp                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python       | [OpenAI Agents SDK](https://docs.mirage.strukto.ai/python/agents/openai-agents), [LangChain](https://docs.mirage.strukto.ai/python/agents/langchain), [Pydantic AI](https://docs.mirage.strukto.ai/python/agents/pydantic-ai), [CAMEL](https://docs.mirage.strukto.ai/python/agents/camel), [OpenHands](https://docs.mirage.strukto.ai/python/agents/openhands), [Agno](https://docs.mirage.strukto.ai/python/agents/agno)      |
+| TypeScript   | [Vercel AI SDK](https://docs.mirage.strukto.ai/typescript/agents/vercel), [OpenAI Agents SDK](https://docs.mirage.strukto.ai/typescript/agents/openai), [LangChain](https://docs.mirage.strukto.ai/typescript/agents/langchain), [Mastra](https://docs.mirage.strukto.ai/typescript/agents/mastra)                                                                                                                              |
+| Coding agent | [Claude Code](https://docs.mirage.strukto.ai/python/agents/claude-code), [Codex](https://docs.mirage.strukto.ai/typescript/agents/codex), [DeepSeek Harness](https://docs.mirage.strukto.ai/typescript/agents/dsh), [Grok Build](https://docs.mirage.strukto.ai/typescript/agents/grok-build), [OpenCode](https://docs.mirage.strukto.ai/typescript/agents/opencode), [Pi](https://docs.mirage.strukto.ai/typescript/agents/pi) |
 
 ## Bộ nhớ đệm
 
