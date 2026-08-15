@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-node",
-  "version": "0.0.5-alpha.1",
+  "version": "0.0.5",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
