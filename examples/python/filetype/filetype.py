@@ -55,7 +55,7 @@ async def main() -> None:
     await ws.ops.write("/data/hits.tally", encode({"alpha": 3, "beta": 11}))
     await ws.ops.write("/data/notes.txt", b"plain text\n")
 
-    mount = ws._registry.mount_for("/data/")
+    mount = ws.mount("/data/")
     mount.register(
         RegisteredCommand("cat",
                           spec=SPECS["cat"],
