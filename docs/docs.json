@@ -149,7 +149,6 @@
                 "icon": "code",
                 "pages": [
                   "home/setup/github",
-                  "home/setup/github_ci",
                   "home/setup/linear",
                   "home/setup/langfuse"
                 ]
@@ -325,7 +324,6 @@
                 "icon": "code",
                 "pages": [
                   "python/resource/github",
-                  "python/resource/github_ci",
                   "python/resource/linear",
                   "python/resource/langfuse"
                 ]
@@ -525,7 +523,6 @@
                 "icon": "code",
                 "pages": [
                   "typescript/setup/github",
-                  "typescript/setup/github_ci",
                   "typescript/setup/linear",
                   "typescript/setup/langfuse"
                 ]
