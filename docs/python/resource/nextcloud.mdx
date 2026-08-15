@@ -1,5 +1,6 @@
 ---
 title: Nextcloud
+description: "Mount Nextcloud over WebDAV as a filesystem and read or write your files with shell commands."
 icon: /images/nextcloud-logo.svg
 ---
 The Nextcloud resource mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
@@ -226,20 +227,6 @@ don't pull the whole file.
 | Command  | Notes                |
 | -------- | -------------------- |
 | `base64` | Base64 encode/decode |
-
-### Data Format Support
-
-Commands with format-specific variants for structured data files:
-
-| Format  | Extension  | Variants                                       |
-| ------- | ---------- | ---------------------------------------------- |
-| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
-| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
-| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
-| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
-
-These variants auto-detect the format by extension and convert to
-tabular text (CSV) for processing.
 
 ## Streaming
 

@@ -142,10 +142,6 @@ processing (`awk`, `sed`, `sort`, `cut`, `diff`, ...), file operations
 encoding. Range reads (`head -c`, `tail -c`) seek chunk-wise, so large
 files are never downloaded whole.
 
-Columnar data files (`.parquet`, `.feather`, `.orc`, `.hdf5`) render as
-tabular text for `cat`, `head`, `tail`, `wc`, `stat`, `cut`, `grep`, `ls`,
-and `file`.
-
 ## Scoping a resource to a key prefix
 
 Pass `key_prefix` to `GridFSConfig` to transparently scope every operation

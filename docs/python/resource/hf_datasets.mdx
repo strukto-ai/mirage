@@ -1,5 +1,6 @@
 ---
 title: HF Datasets
+description: "Mount a Hugging Face dataset repository as a read-only filesystem and browse its shards with shell commands."
 icon: /images/huggingface-logo.svg
 ---
 The HF Datasets resource mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
@@ -100,8 +101,7 @@ if __name__ == "__main__":
 ## Shell Commands
 
 Same set as [HF Buckets](/python/resource/hf_buckets#shell-commands) — read,
-text-processing, file ops, path utilities, compression, encoding, and
-format-specific variants for parquet/feather/orc/hdf5.
+text-processing, file ops, path utilities, compression, and encoding.
 
 ## Cache
 
@@ -112,8 +112,8 @@ most shell commands trigger) costs one HTTP request instead of N.
 
 ## Use Cases
 
-- **AI agents inspecting datasets**: Mount, browse the README, sample a few
-  rows from parquet shards without downloading the whole dataset
+- **AI agents inspecting datasets**: Mount, browse the README, read byte
+  ranges from large shards without downloading the whole dataset
 - **Dataset triage**: `ls`, `stat`, `find` to see what's in a repo before
   committing to a full local copy
 - **Sandboxed access**: Pin a `revision` for reproducibility

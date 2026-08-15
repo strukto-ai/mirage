@@ -195,20 +195,6 @@ on real file content (text, binary, JSON, CSV, etc.):
 | -------- | -------------------- |
 | `base64` | Base64 encode/decode |
 
-### Data Format Support
-
-Commands with format-specific variants for structured data files:
-
-| Format  | Extension  | Variants                                       |
-| ------- | ---------- | ---------------------------------------------- |
-| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
-| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
-| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
-| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
-
-These variants auto-detect the format by extension and convert to
-tabular text (CSV) for processing.
-
 ## Use Cases
 
 - **Local directory access**: Mount local directories for AI agents to read and process

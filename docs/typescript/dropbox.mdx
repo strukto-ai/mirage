@@ -175,12 +175,6 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
   shell redirection (`>` / `>>`)
 - **Search/text**: `grep`, `rg`, `awk`, `sed`, `sort`, `uniq`, `cut`, `diff`, `cmp`, `jq`
 - **Encoding**: `base64`
-- **Format-aware**: `cat_parquet`, `cat_feather`, `cat_hdf5`, `head_parquet`, `head_feather`,
-  `head_hdf5`, `cut_*`, `grep_*`, `ls_*`, `stat_*`, `tail_*`, `wc_*`, `file_*` for `.parquet`,
-  `.feather`, `.hdf5`/`.h5`, `.orc` files
-
-The format-aware commands transparently decode binary tabular files, so
-`cat /dropbox/data/example.parquet` returns a column preview instead of binary garbage.
 
 ## Examples
 
@@ -188,6 +182,5 @@ End-to-end runnable scripts are in
 [`examples/typescript/dropbox/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/dropbox):
 
 - [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox.ts), `Workspace.execute('ls/stat/cat/tree …')` shell demo
-- [`dropbox_parquet.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_parquet.ts), parquet preview through `cat`
 - [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
 - [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal

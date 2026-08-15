@@ -275,28 +275,6 @@ Standard commands available on the mounted Google Drive tree:
 | `tsort`         | Topological sort                           |
 | `file`          | Detect file type                           |
 
-## Data Format Support
-
-Google Drive may contain data files in binary columnar formats.
-These are auto-converted to CSV on read. Specialized variants
-of common commands handle them natively:
-
-| Format  | Extension  | Specialized commands                                                                                                                     |
-| ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Parquet | `.parquet` | `cat-parquet`, `head-parquet`, `tail-parquet`, `wc-parquet`, `stat-parquet`, `grep-parquet`, `cut-parquet`, `ls-parquet`, `file-parquet` |
-| Feather | `.feather` | `cat-feather`, `head-feather`, `tail-feather`, `wc-feather`, `stat-feather`, `grep-feather`, `cut-feather`, `ls-feather`, `file-feather` |
-| HDF5    | `.hdf5`    | `cat-hdf5`, `head-hdf5`, `tail-hdf5`, `wc-hdf5`, `stat-hdf5`, `grep-hdf5`, `cut-hdf5`, `ls-hdf5`, `file-hdf5`                            |
-| ORC     | `.orc`     | `cat-orc`, `head-orc`, `tail-orc`, `wc-orc`, `stat-orc`, `grep-orc`, `cut-orc`, `ls-orc`, `file-orc`                                     |
-
-Example:
-
-```bash
-cat-parquet /gdrive/data/sales.parquet
-head-parquet -n 5 /gdrive/data/sales.parquet
-grep-parquet "revenue" /gdrive/data/sales.parquet
-wc-parquet /gdrive/data/sales.parquet
-```
-
 ## Acting on Drive
 
 Acting on Drive files by id (create, update, copy, delete, share,
