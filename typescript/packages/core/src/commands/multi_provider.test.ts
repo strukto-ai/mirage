@@ -142,14 +142,14 @@ describe('command() registers multiple resources', () => {
     const stdout = result?.[0]
     expect(stdout).toBeDefined()
     const text = new TextDecoder().decode(stdout as Uint8Array)
-    expect(text).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+    expect(text).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 })
 
 describe('versionRequest', () => {
   it('matches the injected option', () => {
     const out = versionRequest('tsort', specFor('tsort'), ['--version'])
-    expect(decode(out)).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+    expect(decode(out)).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 
   it('is null without the flag', () => {

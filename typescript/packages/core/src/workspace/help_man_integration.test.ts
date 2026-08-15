@@ -92,7 +92,7 @@ describe('--help and man through the executor', () => {
     const io = await ws.execute('tsort --version')
     const out = stdoutStr(io)
     expect(io.exitCode).toBe(0)
-    expect(out).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+\n$/)
+    expect(out).toMatch(/^tsort \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 
   it('--version is listed in --help for registered commands', async () => {
@@ -105,7 +105,7 @@ describe('--help and man through the executor', () => {
     const ws = await makeMultiWs()
     const io = await ws.execute('rm --version /ro/c.txt')
     expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io)).toMatch(/^rm \(Mirage\) \d+\.\d+\.\d+\n$/)
+    expect(stdoutStr(io)).toMatch(/^rm \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 
   it('--help beats the read-only mount refusal', async () => {
@@ -119,7 +119,7 @@ describe('--help and man through the executor', () => {
     const ws = await makeMultiWs()
     const io = await ws.execute('cat --version /ram/a.txt /other/b.txt')
     expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io)).toMatch(/^cat \(Mirage\) \d+\.\d+\.\d+\n$/)
+    expect(stdoutStr(io)).toMatch(/^cat \(Mirage\) \d+\.\d+\.\d+(?:-[\w.]+)?\n$/)
   })
 
   it('--version does not run a write command', async () => {
