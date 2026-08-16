@@ -1693,11 +1693,11 @@ function serve(db: PrismaClient, fx: Fixture): Server {
   })
 }
 
-export async function startServer(port: number): Promise<Server> {
+export async function startServer(port: number, host = '127.0.0.1'): Promise<Server> {
   const { db, fx } = await createStore(`rest-${String(port)}`)
   const server = serve(db, fx)
   return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve(server))
+    server.listen(port, host, () => resolve(server))
   })
 }
 
@@ -1851,7 +1851,12 @@ if (isMain) {
   const portArg = process.argv.indexOf('--port')
   const port =
     portArg !== -1 ? Number.parseInt(process.argv[portArg + 1] as string, 10) : DEFAULT_PORT
-  void startServer(port).then(() => {
+  // Loopback by default, which is every direct invocation. A container has
+  // to bind 0.0.0.0 or its published port accepts the connection and then
+  // answers nothing -- an empty reply with no error anywhere to explain it.
+  const hostArg = process.argv.indexOf('--host')
+  const host = hostArg !== -1 ? (process.argv[hostArg + 1] as string) : '127.0.0.1'
+  void startServer(port, host).then(() => {
     console.log(`NOTION_URL=http://127.0.0.1:${String(port)}`)
   })
 }

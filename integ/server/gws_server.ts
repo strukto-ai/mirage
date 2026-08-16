@@ -2915,7 +2915,7 @@ function rangeLabelFor(range: A1Range, requested: string): string {
   return `${range.tab.title}!A1:Z1000`
 }
 
-export function startServer(port: number): Promise<http.Server> {
+export function startServer(port: number, host = '127.0.0.1'): Promise<http.Server> {
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -2953,7 +2953,7 @@ export function startServer(port: number): Promise<http.Server> {
     })
   })
   return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve(server))
+    server.listen(port, host, () => resolve(server))
   })
 }
 
@@ -2961,7 +2961,12 @@ const isMain = process.argv[1] !== undefined && process.argv[1].endsWith('gws_se
 if (isMain) {
   const portArg = process.argv.indexOf('--port')
   const port = portArg !== -1 ? parseInt(process.argv[portArg + 1] as string, 10) : 19999
-  void startServer(port).then(() => {
+  // Loopback by default, which is every direct invocation. A container has
+  // to bind 0.0.0.0 or its published port accepts the connection and then
+  // answers nothing -- an empty reply with no error anywhere to explain it.
+  const hostArg = process.argv.indexOf('--host')
+  const host = hostArg !== -1 ? (process.argv[hostArg + 1] as string) : '127.0.0.1'
+  void startServer(port, host).then(() => {
     console.log(`GWS_URL=http://127.0.0.1:${String(port)}`)
   })
 }

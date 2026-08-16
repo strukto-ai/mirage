@@ -1898,8 +1898,13 @@ def seed_state(state: FakeGitHub, repos: list[str], metadata: list[str],
         seed_commits(state, full_name, fixtures / fixture)
 
 
-async def _serve(port: int, repos: list[str], metadata: list[str],
-                 commits: list[str], create_repos: bool) -> None:
+async def _serve(port: int,
+                 repos: list[str],
+                 metadata: list[str],
+                 commits: list[str],
+                 create_repos: bool,
+                 host: str = "127.0.0.1",
+                 advertise: str | None = None) -> None:
     state = FakeGitHub()
     state.create_repos = create_repos
     state.seed = (repos, metadata, commits)
@@ -1907,9 +1912,13 @@ async def _serve(port: int, repos: list[str], metadata: list[str],
     server = GitHubServer(state)
     runner = web.AppRunner(build_app(server))
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", port)
+    site = web.TCPSite(runner, host, port)
     await site.start()
-    state.base = f"http://127.0.0.1:{port}"
+    # What the fake calls itself in every html_url and clone_url it hands
+    # out, which is not always where it binds: a container binds 0.0.0.0
+    # and is reached on a published loopback port, and 0.0.0.0 in a URL
+    # sends the caller nowhere.
+    state.base = (advertise or f"http://127.0.0.1:{port}").rstrip("/")
     print(f"GITHUB_ENDPOINT={state.base}", flush=True)
     await asyncio.Event().wait()
 
@@ -1942,10 +1951,19 @@ def main() -> None:
         help="refuse POST /user/repos with 403, the way a fine-grained "
         "token without Administration:write does; fork and rename stay "
         "available")
+    parser.add_argument("--host",
+                        default="127.0.0.1",
+                        help="bind address; 0.0.0.0 in a container, where "
+                        "binding the loopback publishes a port that accepts "
+                        "the connection and then answers nothing")
+    parser.add_argument("--advertise",
+                        help="base URL to put in html_url and clone_url, "
+                        "when callers reach this fake by a name other than "
+                        "loopback (default http://127.0.0.1:<port>)")
     args = parser.parse_args()
     asyncio.run(
         _serve(args.port, args.repo, args.metadata, args.commits,
-               not args.no_create_repos))
+               not args.no_create_repos, args.host, args.advertise))
 
 
 if __name__ == "__main__":
