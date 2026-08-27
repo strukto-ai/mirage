@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -578,7 +579,21 @@ def _secs(value: float) -> str:
 
 
 def _at(ordered: list[float], quantile: float) -> float:
-    index = round(quantile * (len(ordered) - 1))
+    """Pick the sample at a quantile, the same way the TypeScript host does.
+
+    ``floor(x + 0.5)`` rather than ``round``: python rounds a half to even
+    and JS ``Math.round`` rounds it up, so an even sample count made the two
+    hosts choose different indexes and report different percentiles for the
+    same ordered data.
+
+    Args:
+        ordered (list[float]): samples, ascending.
+        quantile (float): 0 to 1.
+
+    Returns:
+        float: the chosen sample.
+    """
+    index = math.floor(quantile * (len(ordered) - 1) + 0.5)
     return ordered[min(len(ordered) - 1, max(0, index))]
 
 
