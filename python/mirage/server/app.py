@@ -22,8 +22,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from mirage.server.auth import (AuthConfig, AuthMode,
-                                resolve_auth_config)
+from mirage.server.auth import AuthConfig, AuthMode, resolve_auth_config
 from mirage.server.auth.middleware import AuthMiddleware
 from mirage.server.daemon_config import (read_daemon_table,
                                          validate_daemon_table)
