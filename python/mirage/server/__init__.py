@@ -14,4 +14,11 @@
 
 from mirage.server.registry import WorkspaceRegistry
 
-__all__ = ["WorkspaceRegistry"]
+__all__ = ["WorkspaceRegistry", "build_app"]
+
+
+def __getattr__(name: str):
+    if name == "build_app":
+        from mirage.server.app import build_app
+        return build_app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
