@@ -191,11 +191,16 @@ async function runTarget(
       // every workspace a case can run against, or a consistency scenario would
       // silently run under a different one.
       opened.ws.env = { ...opened.ws.env, ...(target.env ?? {}) }
+      const started = performance.now()
       const { exitCode, out } = await runScenario(opened.ws, opened.mutate, c.scenario)
+      // Measured, not zero: a consistency scenario on s3 or gridfs runs
+      // several remote mutations, and recording it as free dragged the
+      // profile's totals and percentiles down.
+      const elapsed = (performance.now() - started) / 1000
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })
       } else if (report !== null) {
-        report.record(target.id, c.id, compare(c, exitCode, out, '', 0))
+        report.record(target.id, c.id, compare(c, exitCode, out, '', elapsed), elapsed, c.command)
       }
     } finally {
       await opened.cleanup()

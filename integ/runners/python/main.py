@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -60,10 +61,15 @@ async def run_consistency_case(target: dict, case: dict,
     policy = ConsistencyPolicy(case["consistency"])
     read_ws, mutate, cleanup = await adapters.open_consistency(target, policy)
     try:
+        started = time.monotonic()
         exit_code, out = await harness.run_scenario(read_ws, mutate,
                                                     case["scenario"])
+        # Measured, not zero: a consistency scenario on s3 or gridfs runs
+        # several remote mutations, and recording it as free dragged the
+        # profile's totals and percentiles down.
+        elapsed = time.monotonic() - started
         _emit_or_record(emit, report, target["id"], case, exit_code, out, "",
-                        0.0)
+                        elapsed)
     finally:
         await cleanup()
 
