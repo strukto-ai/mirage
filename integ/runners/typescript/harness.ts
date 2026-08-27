@@ -796,16 +796,27 @@ export class Report {
     }
     const out: string[] = ['', '=== profile: per target ===']
     out.push(
-      ['target'.padEnd(22), 'cases'.padStart(6), 'total'.padStart(9), 'p50'.padStart(8),
-        'p90'.padStart(8), 'max'.padStart(9)].join(' '),
+      [
+        'target'.padEnd(22),
+        'cases'.padStart(6),
+        'total'.padStart(9),
+        'p50'.padStart(8),
+        'p90'.padStart(8),
+        'max'.padStart(9),
+      ].join(' '),
     )
     const total = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
     for (const [target, raw] of [...byTarget.entries()].sort((a, b) => total(b[1]) - total(a[1]))) {
       const sorted = [...raw].sort((a, b) => a - b)
       out.push(
-        [target.padEnd(22), String(raw.length).padStart(6), secs(total(raw)).padStart(9),
-          secs(at(sorted, 0.5)).padStart(8), secs(at(sorted, 0.9)).padStart(8),
-          secs(sorted[sorted.length - 1]).padStart(9)].join(' '),
+        [
+          target.padEnd(22),
+          String(raw.length).padStart(6),
+          secs(total(raw)).padStart(9),
+          secs(at(sorted, 0.5)).padStart(8),
+          secs(at(sorted, 0.9)).padStart(8),
+          secs(sorted[sorted.length - 1]).padStart(9),
+        ].join(' '),
       )
     }
     out.push('', `=== profile: ${String(top)} slowest cases ===`)

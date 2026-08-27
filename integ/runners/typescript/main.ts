@@ -214,8 +214,7 @@ async function main(): Promise<void> {
   const services = loadServices(root)
   const cases = loadCases(root)
 
-  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs, profile } =
-    parseArgs()
+  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs, profile } = parseArgs()
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
