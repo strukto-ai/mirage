@@ -14,6 +14,7 @@
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -572,21 +573,111 @@ def compare(case: dict,
     return diffs
 
 
+def _secs(value: float) -> str:
+    return f"{value:.1f}s" if value >= 1 else f"{value * 1000:.0f}ms"
+
+
+def _at(ordered: list[float], quantile: float) -> float:
+    index = round(quantile * (len(ordered) - 1))
+    return ordered[min(len(ordered) - 1, max(0, index))]
+
+
+def command_verb(command: str) -> str:
+    """First real word of a command, skipping leading VAR=value assignments.
+
+    Args:
+        command (str): the case's shell line.
+
+    Returns:
+        str: the command name, or "?" when the line has none.
+    """
+    for word in command.strip().split():
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
+            continue
+        return word.rsplit("/", 1)[-1]
+    return "?"
+
+
 @dataclass
 class Report:
     passed: int = 0
     failed: int = 0
     failures: list[str] = field(default_factory=list)
+    stream: bool = True
+    held: list[str] = field(default_factory=list)
+    samples: list[tuple[str, str, float, str]] = field(default_factory=list)
 
-    def record(self, target: str, case_id: str, diffs: list[str]) -> None:
+    def _say(self, line: str) -> None:
+        if self.stream:
+            print(line)
+        else:
+            self.held.append(line)
+
+    def record(self,
+               target: str,
+               case_id: str,
+               diffs: list[str],
+               elapsed: float = 0.0,
+               command: str = "") -> None:
+        self.samples.append((target, case_id, elapsed, command_verb(command)))
         if diffs:
             self.failed += 1
             joined = "; ".join(diffs)
             self.failures.append(f"[{target}] {case_id}: {joined}")
-            print(f"FAIL [{target}] {case_id}: {joined}")
+            self._say(f"FAIL [{target}] {case_id}: {joined}")
         else:
             self.passed += 1
-            print(f"ok   [{target}] {case_id}")
+            self._say(f"ok   [{target}] {case_id}")
+
+    def absorb(self, other: "Report") -> None:
+        self.passed += other.passed
+        self.failed += other.failed
+        self.failures.extend(other.failures)
+        self.samples.extend(other.samples)
+        for line in other.held:
+            print(line)
 
     def summary(self) -> str:
         return f"{self.passed} passed, {self.failed} failed"
+
+    def profile(self, top: int = 15) -> str:
+        """Where the battery's wall clock goes.
+
+        Local timings do not carry to CI, so this reports from inside the
+        CI job itself.
+
+        Args:
+            top (int): how many rows each ranked section prints.
+
+        Returns:
+            str: the formatted profile, empty when nothing was recorded.
+        """
+        if not self.samples:
+            return ""
+        out = ["", "=== profile: per target ==="]
+        out.append(f"{'target':<22} {'cases':>6} {'total':>9} {'p50':>8} "
+                   f"{'p90':>8} {'max':>9}")
+        by_target: dict[str, list[float]] = {}
+        for target, _case_id, elapsed, _verb in self.samples:
+            by_target.setdefault(target, []).append(elapsed)
+        for target, raw in sorted(by_target.items(),
+                                  key=lambda kv: -sum(kv[1])):
+            ordered = sorted(raw)
+            out.append(f"{target:<22} {len(raw):>6} {_secs(sum(raw)):>9} "
+                       f"{_secs(_at(ordered, 0.5)):>8} "
+                       f"{_secs(_at(ordered, 0.9)):>8} "
+                       f"{_secs(ordered[-1]):>9}")
+        out += ["", f"=== profile: {top} slowest cases ==="]
+        for target, case_id, elapsed, _verb in sorted(
+                self.samples, key=lambda s: -s[2])[:top]:
+            out.append(f"  {_secs(elapsed):>9}  [{target}] {case_id}")
+        out += ["", f"=== profile: {top} costliest commands ==="]
+        by_verb: dict[str, list[float]] = {}
+        for _target, _case_id, elapsed, verb in self.samples:
+            by_verb.setdefault(verb, []).append(elapsed)
+        for verb, times in sorted(by_verb.items(),
+                                  key=lambda kv: -sum(kv[1]))[:top]:
+            mean = sum(times) / len(times)
+            out.append(f"  {_secs(sum(times)):>9}  x{len(times):<5} "
+                       f"mean {_secs(mean):>8}  {verb}")
+        return "\n".join(out)

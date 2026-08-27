@@ -721,25 +721,113 @@ export function compare(
   return diffs
 }
 
+export interface Sample {
+  target: string
+  id: string
+  elapsed: number
+  verb: string
+}
+
+// The first real word of a command, ignoring leading `VAR=value` assignments.
+// Only groups the profile, so a wrong guess costs a mislabeled row.
+export function commandVerb(command: string): string {
+  for (const word of command.trim().split(/\s+/)) {
+    if (word.length === 0) continue
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) continue
+    return word.replace(/^.*\//, '')
+  }
+  return '?'
+}
+
 export class Report {
   passed = 0
   failed = 0
   failures: string[] = []
+  // Held rather than printed when the run is concurrent, so lines can be
+  // replayed in target order and a parallel run reads like a serial one.
+  readonly held: string[] = []
+  readonly samples: Sample[] = []
 
-  record(target: string, caseId: string, diffs: string[]): void {
+  constructor(readonly stream: boolean = true) {}
+
+  private say(line: string): void {
+    if (this.stream) process.stdout.write(line)
+    else this.held.push(line)
+  }
+
+  record(target: string, caseId: string, diffs: string[], elapsed = 0, command = ''): void {
+    this.samples.push({ target, id: caseId, elapsed, verb: commandVerb(command) })
     if (diffs.length) {
       this.failed++
       const joined = diffs.join('; ')
       this.failures.push(`[${target}] ${caseId}: ${joined}`)
-      process.stdout.write(`FAIL [${target}] ${caseId}: ${joined}\n`)
+      this.say(`FAIL [${target}] ${caseId}: ${joined}\n`)
     } else {
       this.passed++
-      process.stdout.write(`ok   [${target}] ${caseId}\n`)
+      this.say(`ok   [${target}] ${caseId}\n`)
     }
+  }
+
+  absorb(other: Report): void {
+    this.passed += other.passed
+    this.failed += other.failed
+    this.failures.push(...other.failures)
+    this.samples.push(...other.samples)
+    for (const line of other.held) process.stdout.write(line)
   }
 
   summary(): string {
     return `${String(this.passed)} passed, ${String(this.failed)} failed`
+  }
+
+  // Where the battery's wall clock goes. Local timings do not carry to CI
+  // (docker on macOS is far slower per request), so this reports from inside
+  // the CI job itself.
+  profile(top = 15): string {
+    if (this.samples.length === 0) return ''
+    const secs = (n: number): string => (n >= 1 ? `${n.toFixed(1)}s` : `${(n * 1000).toFixed(0)}ms`)
+    const at = (sorted: number[], q: number): number =>
+      sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))]
+    const byTarget = new Map<string, number[]>()
+    for (const s of this.samples) {
+      const bucket = byTarget.get(s.target)
+      if (bucket === undefined) byTarget.set(s.target, [s.elapsed])
+      else bucket.push(s.elapsed)
+    }
+    const out: string[] = ['', '=== profile: per target ===']
+    out.push(
+      ['target'.padEnd(22), 'cases'.padStart(6), 'total'.padStart(9), 'p50'.padStart(8),
+        'p90'.padStart(8), 'max'.padStart(9)].join(' '),
+    )
+    const total = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
+    for (const [target, raw] of [...byTarget.entries()].sort((a, b) => total(b[1]) - total(a[1]))) {
+      const sorted = [...raw].sort((a, b) => a - b)
+      out.push(
+        [target.padEnd(22), String(raw.length).padStart(6), secs(total(raw)).padStart(9),
+          secs(at(sorted, 0.5)).padStart(8), secs(at(sorted, 0.9)).padStart(8),
+          secs(sorted[sorted.length - 1]).padStart(9)].join(' '),
+      )
+    }
+    out.push('', `=== profile: ${String(top)} slowest cases ===`)
+    for (const s of [...this.samples].sort((a, b) => b.elapsed - a.elapsed).slice(0, top)) {
+      out.push(`  ${secs(s.elapsed).padStart(9)}  [${s.target}] ${s.id}`)
+    }
+    out.push('', `=== profile: ${String(top)} costliest commands ===`)
+    const byVerb = new Map<string, { total: number; n: number }>()
+    for (const s of this.samples) {
+      const v = byVerb.get(s.verb) ?? { total: 0, n: 0 }
+      v.total += s.elapsed
+      v.n += 1
+      byVerb.set(s.verb, v)
+    }
+    const ranked = [...byVerb.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, top)
+    for (const [verb, v] of ranked) {
+      out.push(
+        `  ${secs(v.total).padStart(9)}  x${String(v.n).padEnd(5)} ` +
+          `mean ${secs(v.total / v.n).padStart(8)}  ${verb}`,
+      )
+    }
+    return out.join('\n')
   }
 }
 

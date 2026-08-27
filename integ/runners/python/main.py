@@ -51,7 +51,7 @@ def _emit_or_record(emit: list[dict] | None,
         report.record(
             target_id, case["id"],
             harness.compare(case, exit_code, out, err, elapsed, check_out,
-                            notes))
+                            notes), elapsed, case.get("command", ""))
 
 
 async def run_consistency_case(target: dict, case: dict,
@@ -132,6 +132,11 @@ async def main() -> None:
     # services it knowingly does not provision. Anything skipping outside
     # this list is a broken job, which is the whole point of --strict.
     parser.add_argument("--allow-skip", dest="allow_skip", default="")
+    parser.add_argument("--target-jobs",
+                        dest="target_jobs",
+                        type=int,
+                        default=1)
+    parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
 
     root = harness.integ_root()
@@ -156,6 +161,7 @@ async def main() -> None:
     ran = 0
     allow_skip = harness.parse_allow_skip(services, args.allow_skip)
     env_skipped: list[str] = []
+    eligible: list[dict] = []
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -171,8 +177,51 @@ async def main() -> None:
             if target.get("service") not in allow_skip:
                 env_skipped.append(f"{target_id} ({', '.join(missing)})")
             continue
-        await run_target(target, cases, root, report, emit)
+        eligible.append(target)
         ran += 1
+
+    # Targets own separate workspaces, so they overlap safely -- except when
+    # two speak to the SAME fake (cli-gh and github, cli-ntn and notion,
+    # qdrant and qdrant-window). Those share a lane and stay sequential; the
+    # rest are bound only by the overall width.
+    if args.target_jobs < 1:
+        print("--target-jobs takes an integer >= 1", file=sys.stderr)
+        sys.exit(2)
+    semaphore = asyncio.Semaphore(args.target_jobs)
+    lane_locks: dict[str, asyncio.Lock] = {}
+    slots: dict[str, tuple[harness.Report | None, list[dict] | None]] = {}
+    errors: list[BaseException] = []
+
+    async def run_one(target: dict, lane: str) -> None:
+        slot_report, slot_emit = slots[target["id"]]
+        async with lane_locks[lane], semaphore:
+            try:
+                await run_target(target, cases, root, slot_report, slot_emit)
+            except Exception as exc:  # reported after every target finishes
+                errors.append(exc)
+
+    tasks = []
+    for target in eligible:
+        slots[target["id"]] = (
+            None if report is None else harness.Report(
+                stream=args.target_jobs <= 1),
+            None if emit is None else [],
+        )
+        lane = target.get("service") or f"solo:{target['id']}"
+        lane_locks.setdefault(lane, asyncio.Lock())
+        tasks.append(asyncio.create_task(run_one(target, lane)))
+    if tasks:
+        await asyncio.gather(*tasks)
+    # Merged in declared target order, so a concurrent run prints what a
+    # serial run printed.
+    for target in eligible:
+        slot_report, slot_emit = slots[target["id"]]
+        if report is not None and slot_report is not None:
+            report.absorb(slot_report)
+        if emit is not None and slot_emit is not None:
+            emit.extend(slot_emit)
+    if errors:
+        raise errors[0]
 
     # A skip is one line on stderr and exit 0, so a facet whose service
     # never came up (or whose env var got renamed in the workflow)
@@ -197,6 +246,8 @@ async def main() -> None:
         Path(args.emit).write_text(json.dumps(emit))
         return
     assert report is not None
+    if args.profile:
+        print(report.profile())
     print(f"\n{report.summary()}")
     if report.failed:
         sys.exit(1)

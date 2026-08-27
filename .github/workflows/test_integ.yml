@@ -279,7 +279,7 @@ jobs:
 
       - name: Run declarative battery on Nextcloud
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud --strict
+        run: pnpm exec tsx runners/typescript/main.ts --target nextcloud --strict --profile
 
       - name: Start MinIO
         run: |
@@ -434,7 +434,7 @@ jobs:
             -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
 
       - name: Run declarative battery (python hosts)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --target-jobs 4 --profile --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
       # Moved here from the `integ` job when the HTTP fixture server became a
       # TypeScript kit fake: the adapter still starts it, but the interpreter is
@@ -518,7 +518,7 @@ jobs:
 
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --target-jobs 4 --profile --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
       # The fixture server is python (started by the adapter through
       # startPythonServer), so this runs here rather than in integ-ts, which
@@ -780,7 +780,7 @@ jobs:
           exit 1
 
       - name: Run declarative battery on nextcloud
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict --profile
 
       # disk and ssh need nothing (tempdir, in-process SFTP server);
       # dropbox is an out-of-process fake started below; s3 and gridfs need a

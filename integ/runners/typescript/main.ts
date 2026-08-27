@@ -51,12 +51,16 @@ function parseArgs(): {
   facet: string | undefined
   strict: boolean
   allowSkip: string
+  targetJobs: number
+  profile: boolean
 } {
   const targets: string[] = []
   let emit: string | undefined
   let facet: string | undefined
   let strict = false
   let allowSkip = ''
+  let targetJobs = 1
+  let profile = false
   const argv = process.argv.slice(2)
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
@@ -64,8 +68,17 @@ function parseArgs(): {
     else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
+    else if (argv[i] === '--profile') profile = true
+    else if (argv[i] === '--target-jobs' && i + 1 < argv.length) {
+      const n = Number(argv[++i])
+      if (!Number.isInteger(n) || n < 1) {
+        process.stderr.write('--target-jobs takes an integer >= 1\n')
+        process.exit(2)
+      }
+      targetJobs = n
+    }
   }
-  return { targets, emit, facet, strict, allowSkip }
+  return { targets, emit, facet, strict, allowSkip, targetJobs, profile }
 }
 
 async function runTarget(
@@ -151,6 +164,8 @@ async function runTarget(
           target.id,
           bound.id,
           compare(bound, exitCode, out, err, elapsed, checkOut, notes),
+          elapsed,
+          bound.command,
         )
       }
     }
@@ -194,7 +209,8 @@ async function main(): Promise<void> {
   const services = loadServices(root)
   const cases = loadCases(root)
 
-  const { targets, emit: emitPath, facet, strict, allowSkip } = parseArgs()
+  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs, profile } =
+    parseArgs()
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
@@ -216,6 +232,7 @@ async function main(): Promise<void> {
   // broken job, which is the whole point of --strict.
   const allowed = parseAllowSkip(services, allowSkip)
   const envSkipped: string[] = []
+  const eligible: Target[] = []
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -235,9 +252,60 @@ async function main(): Promise<void> {
       }
       continue
     }
-    await runTarget(target, cases, root, report, emit)
+    eligible.push(target)
     ran += 1
   }
+
+  // Targets own separate workspaces, so they overlap safely -- except when two
+  // speak to the SAME fake (cli-gh and github, cli-ntn and notion, qdrant and
+  // qdrant-window). Those share a lane and stay sequential; the rest are bound
+  // only by the overall width.
+  const lanes = new Map<string, Promise<void>>()
+  const errors: unknown[] = []
+  const waiters: (() => void)[] = []
+  let active = 0
+  const acquire = async (): Promise<void> => {
+    if (active >= targetJobs) await new Promise<void>((resolve) => waiters.push(resolve))
+    active += 1
+  }
+  const release = (): void => {
+    active -= 1
+    const next = waiters.shift()
+    if (next !== undefined) next()
+  }
+  const slots = new Map<string, { report: Report | null; emit: EmitRow[] | null }>()
+  const chain: Promise<void>[] = []
+  for (const target of eligible) {
+    const slot = {
+      report: report === null ? null : new Report(targetJobs <= 1),
+      emit: emit === null ? null : ([] as EmitRow[]),
+    }
+    slots.set(target.id, slot)
+    const lane = target.service ?? `solo:${target.id}`
+    const prev = lanes.get(lane) ?? Promise.resolve()
+    const next = prev.then(async () => {
+      await acquire()
+      try {
+        await runTarget(target, cases, root, slot.report, slot.emit)
+      } catch (err) {
+        errors.push(err)
+      } finally {
+        release()
+      }
+    })
+    lanes.set(lane, next)
+    chain.push(next)
+  }
+  await Promise.all(chain)
+  // Merged in declared target order, so a concurrent run prints what a serial
+  // run printed.
+  for (const target of eligible) {
+    const slot = slots.get(target.id)
+    if (slot === undefined) continue
+    if (report !== null && slot.report !== null) report.absorb(slot.report)
+    if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
+  }
+  if (errors.length > 0) throw errors[0]
 
   // A skip is one line on stderr and exit 0, so a facet whose service
   // never came up (or whose env var got renamed in the workflow) reports
@@ -264,6 +332,7 @@ async function main(): Promise<void> {
     return
   }
   if (report === null) return
+  if (profile) process.stdout.write(`${report.profile()}\n`)
   process.stdout.write(`\n${report.summary()}\n`)
   if (report.failed) process.exit(1)
 }
