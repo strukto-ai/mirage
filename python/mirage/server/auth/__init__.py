@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.server.auth.config import (AuthConfig, AuthMode, JWTConfig,
                                        resolve_auth_config,
                                        resolve_local_token)
@@ -31,7 +33,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "AuthMiddleware":
         from mirage.server.auth.middleware import AuthMiddleware
         return AuthMiddleware

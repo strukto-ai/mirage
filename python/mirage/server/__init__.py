@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.server.registry import WorkspaceRegistry
 
 __all__ = ["WorkspaceRegistry", "build_app"]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "build_app":
         from mirage.server.app import build_app
         return build_app
