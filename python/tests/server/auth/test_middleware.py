@@ -21,7 +21,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
 
-from mirage.server import build_app
+from mirage.server.app import build_app
 from mirage.server.auth.config import AuthConfig, JWTConfig
 
 

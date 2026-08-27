@@ -15,7 +15,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from mirage.server import build_app
+from mirage.server.app import build_app
 from mirage.server.host_validation import (is_host_allowed,
                                            parse_allowed_hosts,
                                            resolve_allowed_hosts, strip_port)

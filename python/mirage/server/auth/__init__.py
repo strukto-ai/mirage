@@ -15,13 +15,11 @@
 from mirage.server.auth.config import (AuthConfig, AuthMode, JWTConfig,
                                        resolve_auth_config,
                                        resolve_local_token)
-from mirage.server.auth.middleware import AuthMiddleware
 from mirage.server.auth.storage import (default_token_file, ensure_token_file,
                                         read_token_file)
 
 __all__ = [
     "AuthConfig",
-    "AuthMiddleware",
     "AuthMode",
     "JWTConfig",
     "default_token_file",

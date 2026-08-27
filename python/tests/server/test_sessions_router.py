@@ -15,7 +15,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from mirage.server import build_app
+from mirage.server.app import build_app
 from mirage.types import MountMode
 
 
