@@ -70,8 +70,11 @@ function parseArgs(): {
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
     else if (argv[i] === '--profile') profile = true
-    else if (argv[i] === '--target-jobs' && i + 1 < argv.length) {
-      const n = Number(argv[++i])
+    // Recognised before its operand is checked: gated on `i + 1 < argv.length`
+    // a trailing `--target-jobs` fell through every arm and ran serially in
+    // silence, where the argparse runner refuses the same line.
+    else if (argv[i] === '--target-jobs') {
+      const n = i + 1 < argv.length ? Number(argv[++i]) : Number.NaN
       if (!Number.isInteger(n) || n < 1) {
         process.stderr.write('--target-jobs takes an integer >= 1\n')
         process.exit(2)

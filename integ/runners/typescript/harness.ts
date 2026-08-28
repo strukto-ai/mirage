@@ -735,11 +735,15 @@ export interface Sample {
 // and recorded the fragment as the command.
 const LEADING_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\([^)]*\)|\S*)\s*/
 const LEADING_SEP = /^(?:;|&&|\|\||&)\s*/
+// `out=$(cat <<END` is the command `cat`, but LEADING_ASSIGN ends at the space
+// and leaves `<<END` as the first word. Tried before it, so its `\S*` arm
+// never gets to swallow `$(cat`.
+const LEADING_CMDSUB = /^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*/
 
 export function commandVerb(command: string): string {
   let rest = command.trim()
   for (;;) {
-    const match = LEADING_ASSIGN.exec(rest) ?? LEADING_SEP.exec(rest)
+    const match = LEADING_CMDSUB.exec(rest) ?? LEADING_ASSIGN.exec(rest) ?? LEADING_SEP.exec(rest)
     if (match === null || match[0].length === 0) break
     rest = rest.slice(match[0].length)
   }
@@ -838,7 +842,13 @@ export class Report {
       ].join(' '),
     )
     const total = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
-    for (const [target, raw] of [...byTarget.entries()].sort((a, b) => total(b[1]) - total(a[1]))) {
+    // Ranked on wall, the column this table exists to show. Ranking on the
+    // case total instead buried a target whose cost is setup: 100s of setup
+    // and 1s of cases sorted below a target with 2s of cases.
+    const wallOf = (t: string, raw: number[]): number => this.targetWall.get(t) ?? total(raw)
+    for (const [target, raw] of [...byTarget.entries()].sort(
+      (a, b) => wallOf(b[0], b[1]) - wallOf(a[0], a[1]),
+    )) {
       const sorted = [...raw].sort((a, b) => a - b)
       out.push(
         [

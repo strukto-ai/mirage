@@ -625,6 +625,10 @@ def scenario_verb(case: dict) -> str:
 _LEADING_ASSIGN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\"[^\"]*\"|\([^)]*\)|\S*)\s*")
 _LEADING_SEP = re.compile(r"^(?:;|&&|\|\||&)\s*")
+# `out=$(cat <<END` is the command `cat`, but the assignment above ends at the
+# space and leaves `<<END` as the first word. Tried before it, so the `\S*`
+# arm never gets to swallow `$(cat`.
+_LEADING_CMDSUB = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*")
 
 
 def command_verb(command: str) -> str:
@@ -643,7 +647,8 @@ def command_verb(command: str) -> str:
     """
     rest = command.strip()
     while rest:
-        match = _LEADING_ASSIGN.match(rest) or _LEADING_SEP.match(rest)
+        match = (_LEADING_CMDSUB.match(rest) or _LEADING_ASSIGN.match(rest)
+                 or _LEADING_SEP.match(rest))
         if match is None or match.end() == 0:
             break
         rest = rest[match.end():]
@@ -731,8 +736,12 @@ class Report:
         by_target: dict[str, list[float]] = {}
         for target, _case_id, elapsed, _verb in self.samples:
             by_target.setdefault(target, []).append(elapsed)
-        for target, raw in sorted(by_target.items(),
-                                  key=lambda kv: -sum(kv[1])):
+        # Ranked on ``wall``, the column this table exists to show. Ranking
+        # on the case total instead buried a target whose cost is setup: 100s
+        # of setup and 1s of cases sorted below a target with 2s of cases.
+        for target, raw in sorted(
+                by_target.items(),
+                key=lambda kv: -self.target_wall.get(kv[0], sum(kv[1]))):
             ordered = sorted(raw)
             wall = self.target_wall.get(target, sum(raw))
             out.append(f"{target:<22} {len(raw):>6} {_secs(wall):>9} "
