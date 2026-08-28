@@ -209,11 +209,16 @@ async def main() -> None:
     else:
         semaphore = asyncio.Semaphore(args.target_jobs)
         lane_locks: dict[str, asyncio.Lock] = {}
-        slots: dict[str, tuple[harness.Report | None, list[dict] | None]] = {}
+        # One slot per invocation, not per target id. `--target x --target x`
+        # is two runs, and keying by id made both of them write the second
+        # slot and then merged that slot twice, so two runs reported as four.
+        slots: list[tuple[harness.Report | None, list[dict] | None]] = []
         errors: list[BaseException] = []
 
-        async def run_one(target: dict, lane: str) -> None:
-            slot_report, slot_emit = slots[target["id"]]
+        async def run_one(
+                target: dict, lane: str,
+                slot: tuple[harness.Report | None, list[dict] | None]) -> None:
+            slot_report, slot_emit = slot
             async with lane_locks[lane], semaphore:
                 started = time.monotonic()
                 try:
@@ -229,19 +234,19 @@ async def main() -> None:
 
         tasks = []
         for target in eligible:
-            slots[target["id"]] = (
+            slot = (
                 None if report is None else harness.Report(stream=False),
                 None if emit is None else [],
             )
+            slots.append(slot)
             lane = target.get("service") or f"solo:{target['id']}"
             lane_locks.setdefault(lane, asyncio.Lock())
-            tasks.append(asyncio.create_task(run_one(target, lane)))
+            tasks.append(asyncio.create_task(run_one(target, lane, slot)))
         if tasks:
             await asyncio.gather(*tasks)
         # Merged in declared target order, so a concurrent run prints what a
         # serial run printed.
-        for target in eligible:
-            slot_report, slot_emit = slots[target["id"]]
+        for slot_report, slot_emit in slots:
             if report is not None and slot_report is not None:
                 report.absorb(slot_report)
             if emit is not None and slot_emit is not None:

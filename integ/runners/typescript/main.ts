@@ -298,14 +298,17 @@ async function main(): Promise<void> {
       const next = waiters.shift()
       if (next !== undefined) next()
     }
-    const slots = new Map<string, { report: Report | null; emit: EmitRow[] | null }>()
+    // One slot per invocation, not per target id. `--target x --target x` is
+    // two runs, and keying by id made the merge below read the second slot
+    // twice and drop the first.
+    const slots: { report: Report | null; emit: EmitRow[] | null }[] = []
     const chain: Promise<void>[] = []
     for (const target of eligible) {
       const slot = {
         report: report === null ? null : new Report(false),
         emit: emit === null ? null : ([] as EmitRow[]),
       }
-      slots.set(target.id, slot)
+      slots.push(slot)
       const lane = target.service ?? `solo:${target.id}`
       const prev = lanes.get(lane) ?? Promise.resolve()
       const next = prev.then(async () => {
@@ -326,9 +329,7 @@ async function main(): Promise<void> {
     await Promise.all(chain)
     // Merged in declared target order, so a concurrent run prints what a serial
     // run printed.
-    for (const target of eligible) {
-      const slot = slots.get(target.id)
-      if (slot === undefined) continue
+    for (const slot of slots) {
       if (report !== null && slot.report !== null) report.absorb(slot.report)
       if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
     }
