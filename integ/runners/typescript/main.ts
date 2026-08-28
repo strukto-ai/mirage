@@ -19,6 +19,7 @@ import { ADAPTERS, openConsistency } from './adapters.ts'
 import type { Case, Target } from './harness.ts'
 import {
   Report,
+  bindMount,
   compare,
   integRoot,
   loadCases,
@@ -26,10 +27,10 @@ import {
   loadTargets,
   missingEnv,
   parseAllowSkip,
-  bindMount,
   ruleReasons,
   runCase,
   runScenario,
+  scenarioVerb,
   seedFixture,
   seedMountRoot,
 } from './harness.ts'
@@ -200,7 +201,13 @@ async function runTarget(
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })
       } else if (report !== null) {
-        report.record(target.id, c.id, compare(c, exitCode, out, '', elapsed), elapsed, c.command)
+        report.record(
+          target.id,
+          c.id,
+          compare(c, exitCode, out, '', elapsed),
+          elapsed,
+          scenarioVerb(c),
+        )
       }
     } finally {
       await opened.cleanup()
@@ -300,11 +307,13 @@ async function main(): Promise<void> {
       const prev = lanes.get(lane) ?? Promise.resolve()
       const next = prev.then(async () => {
         await acquire()
+        const started = performance.now()
         try {
           await runTarget(target, cases, root, slot.report, slot.emit)
         } catch (err) {
           errors.push(err)
         } finally {
+          slot.report?.noteTargetWall(target.id, (performance.now() - started) / 1000)
           release()
         }
       })

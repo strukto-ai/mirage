@@ -739,6 +739,17 @@ export function commandVerb(command: string): string {
   return '?'
 }
 
+// A consistency case carries no `command`: its commands live in the scenario
+// steps. Reading the field straight off it handed `commandVerb` undefined,
+// which threw on `.trim()` and took the whole battery down.
+export function scenarioVerb(c: Case): string {
+  if (typeof c.command === 'string') return c.command
+  for (const step of c.scenario ?? []) {
+    if ('command' in step) return step.command
+  }
+  return ''
+}
+
 export class Report {
   passed = 0
   failed = 0

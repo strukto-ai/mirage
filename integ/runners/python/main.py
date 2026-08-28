@@ -52,7 +52,7 @@ def _emit_or_record(emit: list[dict] | None,
         report.record(
             target_id, case["id"],
             harness.compare(case, exit_code, out, err, elapsed, check_out,
-                            notes), elapsed, case.get("command", ""))
+                            notes), elapsed, harness.scenario_verb(case))
 
 
 async def run_consistency_case(target: dict, case: dict,

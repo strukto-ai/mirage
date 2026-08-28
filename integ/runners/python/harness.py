@@ -597,6 +597,28 @@ def _at(ordered: list[float], quantile: float) -> float:
     return ordered[min(len(ordered) - 1, max(0, index))]
 
 
+def scenario_verb(case: dict) -> str:
+    """Name the command a case runs, scenario cases included.
+
+    A consistency case carries no ``command``: its commands live in the
+    scenario steps, so reading the field straight off it labelled every one
+    of them as unknown.
+
+    Args:
+        case (dict): the case being recorded.
+
+    Returns:
+        str: the command line to take a verb from, or "" when it has none.
+    """
+    command = case.get("command")
+    if isinstance(command, str):
+        return command
+    for step in case.get("scenario") or []:
+        if isinstance(step, dict) and isinstance(step.get("command"), str):
+            return step["command"]
+    return ""
+
+
 def command_verb(command: str) -> str:
     """First real word of a command, skipping leading VAR=value assignments.
 
