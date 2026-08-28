@@ -103,8 +103,6 @@ async function runTarget(
   if (declaresProfiles && !PROFILE_OPENERS.includes(target.mounts[0].resource)) {
     throw new Error(`target ${target.id}: profiles ride ${PROFILE_OPENERS.join(', ')} mounts`)
   }
-  let lifecycle = 0
-  let started = performance.now()
   const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
   try {
     // A target's declared environment. A CLI whose spec reads a variable
@@ -146,7 +144,6 @@ async function runTarget(
     // `explain` to predict, and only there is the extra dry run per case
     // worth its time. The reasons double as the tell that a refusal came
     // from the policy layer rather than from the command itself.
-    lifecycle += (performance.now() - started) / 1000
     const reasons = ruleReasons({ profiles: target.profiles, sessions: target.sessions })
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
@@ -173,10 +170,7 @@ async function runTarget(
       }
     }
   } finally {
-    started = performance.now()
     await cleanup()
-    lifecycle += (performance.now() - started) / 1000
-    report?.recordLifecycle(target.id, lifecycle)
   }
   const scenarios = cases.filter(
     (c) => c.targets.includes(target.id) && c.consistency !== undefined && c.scenario !== undefined,
@@ -276,7 +270,9 @@ async function main(): Promise<void> {
   // and `gws` four, the default run would quietly reorder itself.
   if (targetJobs <= 1) {
     for (const target of eligible) {
+      const started = performance.now()
       await runTarget(target, cases, root, report, emit)
+      report?.noteTargetWall(target.id, (performance.now() - started) / 1000)
     }
   } else {
     const lanes = new Map<string, Promise<void>>()
