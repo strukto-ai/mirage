@@ -764,10 +764,17 @@ export function commandVerb(command: string): string {
 // A consistency case carries no `command`: its commands live in the scenario
 // steps. Reading the field straight off it handed `commandVerb` undefined,
 // which threw on `.trim()` and took the whole battery down.
+export const SCENARIO_VERB = 'scenario'
+
+// A scenario case is charged as `scenario`, not as its first step. The
+// interval is the whole case, and a scenario spends it on out-of-band remote
+// writes and more than one invocation, so billing it to the first verb made
+// `cat` and `find` carry time no `cat` or `find` spent. A row of its own says
+// what the time is; the slowest-cases table above it names an expensive one.
 export function scenarioVerb(c: Case): string {
   if (typeof c.command === 'string') return c.command
   for (const step of c.scenario ?? []) {
-    if ('command' in step) return step.command
+    if ('command' in step) return SCENARIO_VERB
   }
   return ''
 }

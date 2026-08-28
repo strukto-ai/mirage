@@ -597,6 +597,9 @@ def _at(ordered: list[float], quantile: float) -> float:
     return ordered[min(len(ordered) - 1, max(0, index))]
 
 
+SCENARIO_VERB = "scenario"
+
+
 def scenario_verb(case: dict) -> str:
     """Name the command a case runs, scenario cases included.
 
@@ -604,18 +607,26 @@ def scenario_verb(case: dict) -> str:
     scenario steps, so reading the field straight off it labelled every one
     of them as unknown.
 
+    Such a case is charged as ``scenario``, not as its first step. The
+    interval is the whole case, and a scenario spends it on out-of-band
+    remote writes and more than one invocation, so billing it to the first
+    verb made ``cat`` and ``find`` carry time no ``cat`` or ``find`` spent.
+    A row of its own says what the time is; the slowest-cases table above it
+    is where an expensive one is named.
+
     Args:
         case (dict): the case being recorded.
 
     Returns:
-        str: the command line to take a verb from, or "" when it has none.
+        str: the command line to take a verb from, "scenario" for a scenario
+            case, or "" when it has neither.
     """
     command = case.get("command")
     if isinstance(command, str):
         return command
     for step in case.get("scenario") or []:
         if isinstance(step, dict) and isinstance(step.get("command"), str):
-            return step["command"]
+            return SCENARIO_VERB
     return ""
 
 
