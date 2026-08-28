@@ -621,6 +621,11 @@ class Report:
     stream: bool = True
     held: list[str] = field(default_factory=list)
     samples: list[tuple[str, str, float, str]] = field(default_factory=list)
+    # Wall time for the whole target, which the per-case samples cannot see:
+    # opening it, seeding fixtures and cleaning up all sit outside
+    # ``run_case``, and on nextcloud the fixture seed alone is dozens of
+    # remote writes.
+    target_wall: dict[str, float] = field(default_factory=dict)
 
     def _say(self, line: str) -> None:
         if self.stream:
@@ -644,11 +649,22 @@ class Report:
             self.passed += 1
             self._say(f"ok   [{target}] {case_id}")
 
+    def note_target_wall(self, target: str, seconds: float) -> None:
+        """Add a target's whole-run wall time.
+
+        Args:
+            target (str): target id.
+            seconds (float): wall time for opening, running and cleaning it up.
+        """
+        self.target_wall[target] = self.target_wall.get(target, 0.0) + seconds
+
     def absorb(self, other: "Report") -> None:
         self.passed += other.passed
         self.failed += other.failed
         self.failures.extend(other.failures)
         self.samples.extend(other.samples)
+        for target, seconds in other.target_wall.items():
+            self.note_target_wall(target, seconds)
         for line in other.held:
             print(line)
 
@@ -669,16 +685,20 @@ class Report:
         """
         if not self.samples:
             return ""
+        # ``wall`` is the whole target, ``in cases`` is only what the cases
+        # spent inside it. The gap between them is setup and teardown.
         out = ["", "=== profile: per target ==="]
-        out.append(f"{'target':<22} {'cases':>6} {'total':>9} {'p50':>8} "
-                   f"{'p90':>8} {'max':>9}")
+        out.append(f"{'target':<22} {'cases':>6} {'wall':>9} {'in cases':>9} "
+                   f"{'p50':>8} {'p90':>8} {'max':>9}")
         by_target: dict[str, list[float]] = {}
         for target, _case_id, elapsed, _verb in self.samples:
             by_target.setdefault(target, []).append(elapsed)
         for target, raw in sorted(by_target.items(),
                                   key=lambda kv: -sum(kv[1])):
             ordered = sorted(raw)
-            out.append(f"{target:<22} {len(raw):>6} {_secs(sum(raw)):>9} "
+            wall = self.target_wall.get(target, sum(raw))
+            out.append(f"{target:<22} {len(raw):>6} {_secs(wall):>9} "
+                       f"{_secs(sum(raw)):>9} "
                        f"{_secs(_at(ordered, 0.5)):>8} "
                        f"{_secs(_at(ordered, 0.9)):>8} "
                        f"{_secs(ordered[-1]):>9}")

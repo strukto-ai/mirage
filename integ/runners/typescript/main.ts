@@ -270,7 +270,9 @@ async function main(): Promise<void> {
   // and `gws` four, the default run would quietly reorder itself.
   if (targetJobs <= 1) {
     for (const target of eligible) {
+      const started = performance.now()
       await runTarget(target, cases, root, report, emit)
+      report?.noteTargetWall(target.id, (performance.now() - started) / 1000)
     }
   } else {
     const lanes = new Map<string, Promise<void>>()

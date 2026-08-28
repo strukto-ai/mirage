@@ -201,7 +201,11 @@ async def main() -> None:
     # itself.
     if args.target_jobs == 1:
         for target in eligible:
+            started = time.monotonic()
             await run_target(target, cases, root, report, emit)
+            if report is not None:
+                report.note_target_wall(target["id"],
+                                        time.monotonic() - started)
     else:
         semaphore = asyncio.Semaphore(args.target_jobs)
         lane_locks: dict[str, asyncio.Lock] = {}
@@ -211,11 +215,17 @@ async def main() -> None:
         async def run_one(target: dict, lane: str) -> None:
             slot_report, slot_emit = slots[target["id"]]
             async with lane_locks[lane], semaphore:
+                started = time.monotonic()
                 try:
                     await run_target(target, cases, root, slot_report,
                                      slot_emit)
                 except Exception as exc:  # reported once every target is done
                     errors.append(exc)
+                finally:
+                    if slot_report is not None:
+                        slot_report.note_target_wall(
+                            target["id"],
+                            time.monotonic() - started)
 
         tasks = []
         for target in eligible:
