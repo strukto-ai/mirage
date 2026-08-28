@@ -739,11 +739,21 @@ const LEADING_SEP = /^(?:;|&&|\|\||&)\s*/
 // and leaves `<<END` as the first word. Tried before it, so its `\S*` arm
 // never gets to swallow `$(cat`.
 const LEADING_CMDSUB = /^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*/
+// A subshell or brace group is a wrapper, not the command: `(cd d && grep x)`
+// was recorded as `(cd`. Stripping the delimiter re-enters the loop, so
+// `((echo a); echo b)` peels both. It does NOT make the row `grep`: knowing
+// that `cd` is a prelude is shell semantics, and this labels a row rather
+// than parsing a line.
+const LEADING_GROUP = /^[({]\s*/
 
 export function commandVerb(command: string): string {
   let rest = command.trim()
   for (;;) {
-    const match = LEADING_CMDSUB.exec(rest) ?? LEADING_ASSIGN.exec(rest) ?? LEADING_SEP.exec(rest)
+    const match =
+      LEADING_CMDSUB.exec(rest) ??
+      LEADING_GROUP.exec(rest) ??
+      LEADING_ASSIGN.exec(rest) ??
+      LEADING_SEP.exec(rest)
     if (match === null || match[0].length === 0) break
     rest = rest.slice(match[0].length)
   }

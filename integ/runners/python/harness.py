@@ -629,6 +629,12 @@ _LEADING_SEP = re.compile(r"^(?:;|&&|\|\||&)\s*")
 # space and leaves `<<END` as the first word. Tried before it, so the `\S*`
 # arm never gets to swallow `$(cat`.
 _LEADING_CMDSUB = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*")
+# A subshell or brace group is a wrapper, not the command: `(cd d && grep x)`
+# was recorded as `(cd`. Stripping the delimiter re-enters the loop, so
+# `((echo a); echo b)` peels both. It does NOT make the row `grep`: knowing
+# that `cd` is a prelude is shell semantics, and this labels a row rather
+# than parsing a line.
+_LEADING_GROUP = re.compile(r"^[({]\s*")
 
 
 def command_verb(command: str) -> str:
@@ -647,8 +653,8 @@ def command_verb(command: str) -> str:
     """
     rest = command.strip()
     while rest:
-        match = (_LEADING_CMDSUB.match(rest) or _LEADING_ASSIGN.match(rest)
-                 or _LEADING_SEP.match(rest))
+        match = (_LEADING_CMDSUB.match(rest) or _LEADING_GROUP.match(rest)
+                 or _LEADING_ASSIGN.match(rest) or _LEADING_SEP.match(rest))
         if match is None or match.end() == 0:
             break
         rest = rest[match.end():]
