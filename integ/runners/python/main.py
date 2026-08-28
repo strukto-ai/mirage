@@ -78,6 +78,8 @@ async def run_target(target: dict, cases: list[dict], root: Path,
                      report: harness.Report | None,
                      emit: list[dict] | None) -> None:
     selected = [c for c in cases if target["id"] in c["targets"]]
+    lifecycle = 0.0
+    started = time.monotonic()
     ws, cleanup = await adapters.open_target(target)
     try:
         for mount in target["mounts"]:
@@ -108,6 +110,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
         # per case worth its time. The reasons double as the tell that a
         # refusal came from the policy layer rather than from the
         # command itself.
+        lifecycle += time.monotonic() - started
         reasons = harness.rule_reasons({
             "profiles": target.get("profiles"),
             "sessions": target.get("sessions"),
@@ -121,7 +124,11 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             _emit_or_record(emit, report, target["id"], bound, exit_code, out,
                             err, elapsed, check_out, notes)
     finally:
+        started = time.monotonic()
         await cleanup()
+        lifecycle += time.monotonic() - started
+        if report is not None:
+            report.record_lifecycle(target["id"], lifecycle)
     for case in selected:
         if "consistency" in case:
             await run_consistency_case(target, case, report, emit)
@@ -201,11 +208,7 @@ async def main() -> None:
     # itself.
     if args.target_jobs == 1:
         for target in eligible:
-            started = time.monotonic()
             await run_target(target, cases, root, report, emit)
-            if report is not None:
-                report.note_target_wall(target["id"],
-                                        time.monotonic() - started)
     else:
         semaphore = asyncio.Semaphore(args.target_jobs)
         lane_locks: dict[str, asyncio.Lock] = {}
@@ -215,17 +218,11 @@ async def main() -> None:
         async def run_one(target: dict, lane: str) -> None:
             slot_report, slot_emit = slots[target["id"]]
             async with lane_locks[lane], semaphore:
-                started = time.monotonic()
                 try:
                     await run_target(target, cases, root, slot_report,
                                      slot_emit)
                 except Exception as exc:  # reported once every target is done
                     errors.append(exc)
-                finally:
-                    if slot_report is not None:
-                        slot_report.note_target_wall(
-                            target["id"],
-                            time.monotonic() - started)
 
         tasks = []
         for target in eligible:

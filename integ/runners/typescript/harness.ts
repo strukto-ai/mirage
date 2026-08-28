@@ -747,10 +747,9 @@ export class Report {
   // replayed in target order and a parallel run reads like a serial one.
   readonly held: string[] = []
   readonly samples: Sample[] = []
-  // Wall time for the whole target, which the per-case samples cannot see:
-  // opening it, seeding fixtures and cleaning up all sit outside `runCase`,
-  // and on nextcloud the fixture seed alone is dozens of remote writes.
-  readonly targetWall = new Map<string, number>()
+  // Opening, seeding and closing a target: outside every case, so the
+  // samples above cannot see it.
+  readonly lifecycle: { target: string; elapsed: number }[] = []
 
   constructor(readonly stream: boolean = true) {}
 
@@ -772,8 +771,8 @@ export class Report {
     }
   }
 
-  noteTargetWall(target: string, seconds: number): void {
-    this.targetWall.set(target, (this.targetWall.get(target) ?? 0) + seconds)
+  recordLifecycle(target: string, elapsed: number): void {
+    this.lifecycle.push({ target, elapsed })
   }
 
   absorb(other: Report): void {
@@ -781,7 +780,7 @@ export class Report {
     this.failed += other.failed
     this.failures.push(...other.failures)
     this.samples.push(...other.samples)
-    for (const [target, seconds] of other.targetWall) this.noteTargetWall(target, seconds)
+    this.lifecycle.push(...other.lifecycle)
     for (const line of other.held) process.stdout.write(line)
   }
 
@@ -803,16 +802,19 @@ export class Report {
       if (bucket === undefined) byTarget.set(s.target, [s.elapsed])
       else bucket.push(s.elapsed)
     }
-    // `wall` is the whole target, `cases` is only what the cases spent inside
-    // it. The gap between them is setup and teardown: opening the target,
-    // seeding its fixtures, hydrating sessions, and cleaning up.
+    // Setup is not free and is not in any case: seeding a fixture onto a
+    // remote target is a mkdir and a tee per file. Reported beside the case
+    // time so the row accounts for the target's whole wall clock.
+    const setup = new Map<string, number>()
+    for (const l of this.lifecycle) setup.set(l.target, (setup.get(l.target) ?? 0) + l.elapsed)
     const out: string[] = ['', '=== profile: per target ===']
     out.push(
       [
         'target'.padEnd(22),
         'cases'.padStart(6),
-        'wall'.padStart(9),
-        'in cases'.padStart(9),
+        'in_case'.padStart(9),
+        'setup'.padStart(8),
+        'total'.padStart(9),
         'p50'.padStart(8),
         'p90'.padStart(8),
         'max'.padStart(9),
@@ -825,8 +827,9 @@ export class Report {
         [
           target.padEnd(22),
           String(raw.length).padStart(6),
-          secs(this.targetWall.get(target) ?? total(raw)).padStart(9),
           secs(total(raw)).padStart(9),
+          secs(setup.get(target) ?? 0).padStart(8),
+          secs(total(raw) + (setup.get(target) ?? 0)).padStart(9),
           secs(at(sorted, 0.5)).padStart(8),
           secs(at(sorted, 0.9)).padStart(8),
           secs(sorted[sorted.length - 1]).padStart(9),
