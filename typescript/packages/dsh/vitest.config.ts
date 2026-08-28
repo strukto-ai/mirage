@@ -14,18 +14,13 @@
 
 import { defineConfig } from 'vitest/config'
 
+// Only the pool is set here; everything else stays on vitest's defaults, so
+// this changes scheduling and nothing else. This package spends far more time
+// loading modules than running tests, and a worker thread starts much cheaper
+// than a forked process. Nothing in it writes a process global, which is what
+// keeps server on forks: its setup file rewrites process.env.HOME per worker.
 export default defineConfig({
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
-    // This package's tests do real I/O: temp directories, Redis connections,
-    // and the lazy `redis` import the first case in a worker pays for.
-    // Vitest's 5s default is sized for pure computation, and the first Redis
-    // test in a file was already marginal under the full 200-file run.
-    testTimeout: 15_000,
-    // Same reason as core: this package spends 175s collecting against 33s
-    // running, and a thread starts cheaper than a process. Measured 43s -> 30s
-    // with identical results.
     pool: 'threads',
   },
 })
