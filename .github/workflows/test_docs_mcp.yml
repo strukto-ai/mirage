@@ -1,0 +1,43 @@
+name: Test (Docs MCP)
+
+permissions:
+  contents: read
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - docs/docs.json
+      - scripts/check_docs_mcp.py
+      - .github/workflows/test_docs_mcp.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - docs/docs.json
+      - scripts/check_docs_mcp.py
+      - .github/workflows/test_docs_mcp.yml
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate docs MCP candidate configuration
+        run: python3 scripts/check_docs_mcp.py --config-only
+
+      - name: Check deployed docs MCP endpoint
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python3 scripts/check_docs_mcp.py

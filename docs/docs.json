@@ -77,7 +77,8 @@
               "home/observer",
               "home/permissions",
               "home/policy-engine",
-              "home/auth"
+              "home/auth",
+              "home/docs-mcp"
             ]
           },
           {

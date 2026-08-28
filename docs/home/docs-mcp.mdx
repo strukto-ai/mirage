@@ -1,0 +1,107 @@
+---
+title: Docs MCP Server
+description: A public, read-only MCP server over the Mirage documentation, so a coding agent can search and retrieve current docs without scraping the site.
+icon: magnifying-glass
+---
+
+## What It Is
+
+`https://docs.mirage.strukto.ai/mcp` is a Mintlify-generated MCP server over the
+**published documentation site**. It has no relationship to a `Workspace`: it
+cannot see your mounts, your files, or your credentials, and it needs none of
+your own. Point an agent at it to answer questions like "how do I mount an S3
+bucket in Python?" grounded in the current docs instead of the model's
+training data.
+
+This is a different server from the **workspace MCP server** Mirage exposes
+for your own agents (`MirageServer` in Python's
+[Claude Agent SDK integration](/python/agents/claude-agent-sdk) or
+TypeScript's [`createMirageMcpServer`](/typescript/agents/codex)).
+That one wraps a `Workspace` you construct and exposes `execute_command`,
+`read`, `write`, `edit`, `ls`, and `grep` against your mounts. The docs server
+below wraps this website and exposes only search and read-only retrieval of
+documentation pages. Run both at once without conflict; they answer different
+questions.
+
+## Setup
+
+<CodeGroup>
+
+```json Claude Code
+{
+  "mcpServers": {
+    "mirage-docs": {
+      "url": "https://docs.mirage.strukto.ai/mcp"
+    }
+  }
+}
+```
+
+```json Codex
+[mcp_servers.mirage-docs]
+url = "https://docs.mirage.strukto.ai/mcp"
+```
+
+```json Cursor
+{
+  "mcpServers": {
+    "mirage-docs": {
+      "url": "https://docs.mirage.strukto.ai/mcp"
+    }
+  }
+}
+```
+
+```json VS Code
+{
+  "servers": {
+    "mirage-docs": {
+      "type": "http",
+      "url": "https://docs.mirage.strukto.ai/mcp"
+    }
+  }
+}
+```
+
+</CodeGroup>
+
+<Note>
+  The Codex block above belongs in `~/.codex/config.toml`, in TOML, not JSON;
+  the fenced language tag is set to `json` only so the CodeGroup tab label
+  reads "Codex".
+</Note>
+
+No API key or authentication is required. The endpoint is stateless: every
+request is independent, so no session handshake is needed beyond MCP's own
+`initialize` call.
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `search_mirage` | Natural-language / keyword search across the docs. Returns titles, canonical URLs, and matching excerpts. |
+| `query_docs_filesystem_mirage` | Read-only shell (`cat`, `head`, `rg`, `tree`, `ls`) over a virtualized filesystem of the docs' `.mdx` pages and OpenAPI specs. This is how a page's full Markdown is retrieved. |
+| `submit_feedback` | Flags a docs page as incorrect, outdated, or confusing to the docs team. The only non-read-only tool; it does not touch your workspace. |
+
+A typical flow: call `search_mirage` for a broad question, then
+`query_docs_filesystem_mirage` with the `.mdx` path from a result to read the
+full page (e.g. `cat /home/setup/s3.mdx`).
+
+The server also exposes one MCP resource, `mintlify://skills/struktoai`: a
+Claude-Skill-formatted quick reference (mount modes, common commands, decision
+tables, gotchas) generated from the docs, for agents that read MCP resources
+before acting.
+
+## Verifying It Works
+
+```bash
+curl -s https://docs.mirage.strukto.ai/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_docs_filesystem_mirage","arguments":{"command":"head -3 /home/install.mdx"}}}'
+```
+
+CI validates the candidate `docs/docs.json` configuration on pull requests and
+pushes. A scheduled check runs `scripts/check_docs_mcp.py` against this known
+page in the deployed endpoint, so an outage does not remain a silent gap for
+every agent that connects.
