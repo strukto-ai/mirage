@@ -38,7 +38,8 @@ def _emit_or_record(emit: list[dict] | None,
                     err: str,
                     elapsed: float,
                     check_out: str | None = None,
-                    notes: list[str] | None = None) -> None:
+                    notes: list[str] | None = None,
+                    sample: float | None = None) -> None:
     if emit is not None:
         emit.append({
             "target": target_id,
@@ -49,10 +50,17 @@ def _emit_or_record(emit: list[dict] | None,
             "check": check_out,
         })
     elif report is not None:
+        # Two durations, deliberately. ``elapsed`` is the command alone and is
+        # what a case's ``expect.elapsed`` bounds are asserted against, so it
+        # cannot grow. ``sample`` is the whole case, which for the 34 cases
+        # carrying a ``check`` includes a second backend read the command-only
+        # figure left out; without it that work fell into the wall-minus-cases
+        # gap and read as setup.
         report.record(
             target_id, case["id"],
             harness.compare(case, exit_code, out, err, elapsed, check_out,
-                            notes), elapsed, harness.scenario_verb(case))
+                            notes), elapsed if sample is None else sample,
+            harness.scenario_verb(case))
 
 
 async def run_consistency_case(target: dict, case: dict,
@@ -116,10 +124,21 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             if "consistency" in case:
                 continue
             bound = harness.bind_mount(case, primary)
+            started = time.monotonic()
             ran = await harness.run_case(ws, bound, reasons)
+            whole = time.monotonic() - started
             exit_code, out, err, elapsed, check_out, notes = ran
-            _emit_or_record(emit, report, target["id"], bound, exit_code, out,
-                            err, elapsed, check_out, notes)
+            _emit_or_record(emit,
+                            report,
+                            target["id"],
+                            bound,
+                            exit_code,
+                            out,
+                            err,
+                            elapsed,
+                            check_out,
+                            notes,
+                            sample=whole)
     finally:
         await cleanup()
     for case in selected:

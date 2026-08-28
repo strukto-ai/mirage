@@ -153,7 +153,15 @@ async function runTarget(
       if (!c.targets.includes(target.id)) continue
       if (c.consistency !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
+      const caseStarted = performance.now()
       const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(ws, bound, reasons)
+      // Two durations, deliberately. `elapsed` is the command alone and is what
+      // a case's `expect.elapsed` bounds are asserted against, so it cannot
+      // grow. `whole` is the whole case, which for the 34 cases carrying a
+      // `check` includes a second backend read the command-only figure left
+      // out; without it that work fell into the wall-minus-cases gap and read
+      // as setup.
+      const whole = (performance.now() - caseStarted) / 1000
       if (emit !== null) {
         emit.push({
           target: target.id,
@@ -168,7 +176,7 @@ async function runTarget(
           target.id,
           bound.id,
           compare(bound, exitCode, out, err, elapsed, checkOut, notes),
-          elapsed,
+          whole,
           bound.command,
         )
       }
