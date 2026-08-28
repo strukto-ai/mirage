@@ -264,52 +264,62 @@ async function main(): Promise<void> {
   // speak to the SAME fake (cli-gh and github, cli-ntn and notion, qdrant and
   // qdrant-window). Those share a lane and stay sequential; the rest are bound
   // only by the overall width.
-  const lanes = new Map<string, Promise<void>>()
-  const errors: unknown[] = []
-  const waiters: (() => void)[] = []
-  let active = 0
-  const acquire = async (): Promise<void> => {
-    if (active >= targetJobs) await new Promise<void>((resolve) => waiters.push(resolve))
-    active += 1
-  }
-  const release = (): void => {
-    active -= 1
-    const next = waiters.shift()
-    if (next !== undefined) next()
-  }
-  const slots = new Map<string, { report: Report | null; emit: EmitRow[] | null }>()
-  const chain: Promise<void>[] = []
-  for (const target of eligible) {
-    const slot = {
-      report: report === null ? null : new Report(targetJobs <= 1),
-      emit: emit === null ? null : ([] as EmitRow[]),
+  // One worker means the old loop, unchanged. The lane scheduler below cannot
+  // stand in for it: a target waiting on a busy lane lets a later one from
+  // another lane take the worker first, and with `s3` carrying three targets
+  // and `gws` four, the default run would quietly reorder itself.
+  if (targetJobs <= 1) {
+    for (const target of eligible) {
+      await runTarget(target, cases, root, report, emit)
     }
-    slots.set(target.id, slot)
-    const lane = target.service ?? `solo:${target.id}`
-    const prev = lanes.get(lane) ?? Promise.resolve()
-    const next = prev.then(async () => {
-      await acquire()
-      try {
-        await runTarget(target, cases, root, slot.report, slot.emit)
-      } catch (err) {
-        errors.push(err)
-      } finally {
-        release()
+  } else {
+    const lanes = new Map<string, Promise<void>>()
+    const errors: unknown[] = []
+    const waiters: (() => void)[] = []
+    let active = 0
+    const acquire = async (): Promise<void> => {
+      if (active >= targetJobs) await new Promise<void>((resolve) => waiters.push(resolve))
+      active += 1
+    }
+    const release = (): void => {
+      active -= 1
+      const next = waiters.shift()
+      if (next !== undefined) next()
+    }
+    const slots = new Map<string, { report: Report | null; emit: EmitRow[] | null }>()
+    const chain: Promise<void>[] = []
+    for (const target of eligible) {
+      const slot = {
+        report: report === null ? null : new Report(false),
+        emit: emit === null ? null : ([] as EmitRow[]),
       }
-    })
-    lanes.set(lane, next)
-    chain.push(next)
+      slots.set(target.id, slot)
+      const lane = target.service ?? `solo:${target.id}`
+      const prev = lanes.get(lane) ?? Promise.resolve()
+      const next = prev.then(async () => {
+        await acquire()
+        try {
+          await runTarget(target, cases, root, slot.report, slot.emit)
+        } catch (err) {
+          errors.push(err)
+        } finally {
+          release()
+        }
+      })
+      lanes.set(lane, next)
+      chain.push(next)
+    }
+    await Promise.all(chain)
+    // Merged in declared target order, so a concurrent run prints what a serial
+    // run printed.
+    for (const target of eligible) {
+      const slot = slots.get(target.id)
+      if (slot === undefined) continue
+      if (report !== null && slot.report !== null) report.absorb(slot.report)
+      if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
+    }
+    if (errors.length > 0) throw errors[0]
   }
-  await Promise.all(chain)
-  // Merged in declared target order, so a concurrent run prints what a serial
-  // run printed.
-  for (const target of eligible) {
-    const slot = slots.get(target.id)
-    if (slot === undefined) continue
-    if (report !== null && slot.report !== null) report.absorb(slot.report)
-    if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
-  }
-  if (errors.length > 0) throw errors[0]
 
   // A skip is one line on stderr and exit 0, so a facet whose service
   // never came up (or whose env var got renamed in the workflow) reports

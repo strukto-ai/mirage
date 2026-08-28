@@ -193,41 +193,51 @@ async def main() -> None:
     if args.target_jobs < 1:
         print("--target-jobs takes an integer >= 1", file=sys.stderr)
         sys.exit(2)
-    semaphore = asyncio.Semaphore(args.target_jobs)
-    lane_locks: dict[str, asyncio.Lock] = {}
-    slots: dict[str, tuple[harness.Report | None, list[dict] | None]] = {}
-    errors: list[BaseException] = []
 
-    async def run_one(target: dict, lane: str) -> None:
-        slot_report, slot_emit = slots[target["id"]]
-        async with lane_locks[lane], semaphore:
-            try:
-                await run_target(target, cases, root, slot_report, slot_emit)
-            except Exception as exc:  # reported after every target finishes
-                errors.append(exc)
+    # One worker means the old loop, unchanged. The lane scheduler below
+    # cannot stand in for it: a target waiting on a busy lane lets a later
+    # one from another lane take the worker first, and with `s3` carrying
+    # three targets and `gws` four, the default run would quietly reorder
+    # itself.
+    if args.target_jobs == 1:
+        for target in eligible:
+            await run_target(target, cases, root, report, emit)
+    else:
+        semaphore = asyncio.Semaphore(args.target_jobs)
+        lane_locks: dict[str, asyncio.Lock] = {}
+        slots: dict[str, tuple[harness.Report | None, list[dict] | None]] = {}
+        errors: list[BaseException] = []
 
-    tasks = []
-    for target in eligible:
-        slots[target["id"]] = (
-            None if report is None else harness.Report(
-                stream=args.target_jobs <= 1),
-            None if emit is None else [],
-        )
-        lane = target.get("service") or f"solo:{target['id']}"
-        lane_locks.setdefault(lane, asyncio.Lock())
-        tasks.append(asyncio.create_task(run_one(target, lane)))
-    if tasks:
-        await asyncio.gather(*tasks)
-    # Merged in declared target order, so a concurrent run prints what a
-    # serial run printed.
-    for target in eligible:
-        slot_report, slot_emit = slots[target["id"]]
-        if report is not None and slot_report is not None:
-            report.absorb(slot_report)
-        if emit is not None and slot_emit is not None:
-            emit.extend(slot_emit)
-    if errors:
-        raise errors[0]
+        async def run_one(target: dict, lane: str) -> None:
+            slot_report, slot_emit = slots[target["id"]]
+            async with lane_locks[lane], semaphore:
+                try:
+                    await run_target(target, cases, root, slot_report,
+                                     slot_emit)
+                except Exception as exc:  # reported once every target is done
+                    errors.append(exc)
+
+        tasks = []
+        for target in eligible:
+            slots[target["id"]] = (
+                None if report is None else harness.Report(stream=False),
+                None if emit is None else [],
+            )
+            lane = target.get("service") or f"solo:{target['id']}"
+            lane_locks.setdefault(lane, asyncio.Lock())
+            tasks.append(asyncio.create_task(run_one(target, lane)))
+        if tasks:
+            await asyncio.gather(*tasks)
+        # Merged in declared target order, so a concurrent run prints what a
+        # serial run printed.
+        for target in eligible:
+            slot_report, slot_emit = slots[target["id"]]
+            if report is not None and slot_report is not None:
+                report.absorb(slot_report)
+            if emit is not None and slot_emit is not None:
+                emit.extend(slot_emit)
+        if errors:
+            raise errors[0]
 
     # A skip is one line on stderr and exit 0, so a facet whose service
     # never came up (or whose env var got renamed in the workflow)
