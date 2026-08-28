@@ -619,8 +619,21 @@ def scenario_verb(case: dict) -> str:
     return ""
 
 
+# A leading `NAME=value` assignment, where the value may be quoted or a
+# parenthesised array. Splitting on whitespace instead cut `v='a b'` in half
+# and recorded the fragment as the command.
+_LEADING_ASSIGN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\"[^\"]*\"|\([^)]*\)|\S*)\s*")
+_LEADING_SEP = re.compile(r"^(?:;|&&|\|\||&)\s*")
+
+
 def command_verb(command: str) -> str:
-    """First real word of a command, skipping leading VAR=value assignments.
+    """Name the command a line runs, for grouping the profile.
+
+    Not a shell parser, and it does not need to be: this only labels a row,
+    so the cost of a wrong guess is a mislabelled row rather than a wrong
+    measurement. It does handle the two shapes the corpus actually uses,
+    a quoted assignment and a leading separator.
 
     Args:
         command (str): the case's shell line.
@@ -628,11 +641,14 @@ def command_verb(command: str) -> str:
     Returns:
         str: the command name, or "?" when the line has none.
     """
-    for word in command.strip().split():
-        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
-            continue
-        return word.rsplit("/", 1)[-1]
-    return "?"
+    rest = command.strip()
+    while rest:
+        match = _LEADING_ASSIGN.match(rest) or _LEADING_SEP.match(rest)
+        if match is None or match.end() == 0:
+            break
+        rest = rest[match.end():]
+    words = rest.split()
+    return words[0].rsplit("/", 1)[-1] if words else "?"
 
 
 @dataclass

@@ -730,13 +730,21 @@ export interface Sample {
 
 // The first real word of a command, ignoring leading `VAR=value` assignments.
 // Only groups the profile, so a wrong guess costs a mislabeled row.
+// A leading `NAME=value` assignment, where the value may be quoted or a
+// parenthesised array. Splitting on whitespace instead cut `v='a b'` in half
+// and recorded the fragment as the command.
+const LEADING_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\([^)]*\)|\S*)\s*/
+const LEADING_SEP = /^(?:;|&&|\|\||&)\s*/
+
 export function commandVerb(command: string): string {
-  for (const word of command.trim().split(/\s+/)) {
-    if (word.length === 0) continue
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) continue
-    return word.replace(/^.*\//, '')
+  let rest = command.trim()
+  for (;;) {
+    const match = LEADING_ASSIGN.exec(rest) ?? LEADING_SEP.exec(rest)
+    if (match === null || match[0].length === 0) break
+    rest = rest.slice(match[0].length)
   }
-  return '?'
+  const first = rest.split(/\s+/).filter((w) => w.length > 0)[0]
+  return first === undefined ? '?' : first.replace(/^.*\//, '')
 }
 
 // A consistency case carries no `command`: its commands live in the scenario
