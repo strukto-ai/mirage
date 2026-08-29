@@ -85,13 +85,15 @@ write, would send the write twice. A refusal throws
 `DatabricksVolumeAuthError`, a subclass of `DatabricksVolumeApiError`:
 
 ```ts
-import { DatabricksVolumeAuthError } from '@struktoai/mirage-core'
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from '@struktoai/mirage-core'
 
 try {
   await ws.execute('ls /dbx/')
 } catch (err) {
   if (err instanceof DatabricksVolumeAuthError) {
     // mint a new token and build a new resource
+  } else if (err instanceof DatabricksVolumeApiError) {
+    // every other Files API refusal, with err.statusCode and err.errorCode
   }
 }
 ```
