@@ -54,6 +54,17 @@ await run(agent, "Create /hello.txt with 'hi from mirage' and cat it.")
 
 The examples also support OpenAI-compatible providers. Set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL`; a custom base URL defaults to Chat Completions, uses `mirageExecuteTool`, and disables OpenAI tracing so the third-party key stays with that provider. Set `OPENAI_API=responses` when a compatible endpoint implements the Responses API and the examples will use OpenAI's hosted shell and editor tools instead.
 
+For example, the same examples run against [OrcaRouter](https://www.orcarouter.ai), an OpenAI-compatible gateway that fronts many models behind one endpoint with adaptive routing and automatic failover:
+
+```bash
+export OPENAI_BASE_URL=https://api.orcarouter.ai/v1
+export OPENAI_API_KEY=sk-orca-...
+export OPENAI_MODEL=orcarouter/auto
+node examples/typescript/agents/openai/ram_agent.ts
+```
+
+`orcarouter/auto` is OrcaRouter's adaptive-routing entry: it picks the best model for each request and fails over automatically when one provider degrades.
+
 ## Exports
 
 | Symbol | Purpose |

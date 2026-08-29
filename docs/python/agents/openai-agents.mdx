@@ -54,6 +54,8 @@ client = MirageSandboxClient(ws)
 agent = SandboxAgent(name="...", model="gpt-5.5", instructions=ws.file_prompt)
 ```
 
+Any of these examples can also run against an OpenAI-compatible gateway. Point the OpenAI SDK at it with `OPENAI_BASE_URL` and `OPENAI_API_KEY`, then name a model the gateway serves in the `Agent` — for example, with [OrcaRouter](https://www.orcarouter.ai) as the gateway, use `model="orcarouter/auto"`, its adaptive-routing entry that picks the best model per request and fails over automatically.
+
 ## Exports
 
 | Symbol | Purpose |
