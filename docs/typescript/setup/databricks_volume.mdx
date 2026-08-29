@@ -87,7 +87,7 @@ write, would send the write twice. A refusal throws
 An op call propagates the typed error:
 
 ```ts
-import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from '@struktoai/mirage-core'
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from '@struktoai/mirage-node'
 
 try {
   await ws.readdir('/dbx/')
