@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 from functools import partial
@@ -20,7 +21,8 @@ from urllib.parse import quote
 
 import aiohttp
 
-from mirage.core.api.client import ApiResponse, RetryPolicy, api_request
+from mirage.core.api.client import (ApiResponse, RetryPolicy, api_request,
+                                    header_delay)
 from mirage.core.databricks_volume.errors import (DatabricksVolumeApiError,
                                                   DatabricksVolumeAuthError)
 from mirage.core.databricks_volume.types import (DatabricksEntry,
@@ -203,7 +205,11 @@ class HttpDatabricksFilesClient:
         """Stream a file, one chunk at a time.
 
         The shared kit reads a whole body, so a streaming read owns its
-        session the way dropbox's does.
+        session the way dropbox's does. RETRY still applies, but only to
+        the open, which is the same shape msgraph's stream has: a
+        throttled GET has yielded nothing, so another attempt is a
+        repeat of the whole read, while a failure mid-body cannot be
+        retried without handing the caller the leading bytes twice.
 
         Args:
             path (str): absolute path inside the volume.
@@ -212,12 +218,20 @@ class HttpDatabricksFilesClient:
         url = self.url(FILES, path)
         headers = self._headers({"Accept": OCTET_STREAM})
         async with aiohttp.ClientSession(timeout=self._timeout()) as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status >= 400:
-                    raise databricks_error("GET", url, resp.status, await
-                                           resp.text())
-                async for chunk in resp.content.iter_chunked(chunk_size):
-                    yield chunk
+            attempt = 0
+            while True:
+                async with session.get(url, headers=headers) as resp:
+                    if (resp.status in RETRY.statuses
+                            and attempt < RETRY.max_retries):
+                        await asyncio.sleep(header_delay(resp, attempt, RETRY))
+                        attempt += 1
+                        continue
+                    if resp.status >= 400:
+                        raise databricks_error("GET", url, resp.status, await
+                                               resp.text())
+                    async for chunk in resp.content.iter_chunked(chunk_size):
+                        yield chunk
+                    return
 
     async def get_metadata(self, path: str) -> DatabricksFileMeta:
         url = self.url(FILES, path)

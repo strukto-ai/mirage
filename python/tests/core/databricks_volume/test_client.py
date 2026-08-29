@@ -18,7 +18,8 @@ import pytest
 from aioresponses import aioresponses
 from yarl import URL
 
-from mirage.core.databricks_volume.client import HttpDatabricksFilesClient
+from mirage.core.databricks_volume.client import (RETRY,
+                                                  HttpDatabricksFilesClient)
 from mirage.core.databricks_volume.errors import (DatabricksVolumeApiError,
                                                   DatabricksVolumeAuthError,
                                                   is_not_found)
@@ -116,6 +117,38 @@ async def test_download_stream_yields_the_whole_body_in_chunks():
     assert all(len(chunk) <= 4 for chunk in chunks)
     assert kwargs["headers"]["Authorization"] == "Bearer tok-123"
     assert kwargs["headers"]["Accept"] == "application/octet-stream"
+
+
+@pytest.mark.asyncio
+async def test_download_stream_retries_a_throttled_open():
+    """A stream that has yielded nothing yet can be reopened, so the
+    same RETRY policy the shared kit applies to a whole-body read
+    applies to the open here too."""
+    with aioresponses() as m:
+        m.get(FILES_URL, status=429, body="{}", headers={"Retry-After": "0"})
+        m.get(FILES_URL, status=503, body="{}", headers={"Retry-After": "0"})
+        m.get(FILES_URL, status=200, body=b"0123456789")
+        chunks = [
+            chunk async for chunk in make_client().download_stream(
+                f"{ROOT}/a.txt", 4)
+        ]
+        assert len(sent(m, "GET", FILES_URL)) == 3
+    assert b"".join(chunks) == b"0123456789"
+
+
+@pytest.mark.asyncio
+async def test_download_stream_reports_a_429_it_ran_out_of_retries_for():
+    with aioresponses() as m:
+        for _ in range(RETRY.max_retries + 1):
+            m.get(FILES_URL,
+                  status=429,
+                  body="{}",
+                  headers={"Retry-After": "0"})
+        with pytest.raises(DatabricksVolumeApiError) as excinfo:
+            async for _ in make_client().download_stream(f"{ROOT}/a.txt", 4):
+                pass
+        assert len(sent(m, "GET", FILES_URL)) == RETRY.max_retries + 1
+    assert excinfo.value.status_code == 429
 
 
 @pytest.mark.asyncio
