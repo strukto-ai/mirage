@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.core.onedrive.identity import live_identity as core_live_identity
 from mirage.ops.registry import op
 from mirage.ops.types import LiveFileIdentity
@@ -20,13 +23,17 @@ from mirage.types import PathSpec
 
 
 @op("live_identity", resource="onedrive")
-async def live_identity(accessor: OneDriveAccessor, path: PathSpec, *, index,
-                        **kwargs) -> LiveFileIdentity:
+async def live_identity(accessor: OneDriveAccessor,
+                        path: PathSpec,
+                        *,
+                        index: IndexCacheStore | None = None,
+                        **kwargs: Any) -> LiveFileIdentity:
     """Bounded identity lookup, bypassing the index cache entirely.
 
     Args:
         accessor (OneDriveAccessor): backend accessor.
         path (PathSpec): the path to check.
-        index: the injected index cache; never consulted.
+        index (IndexCacheStore | None): injected index cache;
+            never consulted.
     """
     return await core_live_identity(accessor, path)

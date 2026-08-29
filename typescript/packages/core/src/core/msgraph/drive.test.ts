@@ -28,7 +28,7 @@ function loc(path: string): DriveLoc {
     path,
     virtual: path,
     url: (p, action = '') => `https://graph.example/drives/d1/root:/${p}:${action}`,
-    ref: (folder = '') => `/drives/d1/root:/${folder ?? ''}`,
+    ref: (folder = '') => `/drives/d1/root:/${folder}`,
   })
 }
 
