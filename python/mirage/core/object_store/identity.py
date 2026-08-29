@@ -27,10 +27,10 @@ def make_identity(
 ) -> Callable[[A, PathSpec], Awaitable[LiveFileIdentity]]:
     """Build the no-cache identity lookup over one driver.
 
-    This is stat's slow path only: no index fast path, no directory-hint
-    skip, because the guarantee is bypassing every cache, not serving the
-    common case fastest. A head miss earns exactly one more call, the
-    prefix probe, to tell "absent" from "directory".
+    This is stat's slow path only: no index fast path, because the
+    guarantee is bypassing every cache, not serving the common case
+    fastest. A head miss earns exactly one more call, the prefix probe,
+    to tell "absent" from "directory".
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
@@ -44,6 +44,15 @@ def make_identity(
         if original_prefix and path.startswith(original_prefix):
             path = path[len(original_prefix):] or "/"
 
+        # A trailing slash signals the caller treats the path as a
+        # directory, so the point lookup is skipped exactly as stat
+        # skips it. A directory backed by a zero-byte marker object is
+        # keyed with that slash, so heading it would answer the marker's
+        # own metadata as a file identity for something the file-only
+        # contract has to refuse. The probe decides instead: EISDIR when
+        # the directory is there, absent when nothing is.
+        hints_directory = path.endswith("/")
+
         stripped = path.strip("/")
         if not stripped:
             raise eisdir(virtual)
@@ -51,14 +60,16 @@ def make_identity(
         kpfx = driver.key_prefix_of(accessor)
         key = kp.apply(kpfx, path)
         async with driver.connect(accessor) as conn:
-            meta = await driver.head(conn, key)
-            if meta is not None:
-                return LiveFileIdentity(exists=True,
-                                        revision=meta.revision,
-                                        fingerprint=meta.fingerprint)
+            if not hints_directory:
+                meta = await driver.head(conn, key)
+                if meta is not None:
+                    return LiveFileIdentity(exists=True,
+                                            revision=meta.revision,
+                                            fingerprint=meta.fingerprint)
 
-            # Head missed: the one allowed second call tells "absent" from
-            # "directory" (a marker or any deeper key proves the prefix).
+            # Head missed (or was skipped): the one allowed second call
+            # tells "absent" from "directory" (a marker or any deeper
+            # key proves the prefix).
             pfx = key.rstrip("/") + "/" if key else ""
             if await driver.probe_prefix(conn, pfx):
                 raise eisdir(virtual)

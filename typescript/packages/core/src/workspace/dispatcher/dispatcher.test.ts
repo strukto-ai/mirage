@@ -52,6 +52,51 @@ describe('dispatch applies limits on the executing mount', () => {
   }, 30_000)
 })
 
+describe('a fresh read refuses the warm file cache', () => {
+  // Ops.readFileWithIdentity needs the backend's own answer: a cached
+  // read stamps no fingerprint or revision, so serving one would report
+  // a versioned file as having no identity. Mirrors Python's
+  // tests/workspace/dispatcher/test_dispatcher.py.
+  function mkCaching(): Workspace {
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    return new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+  }
+
+  it('serves the backend bytes where a plain read serves the cache', async () => {
+    const ws = mkCaching()
+    await ws.fs.writeFile('/m/f.txt', 'STORED')
+    await ws.cache.set('/m/f.txt', ENC.encode('CACHED'))
+    expect(DEC.decode((await ws.dispatch('read', '/m/f.txt')) as Uint8Array)).toBe('CACHED')
+    const fresh = (await ws.dispatch('read', '/m/f.txt', [], { fresh: true })) as Uint8Array
+    expect(DEC.decode(fresh)).toBe('STORED')
+  })
+
+  it('is consumed at the door and never forwarded to the backend', async () => {
+    // No backend declares it, so a leaked flag would reach the op fn.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    let seen: string[] = []
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, _path, _args, kwargs) => {
+        seen = Object.keys(kwargs)
+        return ENC.encode('STORED')
+      },
+      write: false,
+    })
+    await ws.dispatch('read', '/m/f.txt', [], { fresh: true })
+    expect(seen).not.toContain('fresh')
+  })
+})
+
 describe('dispatch rename addresses dst against the source mount', () => {
   it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
     const parser = await getTestParser()

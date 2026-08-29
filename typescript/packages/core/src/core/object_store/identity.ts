@@ -29,10 +29,10 @@ export type IdentityFn<A extends Accessor> = (
 /**
  * Build the no-cache identity lookup over one driver.
  *
- * This is stat's slow path only: no index fast path, no directory-hint
- * skip, because the guarantee is bypassing every cache, not serving the
- * common case fastest. A head miss earns exactly one more call, the
- * prefix probe, to tell "absent" from "directory".
+ * This is stat's slow path only: no index fast path, because the
+ * guarantee is bypassing every cache, not serving the common case
+ * fastest. A head miss earns exactly one more call, the prefix probe,
+ * to tell "absent" from "directory".
  */
 export function makeIdentity<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
@@ -43,6 +43,15 @@ export function makeIdentity<A extends Accessor, C>(
     const rawPath =
       prefix !== '' && original.startsWith(prefix) ? original.slice(prefix.length) || '/' : original
 
+    // A trailing slash signals the caller treats the path as a
+    // directory, so the point lookup is skipped exactly as stat skips
+    // it. A directory backed by a zero-byte marker object is keyed with
+    // that slash, so heading it would answer the marker's own metadata
+    // as a file identity for something the file-only contract has to
+    // refuse. The probe decides instead: EISDIR when the directory is
+    // there, absent when nothing is.
+    const hintsDirectory = rawPath.endsWith('/')
+
     const stripped = stripSlash(rawPath)
     if (stripped === '') {
       throw eisdir(path)
@@ -52,17 +61,20 @@ export function makeIdentity<A extends Accessor, C>(
     const key = kp.apply(kpfx, rawPath)
     const { conn, close } = await driver.connect(accessor)
     try {
-      const meta = await driver.head(conn, key)
-      if (meta !== null) {
-        return {
-          exists: true,
-          revision: meta.revision ?? null,
-          fingerprint: meta.fingerprint ?? null,
+      if (!hintsDirectory) {
+        const meta = await driver.head(conn, key)
+        if (meta !== null) {
+          return {
+            exists: true,
+            revision: meta.revision ?? null,
+            fingerprint: meta.fingerprint ?? null,
+          }
         }
       }
 
-      // Head missed: the one allowed second call tells "absent" from
-      // "directory" (a marker or any deeper key proves the prefix).
+      // Head missed (or was skipped): the one allowed second call tells
+      // "absent" from "directory" (a marker or any deeper key proves
+      // the prefix).
       const pfx = key !== '' ? rstripSlash(key) + '/' : ''
       if (await driver.probePrefix(conn, pfx)) {
         throw eisdir(path)

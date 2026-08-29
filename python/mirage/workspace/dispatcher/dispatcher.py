@@ -275,6 +275,14 @@ class Dispatcher:
         # probes cannot recurse into it.
         if self._drift is not None and self._drift.pending:
             await self._drift.drain(self._namespace.registry.try_mount_for)
+        # `fresh` is the caller's "do not answer this from memory": the
+        # warm-cache early return below is skipped, so the op reaches
+        # the backend and its own answer is what gets recorded.
+        # Ops.read_with_identity needs that, because a read served from
+        # the cache stamps no fingerprint or revision and would hand
+        # back bytes with no identity. Consumed here, never forwarded:
+        # no backend takes it.
+        fresh = bool(kwargs.pop("fresh", False))
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link
@@ -355,7 +363,7 @@ class Dispatcher:
         # the probe is the whole fix.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
 
-        if caches_reads and not raw and op in DISPATCH_READ_OPS:
+        if caches_reads and not raw and not fresh and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):

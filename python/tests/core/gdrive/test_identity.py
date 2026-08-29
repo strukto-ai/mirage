@@ -64,3 +64,28 @@ async def test_identity_mount_root_raises_eisdir_without_resolving(
         fake_drive, gdrive_accessor):
     with pytest.raises(IsADirectoryError):
         await live_identity(gdrive_accessor, _path(""))
+
+
+@pytest.mark.asyncio
+async def test_identity_folder_spelled_with_a_trailing_slash_is_eisdir(
+        fake_drive, gdrive_accessor):
+    # Drive is id-addressed and the key the resolver walks carries no
+    # trailing slash, so the hint costs nothing: the folder resolves and
+    # the file-only contract refuses it, the same as without the slash.
+    fake_drive.folder("dir")
+    with pytest.raises(IsADirectoryError):
+        await live_identity(
+            gdrive_accessor,
+            PathSpec(virtual="/dir/", directory="/", resource_path="dir"))
+
+
+@pytest.mark.asyncio
+async def test_identity_absent_path_with_a_trailing_slash_reports_absent(
+        fake_drive, gdrive_accessor):
+    fake_drive.folder("a")
+    result = await live_identity(
+        gdrive_accessor,
+        PathSpec(virtual="/a/gone/", directory="/a", resource_path="a/gone"))
+    assert result.exists is False
+    assert result.revision is None
+    assert result.fingerprint is None

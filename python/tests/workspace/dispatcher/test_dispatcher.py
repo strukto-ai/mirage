@@ -107,6 +107,31 @@ async def test_warm_cache_read_serves_when_no_policy_objects():
 
 
 @pytest.mark.asyncio
+async def test_fresh_read_skips_the_warm_cache_entirely():
+    # Ops.read_with_identity needs the backend's own answer: a cached
+    # read stamps no fingerprint or revision, so serving one would
+    # report a versioned file as having no identity.
+    policies = Policies()
+    dispatcher, cache = _dispatcher(policies)
+    result, _ = await dispatcher.dispatch("read",
+                                          _path("/data/a.txt"),
+                                          fresh=True)
+    assert result == b"cold"
+    cache.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fresh_is_consumed_at_the_door_and_never_forwarded():
+    # No backend declares it, so an op function would take it as an
+    # unexpected keyword.
+    policies = Policies()
+    dispatcher, _ = _dispatcher(policies)
+    mount = dispatcher._namespace.try_mount_for.return_value
+    await dispatcher.dispatch("read", _path("/data/a.txt"), fresh=True)
+    assert "fresh" not in mount.execute_op.await_args.kwargs
+
+
+@pytest.mark.asyncio
 async def test_setattr_classifies_as_a_write():
     # touch on an existing file mutates via setattr, which is absent
     # from the dispatcher's own invalidation set; the policy write

@@ -69,4 +69,22 @@ describe('OneDrive identity', () => {
       code: 'EISDIR',
     })
   })
+
+  it('raises EISDIR for a folder spelled with a trailing slash', async () => {
+    // Graph is item-addressed off the slashless resourcePath, so the
+    // hint costs nothing: the folder facet on the answer is what refuses
+    // it, the same as without the slash.
+    stub(200, { id: '01FOLDER', name: 'Docs', folder: { childCount: 2 } })
+    await expect(
+      liveIdentity(accessor(), PathSpec.fromStrPath('/Docs/', 'Docs')),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('reports exists false for an absent path spelled with a trailing slash', async () => {
+    stub(404, { error: { code: 'itemNotFound', message: 'no' } })
+    const result = await liveIdentity(accessor(), PathSpec.fromStrPath('/Docs/', 'Docs'))
+    expect(result.exists).toBe(false)
+    expect(result.revision).toBeNull()
+    expect(result.fingerprint).toBeNull()
+  })
 })

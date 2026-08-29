@@ -40,6 +40,39 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
   return [value, state.records]
 }
 
+export interface RecordedRun<T> {
+  /** The frame's own records array, appended to as `done` progresses. */
+  records: OpRecord[]
+  /** What `fn` settled to, resolved or rejected. */
+  done: Promise<T>
+}
+
+/**
+ * Open a recording frame and hand back that frame's records array
+ * *and* the pending result, so the caller holds both whether `fn`
+ * resolves or throws.
+ *
+ * {@link runWithRecording} answers the array only on the success path,
+ * and reading it back with {@link activeRecords} from inside the
+ * callback is not the same array under {@link FallbackStorage}, whose
+ * single stack answers the newest live frame rather than this one —
+ * which is exactly the interleaving this frame exists to isolate. The
+ * array is returned synchronously, before anything can bind over it,
+ * so it names this frame in both storage modes.
+ */
+export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
+  const state: RecordingState = { records: [], mountPrefix: '' }
+  let done: Promise<T>
+  try {
+    done = Promise.resolve(storage.run(state, fn))
+  } catch (err) {
+    // A thunk that threw before returning its promise still settles
+    // `done`, so the caller's one handling path covers both.
+    done = Promise.reject(err instanceof Error ? err : new Error(String(err)))
+  }
+  return { records: state.records, done }
+}
+
 /**
  * Run `fn` with `prefix` as the mount prefix records are named against.
  *
@@ -189,9 +222,14 @@ export function revisionFor(path: string): string | null {
 // virtual one already ('/s3/report.json'), so tell them apart before
 // prefixing. The test has to be for a path boundary, not a bare startsWith:
 // a mount at /s3 holding s3-report.txt would otherwise look already-prefixed
-// and record as '/s3-report.txt'. Mirrors python's _virtual.
+// and record as '/s3-report.txt'. A mount-relative path spelled without its
+// leading slash (the drive and box backends hand over
+// `PathSpec.resourcePath`) gets the separator, because a plain concatenation
+// names nothing: '/s3' and 'report.json' would record as '/s3report.json',
+// which is not a path any caller can match, follow or grep for.
+// Mirrors python's _virtual.
 function applyPrefix(prefix: string, path: string): string {
   const root = rstripSlash(prefix)
   if (root === '' || path === root || path.startsWith(`${root}/`)) return path
-  return root + path
+  return path.startsWith('/') ? root + path : `${root}/${path}`
 }

@@ -137,4 +137,44 @@ describe('SharePoint identity', () => {
       ),
     ).rejects.toMatchObject({ code: 'EISDIR' })
   })
+
+  it('raises EISDIR for a folder spelled with a trailing slash', async () => {
+    // Graph is item-addressed off the slashless resourcePath, so the
+    // hint costs nothing: the folder facet on the answer is what refuses
+    // it, the same as without the slash.
+    vi.stubGlobal(
+      'fetch',
+      namespaceFetch(
+        () =>
+          new Response(JSON.stringify({ id: '02FOLDER', name: 'src', folder: { childCount: 2 } }), {
+            status: 200,
+          }),
+      ),
+    )
+    await expect(
+      liveIdentity(
+        accessor(),
+        PathSpec.fromStrPath('/sp/Engineering/Documents/src/', 'Engineering/Documents/src'),
+      ),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('reports exists false for an absent path spelled with a trailing slash', async () => {
+    vi.stubGlobal(
+      'fetch',
+      namespaceFetch(
+        () =>
+          new Response(JSON.stringify({ error: { code: 'itemNotFound', message: 'no' } }), {
+            status: 404,
+          }),
+      ),
+    )
+    const result = await liveIdentity(
+      accessor(),
+      PathSpec.fromStrPath('/sp/Engineering/Documents/nope/', 'Engineering/Documents/nope'),
+    )
+    expect(result.exists).toBe(false)
+    expect(result.revision).toBeNull()
+    expect(result.fingerprint).toBeNull()
+  })
 })

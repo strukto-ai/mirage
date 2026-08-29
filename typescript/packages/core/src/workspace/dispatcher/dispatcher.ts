@@ -188,6 +188,19 @@ export class Dispatcher {
         return stat
       })
     }
+    // `fresh` is the caller's "do not answer this from memory": the
+    // warm-cache early return below is skipped, so the op reaches the
+    // backend and its own answer is what gets recorded.
+    // Ops.readFileWithIdentity needs that, because a read served from
+    // the cache stamps no fingerprint or revision and would hand back
+    // bytes with no identity. Consumed here, never forwarded: no
+    // backend takes it. Mirrors Python's Dispatcher.dispatch.
+    const fresh = kwargs?.fresh === true
+    if (fresh) {
+      const rest = { ...kwargs }
+      delete rest.fresh
+      kwargs = rest
+    }
     // Hidden paths answer before anything else can: the typed path is
     // checked so a link inside hidden space cannot be followed out of
     // it, the followed path is re-checked so a visible link cannot
@@ -308,7 +321,7 @@ export class Dispatcher {
     // nothing populates it from here, so skipping the probe is the
     // whole fix. Mirrors Python's Dispatcher.dispatch.
     const raw = kwargs?.filetype === null
-    if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
+    if (caches && !raw && !fresh && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
         // The cache holds the whole object, so a ranged read is answered

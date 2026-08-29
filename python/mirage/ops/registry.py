@@ -55,6 +55,27 @@ def op(
     return decorator
 
 
+def registered_ops(fn: Callable[..., Any]) -> list[RegisteredOp]:
+    """The RegisteredOp entries an ``@op``-decorated function carries.
+
+    The decorator returns the function itself so a test can call the
+    adapter directly, and hides the entries on an attribute. A backend
+    composing its ``OPS`` list splices these in, so the list holds one
+    shape throughout and a reader of ``OPS`` never meets a bare
+    function.
+
+    Args:
+        fn (Callable[..., Any]): an ``@op``-decorated adapter.
+
+    Returns:
+        list[RegisteredOp]: the entries the decorator recorded.
+    """
+    entries = getattr(fn, "_registered_ops", None)
+    if not entries:
+        raise ValueError(f"{fn!r} carries no registered ops")
+    return list(entries)
+
+
 class OpsRegistry:
 
     def __init__(self) -> None:

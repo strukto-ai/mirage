@@ -112,6 +112,22 @@ describe('s3 identity', () => {
     await expect(liveIdentity(accessor(), path('/dir'))).rejects.toMatchObject({ code: 'EISDIR' })
   })
 
+  it('raises EISDIR for a marker directory spelled with a trailing slash', async () => {
+    // An empty directory on S3 is a zero-byte object keyed 'dir/', so
+    // the point lookup finds it; the trailing slash is what says the
+    // caller meant the directory rather than that object.
+    mockBucket([{ key: 'dir/', etag: 'etag-marker' }])
+    await expect(liveIdentity(accessor(), path('/dir/'))).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('reports exists false for an absent path spelled with a trailing slash', async () => {
+    mockBucket([{ key: 'a.txt', etag: 'etag-a' }])
+    const result = await liveIdentity(accessor(), path('/nope/'))
+    expect(result.exists).toBe(false)
+    expect(result.revision).toBeNull()
+    expect(result.fingerprint).toBeNull()
+  })
+
   it('lifts the path through a key prefix', async () => {
     mockBucket([{ key: 'users/abc/a.txt', etag: 'etag-a' }])
     const result = await liveIdentity(accessor('users/abc/'), path('/a.txt'))

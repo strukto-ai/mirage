@@ -123,3 +123,42 @@ async def test_identity_drive_level_raises_eisdir_without_a_request():
     _seed_caches()
     with pytest.raises(IsADirectoryError):
         await live_identity(_accessor(), _ps("/sp/Engineering/Documents"))
+
+
+@pytest.mark.asyncio
+async def test_identity_folder_spelled_with_a_trailing_slash_is_eisdir():
+    # Graph is item-addressed off the slashless resource_path, so the
+    # hint costs nothing: the folder facet on the answer is what refuses
+    # it, the same as without the slash.
+    _seed_caches()
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/src"
+    with aioresponses() as m:
+        m.get(url,
+              payload={
+                  "id": "02FOLDER",
+                  "name": "src",
+                  "folder": {
+                      "childCount": 2
+                  },
+              })
+        with pytest.raises(IsADirectoryError):
+            await live_identity(_accessor(),
+                                _ps("/sp/Engineering/Documents/src/"))
+
+
+@pytest.mark.asyncio
+async def test_identity_absent_path_with_a_trailing_slash_reports_absent():
+    _seed_caches()
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/nope"
+    with aioresponses() as m:
+        m.get(url,
+              status=404,
+              payload={"error": {
+                  "code": "itemNotFound",
+                  "message": "no"
+              }})
+        result = await live_identity(_accessor(),
+                                     _ps("/sp/Engineering/Documents/nope/"))
+    assert result.exists is False
+    assert result.revision is None
+    assert result.fingerprint is None

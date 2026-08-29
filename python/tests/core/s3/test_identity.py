@@ -77,6 +77,27 @@ def test_identity_directory_raises_eisdir():
             asyncio.run(live_identity(accessor, _path("/dir")))
 
 
+def test_identity_marker_directory_spelled_with_a_slash_raises_eisdir():
+    # An empty directory on S3 is a zero-byte object keyed "dir/", so
+    # the point lookup finds it; the trailing slash is what says the
+    # caller meant the directory rather than that object.
+    store = {BUCKET: {"dir/": b""}}
+    with patch_s3_multi(store):
+        accessor = S3Accessor(_config())
+        with pytest.raises(IsADirectoryError):
+            asyncio.run(live_identity(accessor, _path("/dir/")))
+
+
+def test_identity_absent_path_spelled_with_a_slash_reports_exists_false():
+    store = {BUCKET: {"a.txt": b"hi"}}
+    with patch_s3_multi(store):
+        accessor = S3Accessor(_config())
+        result = asyncio.run(live_identity(accessor, _path("/nope/")))
+    assert result.exists is False
+    assert result.revision is None
+    assert result.fingerprint is None
+
+
 def test_identity_lifts_the_path_through_a_key_prefix():
     prefix = "users/abc/"
     store = {BUCKET: {"users/abc/a.txt": b"data"}}

@@ -28,8 +28,9 @@ from mirage.utils.errors import NoMountError, OperationNotSupportedError
 from mirage.utils.path import owner_prefix
 
 
-def read_identity(records: list[OpRecord]) -> LiveFileIdentity | None:
-    """The identity carried by the records one read emitted.
+def read_identity(records: list[OpRecord],
+                  path: str) -> LiveFileIdentity | None:
+    """The identity carried by the records one read of ``path`` emitted.
 
     A versioned backend stamps ``fingerprint``/``revision`` on the
     record for the response it just read, so the markers and the bytes
@@ -37,15 +38,29 @@ def read_identity(records: list[OpRecord]) -> LiveFileIdentity | None:
     more than one record (a rendered file reads its parts), and only a
     content read ever carries a marker.
 
+    ``path`` is the filter, and it is what removes cross-path
+    contamination: ``OpRecord.path`` is the resolved virtual path, so a
+    marker stamped for some other file cannot be read as this one's.
+    That matters where the recording frame is not task-isolated (the
+    browser's ``FallbackStorage``, whose single stack answers the
+    newest live frame): two overlapping reads can land records in each
+    other's frame there. Two concurrent reads of the *same* path in
+    that mode stay best-effort, since their records are indistinguishable
+    by path alone.
+
     Args:
         records (list[OpRecord]): the records the read emitted, in
             emission order.
+        path (str): the resolved virtual path that was read.
 
     Returns:
         LiveFileIdentity | None: the identity the newest marked record
-        describes, None when no record carried a marker.
+        for ``path`` describes, None when no such record carried a
+        marker.
     """
     for rec in reversed(records):
+        if rec.path != path:
+            continue
         if rec.revision is not None or rec.fingerprint is not None:
             return LiveFileIdentity(exists=True,
                                     revision=rec.revision,
@@ -275,7 +290,8 @@ class Ops:
                    path: str,
                    offset: int = 0,
                    size: int | None = None,
-                   raw: bool = False) -> bytes:
+                   raw: bool = False,
+                   fresh: bool = False) -> bytes:
         """Read file content.
 
         ``raw`` asks for the stored bytes, skipping a filetype-scoped
@@ -286,16 +302,25 @@ class Ops:
         the rendering over the file. TypeScript spells the same thing
         ``readFile(path, {raw: true})``.
 
+        ``fresh`` refuses the warm file cache for a rendered read too,
+        so the bytes come from the backend and carry whatever markers
+        it stamps on them. It costs a round trip every time, so it is
+        for a caller that needs the backend's own answer rather than
+        the newest one seen, not a default.
+
         Args:
             path (str): Virtual path.
             offset (int): Byte offset for range reads.
             size (int | None): Number of bytes for range reads.
             raw (bool): Read stored bytes rather than a rendered form.
+            fresh (bool): Bypass the warm file cache.
 
         Returns:
             bytes: File content.
         """
         kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+        if fresh:
+            kwargs["fresh"] = True
         if offset or size is not None:
             return await self._call("read",
                                     path,
@@ -374,6 +399,14 @@ class Ops:
         another path's markers. What the frame collected is handed up
         to the enclosing scope on the way out, on the error path too,
         so a line's byte accounting still sees every op that happened.
+        The markers are then read back per path, so a record another
+        task dropped into this frame cannot be mistaken for this
+        read's.
+
+        The read is ``fresh``: the dispatcher's warm file cache is
+        skipped, because bytes it hands back crossed no network and
+        carry no marker, and the caller would read that as "this file
+        has no identity" for a file the backend versions.
 
         A failed read propagates as it is; no identity is synthesized
         for it.
@@ -392,15 +425,19 @@ class Ops:
             tuple[bytes, LiveFileIdentity | None]: the content, and its
             identity or None when the backend recorded no marker.
         """
+        # The record names the link-followed path, because ``_call``
+        # follows before it dispatches; the filter has to compare
+        # against that same spelling.
+        target = path if self._links is None else self._links.follow(path)
         outer = active_recorder()
         scope = RecordingScope()
         try:
-            data = await self.read(path, raw=raw)
+            data = await self.read(path, raw=raw, fresh=True)
         finally:
             scope.close()
             if outer is not None:
                 outer.sink.extend(scope.records)
-        return data, read_identity(scope.records)
+        return data, read_identity(scope.records, target)
 
     async def readdir(self, path: str) -> list[str]:
         return await self._call("readdir", path)

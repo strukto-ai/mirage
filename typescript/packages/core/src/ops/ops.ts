@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { OpReport } from '../io/types.ts'
-import { activeRecords, runWithRecording } from '../observe/context.ts'
+import { activeRecords, runRecorded } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
@@ -33,16 +33,26 @@ interface MountOwner {
 export type OwnerOf = (path: string) => MountOwner | null
 
 /**
- * The identity carried by the records one read emitted.
+ * The identity carried by the records one read of `path` emitted.
  *
  * A versioned backend stamps fingerprint/revision on the record for the
  * response it just read, so the markers and the bytes come from the same
  * answer. Scanned newest first: a read may emit more than one record (a
  * rendered file reads its parts), and only a content read ever carries a
- * marker. Mirrors Python's `read_identity`.
+ * marker.
+ *
+ * `path` is the filter, and it is what removes cross-path contamination:
+ * `OpRecord.path` is the resolved virtual path, so a marker stamped for
+ * some other file cannot be read as this one's. That matters here more
+ * than in python, because the browser's `FallbackStorage` is one frame
+ * stack rather than per-task storage, so two overlapping reads can land
+ * records in each other's frame. Two concurrent reads of the *same* path
+ * in that mode stay best-effort, since their records are
+ * indistinguishable by path alone. Mirrors Python's `read_identity`.
  */
-export function readIdentity(records: readonly OpRecord[]): LiveFileIdentity | null {
+export function readIdentity(records: readonly OpRecord[], path: string): LiveFileIdentity | null {
   for (const rec of [...records].reverse()) {
+    if (rec.path !== path) continue
     if (rec.revision !== null || rec.fingerprint !== null) {
       return { exists: true, revision: rec.revision, fingerprint: rec.fingerprint }
     }
@@ -211,14 +221,19 @@ export class Ops {
   // `raw` skips the filetype cascade: an explicit null filetype stops
   // the door from stamping the path's extension, so a rendered read op
   // (gdoc/gsheet/gmail) is bypassed and the stored bytes come back.
+  // `fresh` refuses the warm file cache for a rendered read too, so the
+  // bytes come from the backend and carry whatever markers it stamps on
+  // them; it costs a round trip every time, so it is for a caller that
+  // needs the backend's own answer rather than the newest one seen.
   // `offset`/`size` ride the same kwargs the generic read op already reads,
   // so a backend with a native range fetches one window instead of the whole
-  // object. Python spells this `read(path, offset, size, raw)`.
+  // object. Python spells this `read(path, offset, size, raw, fresh)`.
   async readFile(
     path: string,
-    options: { raw?: boolean; offset?: number; size?: number | null } = {},
+    options: { raw?: boolean; fresh?: boolean; offset?: number; size?: number | null } = {},
   ): Promise<Uint8Array> {
     const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
+    if (options.fresh === true) kwargs.fresh = true
     const offset = options.offset ?? 0
     const size = options.size ?? null
     if (offset !== 0 || size !== null) {
@@ -294,9 +309,19 @@ export class Ops {
    * the read runs inside its own recording frame. The frame is nested
    * rather than shared: a sibling task writing into an enclosing line's
    * records would otherwise be able to hand this read another path's
-   * markers. What the frame collected is handed up to the enclosing
-   * frame on the way out, on the error path too, so a line's byte
-   * accounting still sees every op that happened.
+   * markers. `runRecorded` names that frame's array up front rather
+   * than reading it back from inside the callback, which under the
+   * browser's `FallbackStorage` can be a concurrent read's frame. What
+   * the frame collected is handed up to the enclosing frame on the way
+   * out, on the error path too, so a line's byte accounting still sees
+   * every op that happened. The markers are then read back per path, so
+   * a record another task dropped into this frame cannot be mistaken
+   * for this read's.
+   *
+   * The read is `fresh`: the dispatcher's warm file cache is skipped,
+   * because bytes it hands back crossed no network and carry no marker,
+   * and the caller would read that as "this file has no identity" for a
+   * file the backend versions.
    *
    * A failed read propagates as it is; no identity is synthesized for
    * it.
@@ -312,15 +337,16 @@ export class Ops {
     path: string,
     options: { raw?: boolean } = {},
   ): Promise<[Uint8Array, LiveFileIdentity | null]> {
+    // The record names the link-followed path, because `through`
+    // follows before it dispatches; the filter has to compare against
+    // that same spelling.
+    const target = this.links !== null ? this.links.follow(path) : path
     const outer = activeRecords()
-    let inner: OpRecord[] = []
-    const capture = async (): Promise<Uint8Array> => {
-      inner = activeRecords() ?? inner
-      return this.readFile(path, options)
-    }
+    const { records: inner, done } = runRecorded(() =>
+      this.readFile(path, { ...options, fresh: true }),
+    )
     try {
-      const [data] = await runWithRecording(capture)
-      return [data, readIdentity(inner)]
+      return [await done, readIdentity(inner, target)]
     } finally {
       if (outer !== null) outer.push(...inner)
     }

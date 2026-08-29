@@ -85,3 +85,37 @@ async def test_identity_folder_raises_eisdir():
 async def test_identity_mount_root_raises_eisdir_without_a_request():
     with pytest.raises(IsADirectoryError):
         await live_identity(_accessor(), PathSpec.from_str_path("/"))
+
+
+@pytest.mark.asyncio
+async def test_identity_folder_spelled_with_a_trailing_slash_is_eisdir():
+    # Graph is item-addressed off the slashless resource_path, so the
+    # hint costs nothing: the folder facet on the answer is what refuses
+    # it, the same as without the slash.
+    with aioresponses() as m:
+        m.get(_DIR_URL,
+              payload={
+                  "id": "01FOLDER",
+                  "name": "Docs",
+                  "folder": {
+                      "childCount": 2
+                  },
+              })
+        with pytest.raises(IsADirectoryError):
+            await live_identity(_accessor(), PathSpec.from_str_path("/Docs/"))
+
+
+@pytest.mark.asyncio
+async def test_identity_absent_path_with_a_trailing_slash_reports_absent():
+    with aioresponses() as m:
+        m.get(_DIR_URL,
+              status=404,
+              payload={"error": {
+                  "code": "itemNotFound",
+                  "message": "no"
+              }})
+        result = await live_identity(_accessor(),
+                                     PathSpec.from_str_path("/Docs/"))
+    assert result.exists is False
+    assert result.revision is None
+    assert result.fingerprint is None

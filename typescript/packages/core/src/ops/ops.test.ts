@@ -929,4 +929,91 @@ describe('Ops.readFileWithIdentity', () => {
     expect(threw).toBeInstanceOf(Error)
     expect(outerRecords.some((r) => r.revision === 'rev-3')).toBe(true)
   })
+
+  it('is not answered by the warm file cache', async () => {
+    // A cached read crosses no network and stamps no marker, so serving
+    // one here would hand back bytes with identity null for a file the
+    // backend versions. The plain read still takes the cache; only this
+    // one refuses it.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    await ws.cache.set('/data/a.txt', new TextEncoder().encode('CACHED'))
+    expect(await ws.fs.readFileText('/data/a.txt')).toBe('CACHED')
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('does not read a marker stamped for another path as this one', async () => {
+    // FallbackStorage (the browser) hands the newest live frame to every
+    // reader, so a concurrent read's record can land in this frame.
+    // Filtering on the record's own path is what stops that record from
+    // being reported as this file's identity.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => {
+        record('read', '/data/other.txt', resource.kind, 1, performance.now(), {
+          fingerprint: 'fp-other',
+          revision: 'rev-other',
+        })
+        return new TextEncoder().encode('mine')
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('mine')
+    expect(identity).toBeNull()
+  })
+
+  it('still finds the marker of a read reached through a symlink', async () => {
+    // The record names the followed path, so the filter has to follow
+    // too: comparing against the link's own name would drop the marker
+    // of every read reached through one.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/data/a.txt', 'stored')
+    await ws.fs.symlink('/data/link.txt', '/data/a.txt')
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/link.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
 })

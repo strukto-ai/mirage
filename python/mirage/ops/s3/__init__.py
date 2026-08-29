@@ -14,6 +14,7 @@
 
 from mirage.commands.builtin.s3.io import IO
 from mirage.ops.generic import make_generic_ops
+from mirage.ops.registry import registered_ops
 from mirage.ops.s3.identity import live_identity
 
-OPS = [*make_generic_ops("s3", IO), live_identity]
+OPS = [*make_generic_ops("s3", IO), *registered_ops(live_identity)]

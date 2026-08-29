@@ -92,6 +92,18 @@ describe('runWithRecording / record / runWithMountPrefix', () => {
     expect(records[0]?.path).toBe('/s3/s3-report.txt')
   })
 
+  // The drive and box backends hand over PathSpec.resourcePath, which
+  // carries no leading slash; a plain concatenation would record
+  // '/drivereport.json', a path nothing can match or follow.
+  it('inserts the separator for a mount-relative path with no leading slash', async () => {
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/drive', async () => {
+        record('read', 'sub/report.json', 'gdrive', 1, 0)
+      }),
+    )
+    expect(records[0]?.path).toBe('/drive/sub/report.json')
+  })
+
   it('restores the enclosing prefix when a nested mount scope ends', async () => {
     const [, records] = await runWithRecording(() =>
       runWithMountPrefix('/s3', async () => {

@@ -49,4 +49,35 @@ describe('object_store identity', () => {
     await expect(codeOf(identity(accessor, spec('/')))).resolves.toBe('EISDIR')
     expect(store.connects).toBe(0)
   })
+
+  it('a trailing slash on a marker directory is EISDIR', async () => {
+    // A zero-byte marker object keyed 'dir/' is what an empty directory
+    // is on these stores, so the point lookup would find it and report
+    // its metadata as a file identity. The trailing slash says the
+    // caller means the directory, exactly as it does for stat.
+    const store = new FakeStore({ 'dir/': '' })
+    const identity = makeIdentity(makeDriver(store))
+    await expect(codeOf(identity(accessor, spec('/dir/')))).resolves.toBe('EISDIR')
+  })
+
+  it('a trailing slash on nothing is absent', async () => {
+    // The hint is not a licence to answer EISDIR unasked: nothing is
+    // stored under the prefix, so the honest answer is absent.
+    const store = new FakeStore({ 'a.txt': 'hi' })
+    const identity = makeIdentity(makeDriver(store))
+    const result = await identity(accessor, spec('/nope/'))
+    expect(result.exists).toBe(false)
+    expect(result.revision).toBeNull()
+    expect(result.fingerprint).toBeNull()
+  })
+
+  it('never reads the marker as a file, but the file spelling still does', async () => {
+    const store = new FakeStore({ csv: 'rows', 'csv/': '' })
+    const identity = makeIdentity(makeDriver(store))
+    await expect(codeOf(identity(accessor, spec('/csv/')))).resolves.toBe('EISDIR')
+    const result = await identity(accessor, spec('/csv'))
+    expect(result.exists).toBe(true)
+    expect(result.fingerprint).toBe('fp-csv')
+    expect(result.revision).toBe('rev-csv')
+  })
 })

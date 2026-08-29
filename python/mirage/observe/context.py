@@ -168,13 +168,19 @@ def _virtual(path: str, prefix: str) -> str:
     at /s3 holding s3-report.txt would otherwise look already-prefixed and
     record as "/s3-report.txt".
 
+    A mount-relative path spelled without its leading slash (the drive
+    and box backends hand over ``PathSpec.resource_path``) gets the
+    separator, because a plain concatenation names nothing: "/s3" and
+    "report.json" would record as "/s3report.json", which is not a path
+    any caller can match, follow or grep for.
+
     Args:
         path (str): Mount-relative or already-virtual path.
         prefix (str): Mount prefix (e.g. "/s3"), empty for the root mount.
     """
     if not prefix or path == prefix or path.startswith(prefix + "/"):
         return path
-    return prefix + path
+    return prefix + path if path.startswith("/") else prefix + "/" + path
 
 
 def record(op: str,

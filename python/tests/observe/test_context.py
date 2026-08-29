@@ -113,6 +113,19 @@ def test_record_prefixes_name_sharing_prefix_leading_text():
     assert records[0].path == "/s3/s3-report.txt"
 
 
+def test_record_inserts_the_separator_for_a_slashless_mount_path():
+    # The drive and box backends hand over PathSpec.resource_path, which
+    # carries no leading slash; a plain concatenation would record
+    # "/drivesub/report.json", a path nothing can match or follow.
+    scope = RecordingScope()
+    records = scope.records
+    push_mount_prefix("/drive")
+    record("read", "sub/report.json", "gdrive", 1, 0)
+    push_mount_prefix("")
+    scope.close()
+    assert records[0].path == "/drive/sub/report.json"
+
+
 def test_push_mount_prefix_returns_previous():
     scope = RecordingScope()
     assert push_mount_prefix("/s3") == ""

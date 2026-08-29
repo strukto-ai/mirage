@@ -71,4 +71,22 @@ describe('gdrive identity', () => {
   it('raises EISDIR on the mount root without resolving', async () => {
     await expect(liveIdentity(accessor, path(''))).rejects.toMatchObject({ code: 'EISDIR' })
   })
+
+  it('raises EISDIR for a folder spelled with a trailing slash', async () => {
+    // Drive is id-addressed and the key the resolver walks carries no
+    // trailing slash, so the hint costs nothing: the folder resolves and
+    // the file-only contract refuses it, the same as without the slash.
+    fake.folder('dir')
+    const slashed = new PathSpec({ virtual: '/dir/', directory: '/', resourcePath: 'dir' })
+    await expect(liveIdentity(accessor, slashed)).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('reports exists false for an absent path spelled with a trailing slash', async () => {
+    fake.folder('a')
+    const slashed = new PathSpec({ virtual: '/a/gone/', directory: '/a', resourcePath: 'a/gone' })
+    const result = await liveIdentity(accessor, slashed)
+    expect(result.exists).toBe(false)
+    expect(result.revision).toBeNull()
+    expect(result.fingerprint).toBeNull()
+  })
 })
