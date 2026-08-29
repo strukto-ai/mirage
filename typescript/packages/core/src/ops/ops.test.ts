@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { IndexEntry, LookupStatus, type LookupResult } from '../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../cache/index/ram.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/errors.ts'
+import { record, runWithRecording } from '../observe/context.ts'
 import { OpsRegistry } from './registry.ts'
+import type { LiveFileIdentity } from './types.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
@@ -23,6 +28,15 @@ import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
 import { enoent, enotdir } from '../utils/errors.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
+
+// Exposes the protected `_index` slot so a test can swap in a custom
+// IndexCacheStore instance, the way BaseResource.setIndex only allows a
+// config, never an arbitrary store.
+class TestableRAMResource extends RAMResource {
+  setRawIndex(index: IndexCacheStore): void {
+    this._index = index
+  }
+}
 
 const DEC = new TextDecoder()
 
@@ -771,5 +785,148 @@ describe('Ops.readlink', () => {
       { mode: MountMode.WRITE, ops, policies: [noProbe] },
     )
     expect(await codeOf(ws, '/data/missing')).toBe('EINVAL')
+  })
+})
+
+describe('Ops.liveIdentity', () => {
+  it('reads back null when the mount has no identity op', async () => {
+    const ws = mkWorkspace()
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toBeNull()
+  })
+
+  it('answers with the backend struct on a wired mount', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const fresh: LiveFileIdentity = { exists: true, revision: 'r1', fingerprint: 'fp1' }
+    ops.register({
+      name: 'live_identity',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => fresh,
+      write: false,
+    })
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toEqual(fresh)
+  })
+
+  it('ignores a wrong entry and a lying negative cache', async () => {
+    // The index holds a stale positive entry for this exact path, and its
+    // own get() answers NOT_FOUND for everything regardless of what was
+    // put -- liveIdentity must still answer from the backend, proving the
+    // op never consults the index either way.
+    class LyingIndex extends RAMIndexCacheStore {
+      override get(_resourcePath: string): Promise<LookupResult> {
+        return Promise.resolve({ entry: null, status: LookupStatus.NOT_FOUND })
+      }
+    }
+    const resource = new TestableRAMResource()
+    const lying = new LyingIndex()
+    resource.setRawIndex(lying)
+    const wrongEntry = new IndexEntry({ id: 'wrong-id', name: 'a.txt', resourceType: 'ram/file' })
+    await lying.put('/a.txt', wrongEntry)
+
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const fresh: LiveFileIdentity = { exists: true, revision: 'fresh-rev', fingerprint: 'fresh-fp' }
+    ops.register({
+      name: 'live_identity',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => fresh,
+      write: false,
+    })
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toEqual(fresh)
+  })
+})
+
+describe('Ops.readFileWithIdentity', () => {
+  it('returns bytes and null on RAM', async () => {
+    const ws = mkWorkspace()
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('hello')
+    expect(identity).toBeNull()
+  })
+
+  it('is populated when the read stamps markers', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    // The Workspace constructor re-registers each mount's ops, so the
+    // fake read has to land on the registry after the workspace is built.
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('forwards nested records to an enclosing scope on success', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('data')
+        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+          fingerprint: 'fp-2',
+          revision: 'rev-2',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [, outerRecords] = await runWithRecording(() => ws.fs.readFileWithIdentity('/data/a.txt'))
+    expect(outerRecords.some((r) => r.revision === 'rev-2')).toBe(true)
+  })
+
+  it('forwards nested records to an enclosing scope on a raising read', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        record('read', path.virtual, resource.kind, 0, performance.now(), {
+          fingerprint: 'fp-3',
+          revision: 'rev-3',
+        })
+        throw new Error('boom')
+      },
+      write: false,
+    })
+    let threw: unknown
+    const [, outerRecords] = await runWithRecording(async () => {
+      try {
+        await ws.fs.readFileWithIdentity('/data/a.txt')
+      } catch (err) {
+        threw = err
+      }
+    })
+    expect(threw).toBeInstanceOf(Error)
+    expect(outerRecords.some((r) => r.revision === 'rev-3')).toBe(true)
   })
 })

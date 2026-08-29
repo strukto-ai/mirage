@@ -227,3 +227,46 @@ works on the fingerprint alone.
 
 - **Revision longevity.** Pinned reads only work as long as the source still retains the recorded revision. S3 bucket lifecycle rules can age out old versions; Drive keeps revisions for 30 days on non-Workspace files. Treat pins as best-effort.
 - **First read after load is slower than the rest.** `Workspace.load()` returns immediately, but the first `execute()` or `dispatch()` afterwards pauses while Mirage verifies that nothing has drifted upstream. Concretely, it asks the live source "is this path still the bytes I remember?" once per recorded read, in parallel. Tiny for short sessions (tens of milliseconds); a few hundred milliseconds to a couple of seconds for sessions with hundreds of recorded reads. The pause happens once per loaded workspace; subsequent calls are normal speed. Pass `drift_policy=DriftPolicy.OFF` if you want to skip the check entirely.
+
+## Live File Identity
+
+Snapshot drift detection asks "did this path change since I captured it?" A second, standalone pair of ops answers the more general question, "what does the backend know about this file right now?" — on demand, with no capture step and no relationship to `SUPPORTS_SNAPSHOT`.
+
+```python
+identity = await ws.ops.live_identity("/s3/data.csv")
+# LiveFileIdentity(exists=True, revision="v3-...", fingerprint="a1b2c3...")
+
+data, identity = await ws.ops.read_with_identity("/s3/data.csv")
+```
+
+```typescript
+const identity = await ws.fs.liveIdentity('/s3/data.csv')
+
+const [data, readIdentity] = await ws.fs.readFileWithIdentity('/s3/data.csv')
+```
+
+Both bypass every cache on the way down — the positive and negative index entries, the warm file cache — so the answer always reflects one fresh backend call (two for Google Drive, which resolves a path to a file id before it can ask that id's metadata). `read_with_identity` stamps the bytes it just read from that same response, never a second round trip; `live_identity` is the standalone probe for a pre-write check or a post-write restamp.
+
+The result carries the same two markers snapshot fingerprints and pins:
+
+- **`revision`** — a durable, replayable handle (S3 `VersionId`, GridFS `_id`, Drive `headRevisionId`, a Graph version id). Strong enough to fetch the exact bytes again later.
+- **`fingerprint`** — a change token only (ETag, md5, cTag). Strong enough to detect that the file moved on, nothing more.
+
+They are never collapsed into one string, and `exists` keeps three states distinct:
+
+| State | Meaning |
+| --- | --- |
+| `exists=False` | The backend answered "no such file." Both markers are `None`. |
+| `exists=True`, both markers `None` | The file is there; the backend has no native marker for it. Not the same as absent. |
+| `exists=True`, a marker set | The live identity. |
+
+A mount whose backend registers no identity op reads back `None` rather than raising — an honest capability probe a caller can branch on, the same way a missing op reads elsewhere in the facade. The surface is file-only: a directory operand raises `EISDIR`, since a prefix has no stable identity on an object store.
+
+<Note>
+  In the browser, S3 identity is a HEAD request the presigned client can
+  sign, so no separate code path is needed there. But the browser can only
+  read the `ETag` and `x-amz-version-id` response headers back when the
+  bucket's CORS configuration lists them in `ExposeHeaders`. Without that,
+  `live_identity` honestly returns both markers as `None` rather than
+  guessing at a value it cannot see.
+</Note>
