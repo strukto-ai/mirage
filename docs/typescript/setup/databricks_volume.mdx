@@ -84,17 +84,30 @@ or retries it: a retry would send the same refused credential again and, for a
 write, would send the write twice. A refusal throws
 `DatabricksVolumeAuthError`, a subclass of `DatabricksVolumeApiError`:
 
+An op call propagates the typed error:
+
 ```ts
 import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from '@struktoai/mirage-core'
 
 try {
-  await ws.execute('ls /dbx/')
+  await ws.readdir('/dbx/')
 } catch (err) {
   if (err instanceof DatabricksVolumeAuthError) {
     // mint a new token and build a new resource
   } else if (err instanceof DatabricksVolumeApiError) {
     // every other Files API refusal, with err.statusCode and err.errorCode
   }
+}
+```
+
+A shell line does not. `Workspace.execute` turns every backend failure into a
+nonzero result the way a shell does, so the refusal arrives as an exit code and
+a message on stderr rather than as a thrown error:
+
+```ts
+const result = await ws.execute('ls /dbx/')
+if (result.exitCode !== 0) {
+  console.error(result.stderrText)
 }
 ```
 

@@ -98,14 +98,38 @@ refused credential again and, for a write, would send the write twice. A
 refusal surfaces as `DatabricksVolumeAuthError`, a subclass of
 `DatabricksVolumeApiError`:
 
+A rebuilt config is validated, not copied. `model_copy(update=...)` skips
+validation, so the new token would sit in the field as a plain `str` and its
+value would show up in the config's `repr`:
+
 ```python
 from mirage.core.databricks_volume.errors import DatabricksVolumeAuthError
 
+
+def with_token(config: DatabricksVolumeConfig, token: str):
+    return DatabricksVolumeConfig.model_validate({
+        **config.model_dump(),
+        "token": token,
+    })
+```
+
+An op call propagates the typed error:
+
+```python
 try:
-    await ws.execute("ls /dbx/")
+    await ws.readdir("/dbx/")
 except DatabricksVolumeAuthError:
-    resource = DatabricksVolumeResource(
-        config.model_copy(update={"token": mint_my_token()}))
+    resource = DatabricksVolumeResource(with_token(config, mint_my_token()))
+```
+
+A shell line does not. `Workspace.execute` turns every backend failure into a
+nonzero result the way a shell does, so the refusal arrives as an exit code and
+a message on stderr rather than as an exception:
+
+```python
+result = await ws.execute("ls /dbx/")
+if result.exit_code != 0:
+    print(await result.stderr_str())
 ```
 
 For a long-lived process against short-lived tokens, rebuild the resource on a

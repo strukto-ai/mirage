@@ -159,8 +159,11 @@ ws = await Workspace.load(
 ## Expired tokens
 
 MIRAGE sends the configured token on every call and never refreshes or retries
-it. A refusal raises `DatabricksVolumeAuthError`; build a new resource with a
-new config to recover.
+it. A refusal raises `DatabricksVolumeAuthError` out of an op call
+(`ws.readdir`, `ws.stat`, `ws.dispatch`); through `ws.execute` it arrives as a
+nonzero `IOResult` instead, because the executor answers a failed shell line
+the way a shell does. Either way, recovery is a new resource built from a new
+config. See the [setup guide](/python/setup/databricks) for both shapes.
 
 ## Databricks Apps
 
@@ -169,9 +172,13 @@ supply the token — typically the token of the signed-in user, resolved per
 request:
 
 ```python
-resource = DatabricksVolumeResource(
-    config.model_copy(update={"token": request_user_token()}))
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+# model_validate, not model_copy(update=...): a copy skips validation, so
+# the token would stay a plain str and its value would show in the repr.
+config = DatabricksVolumeConfig.model_validate({
+    **config.model_dump(),
+    "token": request_user_token(),
+})
+ws = Workspace({"/dbx/": DatabricksVolumeResource(config)}, mode=MountMode.READ)
 ```
 
 This does not require FUSE. The agent can access the mounted workspace through

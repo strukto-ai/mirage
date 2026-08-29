@@ -41,7 +41,8 @@ machine-to-machine, on-behalf-of a signed-in user, or a token read from a
 secret manager. Mint it your own way and pass the string as `token`.
 
 MIRAGE sends that token on every Files API call and never refreshes or retries
-it. When it expires the call fails with `DatabricksVolumeAuthError`, and your
+it. When it expires the call fails with `DatabricksVolumeAuthError` (raised
+from an op call, reported as a nonzero result from a shell line), and your
 program obtains a new token and builds a new resource. See the
 [Python](/python/setup/databricks) and
 [TypeScript](/typescript/setup/databricks_volume) setup guides.
