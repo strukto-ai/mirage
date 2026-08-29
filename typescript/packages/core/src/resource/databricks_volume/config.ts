@@ -17,7 +17,7 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
-  secretStr,
+  secretSchema,
 } from '../secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
 
@@ -48,7 +48,11 @@ function normalizeRootPath(value: string): string {
 // program decides where the token comes from and hands it over.
 const DatabricksVolumeConfigSchema = z.object({
   host: z.string().transform(normalizeHost),
-  token: secretStr(),
+  // `secretSchema` last, not `secretStr().min(1)`: the secret marker is
+  // metadata on the schema instance, and a check clones the instance, so a
+  // marker applied first would not survive and the token would stop being
+  // redacted. Python spells the same rule as `validate_token`.
+  token: secretSchema(z.string().min(1, 'token must be a non-empty bearer token')),
   catalog: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   schema: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   volume: z.string().refine(validVolumePart, 'must be a non-empty path segment'),

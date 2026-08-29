@@ -61,6 +61,7 @@ describe('config normalization', () => {
         host: 'https://dbc.example.com',
       }),
     ).toThrow()
+    expect(() => normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, token: '' })).toThrow()
   })
 
   it('has no profile field', () => {
