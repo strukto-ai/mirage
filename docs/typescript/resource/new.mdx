@@ -198,7 +198,7 @@ export class MyResource extends BaseResource implements Resource {
 
 Set `cachesReads` true only for stable, read-mostly content. Override `getState()` to carry the (redacted) config, and `close()` to release any client handles, calling `super.close()`, which closes the index store.
 
-A config-backed backend also sets `needs_override: true` in that state. TypeScript's loader consults no registry, so a mount it was not handed comes back as an empty `RAMResource`; the flag makes it refuse instead. Python does not need it, which is why the flag is written on only a handful of resources there and read on none.
+A config-backed backend also sets `needs_override: true` in that state. TypeScript's loader consults no registry, so a mount it was not handed comes back as an empty `RAMResource`; the flag makes it refuse instead. Python's loader reads the same flag, so the two agree; it rebuilds the class through its registry, so it writes the flag only where that rebuild would come back inert.
 
 ## 6. Snapshot Support
 

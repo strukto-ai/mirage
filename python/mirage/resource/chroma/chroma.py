@@ -53,9 +53,10 @@ class ChromaResource(BaseResource):
         return await _resolve_glob(self.accessor, paths, index=self._index)
 
     def get_state(self) -> dict[str, Any]:
+        # No override marker and nothing redacted: host/port/collection
+        # is the whole config, so the loader rebuilds the client from it.
         return {
             "type": self.name,
-            "needs_override": True,
             "redacted_fields": [],
             "config": self.config.model_dump(),
         }

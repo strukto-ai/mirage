@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
-
 import pytest
 
 from mirage.core.databricks_volume.mkdir import mkdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+from ._fakes import file_metadata
 
 
 def _path(path: str) -> PathSpec:
@@ -72,8 +72,7 @@ async def test_mkdir_existing_target_fails(accessor, files, remote_root,
 @pytest.mark.asyncio
 async def test_mkdir_parent_is_file_fails(accessor, files, remote_root, index):
     _seed_directory(files, remote_root)
-    files.metadata[f"{remote_root}/file.txt"] = SimpleNamespace(
-        is_directory=False, file_size=3)
+    files.metadata[f"{remote_root}/file.txt"] = file_metadata(3)
 
     with pytest.raises(NotADirectoryError):
         await mkdir(accessor, _path("/dbx/file.txt/sub"), index=index)

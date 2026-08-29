@@ -13,6 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+class DatabricksVolumeApiError(RuntimeError):
+    """A Files API answer the client could not use.
+
+    Args:
+        message (str): the rendered failure, method and URL included.
+        status_code (int | None): HTTP status, when there was one.
+        error_code (str | None): the Databricks ``error_code`` field,
+            absent on a HEAD (which carries no body at all).
+    """
+
+    def __init__(self,
+                 message: str,
+                 status_code: int | None = None,
+                 error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
+
+
 def is_not_found(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     if status_code == 404:

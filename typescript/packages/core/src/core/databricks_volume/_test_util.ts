@@ -15,18 +15,20 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { normalizeDatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
+import { StaticTokenProvider } from '../../resource/databricks_volume/token_provider.ts'
 import { PathSpec } from '../../types.ts'
 
 export const TEST_ROOT = '/Volumes/main/default/agent_files/root'
 
 export function makeAccessor(rootPath = '/root'): DatabricksVolumeAccessor {
   const config = normalizeDatabricksVolumeConfig({
+    host: 'https://dbc.example.com',
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',
     root_path: rootPath,
   })
-  return new DatabricksVolumeAccessor(config, 'https://dbc.example.com', 'tok-123')
+  return new DatabricksVolumeAccessor(config, new StaticTokenProvider('tok-123'))
 }
 
 export function spec(virtual: string, prefix = '/volume'): PathSpec {

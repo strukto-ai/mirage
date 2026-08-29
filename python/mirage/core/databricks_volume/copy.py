@@ -12,13 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from io import BytesIO
-from typing import Any
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.databricks_volume.client import DatabricksFilesClient
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.stat import stat
@@ -26,53 +23,26 @@ from mirage.core.databricks_volume.write import write_bytes
 from mirage.types import FileType, PathSpec
 
 
-def _download_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> bytes:
-    response = accessor.files.download(remote_path)
-    contents = getattr(response, "contents", response)
-    if hasattr(contents, "read"):
-        return contents.read()
-    return bytes(contents)
-
-
-def _upload_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-    data: bytes,
-) -> None:
-    accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
-
-
-def _create_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.create_directory(remote_path)
-
-
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
-def _copy_tree_sync(
-    accessor: DatabricksVolumeAccessor,
+async def copy_tree(
+    client: DatabricksFilesClient,
     remote_src: str,
     remote_dst: str,
 ) -> None:
-    _create_directory_sync(accessor, remote_dst)
-    for entry in _list_directory_sync(accessor, remote_src):
+    """Recreate a directory subtree under a new backend path.
+
+    Args:
+        client (DatabricksFilesClient): the Files API client.
+        remote_src (str): absolute backend path of the source directory.
+        remote_dst (str): absolute backend path of the destination.
+    """
+    await client.create_directory(remote_dst)
+    for entry in await client.list_directory(remote_src):
         name = entry.path.rstrip("/").rsplit("/", 1)[-1]
         child_dst = remote_dst.rstrip("/") + "/" + name
-        if getattr(entry, "is_directory", False):
-            _copy_tree_sync(accessor, entry.path, child_dst)
+        if entry.is_directory:
+            await copy_tree(client, entry.path, child_dst)
         else:
-            _upload_sync(accessor, child_dst,
-                         _download_sync(accessor, entry.path))
+            await client.upload(child_dst, await client.download(entry.path))
 
 
 async def copy(
@@ -100,8 +70,7 @@ async def copy(
             # forever. Refuse before any create_directory/upload.
             raise ValueError(f"cannot copy a directory, '{src.virtual}', "
                              f"into itself, '{dst.virtual}'")
-        await asyncio.to_thread(_copy_tree_sync, accessor, remote_src,
-                                remote_dst)
+        await copy_tree(accessor.client, remote_src, remote_dst)
         # create_directory materializes missing ancestors and the walk can
         # merge into a pre-existing destination directory (mv onto an empty
         # dir), so evict the destination's own listing and every ancestor

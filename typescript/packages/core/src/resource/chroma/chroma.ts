@@ -70,8 +70,8 @@ export class ChromaResource extends BaseResource implements Resource {
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMResource for anything it was
       // not handed. Saying so out loud turns a silently empty mount
-      // into a refusal to load. Python rebuilds via its registry, so it
-      // writes this on only four resources and reads it nowhere.
+      // into a refusal to load. Python reads the flag too now, and
+      // writes it only where a rebuild really cannot work.
       needs_override: true,
     }
   }

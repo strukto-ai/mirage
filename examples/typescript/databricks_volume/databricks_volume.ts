@@ -16,6 +16,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
+  DatabricksStaticTokenProvider,
   DatabricksVolumeResource,
   MountMode,
   Workspace,
@@ -50,17 +51,19 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 
 async function main(): Promise<void> {
   const config = normalizeDatabricksVolumeConfig({
+    host: process.env.DATABRICKS_HOST!,
     catalog: process.env.DATABRICKS_VOLUME_CATALOG!,
     schema: process.env.DATABRICKS_VOLUME_SCHEMA!,
     volume: process.env.DATABRICKS_VOLUME_NAME!,
     root_path: process.env.DATABRICKS_VOLUME_ROOT_PATH ?? '/',
-    ...(process.env.DATABRICKS_HOST !== undefined ? { host: process.env.DATABRICKS_HOST } : {}),
-    ...(process.env.DATABRICKS_TOKEN !== undefined ? { token: process.env.DATABRICKS_TOKEN } : {}),
-    ...(process.env.DATABRICKS_CONFIG_PROFILE !== undefined
-      ? { profile: process.env.DATABRICKS_CONFIG_PROFILE }
-      : {}),
   })
-  const resource = await DatabricksVolumeResource.create(config)
+  // The config holds no credential. Anything that mints or refreshes a token
+  // is application code implementing TokenProvider; a personal access token
+  // needs nothing more than this.
+  const resource = await DatabricksVolumeResource.create(
+    config,
+    new DatabricksStaticTokenProvider(process.env.DATABRICKS_TOKEN!),
+  )
   const ws = new Workspace({ '/dbx/': resource }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')

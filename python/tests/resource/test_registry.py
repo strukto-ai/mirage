@@ -130,6 +130,33 @@ def test_unknown_resource_raises_keyerror():
         build_resource("nonsense")
 
 
+def test_databricks_volume_refuses_to_build_from_config():
+    """The token reaches the resource through a provider the embedding
+    program constructs, so a mount described as data is refused by name
+    rather than dying on a missing argument three frames down. The
+    sentence is the one TypeScript's factory rejects with."""
+    with pytest.raises(TypeError) as excinfo:
+        build_resource(
+            "databricks_volume", {
+                "host": "https://dbc.example.com",
+                "catalog": "main",
+                "schema": "default",
+                "volume": "agent_files",
+            })
+    assert str(excinfo.value) == (
+        "databricks_volume: a token provider is required; construct "
+        "DatabricksVolumeResource(config, token_provider) directly instead of "
+        "declaring this mount as config")
+
+
+def test_a_name_refused_from_config_is_still_a_known_resource():
+    # The name still resolves everywhere else a registry name is read
+    # from — a snapshot records it, and the class lookup goes through
+    # the same table.
+    assert "databricks_volume" in REGISTRY
+    assert "databricks_volume" in known_resources()
+
+
 def test_registry_module_import_is_free_of_resource_deps():
     import importlib
     import sys

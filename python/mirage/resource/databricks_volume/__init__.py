@@ -12,12 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TYPE_CHECKING
+
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
+from mirage.resource.databricks_volume.token_provider import (
+    StaticTokenProvider, TokenProvider)
 
-__all__ = ["DatabricksVolumeConfig", "DatabricksVolumeResource"]
+if TYPE_CHECKING:
+    from mirage.resource.databricks_volume.databricks_volume import \
+        DatabricksVolumeResource
+
+__all__ = [
+    "DatabricksVolumeConfig",
+    "DatabricksVolumeResource",
+    "StaticTokenProvider",
+    "TokenProvider",
+]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> type["DatabricksVolumeResource"]:
     if name == "DatabricksVolumeResource":
         from mirage.resource.databricks_volume.databricks_volume import \
             DatabricksVolumeResource

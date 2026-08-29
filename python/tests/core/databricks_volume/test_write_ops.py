@@ -20,6 +20,8 @@ from mirage.core.databricks_volume.write import write_bytes
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
+from ._fakes import file_entry, file_metadata
+
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
@@ -27,31 +29,15 @@ def _path(path: str) -> PathSpec:
 
 def _seed_directory(files, path: str) -> None:
     files.directory_metadata.add(path)
-    files.metadata[path] = type("Metadata", (), {"is_directory": True})()
     files.directories.setdefault(path, [])
 
 
 def _seed_file(files, path: str, data: bytes) -> None:
     parent = path.rsplit("/", 1)[0]
     files.downloads[path] = data
-    files.metadata[path] = type(
-        "Metadata",
-        (),
-        {
-            "content_length": len(data),
-        },
-    )()
+    files.metadata[path] = file_metadata(len(data))
     files.directories.setdefault(parent, [])
-    files.directories[parent].append(
-        type(
-            "Entry",
-            (),
-            {
-                "path": path,
-                "is_directory": False,
-                "file_size": len(data),
-            },
-        )())
+    files.directories[parent].append(file_entry(path, len(data)))
 
 
 @pytest.mark.asyncio
@@ -61,7 +47,7 @@ async def test_write_new_file(accessor, files, remote_root, index):
     await write_bytes(accessor, _path("/dbx/new.txt"), b"hello", index)
 
     assert files.downloads[f"{remote_root}/new.txt"] == b"hello"
-    assert files.upload_calls == [(f"{remote_root}/new.txt", b"hello", True)]
+    assert files.upload_calls == [(f"{remote_root}/new.txt", b"hello")]
 
 
 @pytest.mark.asyncio

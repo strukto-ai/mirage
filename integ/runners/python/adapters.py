@@ -37,7 +37,7 @@ import asyncpg
 import boto3
 import chromadb
 import lancedb
-from databricks_client import HttpFilesClient
+from databricks_client import create_volume_root
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient, models
@@ -57,7 +57,8 @@ from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.ceph import CephConfig, CephResource
 from mirage.resource.chroma import ChromaConfig, ChromaResource
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource)
+                                               DatabricksVolumeResource,
+                                               StaticTokenProvider)
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.digitalocean import (DigitalOceanConfig,
                                           DigitalOceanResource)
@@ -328,13 +329,14 @@ class DatabricksVolumeService:
 
     def resource(self, mount: dict) -> DatabricksVolumeResource:
         volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
-        config = DatabricksVolumeConfig(catalog="main",
+        config = DatabricksVolumeConfig(host=self.base,
+                                        catalog="main",
                                         schema="default",
                                         volume=volume,
                                         root_path=mount.get("prefix") or "/")
-        client = HttpFilesClient(self.base, self.token)
-        client.files.create_directory(configured_root(config))
-        return DatabricksVolumeResource(config, client=client)
+        create_volume_root(self.base, self.token, configured_root(config))
+        return DatabricksVolumeResource(config,
+                                        StaticTokenProvider(self.token))
 
     async def teardown(self) -> None:
         await stop_kit_fake(self.process)
@@ -2402,8 +2404,7 @@ def build_slack(
 # hf_buckets validates the bucket id.
 ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
     "databricks": (DatabricksVolumeResource, DatabricksVolumeConfig, {
-        "host": "h",
-        "token": "t",
+        "host": "https://h.example.com",
         "catalog": "c",
         "schema": "s",
         "volume": "v",
@@ -2468,7 +2469,11 @@ def build_arg_error(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     resource_cls, config_cls, kwargs = ARG_ERROR_RESOURCES[mount["backend"]]
-    return resource_cls(config_cls(**kwargs)), _noop
+    config = config_cls(**kwargs)
+    if resource_cls is DatabricksVolumeResource:
+        # Its credential is a provider argument, not a config field.
+        return resource_cls(config, StaticTokenProvider("t")), _noop
+    return resource_cls(config), _noop
 
 
 BUILDERS = {

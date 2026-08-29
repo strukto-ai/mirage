@@ -7,59 +7,39 @@ description: Set up the Databricks Unity Catalog volume resource in Python.
 ## Dependencies
 
 ```bash
-uv add 'mirage-ai[databricks]'
+uv add mirage-ai
 ```
+
+No extra to install: the resource speaks the Files REST API over `aiohttp`,
+which MIRAGE already depends on. It does **not** use `databricks-sdk`.
 
 For credential setup, see the [Databricks Volume Setup](/home/setup/databricks)
 guide.
 
 ## Configuration
 
-### Databricks Apps or SDK-default auth
-
-```python
-from mirage import Workspace, MountMode
-from mirage.resource.databricks_volume import (
-    DatabricksVolumeConfig,
-    DatabricksVolumeResource,
-)
-
-config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-)
-resource = DatabricksVolumeResource(config=config)
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
-```
-
-### Explicit host and token
+The config carries location and transport. The credential arrives separately,
+through a token provider.
 
 ```python
 import os
 
+from mirage import MountMode, Workspace
+from mirage.resource.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeResource,
+    StaticTokenProvider,
+)
+
 config = DatabricksVolumeConfig(
+    host=os.environ["DATABRICKS_HOST"],
     catalog="main",
     schema="default",
     volume="agent_files",
-    host=os.environ["DATABRICKS_HOST"],
-    token=os.environ["DATABRICKS_TOKEN"],
     root_path="/reports",
 )
-resource = DatabricksVolumeResource(config=config)
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
-```
-
-### Profile-based auth
-
-```python
-config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    profile="DEV",
-)
-resource = DatabricksVolumeResource(config=config)
+resource = DatabricksVolumeResource(
+    config, StaticTokenProvider(os.environ["DATABRICKS_TOKEN"]))
 ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
 ```
 
@@ -67,17 +47,108 @@ ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
 
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
+| `host` | Yes |  | Databricks workspace URL. Trailing slashes are stripped. |
 | `catalog` | Yes |  | Unity Catalog catalog name. |
 | `schema` | Yes |  | Unity Catalog schema name. |
 | `volume` | Yes |  | Unity Catalog volume name. |
 | `root_path` | No | `/` | Subdirectory inside the volume to expose. |
-| `host` | No |  | Databricks workspace host. |
-| `token` | No |  | Databricks personal access token. Redacted in snapshots. |
-| `profile` | No |  | Databricks SDK profile name. |
 | `timeout` | No | `30` | Request timeout in seconds. |
+
+There is no `token` or `profile` field. The config holds no secret at all.
+
+## Bring your own token acquisition
+
+`TokenProvider` is one method:
+
+```python
+class TokenProvider(Protocol):
+    def get_token(self) -> str | Awaitable[str]: ...
+```
+
+Return the raw token, without the `Bearer ` prefix. It may be sync or async.
+MIRAGE calls it before each Files API operation, so one shell line may consult
+it more than once; caching, refresh and locking belong to the provider. MIRAGE
+never serializes a provider, and a 401 propagates as
+`DatabricksVolumeApiError` rather than being retried, because an
+on-behalf-of provider cannot re-mint a user's token and a write must not be
+sent twice.
+
+The three providers below are **application code**, not part of MIRAGE. Copy
+what fits.
+
+### On behalf of the signed-in user
+
+A request handler stashes the caller's token; every operation the agent runs
+during that request reaches the volume as that user.
+
+```python
+from contextvars import ContextVar
+
+REQUEST_TOKEN: ContextVar[str] = ContextVar("databricks_user_token")
+
+
+class OnBehalfOfTokenProvider:
+    def get_token(self) -> str:
+        return REQUEST_TOKEN.get()
+```
+
+### Service principal, OAuth machine-to-machine
+
+Mint once, reuse until shortly before expiry, and refresh under a lock.
+
+```python
+import asyncio
+import time
+
+import aiohttp
+
+
+class ServicePrincipalTokenProvider:
+    def __init__(self, host: str, client_id: str, client_secret: str) -> None:
+        self._url = f"{host.rstrip('/')}/oidc/v1/token"
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token = ""
+        self._expires_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def get_token(self) -> str:
+        async with self._lock:
+            if self._token and time.time() < self._expires_at - 60:
+                return self._token
+            auth = aiohttp.BasicAuth(self._client_id, self._client_secret)
+            body = {"grant_type": "client_credentials", "scope": "all-apis"}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self._url, auth=auth, data=body) as r:
+                    r.raise_for_status()
+                    payload = await r.json()
+            self._token = payload["access_token"]
+            self._expires_at = time.time() + float(payload["expires_in"])
+            return self._token
+```
+
+### Databricks CLI profile
+
+If your application already depends on `databricks-sdk` (`pip install
+databricks-sdk` — MIRAGE itself does not), its auth chain hands back a header
+you can unwrap:
+
+```python
+from databricks.sdk.core import Config
+
+
+class ProfileTokenProvider:
+    def __init__(self, profile: str) -> None:
+        self._authenticate = Config(profile=profile).authenticate
+
+    def get_token(self) -> str:
+        return self._authenticate()["Authorization"].removeprefix("Bearer ")
+```
 
 ## Notes
 
 - Supports both read and write mount modes (`MountMode.READ` / `MountMode.WRITE`).
-- Auth falls through to the Databricks SDK defaults when `host`, `token`, and `profile` are omitted.
 - `root_path` is normalized and cannot contain `..`.
+- A snapshot records the config verbatim and marks the mount
+  `needs_override: true`: the provider is runtime state, so `Workspace.load`
+  asks for a fresh resource rather than restoring one that cannot authenticate.

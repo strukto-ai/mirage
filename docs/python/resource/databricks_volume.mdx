@@ -13,31 +13,42 @@ For auth and environment setup, see [Databricks Volume Setup](/python/setup/data
 ## Config
 
 ```python
+import os
+
 from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeResource,
+    StaticTokenProvider,
 )
 
-resource = DatabricksVolumeResource(DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    root_path="/reports",
-))
+resource = DatabricksVolumeResource(
+    DatabricksVolumeConfig(
+        host=os.environ["DATABRICKS_HOST"],
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+        root_path="/reports",
+    ),
+    StaticTokenProvider(os.environ["DATABRICKS_TOKEN"]),
+)
 ws = Workspace({"/dbx": resource}, mode=MountMode.READ)
 ```
 
 | Field | Default | Notes |
 | --- | --- | --- |
+| `host` | required | Databricks workspace URL. Trailing slashes are stripped. |
 | `catalog` | required | Unity Catalog catalog name. |
 | `schema` | required | Unity Catalog schema name. |
 | `volume` | required | Unity Catalog volume name. |
 | `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | `None` | Optional workspace host override. |
-| `token` | `None` | Optional PAT override. Redacted in snapshots. |
-| `profile` | `None` | Optional Databricks SDK profile name. |
 | `timeout` | `30` | Request timeout in seconds. |
+
+The config holds no credential. The bearer token arrives through a
+`TokenProvider` passed to the constructor, which MIRAGE consults before each
+Files API operation and never stores. `StaticTokenProvider` is the only one
+MIRAGE ships; see [Databricks Volume Setup](/python/setup/databricks) for
+on-behalf-of, service-principal and CLI-profile providers you write yourself.
 
 ## Mount mode
 
@@ -51,6 +62,7 @@ Given:
 
 ```python
 DatabricksVolumeConfig(
+    host="https://dbc-example.cloud.databricks.com",
     catalog="main",
     schema="default",
     volume="agent_files",
@@ -134,21 +146,25 @@ or local-only utilities).
 
 ## Snapshot behavior
 
-`token` is redacted in resource state. Loading a snapshot back requires an
-override config that provides fresh credentials if the runtime auth chain does
-not already supply them.
+Resource state carries the config whole, because none of it is secret, and
+marks the mount `needs_override: true`. The token provider is runtime state
+that no state dict can hold, so `Workspace.load` asks for a fresh resource
+rather than restoring one that cannot authenticate:
+
+```python
+ws = await Workspace.load(
+    "snap.tar",
+    resources={"/dbx/": DatabricksVolumeResource(config, provider)},
+)
+```
 
 ## Databricks Apps
 
-For Databricks Apps, prefer SDK-default auth and keep Mirage in-process:
+Inside a Databricks App, keep Mirage in-process and let the app's own auth
+supply the token — typically on behalf of the signed-in user:
 
 ```python
-config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-)
-resource = DatabricksVolumeResource(config)
+resource = DatabricksVolumeResource(config, OnBehalfOfTokenProvider())
 ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
 ```
 
@@ -159,19 +175,25 @@ Mirage's backend adapters or `Workspace.execute(...)`.
 
 ```python
 import asyncio
+import os
 
 from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeResource,
+    StaticTokenProvider,
 )
 
-resource = DatabricksVolumeResource(DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-    root_path="/reports",
-))
+resource = DatabricksVolumeResource(
+    DatabricksVolumeConfig(
+        host=os.environ["DATABRICKS_HOST"],
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+        root_path="/reports",
+    ),
+    StaticTokenProvider(os.environ["DATABRICKS_TOKEN"]),
+)
 
 
 async def main() -> None:
@@ -202,7 +224,8 @@ See:
 ## Use Cases
 
 - **Agents in Databricks Apps**: mount a Unity Catalog volume in-process so an
-  agent can read and write governed files without FUSE or hardcoded credentials.
+  agent can read and write governed files without FUSE, and reach it on behalf
+  of the signed-in user through a token provider.
 - **Reading governed datasets**: expose a reports or dataset subtree through
   `root_path` and query it with shell commands.
 - **Sandboxed volume access**: scope an agent to a single volume (and optional

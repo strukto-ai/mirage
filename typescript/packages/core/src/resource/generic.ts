@@ -209,9 +209,9 @@ export class GenericResource<A extends Accessor = Accessor>
   // accessor, so it always says this, which turns that silence into a
   // refusal to load and makes `copy()` reuse this instance. A subclass
   // that genuinely can restore itself overrides getState and drops the
-  // flag. Python needs none of this: its loader rebuilds the class from
-  // `resource_state.type` through its registry, which is why the field
-  // is inert there.
+  // flag. Python reads the flag too, and refuses the same mount for the
+  // same reason: its registry has no class to resolve for a backend
+  // built out of live IO callables.
   override getState(): ResourceStateBase {
     return { type: this.kind, needs_override: true }
   }

@@ -19,21 +19,24 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource)
+                                               DatabricksVolumeResource,
+                                               StaticTokenProvider)
 from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
 config = DatabricksVolumeConfig(
+    host=os.environ["DATABRICKS_HOST"],
     catalog=os.environ["DATABRICKS_VOLUME_CATALOG"],
     schema=os.environ["DATABRICKS_VOLUME_SCHEMA"],
     volume=os.environ["DATABRICKS_VOLUME_NAME"],
     root_path=os.environ.get("DATABRICKS_VOLUME_ROOT_PATH", "/"),
-    host=os.environ.get("DATABRICKS_HOST"),
-    token=os.environ.get("DATABRICKS_TOKEN"),
-    profile=os.environ.get("DATABRICKS_CONFIG_PROFILE"),
 )
-resource = DatabricksVolumeResource(config=config)
+# The config holds no credential. Anything that mints or refreshes a token
+# is application code implementing TokenProvider; a personal access token
+# needs nothing more than this.
+resource = DatabricksVolumeResource(
+    config, StaticTokenProvider(os.environ["DATABRICKS_TOKEN"]))
 
 
 async def _run(ws, cmd):

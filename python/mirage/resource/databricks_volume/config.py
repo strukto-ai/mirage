@@ -22,16 +22,25 @@ class DatabricksVolumeConfig(BaseModel):
                               populate_by_name=True,
                               serialize_by_alias=True)
 
+    # Location and transport only: the credential reaches the resource
+    # through a TokenProvider, so this config holds no secret at all and
+    # a snapshot of it has nothing to redact.
+    host: str
     catalog: str
     # Public config key is still "schema"
     # internal name avoids warning overwriting BaseModel.schema.
     schema_name: str = Field(alias="schema")
     volume: str
     root_path: str = "/"
-    host: str | None = None
-    token: str | None = None
-    profile: str | None = None
     timeout: int = 30
+
+    @field_validator("host")
+    @classmethod
+    def validate_host(cls, value: str) -> str:
+        stripped = value.rstrip("/")
+        if not stripped:
+            raise ValueError("host must be a non-empty workspace URL")
+        return stripped
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod

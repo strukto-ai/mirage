@@ -225,10 +225,10 @@ class GenericResource(BaseResource):
         return await self._resolve(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
-        # ``needs_override`` is inert for python's own loader, which
-        # rebuilds the class from ``type`` through the registry. It is
-        # written for a TypeScript reader, whose ``buildMountArgs``
-        # consults no registry and would otherwise restore this mount as
-        # an empty RAMResource; the builtins carrying the key do so for
-        # the same reason.
+        # ``needs_override`` is read by both loaders now. A generic
+        # resource is built from live IO callables that no state dict
+        # can carry, so a rebuild from ``type`` would be inert either
+        # way: TypeScript's ``buildMountArgs`` would substitute an empty
+        # RAMResource, and python's registry lookup has no class to
+        # resolve. Both refuse instead, and ask for a fresh resource.
         return {"type": self.name, "needs_override": True}

@@ -18,6 +18,8 @@ from typing import Any
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.commands.builtin.databricks_volume import \
     COMMANDS as DATABRICKS_VOLUME_COMMANDS
+from mirage.core.databricks_volume.client import (DatabricksFilesClient,
+                                                  HttpDatabricksFilesClient)
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.exists import exists
@@ -35,6 +37,7 @@ from mirage.ops.databricks_volume import OPS as DATABRICKS_VOLUME_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 from mirage.resource.databricks_volume.prompt import PROMPT
+from mirage.resource.databricks_volume.token_provider import TokenProvider
 from mirage.types import PathSpec, ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
@@ -73,11 +76,44 @@ class DatabricksVolumeResource(BaseResource):
     def __init__(
         self,
         config: DatabricksVolumeConfig,
-        client: Any | None = None,
+        token_provider: TokenProvider,
     ) -> None:
+        """Mount one Unity Catalog volume over the Files API.
+
+        Args:
+            config (DatabricksVolumeConfig): location and transport; it
+                carries no credential.
+            token_provider (TokenProvider): consulted before each Files
+                API operation. Never stored in a snapshot.
+        """
         super().__init__()
+        self._initialize(config,
+                         HttpDatabricksFilesClient(config, token_provider))
+
+    @classmethod
+    def _from_files_client(
+        cls,
+        config: DatabricksVolumeConfig,
+        files_client: DatabricksFilesClient,
+    ) -> "DatabricksVolumeResource":
+        """Build a resource around an already-made Files API client.
+
+        The seam a test drives the whole backend through without a
+        token provider or a socket; deliberately not exported.
+
+        Args:
+            config (DatabricksVolumeConfig): location and transport.
+            files_client (DatabricksFilesClient): the client to use.
+        """
+        resource = cls.__new__(cls)
+        BaseResource.__init__(resource)
+        resource._initialize(config, files_client)
+        return resource
+
+    def _initialize(self, config: DatabricksVolumeConfig,
+                    files_client: DatabricksFilesClient) -> None:
         self.config = config
-        self.accessor = DatabricksVolumeAccessor(self.config, client)
+        self.accessor = DatabricksVolumeAccessor(config, files_client)
 
         for fn in DATABRICKS_VOLUME_COMMANDS:
             self.register(fn)
@@ -98,16 +134,13 @@ class DatabricksVolumeResource(BaseResource):
         return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
-        redacted = ["token"]
-        cfg = self.config.model_dump()
-        for field in redacted:
-            if cfg.get(field) is not None:
-                cfg[field] = "<REDACTED>"
+        # Nothing to redact: the config is location and transport only.
+        # A token provider is runtime state, so the mount cannot be
+        # rebuilt from this dict and says so with needs_override.
         return {
             "type": self.name,
             "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
+            "config": self.config.model_dump(),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:

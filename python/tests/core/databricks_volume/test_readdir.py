@@ -1,13 +1,10 @@
-import asyncio
-
 import pytest
 
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
-from .conftest import (ToThreadRecorder, directory_entry, file_entry,
-                       file_metadata)
+from ._fakes import directory_entry, file_entry, file_metadata
 
 
 @pytest.mark.asyncio
@@ -131,25 +128,3 @@ async def test_readdir_on_a_file_is_enotdir_without_walking(
         await readdir(accessor, path, index)
     assert files.get_metadata_calls == [f"{remote_root}/docs/a.txt"]
     assert files.get_directory_metadata_calls == []
-
-
-@pytest.mark.asyncio
-async def test_readdir_runs_blocking_list_off_event_loop(
-    accessor,
-    files,
-    index,
-    remote_root,
-    monkeypatch,
-):
-    to_thread = ToThreadRecorder()
-    monkeypatch.setattr(asyncio, "to_thread", to_thread)
-    files.directories[f"{remote_root}/reports"] = [
-        file_entry(f"{remote_root}/reports/latest.md", size=6),
-    ]
-    path = PathSpec.from_str_path("/volume/reports",
-                                  mount_key("/volume/reports", "/volume"))
-
-    result = await readdir(accessor, path, index)
-
-    assert result == ["/volume/reports/latest.md"]
-    assert len(to_thread.calls) == 1

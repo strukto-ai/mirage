@@ -94,11 +94,12 @@ export function hasRedactedSecret(value: unknown): boolean {
  * explicit `needs_override` says the mount cannot be rebuilt from its
  * state at all — which in TypeScript is true of every config-backed
  * backend, because `buildMountArgs` substitutes a `RAMResource` for any
- * mount it was not given (`snapshot/state.ts`). Python instead
- * reconstructs the class from `resource_state["type"]` via its registry
- * (`_resource_class_for`), so the field is inert there and only four of
- * its resources bother to write it; TypeScript has to read it or a live
- * database mount comes back as an empty directory.
+ * mount it was not given (`snapshot/state.ts`). Python's
+ * `requires_resource_override` reads the same flag, so the contract is
+ * one contract; it reconstructs the class from `resource_state["type"]`
+ * via its registry (`_resource_class_for`) and so writes the flag only
+ * where that rebuild would come back inert (a live client, a token
+ * provider, a generic backend's IO).
  *
  * The lasting fix is to give `buildMountArgs` a resource factory, which
  * core cannot import today (`buildResource` lives in node/browser).

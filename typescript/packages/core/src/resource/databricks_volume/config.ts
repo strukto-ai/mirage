@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  redactConfigWithSchema,
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import type { ConfigOf } from '../secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
+
+function normalizeHost(value: string): string {
+  const trimmed = value.replace(/\/+$/, '')
+  if (trimmed === '') {
+    throw new Error('host must be a non-empty workspace URL')
+  }
+  return trimmed
+}
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -34,28 +37,28 @@ function normalizeRootPath(value: string): string {
   return '/' + parts.join('/')
 }
 
+// Location and transport only: the credential reaches the resource through a
+// TokenProvider, so this config holds no secret at all and a snapshot of it
+// has nothing to redact.
 const DatabricksVolumeConfigSchema = z.object({
+  host: z.string().transform(normalizeHost),
   catalog: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   schema: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   volume: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   rootPath: z.string().transform(normalizeRootPath).default('/'),
-  host: z.string().optional(),
-  token: secretStr().optional(),
-  profile: z.string().optional(),
   timeout: z.number().default(30),
 })
 
 export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>
 
-export type DatabricksVolumeConfigRedacted = RedactedConfig<DatabricksVolumeConfig, 'token'>
+// No credential in this config, so the snapshot carries it whole; the mount
+// still needs an override at load because the token provider is runtime state.
+export type DatabricksVolumeConfigRedacted = DatabricksVolumeConfig
 
 export function redactDatabricksVolumeConfig(
   config: DatabricksVolumeConfig,
 ): DatabricksVolumeConfigRedacted {
-  return redactConfigWithSchema(
-    DatabricksVolumeConfigSchema,
-    config,
-  ) as unknown as DatabricksVolumeConfigRedacted
+  return { ...config }
 }
 
 export function normalizeDatabricksVolumeConfig(

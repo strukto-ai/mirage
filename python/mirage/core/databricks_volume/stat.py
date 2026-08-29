@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.databricks_volume._helpers import is_directory_metadata
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.types import FileStat, FileType, PathSpec
@@ -27,7 +25,13 @@ from mirage.utils.filetype import guess_type
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def modified_to_iso(value) -> str | None:
+def modified_to_iso(value: datetime | int | float | str | None) -> str | None:
+    """One mtime spelling out of the three the Files API sends.
+
+    Args:
+        value (datetime | int | float | str | None): a listing's epoch
+            millis, a HEAD's HTTP date, or nothing at all.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
@@ -56,8 +60,7 @@ async def _directory_stat_or_raise(
     path: PathSpec,
 ) -> FileStat:
     try:
-        await asyncio.to_thread(accessor.files.get_directory_metadata,
-                                remote_path)
+        await accessor.client.get_directory_metadata(remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
@@ -92,20 +95,17 @@ async def stat(
     if parent_listing.entries is not None:
         raise enoent(path)
     remote_path = backend_path(accessor.config, path)
+    # A directory 404s on /fs/files, so the file probe failing is not
+    # proof of absence: the directory probe below decides.
     try:
-        metadata = await asyncio.to_thread(accessor.files.get_metadata,
-                                           remote_path)
+        metadata = await accessor.client.get_metadata(remote_path)
     except Exception as exc:
         if is_not_found(exc):
             return await _directory_stat_or_raise(accessor, remote_path, path)
         raise
     name = _name_from_backend_path(remote_path)
-    if is_directory_metadata(metadata):
-        return FileStat(name=name, type=FileType.DIRECTORY)
-    size = getattr(metadata, "content_length", None)
-    modified = modified_to_iso(getattr(metadata, "last_modified", None))
     return FileStat(name=name,
-                    size=size,
-                    modified=modified,
+                    size=metadata.content_length,
+                    modified=modified_to_iso(metadata.last_modified),
                     type=FileType.FILE,
                     content=guess_type(name))

@@ -6,9 +6,13 @@ description: Set up Databricks credentials for the Unity Catalog volume resource
 
 ## Credentials
 
-The resource reads a Unity Catalog volume over the Databricks SDK. It needs a
-workspace host plus one auth method: a personal access token, a config
-profile, or the SDK defaults (handy inside Databricks Apps).
+The resource reads a Unity Catalog volume over the Databricks Files REST API.
+It needs two things, and they are supplied separately: a workspace **host**,
+which is configuration, and a **bearer token**, which reaches the resource
+through a token provider your program writes.
+
+The config never holds a credential, so nothing is redacted in a snapshot and
+nothing leaks into a config file.
 
 ### 1. Get Your Workspace Host
 
@@ -28,11 +32,19 @@ DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
 DATABRICKS_TOKEN=dapi...
 ```
 
-### Alternatives
+Your program reads these; MIRAGE does not. It takes the host as config and the
+token from the provider you hand it.
 
-- **Config profile:** add a profile to `~/.databrickscfg` and pass
-  `profile="DEV"` instead of host/token.
-- **SDK defaults:** omit host, token, and profile to fall through to the
-  Databricks SDK default auth chain (for example inside Databricks Apps).
+### Beyond a personal access token
 
-For Python configuration, see the [Python Databricks Volume Setup](/python/setup/databricks) guide.
+MIRAGE ships one provider, `StaticTokenProvider`, for a token you already
+hold. Anything that mints, refreshes or exchanges a credential (OAuth
+machine-to-machine, on-behalf-of a signed-in user, a `~/.databrickscfg`
+profile) is application code implementing the same one-method interface. See
+the [Python](/python/setup/databricks) and
+[TypeScript](/typescript/setup/databricks_volume) setup guides for worked
+providers.
+
+MIRAGE calls the provider before each Files API operation, never caches or
+refreshes the token, and never retries a 401. Caching and refresh belong to
+the provider, which is the only party that knows how its credential is minted.

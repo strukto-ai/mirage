@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from typing import Any
-
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.databricks_volume.client import DatabricksFilesClient
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import stat
@@ -26,49 +24,26 @@ from mirage.types import FileType, PathSpec
 from mirage.utils.errors import enoent
 
 
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
-
-
-def _delete_file_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete(remote_path)
-
-
-def _delete_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> None:
-    accessor.files.delete_directory(remote_path)
-
-
-def _remove_tree_recurse(
-    accessor: DatabricksVolumeAccessor,
+async def remove_tree(
+    client: DatabricksFilesClient,
     remote_dir: str,
     removed: list[str],
 ) -> None:
-    for entry in _list_directory_sync(accessor, remote_dir):
-        if getattr(entry, "is_directory", False):
-            _remove_tree_recurse(accessor, entry.path, removed)
+    """Delete a directory bottom-up, recording every path removed.
+
+    Args:
+        client (DatabricksFilesClient): the Files API client.
+        remote_dir (str): absolute backend path of the directory.
+        removed (list[str]): accumulates the paths deleted, in order.
+    """
+    for entry in await client.list_directory(remote_dir):
+        if entry.is_directory:
+            await remove_tree(client, entry.path, removed)
         else:
-            _delete_file_sync(accessor, entry.path)
+            await client.delete(entry.path)
             removed.append(entry.path)
-    _delete_directory_sync(accessor, remote_dir)
+    await client.delete_directory(remote_dir)
     removed.append(remote_dir)
-
-
-def _remove_tree_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_root: str,
-) -> list[str]:
-    removed: list[str] = []
-    _remove_tree_recurse(accessor, remote_root, removed)
-    return removed
 
 
 async def rm_recursive(
@@ -81,9 +56,9 @@ async def rm_recursive(
         await unlink(accessor, path, index)
         return [path.mount_path]
     remote_root = backend_path(accessor.config, path)
+    removed: list[str] = []
     try:
-        removed = await asyncio.to_thread(_remove_tree_sync, accessor,
-                                          remote_root)
+        await remove_tree(accessor.client, remote_root, removed)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

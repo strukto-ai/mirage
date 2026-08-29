@@ -41,36 +41,19 @@ import { DATABRICKS_VOLUME_PROMPT } from '@struktoai/mirage-core/resource/databr
 import { PathSpec, ResourceName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import type { TokenProvider } from '@struktoai/mirage-core/resource/databricks_volume/token_provider'
 import {
   redactDatabricksVolumeConfig,
   type DatabricksVolumeConfig,
   type DatabricksVolumeConfigRedacted,
 } from './config.ts'
-import { loadDatabricksProfile } from './profile.ts'
 
 const resolveDatabricksVolumeGlob = makeResolveGlob(databricksVolumeReaddir)
 
 export interface DatabricksVolumeResourceState {
   type: string
+  needs_override: true
   config: DatabricksVolumeConfigRedacted
-}
-
-async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, string]> {
-  let host = config.host ?? process.env.DATABRICKS_HOST
-  let token = config.token ?? process.env.DATABRICKS_TOKEN
-  if (host === undefined || host === '' || token === undefined || token === '') {
-    const profileName = config.profile ?? process.env.DATABRICKS_CONFIG_PROFILE ?? 'DEFAULT'
-    const profile = await loadDatabricksProfile(profileName)
-    host = host !== undefined && host !== '' ? host : profile.host
-    token = token !== undefined && token !== '' ? token : profile.token
-  }
-  if (host === undefined || host === '' || token === undefined || token === '') {
-    throw new Error(
-      'databricks_volume: missing credentials; set host/token in the config, ' +
-        'DATABRICKS_HOST/DATABRICKS_TOKEN env vars, or a ~/.databrickscfg profile',
-    )
-  }
-  return [host, token]
 }
 
 export class DatabricksVolumeResource extends BaseResource implements Resource {
@@ -101,16 +84,24 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
     rm_recursive: databricksVolumeRmRecursive,
   }
 
-  private constructor(config: DatabricksVolumeConfig, accessor: DatabricksVolumeAccessor) {
+  /**
+   * Mount one Unity Catalog volume over the Files API.
+   *
+   * @param config location and transport; it carries no credential.
+   * @param tokenProvider consulted before each Files API operation, and never
+   * written into a snapshot.
+   */
+  constructor(config: DatabricksVolumeConfig, tokenProvider: TokenProvider) {
     super()
     this.config = config
-    this.accessor = accessor
+    this.accessor = new DatabricksVolumeAccessor(config, tokenProvider)
   }
 
-  static async create(config: DatabricksVolumeConfig): Promise<DatabricksVolumeResource> {
-    const [host, token] = await resolveAuth(config)
-    const accessor = new DatabricksVolumeAccessor(config, host, token)
-    return new DatabricksVolumeResource(config, accessor)
+  static create(
+    config: DatabricksVolumeConfig,
+    tokenProvider: TokenProvider,
+  ): Promise<DatabricksVolumeResource> {
+    return Promise.resolve(new DatabricksVolumeResource(config, tokenProvider))
   }
 
   open(): Promise<void> {
@@ -222,8 +213,12 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   override getState(): Promise<DatabricksVolumeResourceState> {
+    // Nothing to redact: the config is location and transport only. A token
+    // provider is runtime state, so the mount cannot be rebuilt from this
+    // dict and says so with needs_override, which both loaders read.
     return Promise.resolve({
       type: this.kind,
+      needs_override: true,
       config: redactDatabricksVolumeConfig(this.config),
     })
   }

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
+import type { TokenProvider } from '../../resource/databricks_volume/token_provider.ts'
 import { DatabricksVolumeApiError } from './errors.ts'
 
 export type DbxEndpoint = 'files' | 'directories'
@@ -43,6 +44,20 @@ export function dbxUrl(
   return url
 }
 
+/**
+ * The bearer token for one operation, awaited whether or not it is async.
+ *
+ * @throws when the provider answered with something that is not a usable
+ * token; sending `Bearer ` alone would come back as an opaque 401 instead.
+ */
+export async function resolveToken(provider: TokenProvider): Promise<string> {
+  const token = await provider.getToken()
+  if (typeof token !== 'string' || token === '') {
+    throw new Error('databricks_volume: token provider returned an empty token')
+  }
+  return token
+}
+
 async function errorFromResponse(method: string, url: string, r: Response): Promise<Error> {
   let errorCode: string | null = null
   let message = ''
@@ -69,8 +84,13 @@ export async function dbxFetch(
   options: DbxFetchOptions = {},
 ): Promise<Response> {
   const url = dbxUrl(accessor, endpoint, remotePath, options.query)
+  // Resolved per request and never stored: the provider owns caching and
+  // refresh, and a 401 is reported rather than replayed with a new token,
+  // because an on-behalf-of provider cannot re-mint a user's credential and
+  // a write must not be sent twice.
+  const token = await resolveToken(accessor.tokenProvider)
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessor.token}`,
+    Authorization: `Bearer ${token}`,
     ...options.headers,
   }
   const controller = new AbortController()

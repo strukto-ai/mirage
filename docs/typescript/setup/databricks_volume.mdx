@@ -12,6 +12,9 @@ MIRAGE ships it in `@struktoai/mirage-node` only. The TypeScript client calls
 the Databricks Files REST API directly with `fetch`; the Databricks API does
 not allow cross-origin browser requests, so there is no browser runtime.
 
+The workspace **host** is configuration; the bearer **token** reaches the
+resource through a token provider your program writes.
+
 For auth and environment setup, see [Databricks Volume Setup](/home/setup/databricks).
 
 ## Node
@@ -22,19 +25,22 @@ pnpm add @struktoai/mirage-node
 
 ```ts
 import {
+  DatabricksStaticTokenProvider,
   DatabricksVolumeResource,
   MountMode,
   Workspace,
   normalizeDatabricksVolumeConfig,
 } from '@struktoai/mirage-node'
 
-const resource = await DatabricksVolumeResource.create(
+const resource = new DatabricksVolumeResource(
   normalizeDatabricksVolumeConfig({
+    host: process.env.DATABRICKS_HOST!,
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',
     root_path: '/reports',
   }),
+  new DatabricksStaticTokenProvider(process.env.DATABRICKS_TOKEN!),
 )
 const ws = new Workspace({ '/dbx/': resource }, { mode: MountMode.READ })
 const res = await ws.execute('ls /dbx/')
@@ -43,19 +49,98 @@ console.log(res.stdoutText)
 
 | Field | Default | Notes |
 | --- | --- | --- |
+| `host` | required | Databricks workspace URL. Trailing slashes are stripped. |
 | `catalog` | required | Unity Catalog catalog name. |
 | `schema` | required | Unity Catalog schema name. |
 | `volume` | required | Unity Catalog volume name. |
 | `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | none | Optional workspace host override. |
-| `token` | none | Optional PAT override. Redacted in snapshots. |
-| `profile` | none | Optional `~/.databrickscfg` profile name. |
 | `timeout` | `30` | Request timeout in seconds. |
 
-Credentials resolve in order: explicit `host`/`token` in the config, then the
-`DATABRICKS_HOST`/`DATABRICKS_TOKEN` environment variables, then the
-`profile` section of `~/.databrickscfg` (or `DATABRICKS_CONFIG_PROFILE`,
-falling back to `DEFAULT`).
+There is no `token` or `profile` field, and no environment or
+`~/.databrickscfg` fallback. The config holds no secret at all.
+
+## Bring your own token acquisition
+
+`TokenProvider` is one method:
+
+```ts
+export interface TokenProvider {
+  getToken(): string | Promise<string>
+}
+```
+
+Return the raw token, without the `Bearer ` prefix. MIRAGE calls it before
+each Files API operation, so one shell line may consult it more than once;
+caching, refresh and locking belong to the provider. MIRAGE never serializes a
+provider, and a 401 propagates as `DatabricksVolumeApiError` rather than being
+retried, because an on-behalf-of provider cannot re-mint a user's token and a
+write must not be sent twice.
+
+`DatabricksStaticTokenProvider` is the only one MIRAGE ships. The two below
+are **application code**, not part of MIRAGE.
+
+### On behalf of the signed-in user
+
+```ts
+import { AsyncLocalStorage } from 'node:async_hooks'
+
+export const requestToken = new AsyncLocalStorage<string>()
+
+export class OnBehalfOfTokenProvider implements TokenProvider {
+  getToken(): string {
+    const token = requestToken.getStore()
+    if (token === undefined) throw new Error('no Databricks token on this request')
+    return token
+  }
+}
+```
+
+### Service principal, OAuth machine-to-machine
+
+```ts
+export class ServicePrincipalTokenProvider implements TokenProvider {
+  private token = ''
+  private expiresAt = 0
+  private pending: Promise<string> | null = null
+
+  constructor(
+    private readonly host: string,
+    private readonly clientId: string,
+    private readonly clientSecret: string,
+  ) {}
+
+  getToken(): Promise<string> {
+    if (this.token !== '' && Date.now() < this.expiresAt - 60_000) {
+      return Promise.resolve(this.token)
+    }
+    this.pending ??= this.mint().finally(() => {
+      this.pending = null
+    })
+    return this.pending
+  }
+
+  private async mint(): Promise<string> {
+    const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64')
+    const r = await fetch(`${this.host.replace(/\/+$/, '')}/oidc/v1/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ grant_type: 'client_credentials', scope: 'all-apis' }),
+    })
+    if (!r.ok) throw new Error(`databricks token mint failed: ${String(r.status)}`)
+    const payload = (await r.json()) as { access_token: string; expires_in: number }
+    this.token = payload.access_token
+    this.expiresAt = Date.now() + payload.expires_in * 1000
+    return this.token
+  }
+}
+```
+
+A mount described as data (YAML, `buildResource`) has no provider to offer, so
+the registry refuses `databricks_volume` rather than building a mount that
+401s on its first read. Construct the resource directly.
 
 ## Filesystem layout
 
@@ -88,9 +173,10 @@ server-side rename.
 
 ## Snapshot behavior
 
-`token` is redacted in resource state. Loading a snapshot back requires an
-override config that provides fresh credentials if the runtime auth chain does
-not already supply them.
+Resource state carries the config whole, because none of it is secret, and
+marks the mount `needs_override: true`. The token provider is runtime state
+that no state dict can hold, so `Workspace.load` asks for a fresh resource
+rather than restoring one that cannot authenticate.
 
 ## Example
 

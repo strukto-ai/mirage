@@ -1,99 +1,40 @@
-from mirage.accessor import databricks_volume as accessor_module
+from mirage.accessor.base import Accessor
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.resource.databricks_volume import DatabricksVolumeConfig
+from mirage.core.databricks_volume.client import HttpDatabricksFilesClient
+from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
+                                               StaticTokenProvider)
 
 
-class FakeWorkspaceClient:
-    calls: list[dict] = []
-
-    def __init__(self, **kwargs) -> None:
-        self.calls.append(kwargs)
-        self.files = object()
-
-
-class FakeWorkspaceConfig:
-
-    def __init__(self, **kwargs) -> None:
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+def make_config(**overrides) -> DatabricksVolumeConfig:
+    return DatabricksVolumeConfig(host="https://example.cloud.databricks.com",
+                                  catalog="main",
+                                  schema="default",
+                                  volume="agent_files",
+                                  **overrides)
 
 
-def test_accessor_passes_timeout_to_workspace_client(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
-    )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        host="https://example.cloud.databricks.com",
-        token="secret",
-        timeout=17,
-    )
-    accessor = DatabricksVolumeAccessor(config)
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert sdk_config.host == "https://example.cloud.databricks.com"
-    assert sdk_config.token == "secret"
-    assert sdk_config.http_timeout_seconds == 17
+def test_accessor_holds_the_config_and_the_client():
+    config = make_config()
+    client = HttpDatabricksFilesClient(config, StaticTokenProvider("secret"))
+    accessor = DatabricksVolumeAccessor(config, client)
+
+    assert isinstance(accessor, Accessor)
+    assert accessor.config is config
+    assert accessor.client is client
 
 
-def test_accessor_sets_pat_auth_type_for_explicit_token(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
-    )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        host="https://example.cloud.databricks.com",
-        token="request-token",
-    )
-    accessor = DatabricksVolumeAccessor(config)
+def test_accessor_keeps_no_token_of_its_own():
+    config = make_config()
+    accessor = DatabricksVolumeAccessor(
+        config, HttpDatabricksFilesClient(config,
+                                          StaticTokenProvider("secret")))
 
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert sdk_config.auth_type == "pat"
-    assert sdk_config.token == "request-token"
+    assert not hasattr(accessor, "token")
+    assert "secret" not in repr(vars(accessor))
 
 
-def test_accessor_leaves_auth_type_unset_for_profile(monkeypatch):
-    FakeWorkspaceClient.calls = []
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceClient",
-        FakeWorkspaceClient,
-    )
-    monkeypatch.setattr(
-        accessor_module,
-        "WorkspaceConfig",
-        FakeWorkspaceConfig,
-    )
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        profile="default",
-    )
-    accessor = DatabricksVolumeAccessor(config)
+def test_client_reads_the_configured_timeout():
+    config = make_config(timeout=17)
+    client = HttpDatabricksFilesClient(config, StaticTokenProvider("secret"))
 
-    assert accessor.files is not None
-    sdk_config = FakeWorkspaceClient.calls[0]["config"]
-    assert not hasattr(sdk_config, "auth_type")
-    assert sdk_config.profile == "default"
+    assert client.config.timeout == 17

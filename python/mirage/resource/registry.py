@@ -185,6 +185,22 @@ REGISTRY: dict[str, ResourceEntry] = {
                   "mirage.resource.qdrant:QdrantConfig"),
 }
 
+# Registry names that name a resource but cannot be built from config
+# alone. A mount described as data has no credential to offer, and a
+# databricks volume reaches its workspace through a ``TokenProvider``
+# the embedding program constructs, so :func:`build_resource` refuses
+# rather than handing back a mount that 401s on its first read. The
+# entry stays in ``REGISTRY`` because the name is still a resource: a
+# snapshot records it and ``workspace.snapshot.state`` resolves its
+# class through the same table. TypeScript's factory for the name
+# refuses with the same sentence.
+UNBUILDABLE_FROM_CONFIG: dict[str, str] = {
+    "databricks_volume":
+    ("databricks_volume: a token provider is required; construct "
+     "DatabricksVolumeResource(config, token_provider) directly instead of "
+     "declaring this mount as config"),
+}
+
 _CUSTOM: dict[str, ResourceEntry] = {}
 _entry_points_loaded = False
 
@@ -241,7 +257,12 @@ def _load_entry_point_resources() -> None:
 
 
 def known_resources() -> list[str]:
-    """All constructible registry names (builtin, registered, installed)."""
+    """Every registry name (builtin, registered, installed).
+
+    A name in ``UNBUILDABLE_FROM_CONFIG`` is listed too: it names a
+    real resource, it is simply one the embedding program has to
+    construct itself.
+    """
     _load_entry_point_resources()
     return sorted({*REGISTRY, *_CUSTOM})
 
@@ -349,8 +370,7 @@ def build_resource(name: str,
     ``ensure_default_branch``, and never from ``__init__``, which cannot
     await and so would have to block the caller's event loop. This is a
     deliberate divergence from the TypeScript ``buildResource``, which
-    stays ``Promise<Resource>`` because two of its backends
-    (``github``, ``databricks_volume``) construct through
+    stays ``Promise<Resource>`` because ``github`` constructs through
     ``static async create``.
 
     Args:
@@ -366,7 +386,12 @@ def build_resource(name: str,
     Raises:
         KeyError: ``name`` is neither builtin, registered, a colon
             reference, nor installed.
+        TypeError: ``name`` is listed in ``UNBUILDABLE_FROM_CONFIG``,
+            so it needs a runtime object no config dict can carry.
     """
+    refusal = UNBUILDABLE_FROM_CONFIG.get(name)
+    if refusal is not None:
+        raise TypeError(refusal)
     entry = _resolve_entry(name)
     if entry is None:
         raise KeyError(

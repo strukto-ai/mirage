@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
-
 import pytest
 
 from mirage.core.databricks_volume.rename import rename
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+from ._fakes import directory_entry, file_entry, file_metadata
 
 
 def _path(path: str) -> PathSpec:
@@ -30,17 +30,15 @@ def _seed_directory(files, path: str) -> None:
     files.directories.setdefault(path, [])
     parent = path.rsplit("/", 1)[0]
     if parent and parent != path:
-        files.directories.setdefault(parent, []).append(
-            SimpleNamespace(path=path, is_directory=True, file_size=None))
+        files.directories.setdefault(parent, []).append(directory_entry(path))
 
 
 def _seed_file(files, path: str, data: bytes) -> None:
     parent = path.rsplit("/", 1)[0]
     files.downloads[path] = data
-    files.metadata[path] = SimpleNamespace(is_directory=False,
-                                           file_size=len(data))
-    files.directories.setdefault(parent, []).append(
-        SimpleNamespace(path=path, is_directory=False, file_size=len(data)))
+    files.metadata[path] = file_metadata(len(data))
+    files.directories.setdefault(parent,
+                                 []).append(file_entry(path, len(data)))
 
 
 @pytest.mark.asyncio

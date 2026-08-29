@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -10,8 +9,7 @@ from mirage.core.databricks_volume.stat import (_name_from_backend_path,
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
-from .conftest import (ToThreadRecorder, directory_entry, file_entry,
-                       file_metadata)
+from ._fakes import directory_entry, file_entry, file_metadata
 
 
 def test_modified_none_and_empty_string_return_none():
@@ -69,8 +67,8 @@ async def test_stat_file(accessor, files, remote_root):
 
 
 @pytest.mark.asyncio
-async def test_stat_file_from_index_skips_sdk(accessor, files, index,
-                                              remote_root):
+async def test_stat_file_from_index_skips_the_api(accessor, files, index,
+                                                  remote_root):
     files.directories[f"{remote_root}/reports"] = [
         file_entry(f"{remote_root}/reports/latest.md",
                    size=6,
@@ -93,8 +91,8 @@ async def test_stat_file_from_index_skips_sdk(accessor, files, index,
 
 
 @pytest.mark.asyncio
-async def test_stat_directory_from_index_skips_sdk(accessor, files, index,
-                                                   remote_root):
+async def test_stat_directory_from_index_skips_the_api(accessor, files, index,
+                                                       remote_root):
     files.directories[f"{remote_root}/reports"] = [
         directory_entry(f"{remote_root}/reports/archive"),
     ]
@@ -113,7 +111,7 @@ async def test_stat_directory_from_index_skips_sdk(accessor, files, index,
 
 
 @pytest.mark.asyncio
-async def test_stat_index_negative_cache_raises_without_sdk(
+async def test_stat_index_negative_cache_raises_without_the_api(
     accessor,
     files,
     index,
@@ -136,8 +134,8 @@ async def test_stat_index_negative_cache_raises_without_sdk(
 
 
 @pytest.mark.asyncio
-async def test_stat_index_fast_path_matches_sdk(accessor, files, index,
-                                                remote_root):
+async def test_stat_index_fast_path_matches_the_api(accessor, files, index,
+                                                    remote_root):
     files.directories[f"{remote_root}/reports"] = [
         file_entry(f"{remote_root}/reports/latest.md",
                    size=6,
@@ -161,7 +159,7 @@ async def test_stat_index_fast_path_matches_sdk(accessor, files, index,
 
 
 @pytest.mark.asyncio
-async def test_stat_directory_index_fast_path_matches_sdk(
+async def test_stat_directory_index_fast_path_matches_the_api(
     accessor,
     files,
     index,
@@ -187,7 +185,7 @@ async def test_stat_directory_index_fast_path_matches_sdk(
 
 
 @pytest.mark.asyncio
-async def test_stat_root_does_not_call_sdk(accessor, files):
+async def test_stat_root_does_not_call_the_api(accessor, files):
     path = PathSpec.from_str_path("/volume", mount_key("/volume", "/volume"))
     result = await stat(accessor, path)
     assert result.name == "/"
@@ -270,42 +268,3 @@ async def test_stat_directory_metadata_error_propagates(
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
     assert files.get_directory_metadata_calls == [remote_path]
-
-
-@pytest.mark.asyncio
-async def test_stat_runs_blocking_metadata_off_event_loop(
-    accessor,
-    files,
-    remote_root,
-    monkeypatch,
-):
-    to_thread = ToThreadRecorder()
-    monkeypatch.setattr(asyncio, "to_thread", to_thread)
-    files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(size=6)
-    path = PathSpec.from_str_path(
-        "/volume/reports/latest.md",
-        mount_key("/volume/reports/latest.md", "/volume"))
-
-    result = await stat(accessor, path)
-
-    assert result.name == "latest.md"
-    assert len(to_thread.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_stat_directory_fallback_runs_off_event_loop(
-    accessor,
-    files,
-    remote_root,
-    monkeypatch,
-):
-    to_thread = ToThreadRecorder()
-    monkeypatch.setattr(asyncio, "to_thread", to_thread)
-    files.directory_metadata.add(f"{remote_root}/reports")
-    path = PathSpec.from_str_path("/volume/reports",
-                                  mount_key("/volume/reports", "/volume"))
-
-    result = await stat(accessor, path)
-
-    assert result.type == FileType.DIRECTORY
-    assert len(to_thread.calls) == 2

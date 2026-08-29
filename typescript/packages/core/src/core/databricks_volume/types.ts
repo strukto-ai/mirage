@@ -12,22 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Accessor } from './base.ts'
-import type { DatabricksVolumeConfig } from '../resource/databricks_volume/config.ts'
-import type { TokenProvider } from '../resource/databricks_volume/token_provider.ts'
+/**
+ * One row of a `GET /api/2.0/fs/directories` listing, as the API sends it.
+ *
+ * `last_modified` is epoch milliseconds. The field names stay snake_case
+ * because this is the wire shape, parsed straight out of the response body.
+ */
+export interface DatabricksEntry {
+  path: string
+  is_directory?: boolean
+  file_size?: number
+  last_modified?: number
+  name?: string
+}
 
-export class DatabricksVolumeAccessor extends Accessor {
-  readonly config: DatabricksVolumeConfig
-  readonly tokenProvider: TokenProvider
-
-  constructor(config: DatabricksVolumeConfig, tokenProvider: TokenProvider) {
-    super()
-    this.config = config
-    this.tokenProvider = tokenProvider
-  }
-
-  /** The workspace origin, already stripped of trailing slashes by the config. */
-  get host(): string {
-    return this.config.host
-  }
+/** The headers a `HEAD /api/2.0/fs/files` answer carries. */
+export interface DatabricksFileMeta {
+  contentLength: number | null
+  contentType: string | null
+  lastModified: string | null
 }
