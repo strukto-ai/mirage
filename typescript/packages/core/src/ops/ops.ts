@@ -13,12 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { OpReport } from '../io/types.ts'
+import { activeRecords, runWithRecording } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
+import type { LiveFileIdentity } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { exdev, isMissingPath } from '../utils/errors.ts'
+import { exdev, isMissingOp, isMissingPath } from '../utils/errors.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
@@ -29,6 +31,24 @@ interface MountOwner {
 }
 
 export type OwnerOf = (path: string) => MountOwner | null
+
+/**
+ * The identity carried by the records one read emitted.
+ *
+ * A versioned backend stamps fingerprint/revision on the record for the
+ * response it just read, so the markers and the bytes come from the same
+ * answer. Scanned newest first: a read may emit more than one record (a
+ * rendered file reads its parts), and only a content read ever carries a
+ * marker. Mirrors Python's `read_identity`.
+ */
+export function readIdentity(records: readonly OpRecord[]): LiveFileIdentity | null {
+  for (const rec of [...records].reverse()) {
+    if (rec.revision !== null || rec.fingerprint !== null) {
+      return { exists: true, revision: rec.revision, fingerprint: rec.fingerprint }
+    }
+  }
+  return null
+}
 
 // The op's byte count for recording: the result first, else the input
 // (write payloads travel as the first positional argument). Mirrors
@@ -233,6 +253,77 @@ export class Ops {
 
   async stat(path: string): Promise<FileStat> {
     return (await this.through('stat', path)) as FileStat
+  }
+
+  /**
+   * The backend's own identity for the file living at `path`.
+   *
+   * Dispatched like every other op, so the link follow, the session
+   * grants, the admission policies and the recording all fire once at
+   * the same door. The op consults no cache: it is not a read op, so
+   * the warm file cache never answers it, and the backend module
+   * ignores the index it is handed, which is what makes the answer a
+   * live one.
+   *
+   * A mount whose backend registers no identity op reads back as null
+   * rather than throwing: this is the programmatic capability probe,
+   * and an honest null is what a caller can branch on. Every other
+   * failure propagates, and the raw op keeps throwing ENOTSUP for a
+   * direct `dispatch` caller. Mirrors Python's `live_identity`.
+   */
+  async liveIdentity(path: string): Promise<LiveFileIdentity | null> {
+    try {
+      return (await this.through('live_identity', path)) as LiveFileIdentity
+    } catch (err) {
+      if (isMissingOp(err, 'live_identity')) return null
+      throw err
+    }
+  }
+
+  /**
+   * Read a file and the identity of the bytes just read.
+   *
+   * The stamp comes from the read's own backend response, never from a
+   * second call: s3 and gridfs take both markers off the GET that
+   * delivered the bytes, and drive and graph capture the metadata
+   * immediately before the download, so their residual window can only
+   * report a stamp older than the bytes, which fails safe as a spurious
+   * stale refusal rather than a silently accepted stale write.
+   *
+   * Both of those captures are gated on a recording being active, so
+   * the read runs inside its own recording frame. The frame is nested
+   * rather than shared: a sibling task writing into an enclosing line's
+   * records would otherwise be able to hand this read another path's
+   * markers. What the frame collected is handed up to the enclosing
+   * frame on the way out, on the error path too, so a line's byte
+   * accounting still sees every op that happened.
+   *
+   * A failed read propagates as it is; no identity is synthesized for
+   * it.
+   *
+   * `raw` is `readFile`'s own option, passed straight through: a caller
+   * that stamps stored bytes has to read stored bytes, or the stamp
+   * describes a rendering the write path never stores. `offset`/`size`
+   * are deliberately not offered, because the identity of half a file
+   * is not a question the backend can answer. Mirrors Python's
+   * `read_with_identity`.
+   */
+  async readFileWithIdentity(
+    path: string,
+    options: { raw?: boolean } = {},
+  ): Promise<[Uint8Array, LiveFileIdentity | null]> {
+    const outer = activeRecords()
+    let inner: OpRecord[] = []
+    const capture = async (): Promise<Uint8Array> => {
+      inner = activeRecords() ?? inner
+      return this.readFile(path, options)
+    }
+    try {
+      const [data] = await runWithRecording(capture)
+      return [data, readIdentity(inner)]
+    } finally {
+      if (outer !== null) outer.push(...inner)
+    }
   }
 
   // The three probes below answer "is this path there?", so only a genuine

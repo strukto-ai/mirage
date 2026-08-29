@@ -153,6 +153,38 @@ export interface LinkView {
   targetStat(path: string): Promise<FileStat | null>
 }
 
+// What a backend natively knows about one file's current version.
+//
+// Two markers, never one. `revision` is a durable, replayable handle (S3
+// `VersionId`, GridFS `_id`, Drive `headRevisionId`, a Graph version id):
+// it names bytes that can be fetched again. `fingerprint` is a change
+// token only (ETag, md5, cTag): it can say that the file moved on and
+// nothing more. Never collapse the two into one string; a caller
+// comparing them has to know which of the two guarantees it is holding.
+//
+// Three states, all distinct:
+//
+// - `exists: false` is the backend's own "no such file". Both markers are
+//   null in v1; a tombstone revision arrives with soft delete, and the
+//   field shape already holds one.
+// - `exists: true` with both markers null means the file is there and the
+//   backend has no native marker for it. That is not absence and must
+//   never be read as one.
+// - `exists: true` with either marker set is the live identity.
+//
+// The surface is file-only: a directory operand is refused by the backend
+// cores with EISDIR, because a prefix has no stable identity on an object
+// store and "present, no markers" has to keep meaning a marker-less file
+// rather than a directory. Mirrors python's `LiveFileIdentity`.
+export interface LiveFileIdentity {
+  // Whether the backend answered that the file is there.
+  exists: boolean
+  // Durable, replayable version handle.
+  revision: string | null
+  // Change token; detects change, cannot replay bytes.
+  fingerprint: string | null
+}
+
 // The name plane's facts a command may consult, as one injected object.
 //
 // Everything here answers from the workspace's addressing authority (the

@@ -19,11 +19,38 @@ from typing import Any
 
 from mirage.io import OpReport
 from mirage.observe import OpRecord
+from mirage.observe.context import RecordingScope, active_recorder
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
+from mirage.ops.types import LiveFileIdentity
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import NoMountError
+from mirage.utils.errors import NoMountError, OperationNotSupportedError
 from mirage.utils.path import owner_prefix
+
+
+def read_identity(records: list[OpRecord]) -> LiveFileIdentity | None:
+    """The identity carried by the records one read emitted.
+
+    A versioned backend stamps ``fingerprint``/``revision`` on the
+    record for the response it just read, so the markers and the bytes
+    come from the same answer. Scanned newest first: a read may emit
+    more than one record (a rendered file reads its parts), and only a
+    content read ever carries a marker.
+
+    Args:
+        records (list[OpRecord]): the records the read emitted, in
+            emission order.
+
+    Returns:
+        LiveFileIdentity | None: the identity the newest marked record
+        describes, None when no record carried a marker.
+    """
+    for rec in reversed(records):
+        if rec.revision is not None or rec.fingerprint is not None:
+            return LiveFileIdentity(exists=True,
+                                    revision=rec.revision,
+                                    fingerprint=rec.fingerprint)
+    return None
 
 
 class Ops:
@@ -297,6 +324,83 @@ class Ops:
 
     async def stat(self, path: str) -> FileStat:
         return await self._call("stat", path)
+
+    async def live_identity(self, path: str) -> LiveFileIdentity | None:
+        """The backend's own identity for the file living at ``path``.
+
+        Dispatched like every other op, so the link follow, the session
+        grants, the admission policies and the recording all fire once
+        at the same door. The op consults no cache: it is not a read
+        op, so the warm file cache never answers it, and the backend
+        module ignores the index it is handed, which is what makes the
+        answer a live one.
+
+        A mount whose backend registers no identity op reads back as
+        None rather than raising: this is the programmatic capability
+        probe, and an honest None is what a caller can branch on. Every
+        other failure propagates, and the raw op keeps raising ENOTSUP
+        for a direct ``execute_op`` caller.
+
+        Args:
+            path (str): Virtual path.
+
+        Returns:
+            LiveFileIdentity | None: the identity, or None when the
+            mount has no identity op.
+        """
+        try:
+            return await self._call("live_identity", path)
+        except OperationNotSupportedError:
+            return None
+
+    async def read_with_identity(
+            self,
+            path: str,
+            raw: bool = False) -> tuple[bytes, LiveFileIdentity | None]:
+        """Read a file and the identity of the bytes just read.
+
+        The stamp comes from the read's own backend response, never
+        from a second call: s3 and gridfs take both markers off the GET
+        that delivered the bytes, and drive and graph capture the
+        metadata immediately before the download, so their residual
+        window can only report a stamp older than the bytes, which
+        fails safe as a spurious stale refusal rather than a silently
+        accepted stale write.
+
+        Both of those captures are gated on a recording being active,
+        so the read runs inside its own recording frame. The frame is
+        nested rather than shared: a sibling task writing into an
+        enclosing line's sink would otherwise be able to hand this read
+        another path's markers. What the frame collected is handed up
+        to the enclosing scope on the way out, on the error path too,
+        so a line's byte accounting still sees every op that happened.
+
+        A failed read propagates as it is; no identity is synthesized
+        for it.
+
+        ``raw`` is ``read``'s own flag, passed straight through: a
+        caller that stamps stored bytes has to read stored bytes, or
+        the stamp describes a rendering the write path never stores.
+        No offset/size window is offered, because the identity of half
+        a file is not a question the backend can answer.
+
+        Args:
+            path (str): Virtual path.
+            raw (bool): Read stored bytes rather than a rendered form.
+
+        Returns:
+            tuple[bytes, LiveFileIdentity | None]: the content, and its
+            identity or None when the backend recorded no marker.
+        """
+        outer = active_recorder()
+        scope = RecordingScope()
+        try:
+            data = await self.read(path, raw=raw)
+        finally:
+            scope.close()
+            if outer is not None:
+                outer.sink.extend(scope.records)
+        return data, read_identity(scope.records)
 
     async def readdir(self, path: str) -> list[str]:
         return await self._call("readdir", path)

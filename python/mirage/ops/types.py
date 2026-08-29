@@ -210,6 +210,46 @@ class LinkView:
     target_stat: LinkTargetStat
 
 
+@dataclass(frozen=True, slots=True)
+class LiveFileIdentity:
+    """What a backend natively knows about one file's current version.
+
+    Two markers, never one. ``revision`` is a durable, replayable
+    handle (S3 ``VersionId``, GridFS ``_id``, Drive ``headRevisionId``,
+    a Graph version id): it names bytes that can be fetched again.
+    ``fingerprint`` is a change token only (ETag, md5, cTag): it can
+    say that the file moved on and nothing more. Never collapse the
+    two into one string; a caller comparing them has to know which of
+    the two guarantees it is holding.
+
+    Three states, all distinct:
+
+    - ``exists=False`` is the backend's own "no such file". Both
+      markers are None in v1; a tombstone revision arrives with soft
+      delete, and the field shape already holds one.
+    - ``exists=True`` with both markers None means the file is there
+      and the backend has no native marker for it. That is not
+      absence and must never be read as one.
+    - ``exists=True`` with either marker set is the live identity.
+
+    The surface is file-only: a directory operand is refused by the
+    backend cores with EISDIR, because a prefix has no stable identity
+    on an object store and "present, no markers" has to keep meaning a
+    marker-less file rather than a directory.
+
+    Args:
+        exists (bool): whether the backend answered that the file is
+            there.
+        revision (str | None): durable, replayable version handle.
+        fingerprint (str | None): change token; detects change, cannot
+            replay bytes.
+    """
+
+    exists: bool
+    revision: str | None
+    fingerprint: str | None
+
+
 @dataclass(frozen=True)
 class NamespaceView:
     """The name plane's facts a command may consult, as one injected object.

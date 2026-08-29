@@ -86,6 +86,16 @@ export function recordingActive(): boolean {
   return storage.getStore() !== undefined
 }
 
+// The live array the active frame appends to, null when none is active.
+// The twin of python's `active_recorder().sink`, and what a caller
+// opening a nested frame needs on both ends of it: the frame's own
+// records to read markers off, and the enclosing frame's array to hand
+// them up to, so a line's byte accounting still sees every op that
+// happened inside the nested one.
+export function activeRecords(): OpRecord[] | null {
+  return storage.getStore()?.records ?? null
+}
+
 export interface RecordOptions {
   fingerprint?: string | null
   revision?: string | null
