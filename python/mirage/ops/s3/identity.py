@@ -12,8 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.onedrive.io import IO
-from mirage.ops.generic import make_generic_ops
-from mirage.ops.onedrive.identity import live_identity
+from mirage.accessor.s3 import S3Accessor
+from mirage.core.s3.identity import live_identity as core_live_identity
+from mirage.ops.registry import op
+from mirage.ops.types import LiveFileIdentity
+from mirage.types import PathSpec
 
-OPS = [*make_generic_ops("onedrive", IO), live_identity]
+
+@op("live_identity", resource="s3")
+async def live_identity(accessor: S3Accessor, path: PathSpec, *, index,
+                        **kwargs) -> LiveFileIdentity:
+    """Bounded identity lookup, bypassing the index cache entirely.
+
+    Args:
+        accessor (S3Accessor): backend accessor.
+        path (PathSpec): the path to check.
+        index: the injected index cache; never consulted.
+    """
+    return await core_live_identity(accessor, path)

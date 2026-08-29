@@ -14,5 +14,6 @@
 
 from mirage.commands.builtin.sharepoint.io import IO
 from mirage.ops.generic import make_generic_ops
+from mirage.ops.sharepoint.identity import live_identity
 
-OPS = make_generic_ops("sharepoint", IO)
+OPS = [*make_generic_ops("sharepoint", IO), live_identity]

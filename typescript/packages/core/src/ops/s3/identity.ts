@@ -12,13 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GDRIVE_IO } from '../../commands/builtin/gdrive/io.ts'
-import { ResourceName } from '../../types.ts'
-import { makeGenericOps } from '../generic/factory.ts'
-import type { RegisteredOp } from '../registry.ts'
-import { liveIdentityOp } from './identity.ts'
+import type { S3Accessor } from '../../accessor/s3.ts'
+import { liveIdentity as coreLiveIdentity } from '../../core/s3/identity.ts'
+import type { OpKwargs, RegisteredOp } from '../registry.ts'
+import { type PathSpec, ResourceName } from '../../types.ts'
 
-export const GDRIVE_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.GDRIVE, GDRIVE_IO),
-  liveIdentityOp,
-]
+// Bounded identity lookup, bypassing the index cache entirely: `kwargs`
+// carries the injected `index` and it is never read.
+export const liveIdentityOp: RegisteredOp = {
+  name: 'live_identity',
+  resource: ResourceName.S3,
+  filetype: null,
+  write: false,
+  fn: async (accessor: S3Accessor, path: PathSpec, _args: readonly unknown[], _kwargs: OpKwargs) =>
+    coreLiveIdentity(accessor, path),
+}

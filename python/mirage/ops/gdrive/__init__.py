@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.gdrive.io import IO
+from mirage.ops.gdrive.identity import live_identity
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops("gdrive", IO)
+OPS = [*make_generic_ops("gdrive", IO), live_identity]

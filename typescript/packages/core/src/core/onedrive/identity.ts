@@ -12,13 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GDRIVE_IO } from '../../commands/builtin/gdrive/io.ts'
-import { ResourceName } from '../../types.ts'
-import { makeGenericOps } from '../generic/factory.ts'
-import type { RegisteredOp } from '../registry.ts'
-import { liveIdentityOp } from './identity.ts'
+import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
+import type { LiveFileIdentity } from '../../ops/types.ts'
+import type { PathSpec } from '../../types.ts'
+import { eisdir } from '../../utils/errors.ts'
+import { identityItem } from '../msgraph/drive.ts'
 
-export const GDRIVE_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.GDRIVE, GDRIVE_IO),
-  liveIdentityOp,
-]
+// Bounded identity lookup: one plain item GET on the drive item.
+export async function liveIdentity(
+  accessor: OneDriveAccessor,
+  path: PathSpec,
+): Promise<LiveFileIdentity> {
+  if (path.resourcePath === '') throw eisdir(path)
+  return identityItem(accessor.config, accessor.loc(path.resourcePath), path)
+}

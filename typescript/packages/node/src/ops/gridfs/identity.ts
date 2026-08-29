@@ -12,13 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
-import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
+import type { OpKwargs, RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { ResourceName } from '@struktoai/mirage-core/types'
-import { GRIDFS_IO } from '../../commands/builtin/gridfs/io.ts'
-import { liveIdentityOp } from './identity.ts'
+import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { GridFSAccessor } from '../../accessor/gridfs.ts'
+import { liveIdentity as coreLiveIdentity } from '../../core/gridfs/identity.ts'
 
-export const GRIDFS_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.GRIDFS, GRIDFS_IO, {}),
-  liveIdentityOp,
-]
+// Bounded identity lookup, bypassing the index cache entirely: `kwargs`
+// carries the injected `index` and it is never read.
+export const liveIdentityOp: RegisteredOp = {
+  name: 'live_identity',
+  resource: ResourceName.GRIDFS,
+  filetype: null,
+  write: false,
+  fn: async (
+    accessor: GridFSAccessor,
+    path: PathSpec,
+    _args: readonly unknown[],
+    _kwargs: OpKwargs,
+  ) => coreLiveIdentity(accessor, path),
+}

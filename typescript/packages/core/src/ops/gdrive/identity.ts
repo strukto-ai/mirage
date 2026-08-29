@@ -12,13 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GDRIVE_IO } from '../../commands/builtin/gdrive/io.ts'
-import { ResourceName } from '../../types.ts'
-import { makeGenericOps } from '../generic/factory.ts'
-import type { RegisteredOp } from '../registry.ts'
-import { liveIdentityOp } from './identity.ts'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { liveIdentity as coreLiveIdentity } from '../../core/gdrive/identity.ts'
+import type { OpKwargs, RegisteredOp } from '../registry.ts'
+import { type PathSpec, ResourceName } from '../../types.ts'
 
-export const GDRIVE_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.GDRIVE, GDRIVE_IO),
-  liveIdentityOp,
-]
+// Bounded identity lookup, bypassing the index cache entirely: `kwargs`
+// carries the injected `index` and it is never read.
+export const liveIdentityOp: RegisteredOp = {
+  name: 'live_identity',
+  resource: ResourceName.GDRIVE,
+  filetype: null,
+  write: false,
+  fn: async (
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    _args: readonly unknown[],
+    _kwargs: OpKwargs,
+  ) => coreLiveIdentity(accessor, path),
+}

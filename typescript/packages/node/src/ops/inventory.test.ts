@@ -16,6 +16,7 @@ import { expect, test } from 'vitest'
 
 import { DISK_OPS } from './disk/index.ts'
 import { EMAIL_OPS } from './email/index.ts'
+import { GRIDFS_OPS } from './gridfs/index.ts'
 import { HF_OPS } from './hf/index.ts'
 import { REDIS_OPS } from './redis/index.ts'
 import { SSH_OPS } from './ssh/index.ts'
@@ -30,6 +31,7 @@ type Row = [string, string, string, boolean]
 const TABLES = {
   disk: DISK_OPS,
   email: EMAIL_OPS,
+  gridfs: GRIDFS_OPS,
   hf: HF_OPS,
   redis: REDIS_OPS,
   ssh: SSH_OPS,
@@ -54,6 +56,19 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['read', 'email', '', false],
     ['readdir', 'email', '', false],
     ['stat', 'email', '', false],
+  ],
+  gridfs: [
+    ['create', 'gridfs', '', true],
+    ['live_identity', 'gridfs', '', false],
+    ['mkdir', 'gridfs', '', true],
+    ['read', 'gridfs', '', false],
+    ['readdir', 'gridfs', '', false],
+    ['rename', 'gridfs', '', true],
+    ['rmdir', 'gridfs', '', true],
+    ['stat', 'gridfs', '', false],
+    ['truncate', 'gridfs', '', true],
+    ['unlink', 'gridfs', '', true],
+    ['write', 'gridfs', '', true],
   ],
   hf: [
     ['create', 'hf_buckets', '', true],

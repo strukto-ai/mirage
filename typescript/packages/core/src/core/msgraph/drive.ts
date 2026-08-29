@@ -18,8 +18,9 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/find_eval.ts'
 import { record, recordingActive, recordStream, revisionFor } from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
+import type { LiveFileIdentity } from '../../ops/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { enoent, listingError } from '../../utils/errors.ts'
+import { eisdir, enoent, listingError } from '../../utils/errors.ts'
 import { guessType } from '../../utils/filetype.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -334,6 +335,29 @@ async function captureItemMetadata(
     currentVersionId(versions),
     asString(item['@microsoft.graph.downloadUrl']),
   ]
+}
+
+// Bounded identity lookup: one plain item GET, no version history.
+// `captureItemMetadata`'s `$expand=versions` pulls the whole version
+// history, which the identity guarantee forbids; this reads only the
+// current item and its cTag, so `revision` stays null until a bounded
+// revision call is proven safe (see #572).
+export async function identityItem(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
+  path: PathSpec,
+): Promise<LiveFileIdentity> {
+  let item: Record<string, unknown>
+  try {
+    item = await graphGet(config, loc.item())
+  } catch (error) {
+    if (error instanceof GraphError && error.status === 404) {
+      return { exists: false, revision: null, fingerprint: null }
+    }
+    throw error
+  }
+  if (isFolder(item)) throw eisdir(path)
+  return { exists: true, revision: null, fingerprint: asString(item.cTag) }
 }
 
 export async function readItem(

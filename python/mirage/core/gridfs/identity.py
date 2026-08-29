@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.onedrive.io import IO
-from mirage.ops.generic import make_generic_ops
-from mirage.ops.onedrive.identity import live_identity
+from mirage.core.gridfs.driver import DRIVER
+from mirage.core.object_store.identity import make_identity
 
-OPS = [*make_generic_ops("onedrive", IO), live_identity]
+live_identity = make_identity(DRIVER)
