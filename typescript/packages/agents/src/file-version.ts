@@ -173,18 +173,17 @@ export class FileVersionTracker {
   }
 
   async read(path: string): Promise<Buffer> {
+    if (!this.enabled) return readBuffer(this.ws, path)
     const [bytes, identity] = await this.ws.fs.readFileWithIdentity(path, { raw: true })
     const content = Buffer.from(bytes)
-    if (this.enabled) {
-      this.readVersions.set(this.key(path), { identity, contentHash: fingerprint(content) })
-    }
+    this.readVersions.set(this.key(path), { identity, contentHash: fingerprint(content) })
     return content
   }
 
   async readForEdit(path: string): Promise<Buffer> {
+    if (!this.enabled) return readBuffer(this.ws, path)
     const [bytes, identity] = await this.ws.fs.readFileWithIdentity(path, { raw: true })
     const content = Buffer.from(bytes)
-    if (!this.enabled) return content
     const key = this.key(path)
     const stamp: Stamp = { identity, contentHash: fingerprint(content) }
     const readStamp = this.readVersions.get(key)

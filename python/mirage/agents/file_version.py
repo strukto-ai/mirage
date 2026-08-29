@@ -299,10 +299,11 @@ class FileVersionTracker:
         Returns:
             bytes: The stored bytes.
         """
+        if not self._enabled:
+            return await self._ws.ops.read(path)
         content, identity = await self._ws.ops.read_with_identity(path)
-        if self._enabled:
-            self._read_versions[self._key(path)] = Stamp(
-                identity=identity, content_hash=fingerprint(content))
+        self._read_versions[self._key(path)] = Stamp(
+            identity=identity, content_hash=fingerprint(content))
         return content
 
     async def read_for_edit(self, path: str) -> bytes:
@@ -317,9 +318,9 @@ class FileVersionTracker:
         Raises:
             StaleMirageFileError: The file moved since it was last read.
         """
-        content, identity = await self._ws.ops.read_with_identity(path)
         if not self._enabled:
-            return content
+            return await self._ws.ops.read(path)
+        content, identity = await self._ws.ops.read_with_identity(path)
         key = self._key(path)
         stamp = Stamp(identity=identity, content_hash=fingerprint(content))
         read_stamp = self._read_versions.get(key)

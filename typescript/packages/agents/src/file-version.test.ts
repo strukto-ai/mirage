@@ -59,6 +59,7 @@ function renderingWs(inner: Workspace): Workspace {
 class VersionedFs {
   reads = 0
   identityCalls = 0
+  readWithIdentityCalls = 0
   withRevision = true
   withFingerprint = true
   private readonly marks = new Map<string, number>()
@@ -85,6 +86,7 @@ class VersionedFs {
   // The markers ride the read's own response, the way s3 and gridfs
   // lift an ETag and a VersionId off the GET that carried the bytes.
   async readFileWithIdentity(path: string): Promise<[Uint8Array, LiveFileIdentity]> {
+    this.readWithIdentityCalls += 1
     return [await this.readFile(path), await this.identity(path)]
   }
 
@@ -170,6 +172,17 @@ describe('FileVersionTracker', () => {
     await ws.fs.writeFile('/a.txt', 'moved underneath')
     await tracker.write('/a.txt', 'two')
     expect(await ws.fs.readFileText('/a.txt')).toBe('two')
+  })
+
+  it('never asks for identity when disabled', async () => {
+    const fs = new VersionedFs(ws)
+    const tracker = new FileVersionTracker(versionedWs(ws, fs), false)
+    await fs.writeFile('/a.txt', 'one')
+    expect((await tracker.read('/a.txt')).toString()).toBe('one')
+    expect((await tracker.readForEdit('/a.txt')).toString()).toBe('one')
+    await tracker.write('/a.txt', 'two')
+    expect(fs.readWithIdentityCalls).toBe(0)
+    expect(fs.identityCalls).toBe(0)
   })
 })
 

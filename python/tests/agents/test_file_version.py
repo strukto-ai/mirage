@@ -71,6 +71,7 @@ class _VersionedOps:
         self.with_fingerprint = with_fingerprint
         self.reads = 0
         self.identity_calls = 0
+        self.read_with_identity_calls = 0
 
     async def _identity(self, path):
         if not await self._ops.exists(path):
@@ -91,6 +92,7 @@ class _VersionedOps:
         # The markers ride the read's own response, the way s3 and
         # gridfs lift an ETag and a VersionId off the GET that carried
         # the bytes.
+        self.read_with_identity_calls += 1
         return await self.read(path), await self._identity(path)
 
     async def live_identity(self, path):
@@ -411,3 +413,15 @@ def test_stamp_keeps_both_the_identity_and_the_hash():
     stamp = Stamp(identity=identity, content_hash=fingerprint(b"one"))
     assert stamp.identity is identity
     assert stamp.content_hash == fingerprint(b"one")
+
+
+@pytest.mark.asyncio
+async def test_disabled_tracker_never_asks_for_identity(workspace):
+    versioned = _VersionedWorkspace(workspace)
+    tracker = FileVersionTracker(versioned, enabled=False)
+    await versioned.ops.write("/a.txt", b"one")
+    assert await tracker.read("/a.txt") == b"one"
+    assert await tracker.read_for_edit("/a.txt") == b"one"
+    await tracker.write("/a.txt", "two")
+    assert versioned.ops.read_with_identity_calls == 0
+    assert versioned.ops.identity_calls == 0
