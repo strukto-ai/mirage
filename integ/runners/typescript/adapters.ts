@@ -33,7 +33,6 @@ import {
   CephResource,
   ChromaResource,
   DatabricksVolumeResource,
-  DatabricksStaticTokenProvider,
   DifyResource,
   DigitalOceanResource,
   DiscordResource,
@@ -374,17 +373,15 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!created.ok) throw new Error(`databricks mkdir root failed: ${String(created.status)}`)
-    mounts[m.path] = await DatabricksVolumeResource.create(
-      {
-        catalog: 'main',
-        schema: 'default',
-        volume,
-        rootPath,
-        host: endpoint,
-        timeout: 30,
-      },
-      new DatabricksStaticTokenProvider(token),
-    )
+    mounts[m.path] = new DatabricksVolumeResource({
+      catalog: 'main',
+      schema: 'default',
+      volume,
+      rootPath,
+      host: endpoint,
+      token,
+      timeout: 30,
+    })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -1959,10 +1956,14 @@ async function openLangfuse(target: Target): Promise<Open> {
 // hf_buckets validates the bucket id.
 const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
   databricks: () =>
-    new DatabricksVolumeResource(
-      { host: 'https://h.example.com', catalog: 'c', schema: 's', volume: 'v', rootPath: '/' },
-      new DatabricksStaticTokenProvider('t'),
-    ),
+    new DatabricksVolumeResource({
+      host: 'https://h.example.com',
+      token: 't',
+      catalog: 'c',
+      schema: 's',
+      volume: 'v',
+      rootPath: '/',
+    }),
   discord: () => new DiscordResource({ token: 'x' }),
   email: () =>
     new EmailResource({

@@ -7,12 +7,11 @@ description: Set up Databricks credentials for the Unity Catalog volume resource
 ## Credentials
 
 The resource reads a Unity Catalog volume over the Databricks Files REST API.
-It needs two things, and they are supplied separately: a workspace **host**,
-which is configuration, and a **bearer token**, which reaches the resource
-through a token provider your program writes.
+It needs two things: your workspace **host** and a **bearer token**, both given
+to the resource as config.
 
-The config never holds a credential, so nothing is redacted in a snapshot and
-nothing leaks into a config file.
+The token is held as a secret, so a snapshot writes `<REDACTED>` in its place
+and restoring that snapshot asks for a fresh resource.
 
 ### 1. Get Your Workspace Host
 
@@ -32,19 +31,17 @@ DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
 DATABRICKS_TOKEN=dapi...
 ```
 
-Your program reads these; MIRAGE does not. It takes the host as config and the
-token from the provider you hand it.
+Your program reads these and passes them in; MIRAGE reads no environment
+variable of its own and no `~/.databrickscfg` profile.
 
 ### Beyond a personal access token
 
-MIRAGE ships one provider, `StaticTokenProvider`, for a token you already
-hold. Anything that mints, refreshes or exchanges a credential (OAuth
-machine-to-machine, on-behalf-of a signed-in user, a `~/.databrickscfg`
-profile) is application code implementing the same one-method interface. See
-the [Python](/python/setup/databricks) and
-[TypeScript](/typescript/setup/databricks_volume) setup guides for worked
-providers.
+Any credential your program can turn into a bearer token works: OAuth
+machine-to-machine, on-behalf-of a signed-in user, or a token read from a
+secret manager. Mint it your own way and pass the string as `token`.
 
-MIRAGE calls the provider before each Files API operation, never caches or
-refreshes the token, and never retries a 401. Caching and refresh belong to
-the provider, which is the only party that knows how its credential is minted.
+MIRAGE sends that token on every Files API call and never refreshes or retries
+it. When it expires the call fails with `DatabricksVolumeAuthError`, and your
+program obtains a new token and builds a new resource. See the
+[Python](/python/setup/databricks) and
+[TypeScript](/typescript/setup/databricks_volume) setup guides.

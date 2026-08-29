@@ -37,7 +37,6 @@ from mirage.ops.databricks_volume import OPS as DATABRICKS_VOLUME_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 from mirage.resource.databricks_volume.prompt import PROMPT
-from mirage.resource.databricks_volume.token_provider import TokenProvider
 from mirage.types import PathSpec, ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
@@ -73,22 +72,15 @@ class DatabricksVolumeResource(BaseResource):
     _ops: dict[str, Any] = _DATABRICKS_VOLUME_OPS
     PROMPT: str = PROMPT
 
-    def __init__(
-        self,
-        config: DatabricksVolumeConfig,
-        token_provider: TokenProvider,
-    ) -> None:
+    def __init__(self, config: DatabricksVolumeConfig) -> None:
         """Mount one Unity Catalog volume over the Files API.
 
         Args:
-            config (DatabricksVolumeConfig): location and transport; it
-                carries no credential.
-            token_provider (TokenProvider): consulted before each Files
-                API operation. Never stored in a snapshot.
+            config (DatabricksVolumeConfig): workspace host, bearer
+                token, volume coordinates and transport.
         """
         super().__init__()
-        self._initialize(config,
-                         HttpDatabricksFilesClient(config, token_provider))
+        self._initialize(config, HttpDatabricksFilesClient(config))
 
     @classmethod
     def _from_files_client(
@@ -99,7 +91,7 @@ class DatabricksVolumeResource(BaseResource):
         """Build a resource around an already-made Files API client.
 
         The seam a test drives the whole backend through without a
-        token provider or a socket; deliberately not exported.
+        socket; deliberately not exported.
 
         Args:
             config (DatabricksVolumeConfig): location and transport.
@@ -134,14 +126,9 @@ class DatabricksVolumeResource(BaseResource):
         return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
-        # Nothing to redact: the config is location and transport only.
-        # A token provider is runtime state, so the mount cannot be
-        # rebuilt from this dict and says so with needs_override.
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "config": self.config.model_dump(),
-        }
+        # The token dumps as <REDACTED>, which is what makes the loader
+        # demand a fresh resource; no separate marker is needed.
+        return self.config_state(self.config)
 
     def load_state(self, state: dict[str, Any]) -> None:
         pass

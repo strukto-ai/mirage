@@ -95,10 +95,6 @@ export {
   type DatabricksVolumeResourceState,
 } from './resource/databricks_volume/databricks_volume.ts'
 export {
-  StaticTokenProvider as DatabricksStaticTokenProvider,
-  type TokenProvider as DatabricksTokenProvider,
-} from '@struktoai/mirage-core/resource/databricks_volume/token_provider'
-export {
   normalizeS3Config,
   redactConfig as redactS3Config,
   type S3Config,

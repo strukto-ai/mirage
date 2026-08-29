@@ -14,7 +14,7 @@
 
 import posixpath
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 class DatabricksVolumeConfig(BaseModel):
@@ -22,10 +22,13 @@ class DatabricksVolumeConfig(BaseModel):
                               populate_by_name=True,
                               serialize_by_alias=True)
 
-    # Location and transport only: the credential reaches the resource
-    # through a TokenProvider, so this config holds no secret at all and
-    # a snapshot of it has nothing to redact.
     host: str
+    # The workspace credential, held the way every other account backend
+    # holds one: a SecretStr, so a snapshot dumps it as <REDACTED> and
+    # the loader demands a fresh resource. There is no profile field and
+    # no environment discovery; the embedding program decides where the
+    # token comes from and hands it over.
+    token: SecretStr
     catalog: str
     # Public config key is still "schema"
     # internal name avoids warning overwriting BaseModel.schema.
@@ -41,6 +44,13 @@ class DatabricksVolumeConfig(BaseModel):
         if not stripped:
             raise ValueError("host must be a non-empty workspace URL")
         return stripped
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("token must be a non-empty bearer token")
+        return value
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod

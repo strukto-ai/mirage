@@ -23,6 +23,7 @@ import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } 
 
 const CONFIG: DatabricksVolumeConfig = normalizeDatabricksVolumeConfig({
   host: 'https://dbc.example.com',
+  token: 'tok-123',
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
@@ -49,6 +50,7 @@ describe('volumeRoot / configuredRoot', () => {
   it('defaults to the volume root without root_path', () => {
     const config = normalizeDatabricksVolumeConfig({
       host: 'https://dbc.example.com',
+      token: 'tok-123',
       catalog: 'main',
       schema: 'default',
       volume: 'agent_files',

@@ -15,8 +15,6 @@
 from typing import TYPE_CHECKING
 
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
-from mirage.resource.databricks_volume.token_provider import (
-    StaticTokenProvider, TokenProvider)
 
 if TYPE_CHECKING:
     from mirage.resource.databricks_volume.databricks_volume import \
@@ -25,8 +23,6 @@ if TYPE_CHECKING:
 __all__ = [
     "DatabricksVolumeConfig",
     "DatabricksVolumeResource",
-    "StaticTokenProvider",
-    "TokenProvider",
 ]
 
 

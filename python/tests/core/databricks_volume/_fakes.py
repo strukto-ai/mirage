@@ -177,6 +177,7 @@ class FakeFilesClient:
 def databricks_config() -> DatabricksVolumeConfig:
     return DatabricksVolumeConfig(
         host="https://dbc.example.com",
+        token="dapi-test",
         catalog="main",
         schema="default",
         volume="agent_files",
@@ -234,6 +235,7 @@ def file_entry(path: str,
 
 CONFIG = DatabricksVolumeConfig(
     host="https://dbc.example.com",
+    token="dapi-test",
     catalog="main",
     schema="default",
     volume="agent_files",

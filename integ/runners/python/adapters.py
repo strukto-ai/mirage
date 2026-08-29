@@ -57,8 +57,7 @@ from mirage.resource.box import BoxConfig, BoxResource
 from mirage.resource.ceph import CephConfig, CephResource
 from mirage.resource.chroma import ChromaConfig, ChromaResource
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource,
-                                               StaticTokenProvider)
+                                               DatabricksVolumeResource)
 from mirage.resource.dify import DifyConfig, DifyResource
 from mirage.resource.digitalocean import (DigitalOceanConfig,
                                           DigitalOceanResource)
@@ -330,13 +329,13 @@ class DatabricksVolumeService:
     def resource(self, mount: dict) -> DatabricksVolumeResource:
         volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
         config = DatabricksVolumeConfig(host=self.base,
+                                        token=self.token,
                                         catalog="main",
                                         schema="default",
                                         volume=volume,
                                         root_path=mount.get("prefix") or "/")
         create_volume_root(self.base, self.token, configured_root(config))
-        return DatabricksVolumeResource(config,
-                                        StaticTokenProvider(self.token))
+        return DatabricksVolumeResource(config)
 
     async def teardown(self) -> None:
         await stop_kit_fake(self.process)
@@ -2405,6 +2404,7 @@ def build_slack(
 ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
     "databricks": (DatabricksVolumeResource, DatabricksVolumeConfig, {
         "host": "https://h.example.com",
+        "token": "t",
         "catalog": "c",
         "schema": "s",
         "volume": "v",
@@ -2470,9 +2470,6 @@ def build_arg_error(
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     resource_cls, config_cls, kwargs = ARG_ERROR_RESOURCES[mount["backend"]]
     config = config_cls(**kwargs)
-    if resource_cls is DatabricksVolumeResource:
-        # Its credential is a provider argument, not a config field.
-        return resource_cls(config, StaticTokenProvider("t")), _noop
     return resource_cls(config), _noop
 
 

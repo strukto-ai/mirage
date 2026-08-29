@@ -20,9 +20,9 @@ from yarl import URL
 
 from mirage.core.databricks_volume.client import HttpDatabricksFilesClient
 from mirage.core.databricks_volume.errors import (DatabricksVolumeApiError,
+                                                  DatabricksVolumeAuthError,
                                                   is_not_found)
-from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               StaticTokenProvider)
+from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.utils.ranges import ByteWindow
 
 HOST = "https://dbc.example.com"
@@ -31,30 +31,8 @@ FILES_URL = f"{HOST}/api/2.0/fs/files{ROOT}/a.txt"
 DIRS_URL = f"{HOST}/api/2.0/fs/directories{ROOT}"
 
 
-class RotatingTokenProvider:
-
-    def __init__(self, tokens: list[str]) -> None:
-        self.tokens = list(tokens)
-        self.calls = 0
-
-    def get_token(self) -> str:
-        token = self.tokens[min(self.calls, len(self.tokens) - 1)]
-        self.calls += 1
-        return token
-
-
-class AsyncTokenProvider:
-
-    def __init__(self, token: str) -> None:
-        self.token = token
-        self.calls = 0
-
-    async def get_token(self) -> str:
-        self.calls += 1
-        return self.token
-
-
 def make_config(**overrides) -> DatabricksVolumeConfig:
+    overrides.setdefault("token", "tok-123")
     return DatabricksVolumeConfig(host=HOST,
                                   catalog="main",
                                   schema="default",
@@ -62,9 +40,8 @@ def make_config(**overrides) -> DatabricksVolumeConfig:
                                   **overrides)
 
 
-def make_client(provider=None) -> HttpDatabricksFilesClient:
-    return HttpDatabricksFilesClient(
-        make_config(), provider or StaticTokenProvider("tok-123"))
+def make_client(**overrides) -> HttpDatabricksFilesClient:
+    return HttpDatabricksFilesClient(make_config(**overrides))
 
 
 def sent(m: aioresponses, method: str, url: str) -> list:
@@ -256,16 +233,28 @@ async def test_a_head_404_carries_no_body_and_still_reads_as_not_found():
 
 
 @pytest.mark.asyncio
-async def test_a_401_propagates_without_a_replay():
-    """An on-behalf-of provider cannot re-mint a user's token and a
-    write must not be sent twice, so a refused call is reported rather
-    than retried."""
+async def test_a_401_is_an_auth_error_and_is_not_replayed():
+    """The token is the one the config carries, so a replay would send
+    the same refused credential again, and for a write it would send the
+    write twice. The application catches the auth error, obtains a fresh
+    token and rebuilds the resource."""
     with aioresponses() as m:
         m.put(f"{FILES_URL}?overwrite=true", status=401, body="{}")
-        with pytest.raises(DatabricksVolumeApiError) as excinfo:
+        with pytest.raises(DatabricksVolumeAuthError) as excinfo:
             await make_client().upload(f"{ROOT}/a.txt", b"hello")
         assert len(sent(m, "PUT", f"{FILES_URL}?overwrite=true")) == 1
     assert excinfo.value.status_code == 401
+    assert isinstance(excinfo.value, DatabricksVolumeApiError)
+
+
+@pytest.mark.asyncio
+async def test_a_403_stays_an_ordinary_api_error():
+    with aioresponses() as m:
+        m.get(FILES_URL, status=403, body="{}")
+        with pytest.raises(DatabricksVolumeApiError) as excinfo:
+            await make_client().download(f"{ROOT}/a.txt")
+    assert not isinstance(excinfo.value, DatabricksVolumeAuthError)
+    assert excinfo.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -278,35 +267,13 @@ async def test_a_429_is_retried_then_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_an_async_provider_is_awaited():
-    provider = AsyncTokenProvider("tok-async")
-    with aioresponses() as m:
-        m.get(FILES_URL, status=200, body=b"hello")
-        await make_client(provider).download(f"{ROOT}/a.txt")
-        kwargs = sent(m, "GET", FILES_URL)[0].kwargs
-    assert provider.calls == 1
-    assert kwargs["headers"]["Authorization"] == "Bearer tok-async"
-
-
-@pytest.mark.asyncio
-async def test_each_operation_consults_the_provider_again():
-    provider = RotatingTokenProvider(["tok-one", "tok-two"])
-    client = make_client(provider)
+async def test_every_request_carries_the_configured_token():
+    client = make_client(token="tok-rotated")
     with aioresponses() as m:
         m.get(FILES_URL, status=200, body=b"a")
         m.get(FILES_URL, status=200, body=b"b")
         await client.download(f"{ROOT}/a.txt")
         await client.download(f"{ROOT}/a.txt")
         calls = sent(m, "GET", FILES_URL)
-    assert provider.calls == 2
-    assert calls[0].kwargs["headers"]["Authorization"] == "Bearer tok-one"
-    assert calls[1].kwargs["headers"]["Authorization"] == "Bearer tok-two"
-
-
-@pytest.mark.asyncio
-async def test_an_empty_token_is_refused_before_any_request():
-    client = make_client(StaticTokenProvider(""))
-    with aioresponses() as m:
-        with pytest.raises(ValueError, match="empty token"):
-            await client.download(f"{ROOT}/a.txt")
-        assert m.requests == {}
+    sent_tokens = [c.kwargs["headers"]["Authorization"] for c in calls]
+    assert sent_tokens == ["Bearer tok-rotated", "Bearer tok-rotated"]

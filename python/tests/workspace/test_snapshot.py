@@ -27,8 +27,7 @@ from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
 from mirage.resource.chroma import ChromaConfig, ChromaResource
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource,
-                                               StaticTokenProvider)
+                                               DatabricksVolumeResource)
 from mirage.resource.disk import DiskResource
 from mirage.resource.generic import GenericResource
 from mirage.resource.ram import RAMResource
@@ -209,18 +208,22 @@ def test_s3_without_inline_secret_loads_without_override(tmp_path):
     assert mount.resource.config.aws_profile == "dev"
 
 
-# ── needs_override enforcement ───────────────────────────────────────
+# ── override enforcement ─────────────────────────────────────────────
 
 
-def test_needs_override_demands_a_fresh_resource(tmp_path):
-    """A databricks mount holds a token provider, which no state dict
-    carries, so the loader refuses it rather than rebuilding it inert."""
-    resource = DatabricksVolumeResource(
-        DatabricksVolumeConfig(host="https://dbc.example.com",
-                               catalog="main",
-                               schema="default",
-                               volume="agent_files"),
-        StaticTokenProvider("dapi-123"))
+def databricks_config(token: str = "dapi-123") -> DatabricksVolumeConfig:
+    return DatabricksVolumeConfig(host="https://dbc.example.com",
+                                  token=token,
+                                  catalog="main",
+                                  schema="default",
+                                  volume="agent_files")
+
+
+def test_a_redacted_databricks_token_demands_a_fresh_resource(tmp_path):
+    """The token dumps as <REDACTED>, so a rebuild from state would 401
+    on its first read; the loader refuses instead, the way it does for
+    every other account backend."""
+    resource = DatabricksVolumeResource(databricks_config())
     src = Workspace({"/dbx": (resource, MountMode.READ)}, mode=MountMode.READ)
     snap = tmp_path / "dbx.tar"
     asyncio.run(src.snapshot(snap))
@@ -229,22 +232,17 @@ def test_needs_override_demands_a_fresh_resource(tmp_path):
         _load(snap)
 
 
-def test_needs_override_load_succeeds_with_a_replacement(tmp_path):
-    config = DatabricksVolumeConfig(host="https://dbc.example.com",
-                                    catalog="main",
-                                    schema="default",
-                                    volume="agent_files")
+def test_databricks_load_succeeds_with_a_replacement(tmp_path):
     src = Workspace(
         {
-            "/dbx": (DatabricksVolumeResource(
-                config, StaticTokenProvider("dapi-123")), MountMode.READ)
+            "/dbx":
+            (DatabricksVolumeResource(databricks_config()), MountMode.READ)
         },
         mode=MountMode.READ)
     snap = tmp_path / "dbx-override.tar"
     asyncio.run(src.snapshot(snap))
 
-    replacement = DatabricksVolumeResource(config,
-                                           StaticTokenProvider("dapi-fresh"))
+    replacement = DatabricksVolumeResource(databricks_config("dapi-fresh"))
     dst = _load(snap, resources={"/dbx": replacement})
     assert dst._registry.mount_for("/dbx/").resource is replacement
 

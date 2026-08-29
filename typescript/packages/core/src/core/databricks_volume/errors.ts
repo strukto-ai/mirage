@@ -24,6 +24,21 @@ export class DatabricksVolumeApiError extends Error {
   }
 }
 
+/**
+ * The workspace refused the configured token (401).
+ *
+ * Its own type because it is the one failure an application can act on:
+ * mirage never refreshes or replays, so an expired token reaches the caller
+ * as this error, and the fix is to obtain a fresh token and rebuild the
+ * resource with a new config.
+ */
+export class DatabricksVolumeAuthError extends DatabricksVolumeApiError {
+  constructor(message: string, statusCode: number, errorCode: string | null = null) {
+    super(message, statusCode, errorCode)
+    this.name = 'DatabricksVolumeAuthError'
+  }
+}
+
 const NOT_FOUND_CODES = new Set(['RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND'])
 
 // Messages are the bare path, mirroring Python's builtin OSError subclasses

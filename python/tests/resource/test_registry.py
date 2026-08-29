@@ -23,6 +23,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.hf_buckets import HfBucketsResource
 from mirage.resource.registry import (REGISTRY, build_resource,
                                       known_resources, register_resource)
+from mirage.resource.secrets import REDACTED_SECRET
 
 SPEC_RESOURCES = (Path(__file__).resolve().parents[3] / "spec" / "python" /
                   "resources.json")
@@ -130,31 +131,25 @@ def test_unknown_resource_raises_keyerror():
         build_resource("nonsense")
 
 
-def test_databricks_volume_refuses_to_build_from_config():
-    """The token reaches the resource through a provider the embedding
-    program constructs, so a mount described as data is refused by name
-    rather than dying on a missing argument three frames down. The
-    sentence is the one TypeScript's factory rejects with."""
-    with pytest.raises(TypeError) as excinfo:
-        build_resource(
-            "databricks_volume", {
-                "host": "https://dbc.example.com",
-                "catalog": "main",
-                "schema": "default",
-                "volume": "agent_files",
-            })
-    assert str(excinfo.value) == (
-        "databricks_volume: a token provider is required; construct "
-        "DatabricksVolumeResource(config, token_provider) directly instead of "
-        "declaring this mount as config")
-
-
-def test_a_name_refused_from_config_is_still_a_known_resource():
-    # The name still resolves everywhere else a registry name is read
-    # from — a snapshot records it, and the class lookup goes through
-    # the same table.
-    assert "databricks_volume" in REGISTRY
-    assert "databricks_volume" in known_resources()
+def test_build_databricks_volume_redacts_the_token():
+    """A databricks mount is declarable like any other account backend:
+    the token rides the config, so YAML and the daemon build it by name,
+    and the state it captures carries the redaction marker rather than
+    the credential."""
+    from mirage.resource.databricks_volume import DatabricksVolumeResource
+    built = build_resource(
+        "databricks_volume", {
+            "host": "https://dbc.example.com",
+            "token": "dapi-123",
+            "catalog": "main",
+            "schema": "default",
+            "volume": "agent_files",
+        })
+    assert isinstance(built, DatabricksVolumeResource)
+    assert built.config.host == "https://dbc.example.com"
+    state = built.get_state()
+    assert state["config"]["token"] == REDACTED_SECRET
+    assert "dapi-123" not in json.dumps(state)
 
 
 def test_registry_module_import_is_free_of_resource_deps():

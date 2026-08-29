@@ -41,7 +41,6 @@ import { DATABRICKS_VOLUME_PROMPT } from '@struktoai/mirage-core/resource/databr
 import { PathSpec, ResourceName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
-import type { TokenProvider } from '@struktoai/mirage-core/resource/databricks_volume/token_provider'
 import {
   redactDatabricksVolumeConfig,
   type DatabricksVolumeConfig,
@@ -52,7 +51,6 @@ const resolveDatabricksVolumeGlob = makeResolveGlob(databricksVolumeReaddir)
 
 export interface DatabricksVolumeResourceState {
   type: string
-  needs_override: true
   config: DatabricksVolumeConfigRedacted
 }
 
@@ -87,21 +85,13 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   /**
    * Mount one Unity Catalog volume over the Files API.
    *
-   * @param config location and transport; it carries no credential.
-   * @param tokenProvider consulted before each Files API operation, and never
-   * written into a snapshot.
+   * @param config workspace host, bearer token, volume coordinates and
+   * transport.
    */
-  constructor(config: DatabricksVolumeConfig, tokenProvider: TokenProvider) {
+  constructor(config: DatabricksVolumeConfig) {
     super()
     this.config = config
-    this.accessor = new DatabricksVolumeAccessor(config, tokenProvider)
-  }
-
-  static create(
-    config: DatabricksVolumeConfig,
-    tokenProvider: TokenProvider,
-  ): Promise<DatabricksVolumeResource> {
-    return Promise.resolve(new DatabricksVolumeResource(config, tokenProvider))
+    this.accessor = new DatabricksVolumeAccessor(config)
   }
 
   open(): Promise<void> {
@@ -213,12 +203,10 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   override getState(): Promise<DatabricksVolumeResourceState> {
-    // Nothing to redact: the config is location and transport only. A token
-    // provider is runtime state, so the mount cannot be rebuilt from this
-    // dict and says so with needs_override, which both loaders read.
+    // The token dumps as <REDACTED>, which is what makes both loaders demand
+    // a fresh resource; no separate marker is needed.
     return Promise.resolve({
       type: this.kind,
-      needs_override: true,
       config: redactDatabricksVolumeConfig(this.config),
     })
   }

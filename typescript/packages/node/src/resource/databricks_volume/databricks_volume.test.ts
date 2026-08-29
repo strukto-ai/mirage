@@ -13,11 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { REDACTED_SECRET } from '@struktoai/mirage-core/resource/secrets'
 import { ResourceName } from '@struktoai/mirage-core/types'
-import {
-  StaticTokenProvider,
-  type TokenProvider,
-} from '@struktoai/mirage-core/resource/databricks_volume/token_provider'
 import { normalizeDatabricksVolumeConfig, redactDatabricksVolumeConfig } from './config.ts'
 import { DatabricksVolumeResource } from './databricks_volume.ts'
 import { buildResource } from '../registry.ts'
@@ -27,6 +24,7 @@ const BASE_CONFIG = {
   schema: 'default',
   volume: 'agent_files',
   host: 'https://dbc.example.com',
+  token: 'dapi-123',
 }
 
 describe('config normalization', () => {
@@ -46,6 +44,7 @@ describe('config normalization', () => {
         catalog: 'main',
         schema: 'default',
         volume: 'agent_files',
+        token: 'dapi-123',
       }),
     ).toThrow()
     expect(() => normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, host: '/' })).toThrow()
@@ -53,52 +52,54 @@ describe('config normalization', () => {
     expect(config.host).toBe('https://dbc.io')
   })
 
-  it('carries no credential to redact', () => {
-    const config = normalizeDatabricksVolumeConfig(BASE_CONFIG)
-    const redacted = redactDatabricksVolumeConfig(config)
-    expect(redacted).toEqual(config)
-    expect(JSON.stringify(redacted)).not.toContain('REDACTED')
+  it('requires a token', () => {
+    expect(() =>
+      normalizeDatabricksVolumeConfig({
+        catalog: 'main',
+        schema: 'default',
+        volume: 'agent_files',
+        host: 'https://dbc.example.com',
+      }),
+    ).toThrow()
+  })
+
+  it('has no profile field', () => {
+    const config = normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, profile: 'DEV' })
+    expect(config).not.toHaveProperty('profile')
+  })
+
+  it('redacts the token', () => {
+    const redacted = redactDatabricksVolumeConfig(normalizeDatabricksVolumeConfig(BASE_CONFIG))
+    expect(redacted.token).toBe(REDACTED_SECRET)
+    expect(JSON.stringify(redacted)).not.toContain('dapi-123')
   })
 })
 
 describe('DatabricksVolumeResource', () => {
-  it('creates with a token provider and exposes commands/ops', async () => {
-    const resource = await DatabricksVolumeResource.create(
-      normalizeDatabricksVolumeConfig(BASE_CONFIG),
-      new StaticTokenProvider('tok-123'),
-    )
+  it('exposes commands and ops', () => {
+    const resource = new DatabricksVolumeResource(normalizeDatabricksVolumeConfig(BASE_CONFIG))
     expect(resource.kind).toBe(ResourceName.DATABRICKS_VOLUME)
     expect(resource.cachesReads).toBe(true)
     expect(resource.commands().length).toBeGreaterThan(20)
     expect(resource.ops().map((op) => op.name)).toContain('write')
   })
 
-  it('holds the provider on the accessor and no token of its own', () => {
-    const provider: TokenProvider = new StaticTokenProvider('tok-123')
-    const resource = new DatabricksVolumeResource(
-      normalizeDatabricksVolumeConfig(BASE_CONFIG),
-      provider,
-    )
-    expect(resource.accessor.tokenProvider).toBe(provider)
+  it('reads the token from the config it was handed', () => {
+    const resource = new DatabricksVolumeResource(normalizeDatabricksVolumeConfig(BASE_CONFIG))
+    expect(resource.accessor.config.token).toBe('dapi-123')
     expect(resource.accessor.host).toBe('https://dbc.example.com')
-    expect((resource.accessor as unknown as { token?: string }).token).toBeUndefined()
   })
 
-  it('state carries no secret and demands an override at load', async () => {
-    const resource = new DatabricksVolumeResource(
-      normalizeDatabricksVolumeConfig(BASE_CONFIG),
-      new StaticTokenProvider('tok-123'),
-    )
+  it('state redacts the token, which is what demands an override at load', async () => {
+    const resource = new DatabricksVolumeResource(normalizeDatabricksVolumeConfig(BASE_CONFIG))
     const state = await resource.getState()
-    expect(state.needs_override).toBe(true)
+    expect(state.config.token).toBe(REDACTED_SECRET)
     expect(state.config.host).toBe('https://dbc.example.com')
-    expect(state.config).not.toHaveProperty('token')
-    expect(state.config).not.toHaveProperty('profile')
+    expect(state).not.toHaveProperty('needs_override')
   })
 
-  it('refuses to build from the registry, which has no provider to offer', async () => {
-    await expect(
-      buildResource('databricks_volume', { ...BASE_CONFIG, root_path: '/r' }),
-    ).rejects.toThrow('token provider is required')
+  it('builds from the registry like any other declared mount', async () => {
+    const resource = await buildResource('databricks_volume', { ...BASE_CONFIG, root_path: '/r' })
+    expect(resource).toBeInstanceOf(DatabricksVolumeResource)
   })
 })

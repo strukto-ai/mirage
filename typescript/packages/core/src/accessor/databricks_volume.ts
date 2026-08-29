@@ -14,16 +14,13 @@
 
 import { Accessor } from './base.ts'
 import type { DatabricksVolumeConfig } from '../resource/databricks_volume/config.ts'
-import type { TokenProvider } from '../resource/databricks_volume/token_provider.ts'
 
 export class DatabricksVolumeAccessor extends Accessor {
   readonly config: DatabricksVolumeConfig
-  readonly tokenProvider: TokenProvider
 
-  constructor(config: DatabricksVolumeConfig, tokenProvider: TokenProvider) {
+  constructor(config: DatabricksVolumeConfig) {
     super()
     this.config = config
-    this.tokenProvider = tokenProvider
   }
 
   /** The workspace origin, already stripped of trailing slashes by the config. */

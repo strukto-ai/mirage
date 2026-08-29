@@ -59,11 +59,11 @@ export type {
 export { ProvisionResult } from './provision/types.ts'
 export type { Resource } from './resource/base.ts'
 export { ChromaResource } from './resource/chroma/chroma.ts'
-export { normalizeDatabricksVolumeConfig } from './resource/databricks_volume/config.ts'
 export {
-  StaticTokenProvider as DatabricksStaticTokenProvider,
-  type TokenProvider as DatabricksTokenProvider,
-} from './resource/databricks_volume/token_provider.ts'
+  DatabricksVolumeApiError,
+  DatabricksVolumeAuthError,
+} from './core/databricks_volume/errors.ts'
+export { normalizeDatabricksVolumeConfig } from './resource/databricks_volume/config.ts'
 export { DevResource } from './resource/dev/dev.ts'
 export { DifyResource } from './resource/dify/dify.ts'
 export { GenericResource } from './resource/generic.ts'

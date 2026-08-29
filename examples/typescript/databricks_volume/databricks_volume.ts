@@ -16,7 +16,6 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  DatabricksStaticTokenProvider,
   DatabricksVolumeResource,
   MountMode,
   Workspace,
@@ -52,18 +51,16 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 async function main(): Promise<void> {
   const config = normalizeDatabricksVolumeConfig({
     host: process.env.DATABRICKS_HOST!,
+    token: process.env.DATABRICKS_TOKEN!,
     catalog: process.env.DATABRICKS_VOLUME_CATALOG!,
     schema: process.env.DATABRICKS_VOLUME_SCHEMA!,
     volume: process.env.DATABRICKS_VOLUME_NAME!,
     root_path: process.env.DATABRICKS_VOLUME_ROOT_PATH ?? '/',
   })
-  // The config holds no credential. Anything that mints or refreshes a token
-  // is application code implementing TokenProvider; a personal access token
-  // needs nothing more than this.
-  const resource = await DatabricksVolumeResource.create(
-    config,
-    new DatabricksStaticTokenProvider(process.env.DATABRICKS_TOKEN!),
-  )
+  // A personal access token needs nothing more than this. An app whose token
+  // expires catches DatabricksVolumeAuthError, obtains a fresh one its own
+  // way, and builds a new resource with a new config.
+  const resource = new DatabricksVolumeResource(config)
   const ws = new Workspace({ '/dbx/': resource }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')

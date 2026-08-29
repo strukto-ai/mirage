@@ -101,19 +101,11 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { normalizeSupabaseConfig } = await import('./supabase/config.ts')
     return new SupabaseResource(normalizeSupabaseConfig(config))
   },
-  databricks_volume: (config) => {
-    // A mount described as data has no credential to offer: the token reaches
-    // the resource through a TokenProvider the embedding program constructs,
-    // so this factory refuses rather than building a mount that 401s on its
-    // first read. Python's build_resource refuses for the same reason.
-    void config
-    return Promise.reject(
-      new Error(
-        'databricks_volume: a token provider is required; construct ' +
-          'DatabricksVolumeResource(config, tokenProvider) directly instead of ' +
-          'declaring this mount as config',
-      ),
-    )
+  databricks_volume: async (config) => {
+    const { DatabricksVolumeResource } = await import('./databricks_volume/databricks_volume.ts')
+    const { normalizeDatabricksVolumeConfig } =
+      await import('@struktoai/mirage-core/resource/databricks_volume/config')
+    return new DatabricksVolumeResource(normalizeDatabricksVolumeConfig(config))
   },
   minio: async (config) => {
     const { MinIOResource } = await import('./minio/minio.ts')

@@ -20,8 +20,8 @@ from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.core.databricks_volume.client import HttpDatabricksFilesClient
 from mirage.core.databricks_volume.path import backend_path
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource,
-                                               StaticTokenProvider)
+                                               DatabricksVolumeResource)
+from mirage.resource.secrets import REDACTED_SECRET
 from mirage.types import PathSpec, ResourceName
 from mirage.utils.key_prefix import mount_key
 from tests.core.databricks_volume._fakes import (CONFIG, FakeFilesClient,
@@ -33,6 +33,7 @@ from tests.core.databricks_volume._fakes import (CONFIG, FakeFilesClient,
 def test_config_validation_and_normalization():
     config = DatabricksVolumeConfig(
         host="https://dbc.example.com/",
+        token="dapi-123",
         catalog="main",
         schema="default",
         volume="agent_files",
@@ -43,6 +44,7 @@ def test_config_validation_and_normalization():
     with pytest.raises(ValidationError):
         DatabricksVolumeConfig(
             host="https://dbc.example.com",
+            token="dapi-123",
             catalog="main/other",
             schema="default",
             volume="agent_files",
@@ -51,27 +53,55 @@ def test_config_validation_and_normalization():
 
 def test_config_requires_a_host():
     with pytest.raises(ValidationError):
-        DatabricksVolumeConfig(catalog="main",
+        DatabricksVolumeConfig(token="dapi-123",
+                               catalog="main",
                                schema="default",
                                volume="agent_files")
     with pytest.raises(ValidationError):
         DatabricksVolumeConfig(host="/",
+                               token="dapi-123",
                                catalog="main",
                                schema="default",
                                volume="agent_files")
 
 
-def test_config_carries_no_credential_fields():
-    fields = set(DatabricksVolumeConfig.model_fields)
-    assert "token" not in fields
-    assert "profile" not in fields
+def test_config_requires_a_non_empty_token():
+    # An empty token would reach the workspace as a bare "Bearer " and
+    # come back as an opaque 401, so it is refused where it is typed.
+    with pytest.raises(ValidationError):
+        DatabricksVolumeConfig(host="https://dbc.example.com",
+                               catalog="main",
+                               schema="default",
+                               volume="agent_files")
+    with pytest.raises(ValidationError):
+        DatabricksVolumeConfig(host="https://dbc.example.com",
+                               token="",
+                               catalog="main",
+                               schema="default",
+                               volume="agent_files")
 
 
-def test_constructor_builds_an_http_client_from_the_provider():
-    resource = DatabricksVolumeResource(CONFIG, StaticTokenProvider("tok"))
+def test_config_has_no_profile_field():
+    # Profile discovery would mean parsing the Databricks CLI config,
+    # which is what the SDK did; the app resolves its own token instead.
+    assert "profile" not in set(DatabricksVolumeConfig.model_fields)
+
+
+def test_the_token_does_not_leak_through_repr():
+    config = DatabricksVolumeConfig(host="https://dbc.example.com",
+                                    token="dapi-secret",
+                                    catalog="main",
+                                    schema="default",
+                                    volume="agent_files")
+    assert "dapi-secret" not in repr(config)
+    assert config.token.get_secret_value() == "dapi-secret"
+
+
+def test_constructor_builds_an_http_client_from_the_config():
+    resource = DatabricksVolumeResource(CONFIG)
     client = resource.accessor.client
     assert isinstance(client, HttpDatabricksFilesClient)
-    assert client.token_provider.get_token() == "tok"
+    assert client.config is CONFIG
     assert client.url(
         "files",
         "/Volumes/x") == ("https://dbc.example.com/api/2.0/fs/files/Volumes/x")
@@ -80,6 +110,7 @@ def test_constructor_builds_an_http_client_from_the_provider():
 def test_backend_path_uses_volume_root_and_strips_mount_prefix():
     config = DatabricksVolumeConfig(
         host="https://dbc.example.com",
+        token="dapi-123",
         catalog="main",
         schema="default",
         volume="agent_files",
@@ -95,16 +126,16 @@ def test_backend_path_uses_volume_root_and_strips_mount_prefix():
         path) == ("/Volumes/main/default/agent_files/root/reports/latest.md")
 
 
-def test_resource_state_carries_no_secret_and_demands_an_override():
+def test_resource_state_redacts_the_token():
     resource = make_resource(FakeFilesClient())
     state = resource.get_state()
     assert state["type"] == ResourceName.DATABRICKS_VOLUME
-    assert state["needs_override"] is True
     assert state["config"]["host"] == "https://dbc.example.com"
     assert state["config"]["catalog"] == "main"
-    assert "token" not in state["config"]
-    assert "profile" not in state["config"]
-    assert "redacted_fields" not in state
+    assert state["config"]["token"] == REDACTED_SECRET
+    # The redaction marker is what makes the loader demand a fresh
+    # resource, so databricks needs no needs_override of its own.
+    assert "needs_override" not in state
 
 
 def test_resource_registers_ops():

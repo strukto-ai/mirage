@@ -32,6 +32,16 @@ class DatabricksVolumeApiError(RuntimeError):
         self.error_code = error_code
 
 
+class DatabricksVolumeAuthError(DatabricksVolumeApiError):
+    """The workspace refused the configured token (401).
+
+    Its own type because it is the one failure an application can act
+    on: mirage never refreshes or replays, so an expired token reaches
+    the caller as this error, and the fix is to obtain a fresh token
+    and rebuild the resource with a new config.
+    """
+
+
 def is_not_found(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     if status_code == 404:

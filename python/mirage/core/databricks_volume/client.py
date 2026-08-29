@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import inspect
 import json
 from collections.abc import AsyncIterator, Mapping
 from functools import partial
@@ -22,11 +21,12 @@ from urllib.parse import quote
 import aiohttp
 
 from mirage.core.api.client import ApiResponse, RetryPolicy, api_request
-from mirage.core.databricks_volume.errors import DatabricksVolumeApiError
+from mirage.core.databricks_volume.errors import (DatabricksVolumeApiError,
+                                                  DatabricksVolumeAuthError)
 from mirage.core.databricks_volume.types import (DatabricksEntry,
                                                  DatabricksFileMeta)
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
-from mirage.resource.databricks_volume.token_provider import TokenProvider
+from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 
@@ -36,10 +36,10 @@ OCTET_STREAM = "application/octet-stream"
 
 # Databricks answers an over-quota or unavailable workspace with a
 # Retry-After, so the wait comes from the header rather than from a
-# body field. 401 is deliberately absent: a token is resolved fresh per
-# operation and an on-behalf-of provider cannot re-mint one, so a
-# refused call is reported rather than replayed (msgraph's single 401
-# replay would also re-send a write, which must never happen).
+# body field. 401 is deliberately absent: the token is the one the
+# config carries, so a replay would send the same refused credential
+# again, and for a write it would send the write twice (msgraph's
+# single 401 replay exists because it can re-mint; mirage cannot).
 RETRY = RetryPolicy(statuses=frozenset({429, 503}), max_retries=3)
 
 
@@ -77,29 +77,13 @@ def databricks_error(method: str, url: str, status: int,
         error_code = code if isinstance(code, str) else None
         detail = data.get("message")
         message = detail if isinstance(detail, str) else text
-    return DatabricksVolumeApiError(
-        f"databricks_volume: {method} {url} → {status} {message}", status,
-        error_code)
-
-
-async def resolve_token(provider: TokenProvider) -> str:
-    """The bearer token for one operation, awaited when async.
-
-    Args:
-        provider (TokenProvider): the application's token source.
-
-    Raises:
-        ValueError: the provider answered with something that is not a
-            usable token; sending ``Bearer `` alone would come back as
-            an opaque 401 instead.
-    """
-    token = provider.get_token()
-    if inspect.isawaitable(token):
-        token = await token
-    if not isinstance(token, str) or not token:
-        raise ValueError(
-            "databricks_volume: token provider returned an empty token")
-    return token
+    rendered = f"databricks_volume: {method} {url} → {status} {message}"
+    # A refused credential is its own type, because it is the one
+    # failure the application can act on: obtain a fresh token and
+    # rebuild the resource. Nothing here retries or replays.
+    if status == 401:
+        return DatabricksVolumeAuthError(rendered, status, error_code)
+    return DatabricksVolumeApiError(rendered, status, error_code)
 
 
 def _entry_of(raw: Mapping[str, "JsonValue"]) -> DatabricksEntry:
@@ -162,20 +146,16 @@ class DatabricksFilesClient(Protocol):
 
 
 class HttpDatabricksFilesClient:
-    """The Files API over aiohttp, one token resolution per operation."""
+    """The Files API over aiohttp."""
 
-    def __init__(self, config: DatabricksVolumeConfig,
-                 token_provider: TokenProvider) -> None:
-        """Bind a client to one volume's workspace and token source.
+    def __init__(self, config: DatabricksVolumeConfig) -> None:
+        """Bind a client to one volume's workspace.
 
         Args:
-            config (DatabricksVolumeConfig): location and transport
-                settings; it holds no credential.
-            token_provider (TokenProvider): consulted before each
-                operation. The token is never stored on the client.
+            config (DatabricksVolumeConfig): location, credential and
+                transport settings.
         """
         self.config = config
-        self.token_provider = token_provider
 
     def url(self, endpoint: str, remote_path: str) -> str:
         """The Files API URL for one backend path.
@@ -192,10 +172,9 @@ class HttpDatabricksFilesClient:
         return (f"{self.config.host}/api/2.0/fs/{endpoint}"
                 f"{quote(remote_path)}")
 
-    async def _headers(self,
-                       extra: Mapping[str, str] | None = None
-                       ) -> dict[str, str]:
-        token = await resolve_token(self.token_provider)
+    def _headers(self,
+                 extra: Mapping[str, str] | None = None) -> dict[str, str]:
+        token = reveal_secret(self.config.token)
         headers = {"Authorization": f"Bearer {token}"}
         if extra:
             headers.update(extra)
@@ -212,7 +191,7 @@ class HttpDatabricksFilesClient:
             "GET",
             url,
             error_of=partial(error_from_response, "GET", url),
-            headers=await self._headers({"Accept": OCTET_STREAM}),
+            headers=self._headers({"Accept": OCTET_STREAM}),
             retry=RETRY,
             read="bytes",
             window=window,
@@ -231,7 +210,7 @@ class HttpDatabricksFilesClient:
             chunk_size (int): bytes per yielded chunk.
         """
         url = self.url(FILES, path)
-        headers = await self._headers({"Accept": OCTET_STREAM})
+        headers = self._headers({"Accept": OCTET_STREAM})
         async with aiohttp.ClientSession(timeout=self._timeout()) as session:
             async with session.get(url, headers=headers) as resp:
                 if resp.status >= 400:
@@ -242,14 +221,15 @@ class HttpDatabricksFilesClient:
 
     async def get_metadata(self, path: str) -> DatabricksFileMeta:
         url = self.url(FILES, path)
-        response: ApiResponse = await api_request(
-            "HEAD",
-            url,
-            error_of=partial(error_from_response, "HEAD", url),
-            headers=await self._headers(),
-            retry=RETRY,
-            read="response",
-            timeout=self._timeout())
+        response: ApiResponse = await api_request("HEAD",
+                                                  url,
+                                                  error_of=partial(
+                                                      error_from_response,
+                                                      "HEAD", url),
+                                                  headers=self._headers(),
+                                                  retry=RETRY,
+                                                  read="response",
+                                                  timeout=self._timeout())
         return _meta_of(response.headers)
 
     async def get_directory_metadata(self, path: str) -> None:
@@ -257,7 +237,7 @@ class HttpDatabricksFilesClient:
         await api_request("HEAD",
                           url,
                           error_of=partial(error_from_response, "HEAD", url),
-                          headers=await self._headers(),
+                          headers=self._headers(),
                           retry=RETRY,
                           read="none",
                           timeout=self._timeout())
@@ -272,7 +252,7 @@ class HttpDatabricksFilesClient:
                                      url,
                                      error_of=partial(error_from_response,
                                                       "GET", url),
-                                     headers=await self._headers(),
+                                     headers=self._headers(),
                                      params=params,
                                      retry=RETRY,
                                      read="json",
@@ -293,8 +273,8 @@ class HttpDatabricksFilesClient:
         await api_request("PUT",
                           url,
                           error_of=partial(error_from_response, "PUT", url),
-                          headers=await
-                          self._headers({"Content-Type": OCTET_STREAM}),
+                          headers=self._headers({"Content-Type":
+                                                 OCTET_STREAM}),
                           params={"overwrite": "true"},
                           data=data,
                           retry=RETRY,
@@ -306,7 +286,7 @@ class HttpDatabricksFilesClient:
         await api_request("DELETE",
                           url,
                           error_of=partial(error_from_response, "DELETE", url),
-                          headers=await self._headers(),
+                          headers=self._headers(),
                           retry=RETRY,
                           read="none",
                           timeout=self._timeout())
@@ -316,7 +296,7 @@ class HttpDatabricksFilesClient:
         await api_request("PUT",
                           url,
                           error_of=partial(error_from_response, "PUT", url),
-                          headers=await self._headers(),
+                          headers=self._headers(),
                           retry=RETRY,
                           read="none",
                           timeout=self._timeout())
@@ -326,7 +306,7 @@ class HttpDatabricksFilesClient:
         await api_request("DELETE",
                           url,
                           error_of=partial(error_from_response, "DELETE", url),
-                          headers=await self._headers(),
+                          headers=self._headers(),
                           retry=RETRY,
                           read="none",
                           timeout=self._timeout())

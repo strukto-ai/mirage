@@ -18,8 +18,8 @@ guide.
 
 ## Configuration
 
-The config carries location and transport. The credential arrives separately,
-through a token provider.
+The config carries the workspace location, the bearer token, and the volume
+coordinates.
 
 ```python
 import os
@@ -28,19 +28,32 @@ from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeResource,
-    StaticTokenProvider,
 )
 
 config = DatabricksVolumeConfig(
     host=os.environ["DATABRICKS_HOST"],
+    token=os.environ["DATABRICKS_TOKEN"],
     catalog="main",
     schema="default",
     volume="agent_files",
     root_path="/reports",
 )
-resource = DatabricksVolumeResource(
-    config, StaticTokenProvider(os.environ["DATABRICKS_TOKEN"]))
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+ws = Workspace({"/dbx/": DatabricksVolumeResource(config)},
+               mode=MountMode.READ)
+```
+
+The same mount in YAML:
+
+```yaml
+mounts:
+  /dbx/:
+    resource: databricks_volume
+    config:
+      host: https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
+      token: dapi...
+      catalog: main
+      schema: default
+      volume: agent_files
 ```
 
 ## Config Reference
@@ -48,107 +61,60 @@ ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
 | `host` | Yes |  | Databricks workspace URL. Trailing slashes are stripped. |
+| `token` | Yes |  | Bearer token, held as a secret and redacted in snapshots. |
 | `catalog` | Yes |  | Unity Catalog catalog name. |
 | `schema` | Yes |  | Unity Catalog schema name. |
 | `volume` | Yes |  | Unity Catalog volume name. |
 | `root_path` | No | `/` | Subdirectory inside the volume to expose. |
 | `timeout` | No | `30` | Request timeout in seconds. |
 
-There is no `token` or `profile` field. The config holds no secret at all.
+There is no `profile` field and MIRAGE reads no environment variable of its
+own. Whatever your deployment uses to obtain a token, resolve it yourself and
+pass the string.
 
-## Bring your own token acquisition
+## Where the token comes from
 
-`TokenProvider` is one method:
-
-```python
-class TokenProvider(Protocol):
-    def get_token(self) -> str | Awaitable[str]: ...
-```
-
-Return the raw token, without the `Bearer ` prefix. It may be sync or async.
-MIRAGE calls it before each Files API operation, so one shell line may consult
-it more than once; caching, refresh and locking belong to the provider. MIRAGE
-never serializes a provider, and a 401 propagates as
-`DatabricksVolumeApiError` rather than being retried, because an
-on-behalf-of provider cannot re-mint a user's token and a write must not be
-sent twice.
-
-The three providers below are **application code**, not part of MIRAGE. Copy
-what fits.
-
-### On behalf of the signed-in user
-
-A request handler stashes the caller's token; every operation the agent runs
-during that request reaches the volume as that user.
+A personal access token needs nothing more than the example above. For a
+credential your program mints (OAuth machine-to-machine for a service
+principal, on-behalf-of a signed-in user, a secret manager, or the Databricks
+CLI profile through `databricks-sdk`, which MIRAGE itself does not depend on),
+resolve it first and build the config with the result:
 
 ```python
-from contextvars import ContextVar
-
-REQUEST_TOKEN: ContextVar[str] = ContextVar("databricks_user_token")
-
-
-class OnBehalfOfTokenProvider:
-    def get_token(self) -> str:
-        return REQUEST_TOKEN.get()
+config = DatabricksVolumeConfig(
+    host=host,
+    token=mint_my_token(),
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+)
 ```
 
-### Service principal, OAuth machine-to-machine
+## When a token expires
 
-Mint once, reuse until shortly before expiry, and refresh under a lock.
+MIRAGE sends the configured token on every Files API call. It never refreshes
+it and never retries a rejected call, because a retry would send the same
+refused credential again and, for a write, would send the write twice. A
+refusal surfaces as `DatabricksVolumeAuthError`, a subclass of
+`DatabricksVolumeApiError`:
 
 ```python
-import asyncio
-import time
+from mirage.core.databricks_volume.errors import DatabricksVolumeAuthError
 
-import aiohttp
-
-
-class ServicePrincipalTokenProvider:
-    def __init__(self, host: str, client_id: str, client_secret: str) -> None:
-        self._url = f"{host.rstrip('/')}/oidc/v1/token"
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._token = ""
-        self._expires_at = 0.0
-        self._lock = asyncio.Lock()
-
-    async def get_token(self) -> str:
-        async with self._lock:
-            if self._token and time.time() < self._expires_at - 60:
-                return self._token
-            auth = aiohttp.BasicAuth(self._client_id, self._client_secret)
-            body = {"grant_type": "client_credentials", "scope": "all-apis"}
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self._url, auth=auth, data=body) as r:
-                    r.raise_for_status()
-                    payload = await r.json()
-            self._token = payload["access_token"]
-            self._expires_at = time.time() + float(payload["expires_in"])
-            return self._token
+try:
+    await ws.execute("ls /dbx/")
+except DatabricksVolumeAuthError:
+    resource = DatabricksVolumeResource(
+        config.model_copy(update={"token": mint_my_token()}))
 ```
 
-### Databricks CLI profile
-
-If your application already depends on `databricks-sdk` (`pip install
-databricks-sdk` — MIRAGE itself does not), its auth chain hands back a header
-you can unwrap:
-
-```python
-from databricks.sdk.core import Config
-
-
-class ProfileTokenProvider:
-    def __init__(self, profile: str) -> None:
-        self._authenticate = Config(profile=profile).authenticate
-
-    def get_token(self) -> str:
-        return self._authenticate()["Authorization"].removeprefix("Bearer ")
-```
+For a long-lived process against short-lived tokens, rebuild the resource on a
+schedule of your own rather than waiting for the 401.
 
 ## Notes
 
 - Supports both read and write mount modes (`MountMode.READ` / `MountMode.WRITE`).
 - `root_path` is normalized and cannot contain `..`.
-- A snapshot records the config verbatim and marks the mount
-  `needs_override: true`: the provider is runtime state, so `Workspace.load`
-  asks for a fresh resource rather than restoring one that cannot authenticate.
+- A snapshot records the config with the token as `<REDACTED>`, so
+  `Workspace.load` asks for a fresh resource rather than restoring one that
+  cannot authenticate.

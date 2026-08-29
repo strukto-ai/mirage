@@ -28,6 +28,7 @@ def _rig(
 ) -> tuple[DatabricksVolumeAccessor, FakeFilesClient, RAMIndexCacheStore, str]:
     config = DatabricksVolumeConfig(
         host="https://dbc.example.com",
+        token="dapi-test",
         catalog="main",
         schema="default",
         volume="agent_files",

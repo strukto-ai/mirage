@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { TokenProvider } from '../../resource/databricks_volume/token_provider.ts'
-import { DatabricksVolumeApiError } from './errors.ts'
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from './errors.ts'
 
 export type DbxEndpoint = 'files' | 'directories'
 
@@ -44,20 +43,6 @@ export function dbxUrl(
   return url
 }
 
-/**
- * The bearer token for one operation, awaited whether or not it is async.
- *
- * @throws when the provider answered with something that is not a usable
- * token; sending `Bearer ` alone would come back as an opaque 401 instead.
- */
-export async function resolveToken(provider: TokenProvider): Promise<string> {
-  const token = await provider.getToken()
-  if (typeof token !== 'string' || token === '') {
-    throw new Error('databricks_volume: token provider returned an empty token')
-  }
-  return token
-}
-
 async function errorFromResponse(method: string, url: string, r: Response): Promise<Error> {
   let errorCode: string | null = null
   let message = ''
@@ -69,11 +54,14 @@ async function errorFromResponse(method: string, url: string, r: Response): Prom
   } catch {
     message = text
   }
-  return new DatabricksVolumeApiError(
-    `databricks_volume: ${method} ${url} → ${String(r.status)} ${message}`,
-    r.status,
-    errorCode,
-  )
+  const rendered = `databricks_volume: ${method} ${url} → ${String(r.status)} ${message}`
+  // A refused credential is its own type, because it is the one failure the
+  // application can act on: obtain a fresh token and rebuild the resource.
+  // Nothing here retries or replays.
+  if (r.status === 401) {
+    return new DatabricksVolumeAuthError(rendered, r.status, errorCode)
+  }
+  return new DatabricksVolumeApiError(rendered, r.status, errorCode)
 }
 
 export async function dbxFetch(
@@ -84,13 +72,11 @@ export async function dbxFetch(
   options: DbxFetchOptions = {},
 ): Promise<Response> {
   const url = dbxUrl(accessor, endpoint, remotePath, options.query)
-  // Resolved per request and never stored: the provider owns caching and
-  // refresh, and a 401 is reported rather than replayed with a new token,
-  // because an on-behalf-of provider cannot re-mint a user's credential and
-  // a write must not be sent twice.
-  const token = await resolveToken(accessor.tokenProvider)
+  // The token the config carries. A 401 is reported rather than replayed:
+  // the same refused credential would go out again, and for a write it would
+  // send the write twice.
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${accessor.config.token}`,
     ...options.headers,
   }
   const controller = new AbortController()
