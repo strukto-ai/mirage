@@ -41,5 +41,6 @@ async def live_identity(accessor: GDriveAccessor,
         raise eisdir(path.virtual)
     fingerprint, revision = await capture_file_metadata(
         accessor.token_manager, node.id)
-    return LiveFileIdentity(exists=True, revision=revision,
+    return LiveFileIdentity(exists=True,
+                            revision=revision,
                             fingerprint=fingerprint)

@@ -23,7 +23,8 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 
 def make_identity(
-        driver: ObjectStoreDriver[A, C]) -> Callable[[A, PathSpec], Awaitable[LiveFileIdentity]]:
+    driver: ObjectStoreDriver[A, C]
+) -> Callable[[A, PathSpec], Awaitable[LiveFileIdentity]]:
     """Build the no-cache identity lookup over one driver.
 
     This is stat's slow path only: no index fast path, no directory-hint

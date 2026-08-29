@@ -49,6 +49,6 @@ async def live_identity(accessor: SharePointAccessor,
     if resolved.drive_id is None or resolved.item_path is None:
         raise enoent(virtual)
 
-    return await identity_item(
-        accessor.config, drive_loc(accessor.config, resolved, stripped),
-        virtual)
+    return await identity_item(accessor.config,
+                               drive_loc(accessor.config, resolved, stripped),
+                               virtual)

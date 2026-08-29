@@ -13,16 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.core.sharepoint.identity import (live_identity as
-                                             core_live_identity)
+from mirage.core.sharepoint.identity import live_identity as core_live_identity
 from mirage.ops.registry import op
 from mirage.ops.types import LiveFileIdentity
 from mirage.types import PathSpec
 
 
 @op("live_identity", resource="sharepoint")
-async def live_identity(accessor: SharePointAccessor, path: PathSpec, *,
-                        index, **kwargs) -> LiveFileIdentity:
+async def live_identity(accessor: SharePointAccessor, path: PathSpec, *, index,
+                        **kwargs) -> LiveFileIdentity:
     """Bounded identity lookup, bypassing the index cache entirely.
 
     Args:
