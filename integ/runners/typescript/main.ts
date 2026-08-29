@@ -62,26 +62,158 @@ function parseArgs(): {
   let allowSkip = ''
   let targetJobs = 1
   let profile = false
-  const argv = process.argv.slice(2)
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
-    else if (argv[i] === '--facet' && i + 1 < argv.length) facet = argv[++i]
-    else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
-    else if (argv[i] === '--strict') strict = true
-    else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
-    else if (argv[i] === '--profile') profile = true
-    // Recognised before its operand is checked: gated on `i + 1 < argv.length`
-    // a trailing `--target-jobs` fell through every arm and ran serially in
-    // silence, where the argparse runner refuses the same line.
-    else if (argv[i] === '--target-jobs') {
-      const n = i + 1 < argv.length ? Number(argv[++i]) : Number.NaN
-      if (!Number.isInteger(n) || n < 1) {
-        process.stderr.write('--target-jobs takes an integer >= 1\n')
-        process.exit(2)
-      }
-      targetJobs = n
+  // argparse takes `--opt value` and `--opt=value` alike, and refuses a word
+  // it does not know. An exact-string check saw only the first spelling and
+  // every other word was dropped in silence, so `--target-jobs=4` ran serially
+  // without saying so. Split the equals form here and the arms below stay one
+  // comparison each.
+  //
+  // One deliberate divergence, and it is the only one left: argparse defaults
+  // to `allow_abbrev=True`, so `--fac core` and `--prof` reach the python
+  // runner as `--facet` and `--profile`, and an ambiguous prefix like `--targ`
+  // is its own error naming both candidates. This runner refuses all three as
+  // unrecognized. Prefix matching plus ambiguity reporting is a good deal more
+  // machinery than a CI runner's option list is worth, and the divergence
+  // fails loudly on the stricter side: a line that works here works there,
+  // never the reverse, so no invocation can silently mean two things. Every
+  // line in .github/workflows spells its options in full.
+  const argv: string[] = []
+  // Parallel to argv: true where the word arrived as the right of an equals,
+  // which is the one way argparse lets a value look like an option.
+  const literal: boolean[] = []
+  for (const raw of process.argv.slice(2)) {
+    const eq = /^(--[a-z][a-z-]*)=([\s\S]*)$/.exec(raw)
+    if (eq === null) {
+      argv.push(raw)
+      literal.push(false)
+    } else {
+      argv.push(eq[1] as string, eq[2] as string)
+      literal.push(false, true)
     }
   }
+  const refuse = (message: string): never => {
+    process.stderr.write(`${message}\n`)
+    process.exit(2)
+  }
+  // Wording and exit code are argparse's, because the two runners are held to
+  // the same line and a difference here is a difference in what CI accepts.
+  // These three rules are copied off `_parse_optional` rather than guessed: a
+  // one-character token, a negative number, and a token holding a space are
+  // all values, however much they look like options. NEGATIVE_NUMBER is
+  // argparse's `_negative_number_matcher` verbatim, so `-.5` and `-0.5` are
+  // values while `-5.` and `-1e5` are not.
+  const NEGATIVE_NUMBER = /^-\d+$|^-\d*\.\d+$/
+  const optionLike = (w: string): boolean =>
+    w.startsWith('-') && w.length > 1 && !NEGATIVE_NUMBER.test(w) && !w.includes(' ')
+  const value = (at: number, name: string): string => {
+    const v = argv[at + 1]
+    if (v === undefined) refuse(`argument ${name}: expected one argument`)
+    if (literal[at + 1] !== true && optionLike(v as string)) {
+      refuse(`argument ${name}: expected one argument`)
+    }
+    return v as string
+  }
+  // argparse supplies -h/--help for free, so the python runner has always had
+  // it and this one never did. Rejecting unknown words made that silence into
+  // an error, which is worse: the option list is the only place the flags this
+  // runner takes are written down. Same text argparse renders, same exit 0.
+  const usage = [
+    'usage: main.ts [-h] [--target TARGETS] [--facet FACET] [--emit EMIT]',
+    '               [--strict] [--allow-skip ALLOW_SKIP]',
+    '               [--target-jobs TARGET_JOBS] [--profile]',
+    '',
+    'options:',
+    '  -h, --help            show this help message and exit',
+    '  --target TARGETS',
+    '  --facet FACET',
+    '  --emit EMIT',
+    '  --strict',
+    '  --allow-skip ALLOW_SKIP',
+    '  --target-jobs TARGET_JOBS',
+    '  --profile',
+    '',
+  ].join('\n')
+  // A zero-argument option takes no value, and argparse says so rather than
+  // ignoring one: `--strict=foo` and `--help=foo` are both refused. The
+  // equals split above turned such a line into two words, which for --strict
+  // happened to fail anyway on the stray word but for --help exited 0 before
+  // anything else was read.
+  const noValue = (at: number, name: string): void => {
+    if (literal[at + 1] === true) {
+      refuse(`argument ${name}: ignored explicit argument '${argv[at + 1] as string}'`)
+    }
+  }
+  // argparse walks the line once, left to right, and the order of its two
+  // error kinds is observable. An error raised while consuming an option
+  // (`ignored explicit argument`, `invalid int value`, `expected one
+  // argument`) fires there and then, so it beats a `--help` further right.
+  // `unrecognized arguments` does not: it is reported after the whole walk,
+  // so any help flag anywhere beats it. Refusing unknown words inline made
+  // `main.ts x --help` complain about `x`; refusing them before the walk made
+  // `--strict=foo --help` print usage. Collect them and report at the end.
+  const unknown: string[] = []
+  // `--` ends the options. Everything after it is a positional, and this
+  // parser declares none, so the separator and its tail all land in `unknown`
+  // and are reported together. That is why a `--help` to the right of a `--`
+  // is a stray word rather than a request for usage.
+  let endOfOptions = false
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] as string
+    if (endOfOptions) {
+      unknown.push(arg)
+      continue
+    }
+    if (arg === '--') {
+      endOfOptions = true
+      unknown.push(arg)
+      continue
+    }
+    if (arg === '-h' || arg === '--help') {
+      noValue(i, '-h/--help')
+      process.stdout.write(usage)
+      process.exit(0)
+    } else if (arg === '--strict') {
+      noValue(i, arg)
+      strict = true
+    } else if (arg === '--profile') {
+      noValue(i, arg)
+      profile = true
+    } else if (arg === '--target') {
+      targets.push(value(i, arg))
+      i += 1
+    } else if (arg === '--facet') {
+      facet = value(i, arg)
+      i += 1
+    } else if (arg === '--emit') {
+      emit = value(i, arg)
+      i += 1
+    } else if (arg === '--allow-skip') {
+      allowSkip = value(i, arg)
+      i += 1
+    } else if (arg === '--target-jobs') {
+      const raw = value(i, arg)
+      i += 1
+      // `Number()` is far looser than python's `int()`, so it took `4.0`,
+      // `1e1` and `0x4` where the other runner refuses all three. Probed:
+      // int() allows surrounding whitespace, a sign, leading zeros and
+      // underscores between digits, and nothing else. The one spelling not
+      // matched here is a non-ASCII digit (int('\u0664') is 4), which no CI
+      // line will carry and which JS has no cheap equivalent for.
+      const decimal = /^[+-]?\d+(?:_\d+)*$/.exec(raw.trim())
+      if (decimal === null) {
+        refuse(`argument --target-jobs: invalid int value: '${raw}'`)
+      }
+      targetJobs = Number(raw.trim().replace(/_/g, ''))
+    } else unknown.push(arg)
+  }
+  // Space-joined, as argparse joins them: a line with two stray words names
+  // both rather than stopping at the first.
+  if (unknown.length > 0) refuse(`unrecognized arguments: ${unknown.join(' ')}`)
+  // Last, because it is not argparse's. `0` is a valid int, so the python
+  // runner parses the line, prints help or reports a stray word, and only
+  // then reaches its own floor check. Refusing inline made `--target-jobs 0
+  // -h` an error where the other runner prints usage.
+  if (targetJobs < 1) refuse('--target-jobs takes an integer >= 1')
   return { targets, emit, facet, strict, allowSkip, targetJobs, profile }
 }
 
