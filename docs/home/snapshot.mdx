@@ -245,7 +245,7 @@ const identity = await ws.fs.liveIdentity('/s3/data.csv')
 const [data, readIdentity] = await ws.fs.readFileWithIdentity('/s3/data.csv')
 ```
 
-Both bypass every cache on the way down — the positive and negative index entries, the warm file cache — so the answer always reflects one fresh backend call (two for Google Drive, which resolves a path to a file id before it can ask that id's metadata). `read_with_identity` stamps the bytes it just read from that same response, never a second round trip; `live_identity` is the standalone probe for a pre-write check or a post-write restamp.
+Both bypass every cache on the way down — the positive and negative index entries, the warm file cache — so the answer always reflects live backend calls. `live_identity` is one (two for Google Drive, which resolves a path to a file id before it can ask that id's metadata); it is the standalone probe for a pre-write check or a post-write restamp. `read_with_identity` stamps the bytes it just read from that same response, never a second round trip, and on an id-addressed backend it re-resolves the path from a live listing first, so a name rebound to a different file since the last listing reads the file that is there now rather than the one that used to be.
 
 The result carries the same two markers snapshot fingerprints and pins:
 

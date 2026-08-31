@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.read import read
@@ -32,6 +33,20 @@ async def fail_list_files(_tm, folder_id, drive_id=None):
 
 async def empty_list_files(_tm, folder_id, drive_id=None):
     return []
+
+
+async def rebound_list_files(_tm, folder_id, drive_id=None):
+    """Drive's live answer: the name now belongs to a different file."""
+    if folder_id != "root":
+        raise AssertionError(f"unexpected folder_id={folder_id}")
+    return [{
+        "id": "new-id",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "owners": [],
+        "capabilities": {},
+    }]
 
 
 @pytest.fixture
@@ -251,6 +266,80 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
                          virtual="/missing.txt",
                          directory="/missing.txt"),
                 index,
+            )
+
+
+@pytest.mark.asyncio
+async def test_a_remembered_id_wins_over_the_live_one(accessor, index):
+    # What Ops.read_with_identity's `fresh` has to defeat: an index
+    # entry is never expired by time, so a name rebound to a new file on
+    # Drive keeps reading the old id -- and stamping the old file's
+    # identity -- for the life of the workspace.
+    await index.put(
+        "/report.pdf",
+        IndexEntry(id="old-id",
+                   name="report",
+                   resource_type="gdrive/file",
+                   vfs_name="report.pdf"))
+    with (
+            patch("mirage.core.gdrive.readdir.list_files",
+                  new=rebound_list_files),
+            patch(
+                "mirage.core.gdrive.read.download_file",
+                new_callable=AsyncMock,
+                return_value=b"stale-bytes",
+            ) as mock_download,
+    ):
+        await read(
+            accessor,
+            PathSpec(resource_path="report.pdf",
+                     virtual="/report.pdf",
+                     directory="/report.pdf"),
+            index,
+        )
+    assert mock_download.await_args.args[1] == "old-id"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_index_resolves_the_id_live(accessor):
+    # The substitute the dispatcher hands a fresh read: it remembers
+    # nothing, so the warm listing is the only source of the id. This is
+    # why `fresh` replaces the index instead of dropping it -- with no
+    # store at all the warm has nowhere to land and the read is ENOENT.
+    with (
+            patch("mirage.core.gdrive.readdir.list_files",
+                  new=rebound_list_files),
+            patch(
+                "mirage.core.gdrive.read.download_file",
+                new_callable=AsyncMock,
+                return_value=b"live-bytes",
+            ) as mock_download,
+    ):
+        result = await read(
+            accessor,
+            PathSpec(resource_path="report.pdf",
+                     virtual="/report.pdf",
+                     directory="/report.pdf"),
+            RAMIndexCacheStore(),
+        )
+    assert result == b"live-bytes"
+    assert mock_download.await_args.args[1] == "new-id"
+
+
+@pytest.mark.asyncio
+async def test_a_null_index_cannot_serve_a_fresh_read(accessor):
+    # NULL_INDEX discards what the warm writes, so the retry misses
+    # again and a file that is there reads as absent. Pinned because it
+    # is the obvious-looking way to spell "no cache" and it is wrong.
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new=rebound_list_files):
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(resource_path="report.pdf",
+                         virtual="/report.pdf",
+                         directory="/report.pdf"),
+                NULL_INDEX,
             )
 
 

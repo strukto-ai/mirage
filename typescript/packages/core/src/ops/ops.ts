@@ -43,12 +43,17 @@ export type OwnerOf = (path: string) => MountOwner | null
  *
  * `path` is the filter, and it is what removes cross-path contamination:
  * `OpRecord.path` is the resolved virtual path, so a marker stamped for
- * some other file cannot be read as this one's. That matters here more
- * than in python, because the browser's `FallbackStorage` is one frame
- * stack rather than per-task storage, so two overlapping reads can land
- * records in each other's frame. Two concurrent reads of the *same* path
- * in that mode stay best-effort, since their records are
- * indistinguishable by path alone. Mirrors Python's `read_identity`.
+ * some other file cannot be read as this one's. It still earns its keep
+ * where the frames are not serialized: an enclosing command frame is
+ * shared by every op the line ran, so a marker from a sibling read
+ * reaches this scan whatever the storage does about isolation.
+ * It is no longer what holds the browser together, though. Two
+ * overlapping identity reads used to be able to land records in each
+ * other's frame under `FallbackStorage`, and a same-path pair was
+ * indistinguishable by path alone; `runRecorded` now serializes those
+ * frames when the storage cannot isolate tasks, so no two of them are
+ * live at once and each read scans only its own records.
+ * Mirrors Python's `read_identity`.
  */
 export function readIdentity(records: readonly OpRecord[], path: string): LiveFileIdentity | null {
   for (const rec of [...records].reverse()) {
@@ -221,9 +226,14 @@ export class Ops {
   // `raw` skips the filetype cascade: an explicit null filetype stops
   // the door from stamping the path's extension, so a rendered read op
   // (gdoc/gsheet/gmail) is bypassed and the stored bytes come back.
-  // `fresh` refuses the warm file cache for a rendered read too, so the
-  // bytes come from the backend and carry whatever markers it stamps on
-  // them; it costs a round trip every time, so it is for a caller that
+  // `fresh` means no memory answers this read: the warm file cache is
+  // refused (for a rendered read too), and the op runs against an empty
+  // index instead of the mount's, so an id-addressed backend resolves
+  // the path to an id live rather than from a remembered binding. The
+  // bytes then come from the backend and carry whatever markers it
+  // stamps on them; it costs a round trip every time, and more than one
+  // on a backend that has to resolve the path to an id first (drive
+  // re-lists each level it has no id for), so it is for a caller that
   // needs the backend's own answer rather than the newest one seen.
   // `offset`/`size` ride the same kwargs the generic read op already reads,
   // so a backend with a native range fetches one window instead of the whole
@@ -311,17 +321,25 @@ export class Ops {
    * records would otherwise be able to hand this read another path's
    * markers. `runRecorded` names that frame's array up front rather
    * than reading it back from inside the callback, which under the
-   * browser's `FallbackStorage` can be a concurrent read's frame. What
-   * the frame collected is handed up to the enclosing frame on the way
-   * out, on the error path too, so a line's byte accounting still sees
-   * every op that happened. The markers are then read back per path, so
-   * a record another task dropped into this frame cannot be mistaken
-   * for this read's.
+   * browser's `FallbackStorage` can be a concurrent read's frame, and
+   * it serializes these frames outright where that storage is in use,
+   * so a record emitted after an await cannot land in a newer read's
+   * frame and leave this one with no identity at all. What the frame
+   * collected is handed up to the enclosing frame on the way out, on
+   * the error path too, so a line's byte accounting still sees every op
+   * that happened. The markers are then read back per path, which is
+   * what keeps a sibling op's marker in the enclosing frame from being
+   * mistaken for this read's.
    *
-   * The read is `fresh`: the dispatcher's warm file cache is skipped,
+   * The read is `fresh`, which is the dispatcher's "no memory answers
+   * this one" and covers both memories. The warm file cache is skipped,
    * because bytes it hands back crossed no network and carry no marker,
    * and the caller would read that as "this file has no identity" for a
-   * file the backend versions.
+   * file the backend versions. The mount's index is skipped too — the
+   * op is handed an empty one — because on an id-addressed backend a
+   * remembered name->id binding never expires, so a stale one would
+   * stamp the identity of the file that used to live at this path onto
+   * that file's bytes and both would be the wrong file's.
    *
    * A failed read propagates as it is; no identity is synthesized for
    * it.

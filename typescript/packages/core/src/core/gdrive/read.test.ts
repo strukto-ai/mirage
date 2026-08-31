@@ -44,6 +44,26 @@ function makeAccessor(): GDriveAccessor {
   return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
 }
 
+// Drive's live answer: the name now belongs to a different file.
+function rebound(): Promise<DriveModule.DriveFile[]> {
+  return Promise.resolve([
+    {
+      id: 'new-id',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      modifiedTime: '2026-04-01T00:00:00.000Z',
+    },
+  ])
+}
+
+function reportPath(): PathSpec {
+  return new PathSpec({
+    resourcePath: 'report.pdf',
+    virtual: '/report.pdf',
+    directory: '/report.pdf',
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -115,6 +135,44 @@ describe('gdrive read auto-bootstrap', () => {
       directory: '/missing.txt',
     })
     await expect(read(accessor, path, index)).rejects.toThrow(/drive unavailable/)
+  })
+
+  // Mirrors test_a_remembered_id_wins_over_the_live_one and its two
+  // siblings: what Ops.readFileWithIdentity's `fresh` has to defeat,
+  // and why the substitute is an empty store rather than no store.
+  it('serves a remembered id over the live one', async () => {
+    vi.mocked(drive.listFiles).mockImplementation(() => rebound())
+    vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('stale-bytes'))
+    const index = new RAMIndexCacheStore()
+    await index.put(
+      '/report.pdf',
+      new IndexEntry({
+        id: 'old-id',
+        name: 'report',
+        resourceType: 'gdrive/file',
+        vfsName: 'report.pdf',
+      }),
+    )
+    await read(makeAccessor(), reportPath(), index)
+    expect(vi.mocked(drive.downloadFile).mock.calls[0]?.[1]).toBe('old-id')
+  })
+
+  it('resolves the id live when handed an empty index', async () => {
+    vi.mocked(drive.listFiles).mockImplementation(() => rebound())
+    vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('live-bytes'))
+    const out = await read(makeAccessor(), reportPath(), new RAMIndexCacheStore())
+    expect(new TextDecoder().decode(out)).toBe('live-bytes')
+    expect(vi.mocked(drive.downloadFile).mock.calls[0]?.[1]).toBe('new-id')
+  })
+
+  it('cannot serve a read at all with no index', async () => {
+    // The obvious-looking way to spell "no cache" is wrong: the warm
+    // listing is how the id reaches the resolver, so dropping the store
+    // reports a file that is there as absent.
+    vi.mocked(drive.listFiles).mockImplementation(() => rebound())
+    await expect(read(makeAccessor(), reportPath(), undefined)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('throws EISDIR when reading a shared drive root', async () => {

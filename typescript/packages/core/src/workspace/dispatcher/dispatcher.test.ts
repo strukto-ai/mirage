@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { LookupStatus } from '../../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
@@ -94,6 +97,38 @@ describe('a fresh read refuses the warm file cache', () => {
     })
     await ws.dispatch('read', '/m/f.txt', [], { fresh: true })
     expect(seen).not.toContain('fresh')
+  })
+
+  it('hands the op an empty index of its own, not the resource one', async () => {
+    // The other half of "do not answer this from memory": an
+    // id-addressed backend resolves a path to an id through the index,
+    // and a remembered binding never expires, so the resource's index
+    // would serve the file that used to live at the path. The
+    // substitute is a real store rather than undefined, because the
+    // warm listing reaches the resolver through it. Mirrors Python's
+    // test_fresh_hands_the_op_an_empty_index_of_its_own.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    const seen: (IndexCacheStore | undefined)[] = []
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, _path, _args, kwargs) => {
+        seen.push(kwargs.index)
+        return ENC.encode('STORED')
+      },
+      write: false,
+    })
+    await ws.dispatch('read', '/m/f.txt')
+    await ws.dispatch('read', '/m/f.txt', [], { fresh: true })
+    const [plain, fresh] = seen
+    expect(plain).toBe(resource.index)
+    expect(fresh).toBeInstanceOf(RAMIndexCacheStore)
+    expect(fresh).not.toBe(resource.index)
+    expect(await fresh?.get('/m/f.txt')).toEqual({ status: LookupStatus.NOT_FOUND })
   })
 })
 

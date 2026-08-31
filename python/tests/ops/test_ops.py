@@ -18,6 +18,7 @@ import time
 import pytest
 
 from mirage import Workspace
+from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry, LookupResult, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
@@ -728,6 +729,36 @@ class TestReadWithIdentity:
         assert identity == LiveFileIdentity(exists=True,
                                             revision="rev-1",
                                             fingerprint="fp-1")
+
+    def test_the_mount_index_does_not_answer_the_identity_read(self):
+        # The other half of "fresh": an id-addressed backend turns a
+        # path into an id through the index, and a remembered binding
+        # never expires, so a stale one would stamp the identity of the
+        # file that used to live at this path onto that file's bytes.
+        # The op is handed an empty store of its own -- not None, which
+        # is not a store, and not the mount's, which is the memory being
+        # refused -- and the mount's own index is left untouched.
+        resource = RAMResource()
+        seen: list[IndexCacheStore | None] = []
+
+        async def capturing_read(accessor, path, index=None, **kwargs):
+            seen.append(index)
+            return b"live"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=capturing_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(ws.ops.read("/data/a.txt"))
+        run(ws.ops.read_with_identity("/data/a.txt"))
+        plain, fresh = seen
+        assert plain is resource.index
+        assert isinstance(fresh, RAMIndexCacheStore)
+        assert fresh is not resource.index
+        assert run(fresh.entries()) == {}
 
     def test_a_marker_for_another_path_is_not_read_as_this_one(self):
         # FallbackStorage (the browser) hands the newest live frame to

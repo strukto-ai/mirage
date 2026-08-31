@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.context import (get_current_session, hidden_paths_intersect,
@@ -275,14 +276,28 @@ class Dispatcher:
         # probes cannot recurse into it.
         if self._drift is not None and self._drift.pending:
             await self._drift.drain(self._namespace.registry.try_mount_for)
-        # `fresh` is the caller's "do not answer this from memory": the
+        # `fresh` is the caller's "do not answer this from memory", and
+        # it silences both memories the op would otherwise reach. The
         # warm-cache early return below is skipped, so the op reaches
-        # the backend and its own answer is what gets recorded.
-        # Ops.read_with_identity needs that, because a read served from
-        # the cache stamps no fingerprint or revision and would hand
-        # back bytes with no identity. Consumed here, never forwarded:
-        # no backend takes it.
+        # the backend and its own answer is what gets recorded; and the
+        # op runs against an empty index of its own instead of the
+        # mount's, so an id-addressed backend (drive, box, dropbox)
+        # resolves the path to an id from a live listing rather than
+        # from a remembered name->id binding. Ops.read_with_identity
+        # needs both: a read served from the cache stamps no fingerprint
+        # or revision, and a read that resolved a remembered id would
+        # stamp the file that used to live at the path.
+        # The index is *replaced*, not dropped, because it is also how a
+        # live listing reaches the resolver: drive's read warms the
+        # parent directory into the index and reads the id back out of
+        # it, so None raises AttributeError and NULL_INDEX (which
+        # discards the warm) answers ENOENT for a file that is there.
+        # Nothing else sees the substitute, so a fresh read leaves the
+        # mount's index exactly as it found it.
+        # `fresh` is consumed here, never forwarded: no backend takes it.
         fresh = bool(kwargs.pop("fresh", False))
+        if fresh:
+            kwargs["index"] = RAMIndexCacheStore()
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link

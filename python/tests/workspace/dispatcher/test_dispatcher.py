@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
@@ -129,6 +130,37 @@ async def test_fresh_is_consumed_at_the_door_and_never_forwarded():
     mount = dispatcher._namespace.try_mount_for.return_value
     await dispatcher.dispatch("read", _path("/data/a.txt"), fresh=True)
     assert "fresh" not in mount.execute_op.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_fresh_hands_the_op_an_empty_index_of_its_own():
+    # The other half of "do not answer this from memory": an
+    # id-addressed backend resolves a path to an id through the index,
+    # and a remembered binding never expires, so the mount's index
+    # would serve the file that used to live at the path. The
+    # substitute is a real store rather than None, because the warm
+    # listing reaches the resolver through it.
+    policies = Policies()
+    dispatcher, _ = _dispatcher(policies)
+    mount = dispatcher._namespace.try_mount_for.return_value
+    await dispatcher.dispatch("read", _path("/data/a.txt"), fresh=True)
+    forwarded = mount.execute_op.await_args.kwargs["index"]
+    assert isinstance(forwarded, RAMIndexCacheStore)
+    assert forwarded is not mount.resource.index
+    assert await forwarded.entries() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_plain_read_leaves_the_index_to_the_mount():
+    # Mount.execute_op fills it in with the resource's own; only a
+    # fresh read overrides that, so the substitution cannot leak into
+    # ordinary reads.
+    policies = Policies()
+    dispatcher, _ = _dispatcher(policies)
+    mount = dispatcher._namespace.try_mount_for.return_value
+    mount.resource.caches_reads = False
+    await dispatcher.dispatch("read", _path("/data/a.txt"))
+    assert "index" not in mount.execute_op.await_args.kwargs
 
 
 @pytest.mark.asyncio

@@ -111,6 +111,71 @@ describe('recording on the fallback storage', () => {
     expect(insideArray).not.toBe(mine)
   })
 
+  it('two identity frames cannot overlap, so neither loses its record', async () => {
+    // The failure this serialization exists for: `record()` routes by
+    // getStore(), which on the fallback answers the newest live frame.
+    // Read A emits its record after an await, by which point read B has
+    // bound a newer frame and is itself suspended -- so A's record used
+    // to land in B's array and A returned no identity at all. No path
+    // filter can recover a record that was never appended to A. With
+    // the frames serialized, B does not bind until A has settled.
+    const [holdA, releaseA] = gate()
+    const [holdB, releaseB] = gate()
+    const runA = runRecorded(async () => {
+      await holdA
+      record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+      return 'A'
+    })
+    const runB = runRecorded(async () => {
+      record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+      await holdB
+      return 'B'
+    })
+    // A finishes while B is still suspended: unserialized, that is
+    // exactly the window where B's frame is the newest live one.
+    releaseA()
+    expect(await runA.done).toBe('A')
+    releaseB()
+    expect(await runB.done).toBe('B')
+    expect(runA.records.map((r) => [r.path, r.revision])).toEqual([['/a', 'rev-a']])
+    expect(runB.records.map((r) => [r.path, r.revision])).toEqual([['/b', 'rev-b']])
+  })
+
+  it('two identity frames on the same path each keep their own marker', async () => {
+    // Path filtering cannot tell two reads of one path apart, so this
+    // pair was the one the previous round left best-effort. Serialized,
+    // each read scans a frame only its own op wrote to.
+    const [holdFirst, releaseFirst] = gate()
+    const [holdSecond, releaseSecond] = gate()
+    const first = runRecorded(async () => {
+      await holdFirst
+      record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-1' })
+    })
+    const second = runRecorded(async () => {
+      record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-2' })
+      await holdSecond
+    })
+    releaseFirst()
+    await first.done
+    releaseSecond()
+    await second.done
+    expect(first.records.map((r) => r.revision)).toEqual(['rev-1'])
+    expect(second.records.map((r) => r.revision)).toEqual(['rev-2'])
+  })
+
+  it('a frame the queue is holding still starts once the one ahead throws', async () => {
+    // The queue sequences only; a rejected run must not strand the
+    // frames behind it, and its own rejection still reaches its caller.
+    const failing = runRecorded(() => Promise.reject(new Error('boom')))
+    const next = runRecorded(() => {
+      record('read', '/after', 'test', 1, performance.now(), { revision: 'rev-after' })
+      return Promise.resolve('ok')
+    })
+    await expect(failing.done).rejects.toThrow('boom')
+    expect(await next.done).toBe('ok')
+    expect(next.records.map((r) => r.path)).toEqual(['/after'])
+  })
+
   it('runRecorded keeps the frame records when the run throws', async () => {
     const { records, done } = runRecorded(async () => {
       record('read', '/partial', 'test', 1, performance.now())

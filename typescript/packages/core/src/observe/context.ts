@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createAsyncContext } from '../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
 import { OpRecord } from './record.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
@@ -48,6 +48,14 @@ export interface RecordedRun<T> {
 }
 
 /**
+ * The tail of the serialized frames, null when none is live.
+ *
+ * Only read on a storage that cannot isolate tasks; see
+ * {@link runRecorded} for why that mode needs a queue at all.
+ */
+let recordedTail: Promise<void> | null = null
+
+/**
  * Open a recording frame and hand back that frame's records array
  * *and* the pending result, so the caller holds both whether `fn`
  * resolves or throws.
@@ -59,18 +67,62 @@ export interface RecordedRun<T> {
  * which is exactly the interleaving this frame exists to isolate. The
  * array is returned synchronously, before anything can bind over it,
  * so it names this frame in both storage modes.
+ *
+ * Naming the array is not enough on its own, though, and this is why
+ * these frames **serialize** when
+ * {@link asyncContextIsolatesTasks} is false. `record()` routes by
+ * `getStore()`, which on the fallback answers whichever frame is
+ * newest, so a record emitted after an `await` inside frame A lands in
+ * frame B if B bound while A was suspended: A keeps its own array and
+ * finds it empty, which reads as "this file has no identity". No amount
+ * of filtering recovers a record that was never appended here, so
+ * instead no two of these frames are ever live at once — the second
+ * caller waits for the first to settle. That makes concurrent identity
+ * reads correct rather than best-effort, on the same path as on a
+ * different one, at the cost of running them one at a time on a runtime
+ * that could not have run them in parallel correctly anyway.
+ *
+ * On an isolating runtime (node's `AsyncLocalStorage`) the queue is
+ * skipped entirely: `fn` starts synchronously, as before, and
+ * concurrent reads keep overlapping.
+ *
+ * One constraint follows from the queue: a serialized frame must not
+ * open another one inside itself, since it would be waiting for its own
+ * settle. There is one caller ({@link Ops.readFileWithIdentity}) and it
+ * does not nest.
  */
 export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
   const state: RecordingState = { records: [], mountPrefix: '' }
-  let done: Promise<T>
-  try {
-    done = Promise.resolve(storage.run(state, fn))
-  } catch (err) {
-    // A thunk that threw before returning its promise still settles
-    // `done`, so the caller's one handling path covers both.
-    done = Promise.reject(err instanceof Error ? err : new Error(String(err)))
-  }
+  if (asyncContextIsolatesTasks) return { records: state.records, done: bindFrame(state, fn) }
+  // An idle queue still binds synchronously: no other serialized frame
+  // is live, so there is nothing to wait behind, and `fn` starts where
+  // it always did. A live one is waited out first.
+  const done: Promise<T> =
+    recordedTail === null ? bindFrame(state, fn) : recordedTail.then(() => bindFrame(state, fn))
+  // The queue only sequences; `done` is what carries the outcome to the
+  // caller, so the tail settles on either path rather than rejecting
+  // with nobody left to hear it. It is cleared when this frame is the
+  // last one out, so the next caller binds synchronously again.
+  const tail = done.then(
+    () => undefined,
+    () => undefined,
+  )
+  recordedTail = tail
+  void tail.then(() => {
+    if (recordedTail === tail) recordedTail = null
+  })
   return { records: state.records, done }
+}
+
+// One recording frame, bound now: `storage.run` may hand back a value
+// or a promise, and a thunk that throws before returning one still has
+// to settle `done`, so the caller has a single handling path for both.
+function bindFrame<T>(state: RecordingState, fn: () => Promise<T>): Promise<T> {
+  try {
+    return Promise.resolve(storage.run(state, fn))
+  } catch (err) {
+    return Promise.reject(err instanceof Error ? err : new Error(String(err)))
+  }
 }
 
 /**

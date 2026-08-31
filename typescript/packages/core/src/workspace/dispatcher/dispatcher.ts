@@ -15,6 +15,7 @@
 import { NOOPAccessor } from '../../accessor/base.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { getExtension } from '../../commands/resolve.ts'
@@ -188,17 +189,30 @@ export class Dispatcher {
         return stat
       })
     }
-    // `fresh` is the caller's "do not answer this from memory": the
+    // `fresh` is the caller's "do not answer this from memory", and it
+    // silences both memories the op would otherwise reach. The
     // warm-cache early return below is skipped, so the op reaches the
-    // backend and its own answer is what gets recorded.
-    // Ops.readFileWithIdentity needs that, because a read served from
-    // the cache stamps no fingerprint or revision and would hand back
-    // bytes with no identity. Consumed here, never forwarded: no
-    // backend takes it. Mirrors Python's Dispatcher.dispatch.
+    // backend and its own answer is what gets recorded; and the op runs
+    // against an empty index of its own instead of the mount's, so an
+    // id-addressed backend (drive, box, dropbox) resolves the path to
+    // an id from a live listing rather than from a remembered name->id
+    // binding. Ops.readFileWithIdentity needs both: a read served from
+    // the cache stamps no fingerprint or revision, and a read that
+    // resolved a remembered id would stamp the file that used to live
+    // at the path.
+    // The index is *replaced*, not dropped, because it is also how a
+    // live listing reaches the resolver: drive's read warms the parent
+    // directory into the index and reads the id back out of it, so an
+    // undefined index answers ENOENT for a file that is there. Nothing
+    // else sees the substitute, so a fresh read leaves the mount's
+    // index exactly as it found it.
+    // `fresh` is consumed here, never forwarded: no backend takes it.
+    // Mirrors Python's Dispatcher.dispatch.
     const fresh = kwargs?.fresh === true
     if (fresh) {
       const rest = { ...kwargs }
       delete rest.fresh
+      rest.index = new RAMIndexCacheStore()
       kwargs = rest
     }
     // Hidden paths answer before anything else can: the typed path is
