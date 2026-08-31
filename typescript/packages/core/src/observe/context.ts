@@ -95,6 +95,18 @@ let recordedTail: Promise<void> | null = null
  * open another one inside itself, since it would be waiting for its own
  * settle. There is one caller ({@link Ops.readFileWithIdentity}) and it
  * does not nest.
+ *
+ * Ordinary {@link runWithRecording} frames deliberately do NOT join
+ * this queue: an identity read runs *inside* an executing command's
+ * frame, so a queue spanning both kinds would have the inner frame
+ * waiting for its own encloser to settle — a deadlock, not a fix. The
+ * residual window on a fallback runtime is therefore an ordinary frame
+ * opened while an identity read awaits its backend: that read's record
+ * lands in the newer frame and the read answers null. Null is the safe
+ * side — the path filter in {@link readIdentity} means an identity can
+ * be missing but never someone else's — and a null identity is exactly
+ * the marker-less case every consumer already handles by hashing. On an
+ * isolating runtime none of this applies.
  */
 export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
   const state: RecordingState = { records: [], mountPrefix: '' }

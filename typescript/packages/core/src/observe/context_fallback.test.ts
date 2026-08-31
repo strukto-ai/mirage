@@ -22,6 +22,7 @@ import {
   runWithRevisions,
   type RecordedRun,
 } from './context.ts'
+import { readIdentity } from '../ops/ops.ts'
 import type { OpRecord } from './record.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
@@ -140,6 +141,37 @@ describe('recording on the fallback storage', () => {
     expect(await runB.done).toBe('B')
     expect(runA.records.map((r) => [r.path, r.revision])).toEqual([['/a', 'rev-a']])
     expect(runB.records.map((r) => [r.path, r.revision])).toEqual([['/b', 'rev-b']])
+  })
+
+  it('an ordinary frame overlapping an identity read costs the identity, never corrupts it', async () => {
+    // Ordinary runWithRecording frames do not join the queue -- an
+    // identity read runs inside an executing command's frame, so a
+    // queue spanning both kinds would deadlock on its own encloser.
+    // The residual fallback window is pinned here: the identity read's
+    // record lands in the newer ordinary frame and the read answers
+    // null (the marker-less case every consumer hashes through), and
+    // the ordinary frame never hands the identity read a wrong marker.
+    const [holdA, releaseA] = gate()
+    const runA = runRecorded(async () => {
+      await holdA
+      record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+      return 'A'
+    })
+    const [holdLine, releaseLine] = gate()
+    const line = runWithRecording(async () => {
+      record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+      await holdLine
+    })
+    releaseA()
+    expect(await runA.done).toBe('A')
+    releaseLine()
+    const [, lineRecords] = await line
+    expect(readIdentity(runA.records, '/a')).toBeNull()
+    expect(readIdentity(runA.records, '/b')).toBeNull()
+    expect(lineRecords.map((r) => [r.path, r.revision])).toEqual([
+      ['/b', 'rev-b'],
+      ['/a', 'rev-a'],
+    ])
   })
 
   it('two identity frames on the same path each keep their own marker', async () => {
