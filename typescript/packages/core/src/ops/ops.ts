@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { OpReport } from '../io/types.ts'
-import { activeRecords, runRecorded } from '../observe/context.ts'
+import { runRecorded } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
@@ -327,9 +327,12 @@ export class Ops {
    * frame and leave this one with no identity at all. What the frame
    * collected is handed up to the enclosing frame on the way out, on
    * the error path too, so a line's byte accounting still sees every op
-   * that happened. The markers are then read back per path, which is
-   * what keeps a sibling op's marker in the enclosing frame from being
-   * mistaken for this read's.
+   * that happened -- and `runRecorded` owns that hand-up, because the
+   * enclosing frame can only be read at the instant the frame binds,
+   * which under the serializing queue is not when this method runs.
+   * The markers are then read back per path, which is what keeps a
+   * sibling op's marker in the enclosing frame from being mistaken for
+   * this read's.
    *
    * The read is `fresh`, which is the dispatcher's "no memory answers
    * this one" and covers both memories. The warm file cache is skipped,
@@ -359,15 +362,10 @@ export class Ops {
     // follows before it dispatches; the filter has to compare against
     // that same spelling.
     const target = this.links !== null ? this.links.follow(path) : path
-    const outer = activeRecords()
     const { records: inner, done } = runRecorded(() =>
       this.readFile(path, { ...options, fresh: true }),
     )
-    try {
-      return [await done, readIdentity(inner, target)]
-    } finally {
-      if (outer !== null) outer.push(...inner)
-    }
+    return [await done, readIdentity(inner, target)]
   }
 
   // The three probes below answer "is this path there?", so only a genuine

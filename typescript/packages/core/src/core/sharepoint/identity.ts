@@ -18,20 +18,38 @@ import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
 import { identityItem } from '../msgraph/drive.ts'
 
-// Bounded identity lookup: resolve to a drive item, then one plain GET.
+/**
+ * Bounded identity lookup: resolve to a drive item, then one plain GET.
+ *
+ * The resolve is `fresh`: the site and drive name->id memos never
+ * expire, so a drive deleted and recreated under the same name would
+ * otherwise be addressed by an id that is gone, and the item GET
+ * against it would answer 404 — reported as `exists: false` for a file
+ * that is there. That costs the site and drive listings on every call
+ * (two requests for an unscoped mount, none more), which is the price
+ * of a live answer and is bounded by the namespace depth rather than by
+ * the tree.
+ *
+ * A missing site or a missing drive is absence, not ENOENT: the
+ * contract makes absence a value a caller branches on, and which
+ * component of the path went missing is not something that caller
+ * should have to handle two ways. EISDIR stays for a site or drive that
+ * *does* resolve, because that path names a directory. Mirrors Python's
+ * `live_identity`.
+ */
 export async function liveIdentity(
   accessor: SharePointAccessor,
   path: PathSpec,
 ): Promise<LiveFileIdentity> {
   if (path.resourcePath === '') throw eisdir(path)
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.resourcePath, true)
 
   if (resolved.level === 'site') {
-    if (resolved.siteId === null) throw enoent(path)
+    if (resolved.siteId === null) return { exists: false, revision: null, fingerprint: null }
     throw eisdir(path)
   }
   if (resolved.level === 'drive') {
-    if (resolved.driveId === null) throw enoent(path)
+    if (resolved.driveId === null) return { exists: false, revision: null, fingerprint: null }
     throw eisdir(path)
   }
   if (resolved.driveId === null || resolved.itemPath === null) throw enoent(path)

@@ -20,6 +20,7 @@ import {
   runRecorded,
   runWithRecording,
   runWithRevisions,
+  type RecordedRun,
 } from './context.ts'
 import type { OpRecord } from './record.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
@@ -174,6 +175,77 @@ describe('recording on the fallback storage', () => {
     await expect(failing.done).rejects.toThrow('boom')
     expect(await next.done).toBe('ok')
     expect(next.records.map((r) => r.path)).toEqual(['/after'])
+  })
+
+  it('both concurrent identity reads reach the enclosing line ledger', async () => {
+    // The shape of `Ops.readFileWithIdentity`: one enclosing recording
+    // frame, two overlapping identity reads inside it. Read B queues
+    // behind read A, so B's records are written long after B's caller
+    // ran -- and both reads still owe them to the line's ledger, which
+    // is the only place a command's byte accounting can see them.
+    const [holdA, releaseA] = gate()
+    let runA!: RecordedRun<void>
+    let runB!: RecordedRun<void>
+    const [, outer] = await runWithRecording(async () => {
+      runA = runRecorded(async () => {
+        await holdA
+        record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+      })
+      runB = runRecorded(() => {
+        record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+        return Promise.resolve()
+      })
+      releaseA()
+      await Promise.all([runA.done, runB.done])
+    })
+    // Each frame still holds only its own marker, so identity stays per
+    // read; the ledger holds both, in settle order.
+    expect(runA.records.map((r) => r.revision)).toEqual(['rev-a'])
+    expect(runB.records.map((r) => r.revision)).toEqual(['rev-b'])
+    expect(outer.map((r) => r.path)).toEqual(['/a', '/b'])
+  })
+
+  it('reading the enclosing frame at call time names a concurrent read, not the line', async () => {
+    // Why the capture had to move into runRecorded: when the second
+    // identity read runs its own line, the newest live frame is the
+    // first read's inner frame. `const outer = activeRecords()` in the
+    // caller therefore captured that array, which the first read had
+    // already forwarded and dropped by the time the second settled --
+    // so the second read's records were appended to nothing. Bind time
+    // is after the frame ahead has popped, which is why it is right.
+    const [holdA, releaseA] = gate()
+    let runA!: RecordedRun<void>
+    let callTime: OpRecord[] | null = null
+    const [, outer] = await runWithRecording(async () => {
+      runA = runRecorded(() => holdA)
+      callTime = activeRecords()
+      const runB = runRecorded(() => Promise.resolve())
+      releaseA()
+      await Promise.all([runA.done, runB.done])
+    })
+    expect(callTime).toBe(runA.records)
+    expect(callTime).not.toBe(outer)
+  })
+
+  it('a frame with no enclosing one forwards nowhere and still keeps its records', async () => {
+    const { records, done } = runRecorded(() => {
+      record('read', '/loose', 'test', 1, performance.now())
+      return Promise.resolve('ok')
+    })
+    expect(await done).toBe('ok')
+    expect(records.map((r) => r.path)).toEqual(['/loose'])
+  })
+
+  it('a failed frame still hands its records up', async () => {
+    const [, outer] = await runWithRecording(async () => {
+      const { done } = runRecorded(async () => {
+        record('read', '/partial', 'test', 1, performance.now())
+        await Promise.resolve()
+        throw new Error('boom')
+      })
+      await expect(done).rejects.toThrow('boom')
+    })
+    expect(outer.map((r) => r.path)).toEqual(['/partial'])
   })
 
   it('runRecorded keeps the frame records when the run throws', async () => {

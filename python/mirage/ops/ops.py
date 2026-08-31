@@ -409,6 +409,16 @@ class Ops:
         op left in the enclosing frame cannot be mistaken for this
         read's.
 
+        The enclosing recorder is captured here, on the line before the
+        nested scope opens, and that is safe in a way TypeScript's twin
+        is not: the recorder is a contextvar, an asyncio task gets its
+        own copy of the context when it is created, and a sibling task's
+        ``RecordingScope`` therefore cannot be seen from this one. So
+        the recorder read here is always this task's true enclosing one,
+        whenever it is read. TypeScript's fallback storage is one shared
+        frame stack with no such isolation, which is why ``runRecorded``
+        there has to take the enclosing frame at bind time instead.
+
         The read is ``fresh``, which is the dispatcher's "no memory
         answers this one" and covers both memories. The warm file cache
         is skipped, because bytes it hands back crossed no network and

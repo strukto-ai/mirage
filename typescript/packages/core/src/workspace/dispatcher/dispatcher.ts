@@ -206,13 +206,19 @@ export class Dispatcher {
     // undefined index answers ENOENT for a file that is there. Nothing
     // else sees the substitute, so a fresh read leaves the mount's
     // index exactly as it found it.
+    // The substitute is also *marked* fresh, because a backend can hold
+    // a name->id memory the index cannot reach: sharepoint remembers
+    // site and drive ids on its accessor, so an empty index alone would
+    // let a deleted-and-recreated drive answer with the old id. Marking
+    // the store rather than forwarding a kwarg keeps the signal on the
+    // one object every backend read already receives.
     // `fresh` is consumed here, never forwarded: no backend takes it.
     // Mirrors Python's Dispatcher.dispatch.
     const fresh = kwargs?.fresh === true
     if (fresh) {
       const rest = { ...kwargs }
       delete rest.fresh
-      rest.index = new RAMIndexCacheStore()
+      rest.index = new RAMIndexCacheStore({ fresh: true })
       kwargs = rest
     }
     // Hidden paths answer before anything else can: the typed path is

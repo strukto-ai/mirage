@@ -85,8 +85,9 @@ function requireItem(path: PathSpec, resolved: ResolvedSharePointPath): void {
 async function resolvedItem(
   accessor: SharePointAccessor,
   path: PathSpec,
+  fresh = false,
 ): Promise<ResolvedSharePointPath> {
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.resourcePath, fresh)
   requireItem(path, resolved)
   return resolved
 }
@@ -94,19 +95,26 @@ async function resolvedItem(
 /**
  * Read a file, optionally only a byte range of it.
  *
+ * The index holds nothing this read wants — Graph addresses an item by
+ * path — but it still carries one fact: `index.fresh` is the
+ * dispatcher's "no memory answers this one". The site and drive ids are
+ * a memory, and they live on the accessor rather than in the index, so
+ * the flag has to be forwarded or a fresh read would still address the
+ * drive that used to hold this name.
+ *
  * Args:
  *   accessor: SharePoint accessor.
  *   path: the path to read.
- *   _index: unused; Graph resolves the item from the path itself.
+ *   index: injected index cache; read only for its `fresh` marker.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: SharePointAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
+  index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
-  const resolved = await resolvedItem(accessor, path)
+  const resolved = await resolvedItem(accessor, path, index?.fresh === true)
   return readItem(
     accessor.config,
     accessor.loc(resolved, path.resourcePath),

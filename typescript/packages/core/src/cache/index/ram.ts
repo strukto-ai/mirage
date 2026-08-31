@@ -24,8 +24,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly expiry = new Map<string, number>()
   private readonly lock = new KeyLock()
 
-  constructor(options: { ttl?: number } = {}) {
-    super()
+  constructor(options: { ttl?: number; fresh?: boolean } = {}) {
+    super(options.fresh ?? false)
     this.ttl = options.ttl ?? 600
   }
 

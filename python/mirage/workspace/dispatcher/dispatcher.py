@@ -294,10 +294,17 @@ class Dispatcher:
         # discards the warm) answers ENOENT for a file that is there.
         # Nothing else sees the substitute, so a fresh read leaves the
         # mount's index exactly as it found it.
+        # The substitute is also *marked* fresh, because a backend can
+        # hold a name->id memory the index cannot reach: sharepoint
+        # remembers site and drive ids on its accessor, so an empty
+        # index alone would let a deleted-and-recreated drive answer
+        # with the old id. Marking the store rather than forwarding a
+        # kwarg keeps the signal on the one object every backend read
+        # already receives.
         # `fresh` is consumed here, never forwarded: no backend takes it.
         fresh = bool(kwargs.pop("fresh", False))
         if fresh:
-            kwargs["index"] = RAMIndexCacheStore()
+            kwargs["index"] = RAMIndexCacheStore(fresh=True)
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link

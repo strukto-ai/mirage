@@ -86,6 +86,11 @@ let recordedTail: Promise<void> | null = null
  * skipped entirely: `fn` starts synchronously, as before, and
  * concurrent reads keep overlapping.
  *
+ * The **enclosing** frame is this function's business too, and that is
+ * why the caller no longer names it: what the frame collects is handed
+ * up on the way out, and the array to hand it to can only be read at
+ * the instant the frame binds. See {@link bindFrame}.
+ *
  * One constraint follows from the queue: a serialized frame must not
  * open another one inside itself, since it would be waiting for its own
  * settle. There is one caller ({@link Ops.readFileWithIdentity}) and it
@@ -114,13 +119,47 @@ export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
   return { records: state.records, done }
 }
 
-// One recording frame, bound now: `storage.run` may hand back a value
-// or a promise, and a thunk that throws before returning one still has
-// to settle `done`, so the caller has a single handling path for both.
+/**
+ * One recording frame, bound now, and handed up to its enclosing frame
+ * when it settles.
+ *
+ * `storage.run` may hand back a value or a promise, and a thunk that
+ * throws before returning one still has to settle `done`, so the caller
+ * has a single handling path for both.
+ *
+ * The enclosing frame is read **here**, one line before `storage.run`,
+ * and never by the caller of {@link runRecorded}. Both halves of that
+ * matter, for a different reason per storage:
+ *
+ * - On {@link FallbackStorage} the caller's line runs when the caller
+ *   runs, which on a queued frame is long before the frame binds — and
+ *   at that moment the newest live frame is whichever *other* identity
+ *   read is still in flight. Capturing there named a concurrent read's
+ *   inner array as this read's "outer", and by the time this frame
+ *   settled that array had already been forwarded and dropped, so these
+ *   records reached no ledger at all. At bind time the frame ahead has
+ *   settled and popped itself, so the newest live frame is the true
+ *   enclosing one.
+ * - On the isolating storage there is no queue, so bind time *is* call
+ *   time and the capture is the same store either way. What would break
+ *   is reading it from *inside* `fn`: `getStore()` there answers this
+ *   frame's own state. Before `storage.run`, still in the caller's
+ *   async context, is the only place both storages agree on.
+ *
+ * The forward is a copy, so the frame's own array (which the caller
+ * reads its markers off) is untouched, and it runs on both outcomes:
+ * a failed read still happened, and a line's byte accounting has to see
+ * every op it paid for.
+ */
 function bindFrame<T>(state: RecordingState, fn: () => Promise<T>): Promise<T> {
+  const outer = storage.getStore()?.records ?? null
+  const forward = (): void => {
+    if (outer !== null) outer.push(...state.records)
+  }
   try {
-    return Promise.resolve(storage.run(state, fn))
+    return Promise.resolve(storage.run(state, fn)).finally(forward)
   } catch (err) {
+    forward()
     return Promise.reject(err instanceof Error ? err : new Error(String(err)))
   }
 }

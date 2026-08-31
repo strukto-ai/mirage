@@ -25,6 +25,21 @@ async def live_identity(accessor: SharePointAccessor,
                         path: PathSpec) -> LiveFileIdentity:
     """Bounded identity lookup: resolve to a drive item, then one GET.
 
+    The resolve is ``fresh``: the site and drive name->id memos never
+    expire, so a drive deleted and recreated under the same name would
+    otherwise be addressed by an id that is gone, and the item GET
+    against it would answer 404 -- reported as ``exists=False`` for a
+    file that is there. That costs the site and drive listings on every
+    call (two requests for an unscoped mount, none more), which is the
+    price of a live answer and is bounded by the namespace depth rather
+    than by the tree.
+
+    A missing site or a missing drive is absence, not ENOENT: the
+    contract makes absence a value a caller branches on, and which
+    component of the path went missing is not something that caller
+    should have to handle two ways. EISDIR stays for a site or drive
+    that *does* resolve, because that path names a directory.
+
     Args:
         accessor (SharePointAccessor): backend accessor.
         path (PathSpec): the path to check.
@@ -34,16 +49,20 @@ async def live_identity(accessor: SharePointAccessor,
     if not stripped:
         raise eisdir(virtual)
 
-    resolved = await resolve(accessor, path)
+    resolved = await resolve(accessor, path, fresh=True)
 
     if resolved.level == "site":
         if resolved.site_id is None:
-            raise enoent(virtual)
+            return LiveFileIdentity(exists=False,
+                                    revision=None,
+                                    fingerprint=None)
         raise eisdir(virtual)
 
     if resolved.level == "drive":
         if resolved.drive_id is None:
-            raise enoent(virtual)
+            return LiveFileIdentity(exists=False,
+                                    revision=None,
+                                    fingerprint=None)
         raise eisdir(virtual)
 
     if resolved.drive_id is None or resolved.item_path is None:
