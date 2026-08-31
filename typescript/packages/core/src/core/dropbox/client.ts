@@ -18,9 +18,10 @@ import {
   DROPBOX_TOKEN_URL,
   TOKEN_BUFFER_SECONDS,
 } from './constants.ts'
+import { apiRequest } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { rangeHeader, windowOf, type ByteWindow } from '../../utils/ranges.ts'
+import { type ByteWindow } from '../../utils/ranges.ts'
 
 export interface DropboxConfig {
   clientId: string
@@ -69,16 +70,12 @@ async function refreshAccessToken(config: DropboxConfig): Promise<[string, numbe
   if (config.clientSecret !== undefined && config.clientSecret !== '') {
     body.set('client_secret', config.clientSecret)
   }
-  const r = await fetch(tokenUrlOf(config), {
-    method: 'POST',
+  const data = (await apiRequest('POST', tokenUrlOf(config), {
+    errorOf: (r, text) =>
+      new DropboxApiError(`Dropbox token refresh → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new DropboxApiError(`Dropbox token refresh → ${String(r.status)} ${text}`, r.status)
-  }
-  const data = (await r.json()) as { access_token: string; expires_in: number }
+  })) as { access_token: string; expires_in: number }
   return [data.access_token, data.expires_in]
 }
 
@@ -120,21 +117,16 @@ export async function dropboxRpc(
   body: unknown,
 ): Promise<unknown> {
   const headers = await dropboxAuthHeaders(tm)
-  const url = `${tm.apiBase}${endpoint}`
-  const r = await fetch(url, {
-    method: 'POST',
+  return apiRequest('POST', `${tm.apiBase}${endpoint}`, {
+    errorOf: (r, text) =>
+      new DropboxApiError(
+        `Dropbox POST ${endpoint} → ${String(r.status)} ${text}`,
+        r.status,
+        summaryOf(text),
+      ),
     headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    json: body,
   })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new DropboxApiError(
-      `Dropbox POST ${endpoint} → ${String(r.status)} ${text}`,
-      r.status,
-      summaryOf(text),
-    )
-  }
-  return r.json()
 }
 
 export async function dropboxUpload(
@@ -143,25 +135,21 @@ export async function dropboxUpload(
   data: Uint8Array,
 ): Promise<void> {
   const headers = await dropboxAuthHeaders(tm)
-  const url = `${tm.contentBase}/files/upload`
-  const r = await fetch(url, {
-    method: 'POST',
+  await apiRequest('POST', `${tm.contentBase}/files/upload`, {
+    errorOf: (r, text) =>
+      new DropboxApiError(
+        `Dropbox upload ${path} → ${String(r.status)} ${text}`,
+        r.status,
+        summaryOf(text),
+      ),
     headers: {
       ...headers,
       'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite', mute: true }),
       'Content-Type': 'application/octet-stream',
     },
     body: data as unknown as BodyInit,
+    read: 'none',
   })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new DropboxApiError(
-      `Dropbox upload ${path} → ${String(r.status)} ${text}`,
-      r.status,
-      summaryOf(text),
-    )
-  }
-  await r.arrayBuffer()
 }
 
 export async function dropboxDownload(
@@ -170,20 +158,14 @@ export async function dropboxDownload(
   window?: ByteWindow,
 ): Promise<Uint8Array> {
   const headers = await dropboxAuthHeaders(tm)
-  const url = `${tm.contentBase}/files/download`
-  const sent: Record<string, string> = {
-    ...headers,
-    'Dropbox-API-Arg': JSON.stringify({ path }),
-  }
-  const range = window === undefined ? null : rangeHeader(window.offset, window.size)
-  if (range !== null) sent.Range = range
-  const r = await fetch(url, { method: 'POST', headers: sent })
-  if (!r.ok) {
-    const text = await r.text().catch(() => '')
-    throw new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status)
-  }
-  const buf = await r.arrayBuffer()
-  return windowOf(new Uint8Array(buf), r.status, window)
+  const data = await apiRequest('POST', `${tm.contentBase}/files/download`, {
+    errorOf: (r, text) =>
+      new DropboxApiError(`Dropbox download ${path} → ${String(r.status)} ${text}`, r.status),
+    headers: { ...headers, 'Dropbox-API-Arg': JSON.stringify({ path }) },
+    read: 'bytes',
+    window,
+  })
+  return data as Uint8Array
 }
 
 export async function* dropboxDownloadStream(

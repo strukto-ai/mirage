@@ -199,12 +199,35 @@ export const selftestFake: Fake<C> = {
   // left marked seeded, and a throwaway build client left open and holding
   // SQLite files. A reserved tenant name is the only way to reach them from
   // the outside, so the selftest fake grows one.
-  afterSeed: async (_db: C, tenant: string): Promise<void> => {
+  afterSeed: async (
+    db: C,
+    tenant: string,
+    _counts: Record<string, number>,
+    _extras: Record<string, JsonValue>,
+    _fixtureRoot: string,
+    epoch: string | undefined,
+  ): Promise<void> => {
     if (tenant === 'boom') throw new Error('selftest fake: afterSeed refused tenant boom')
     // A seed slow enough to be raced on purpose. The window a request has to
     // slip into is a few milliseconds otherwise, so a test for it would pass
     // by luck rather than by holding the invariant.
     if (tenant === 'slow') await new Promise((ok) => setTimeout(ok, 300))
+    // A seed that WRITES the epoch, which is what makes the epoch an input to
+    // the seed and therefore part of the seeded-template key. Its own tenant so
+    // that no other check sees the extra row; gws is the real case (it stamps a
+    // createdTime on every row it seeds through the Drive table).
+    if (tenant === 'stamped') {
+      await db.card.create({
+        data: {
+          tenant,
+          id: 'crd_epoch',
+          boardId: 'brd_1',
+          title: epoch ?? 'no-epoch',
+          seq: 99,
+          createdAt: epoch ?? null,
+        },
+      })
+    }
   },
   // Opted in, because the refusal is opt-in and this is where it is covered.
   // A fake that says nothing here keeps serving unseeded tenants, which is

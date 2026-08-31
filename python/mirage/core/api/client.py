@@ -70,6 +70,90 @@ class RetryPolicy:
 NO_RETRY = RetryPolicy()
 
 
+class SessionPool:
+    """One lazily created keep-alive session, recreated after close.
+
+    A session per request is a TCP connect per request, and the closing
+    side parks each socket in TIME_WAIT, which exhausts the ephemeral
+    port range under load. Whatever object a backend already threads
+    into every call owns one of these instead: ``TokenManager`` for the
+    OAuth backends, ``SessionAccessor`` for the rest.
+
+    Args:
+        timeout (aiohttp.ClientTimeout | None): applied to the session
+            at creation; None takes aiohttp's default.
+    """
+
+    def __init__(self, timeout: aiohttp.ClientTimeout | None = None) -> None:
+        self._timeout = timeout
+        self._session: aiohttp.ClientSession | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def get(self) -> aiohttp.ClientSession:
+        """The shared session, created on first use.
+
+        A session is bound to the loop it was created on, so an owner
+        that outlives one ``asyncio.run`` and is asked again under the
+        next gets a fresh session. The superseded one is handed to its
+        own loop to close when that loop still runs, and dropped when
+        that loop is gone, because its transports died with it.
+
+        Returns:
+            aiohttp.ClientSession: one keep-alive pool for every call
+            routed through this owner; recreated if it was closed or its
+            loop was replaced.
+        """
+        loop = asyncio.get_running_loop()
+        stale = self._session
+        if stale is not None and (stale.closed or self._loop is not loop):
+            if (not stale.closed and self._loop is not None
+                    and not self._loop.is_closed()):
+                asyncio.run_coroutine_threadsafe(stale.close(), self._loop)
+            self._session = None
+        if self._session is None:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+            self._loop = loop
+        return self._session
+
+    async def close(self) -> None:
+        """Drain the pool. Idempotent, and safe before first use."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        self._session = None
+        self._loop = None
+
+
+SessionArg = aiohttp.ClientSession | SessionPool | None
+
+
+def resolve_session(
+    session: SessionArg,
+    timeout: aiohttp.ClientTimeout | None = None
+) -> tuple[aiohttp.ClientSession, bool]:
+    """The live session for one request, plus whether the caller owns it.
+
+    Callers thread the inert ``SessionPool`` and the session materializes
+    here, at the moment a request actually sends. Threading a live
+    session instead would open one wherever the kwargs are built, which
+    is exactly where a mocked request function never gets to close it.
+
+    Args:
+        session (SessionArg): a pool to draw from, a live session to
+            borrow, or None to own one for this request.
+        timeout (aiohttp.ClientTimeout | None): applied only to an owned
+            session; a pooled or borrowed one already carries its own.
+
+    Returns:
+        tuple[aiohttp.ClientSession, bool]: the session to send on, and
+        True when the caller must close it afterwards.
+    """
+    if isinstance(session, SessionPool):
+        return session.get(), False
+    if session is not None:
+        return session, False
+    return aiohttp.ClientSession(timeout=timeout), True
+
+
 class _RetryableStatus(Exception):
     """A response whose status the policy retries, carried to tenacity.
 
@@ -265,7 +349,7 @@ async def api_request(
     retry: RetryPolicy = NO_RETRY,
     read: ReadMode = "json",
     window: ByteWindow | None = None,
-    session: aiohttp.ClientSession | None = None,
+    session: SessionArg = None,
     timeout: aiohttp.ClientTimeout | None = None,
 ) -> Any:
     """One round-trip against an HTTP API, with retry and error mapping.
@@ -294,8 +378,10 @@ async def api_request(
             returns decoded data with status and lower-cased headers.
         window (ByteWindow | None): the byte range to request; the Range
             header and the trim-if-unranged guard both come from it.
-        session (aiohttp.ClientSession | None): a session to reuse across
-            calls; the kit opens and closes its own when absent.
+        session (SessionArg): a live session to reuse across calls, or
+            the SessionPool it should come from -- a pool materializes
+            its session only here, when the request actually sends; the
+            kit opens and closes its own when absent.
         timeout (aiohttp.ClientTimeout | None): timeout for a kit-owned
             session; a reused session already carries its own.
     """
@@ -307,9 +393,7 @@ async def api_request(
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    own = session is None
-    sess = (session if session is not None else aiohttp.ClientSession(
-        timeout=timeout))
+    sess, own = resolve_session(session, timeout=timeout)
     try:
         try:
             present = (json_body is not None

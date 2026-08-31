@@ -28,10 +28,12 @@ async def test_pin_message_posts_pins_add():
                new_callable=AsyncMock,
                return_value={"ok": True}) as post:
         result = await pin_message(CONFIG, "C001", "111.222")
-    post.assert_awaited_once_with(CONFIG, "pins.add", {
-        "channel": "C001",
-        "timestamp": "111.222",
-    })
+    post.assert_awaited_once_with(CONFIG,
+                                  "pins.add", {
+                                      "channel": "C001",
+                                      "timestamp": "111.222",
+                                  },
+                                  session=None)
     assert result == {"ok": True}
 
 
@@ -41,10 +43,12 @@ async def test_unpin_message_posts_pins_remove():
                new_callable=AsyncMock,
                return_value={"ok": True}) as post:
         await unpin_message(CONFIG, "C001", "111.222")
-    post.assert_awaited_once_with(CONFIG, "pins.remove", {
-        "channel": "C001",
-        "timestamp": "111.222",
-    })
+    post.assert_awaited_once_with(CONFIG,
+                                  "pins.remove", {
+                                      "channel": "C001",
+                                      "timestamp": "111.222",
+                                  },
+                                  session=None)
 
 
 @pytest.mark.asyncio
@@ -58,7 +62,9 @@ async def test_list_pins_returns_items():
                    }],
                }) as get:
         items = await list_pins(CONFIG, "C001")
-    get.assert_awaited_once_with(CONFIG, "pins.list", {"channel": "C001"})
+    get.assert_awaited_once_with(CONFIG,
+                                 "pins.list", {"channel": "C001"},
+                                 session=None)
     assert items == [{"type": "message"}]
 
 

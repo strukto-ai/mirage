@@ -32,4 +32,5 @@ async def copy(accessor: SharePointAccessor, src: PathSpec,
     src_virt = src.mount_path if isinstance(src, PathSpec) else src
     await copy_tree(accessor.config,
                     drive_loc(accessor.config, src_resolved, src_virt),
-                    drive_loc(accessor.config, dst_resolved, dst_virt))
+                    drive_loc(accessor.config, dst_resolved, dst_virt),
+                    session=accessor.pool)

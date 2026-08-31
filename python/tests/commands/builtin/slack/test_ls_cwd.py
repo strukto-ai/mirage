@@ -55,7 +55,7 @@ async def test_ls_no_args_after_cd_returns_cwd_entries(config):
         "has_more": False,
     }
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         if method == "conversations.list":
             return channels_page
         if method == "conversations.history":

@@ -15,6 +15,7 @@
 import type { JsonValue, KitRoute, Reply } from '../../kit/typescript/index.ts'
 import { route } from '../wire/route.ts'
 import type { Ctx } from '../../kit/typescript/index.ts'
+import type { C } from '../store/client.ts'
 import type { GwsState } from '../store/state.ts'
 import { asObj, asStr, asStrArr } from '../wire/json.ts'
 import { googleError, ok } from '../wire/reply.ts'
@@ -53,7 +54,7 @@ function send(ctx: GwsCtx): Reply {
   return ok({ id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] })
 }
 
-export function gmailRoutes(): KitRoute<GwsState>[] {
+export function gmailRoutes(): KitRoute<C>[] {
   return [
     route('GET', '/gmail/v1/users/me/labels', (ctx) =>
       ok({

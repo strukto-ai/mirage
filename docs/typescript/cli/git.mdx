@@ -4,10 +4,16 @@ description: "Read and change a git repository that lives on any mount, in git's
 icon: git-alt
 ---
 
-Read and change a git repository that lives on any mount, in git's own
-vocabulary. Unlike the account CLIs, `git` needs no credentials and takes
-no config: it is a program tree with nothing to authenticate to, so
-installing it is one line.
+Mirage's built-in `git` is an independent implementation that follows the
+command-line interface of upstream [Git](https://github.com/git/git). It reads
+and changes a repository on any mount. Unlike the account CLIs, `git` needs no
+credentials and takes no config: it is a program tree with nothing to
+authenticate to.
+
+**Licenses:** The upstream Git source uses
+[GPLv2](https://github.com/git/git/blob/master/COPYING). Mirage does not
+distribute that source; its independent implementation uses
+[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
 
 ## Install
 

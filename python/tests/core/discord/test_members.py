@@ -76,11 +76,10 @@ async def test_search_members(config):
 
     assert len(result) == 1
     assert result[0]["user"]["username"] == "alice"
-    mock_get.assert_called_once_with(
-        config,
-        "/guilds/G001/members/search",
-        params={
-            "query": "ali",
-            "limit": 100
-        },
-    )
+    mock_get.assert_called_once_with(config,
+                                     "/guilds/G001/members/search",
+                                     params={
+                                         "query": "ali",
+                                         "limit": 100
+                                     },
+                                     session=None)

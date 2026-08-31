@@ -17,6 +17,7 @@ import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { isEnoent } from '../../../utils/errors.ts'
 import { readdir } from '../readdir.ts'
 import { stat } from '../stat.ts'
 
@@ -29,7 +30,11 @@ export async function walkSize(
   let s: FileStat
   try {
     s = await stat(accessor, path, index)
-  } catch {
+  } catch (err) {
+    // Absence counts as 0; a 5xx/429 or ENOTDIR is not absence and must
+    // surface (mirrors du/walk.py's `except FileNotFoundError`), rather
+    // than silently under-reporting the total.
+    if (!isEnoent(err)) throw err
     return 0
   }
   if (s.type !== FileType.DIRECTORY) {
@@ -45,7 +50,8 @@ export async function walkSize(
   let children: string[]
   try {
     children = await readdir(accessor, path, index)
-  } catch {
+  } catch (err) {
+    if (!isEnoent(err)) throw err
     return 0
   }
   let total = 0

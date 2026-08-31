@@ -17,7 +17,8 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import RetryPolicy, api_request, status_error
+from mirage.core.api.client import (RetryPolicy, SessionArg, api_request,
+                                    status_error)
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.constants import DISCORD_API, MAX_RETRIES
 from mirage.resource.secrets import reveal_secret
@@ -64,10 +65,10 @@ def _mutation_error(resp: aiohttp.ClientResponse, body: str) -> Exception:
 
 
 async def discord_get(
-    config: DiscordConfig,
-    endpoint: str,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any] | list[Any]:
+        config: DiscordConfig,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        session: SessionArg = None) -> dict[str, Any] | list[Any]:
     data: dict[str, Any] | list[Any] = await api_request(
         "GET",
         f"{discord_base(config)}{endpoint}",
@@ -75,61 +76,55 @@ async def discord_get(
         headers=discord_headers(config),
         params=params,
         retry=_RATE_LIMIT_RETRY,
-    )
+        session=session)
     return data
 
 
-async def discord_post(
-    config: DiscordConfig,
-    endpoint: str,
-    body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "POST",
-        f"{discord_base(config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(config),
-        json_body=body or {},
-    )
+async def discord_post(config: DiscordConfig,
+                       endpoint: str,
+                       body: dict[str, Any] | None = None,
+                       session: SessionArg = None) -> dict[str, Any]:
+    data: dict[str,
+               Any] = await api_request("POST",
+                                        f"{discord_base(config)}{endpoint}",
+                                        error_of=_mutation_error,
+                                        headers=discord_headers(config),
+                                        json_body=body or {},
+                                        session=session)
     return data
 
 
-async def discord_put(
-    config: DiscordConfig,
-    endpoint: str,
-) -> None:
-    await api_request(
-        "PUT",
-        f"{discord_base(config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(config),
-        read="none",
-    )
+async def discord_put(config: DiscordConfig,
+                      endpoint: str,
+                      session: SessionArg = None) -> None:
+    await api_request("PUT",
+                      f"{discord_base(config)}{endpoint}",
+                      error_of=_mutation_error,
+                      headers=discord_headers(config),
+                      read="none",
+                      session=session)
 
 
-async def discord_patch(
-    config: DiscordConfig,
-    endpoint: str,
-    body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "PATCH",
-        f"{discord_base(config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(config),
-        json_body=body or {},
-    )
+async def discord_patch(config: DiscordConfig,
+                        endpoint: str,
+                        body: dict[str, Any] | None = None,
+                        session: SessionArg = None) -> dict[str, Any]:
+    data: dict[str,
+               Any] = await api_request("PATCH",
+                                        f"{discord_base(config)}{endpoint}",
+                                        error_of=_mutation_error,
+                                        headers=discord_headers(config),
+                                        json_body=body or {},
+                                        session=session)
     return data
 
 
-async def discord_delete(
-    config: DiscordConfig,
-    endpoint: str,
-) -> None:
-    await api_request(
-        "DELETE",
-        f"{discord_base(config)}{endpoint}",
-        error_of=_mutation_error,
-        headers=discord_headers(config),
-        read="none",
-    )
+async def discord_delete(config: DiscordConfig,
+                         endpoint: str,
+                         session: SessionArg = None) -> None:
+    await api_request("DELETE",
+                      f"{discord_base(config)}{endpoint}",
+                      error_of=_mutation_error,
+                      headers=discord_headers(config),
+                      read="none",
+                      session=session)

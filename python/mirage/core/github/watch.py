@@ -61,7 +61,7 @@ class GitHubWalk:
         prefix = mount_prefix_of(root.virtual, root.resource_path)
         ref = await ensure_ref(accessor)
         tree, truncated = await fetch_tree(accessor.config, accessor.owner,
-                                           accessor.repo, ref)
+                                           accessor.repo, ref, accessor.pool)
         if truncated:
             raise IncompleteWalkError(
                 f"github tree for {accessor.owner}/{accessor.repo}"

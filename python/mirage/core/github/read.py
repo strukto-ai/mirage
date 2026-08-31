@@ -16,6 +16,7 @@ import base64
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, LookupStatus
+from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree import ensure_live_index, refill_index
@@ -24,12 +25,16 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def read_bytes(config: GitHubConfig, owner: str, repo: str,
-                     sha: str) -> bytes:
+async def read_bytes(config: GitHubConfig,
+                     owner: str,
+                     repo: str,
+                     sha: str,
+                     session: SessionArg = None) -> bytes:
     data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/blobs/{sha}",
         base_url=config.base_url,
+        session=session,
         owner=owner,
         repo=repo,
         sha=sha,
@@ -66,4 +71,4 @@ async def read(
     if result.entry.resource_type == "folder":
         raise IsADirectoryError(virtual)
     return await read_bytes(accessor.config, accessor.owner, accessor.repo,
-                            result.entry.id)
+                            result.entry.id, accessor.pool)

@@ -1,0 +1,17 @@
+{
+  "labels": [
+    { "id": "INBOX", "name": "INBOX", "type": "system" },
+    { "id": "SENT", "name": "SENT", "type": "system" },
+    { "id": "UNREAD", "name": "UNREAD", "type": "system" },
+    { "id": "TRASH", "name": "TRASH", "type": "system" }
+  ],
+  "calendars": [
+    {
+      "id": "integ@example.com",
+      "summary": "Integ User",
+      "timeZone": "Asia/Hong_Kong",
+      "accessRole": "owner",
+      "primary": true
+    }
+  ]
+}

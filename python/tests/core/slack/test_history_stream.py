@@ -46,7 +46,7 @@ async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         assert method == "conversations.history"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
@@ -90,7 +90,7 @@ async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
     ]
     calls = {"n": 0}
 
-    async def fake_get(_cfg, _method, params=None, token=None):
+    async def fake_get(_cfg, _method, params=None, token=None, session=None):
         page = pages[calls["n"]]
         calls["n"] += 1
         return page

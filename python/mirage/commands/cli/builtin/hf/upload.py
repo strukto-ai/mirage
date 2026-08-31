@@ -174,13 +174,15 @@ async def upload_cmd(
                       repo_type,
                       private=bool(fl.as_bool("private")),
                       exist_ok=True)
-    accessor = hub_for(inv, repo_id, repo_type, fl.as_str("revision"))
-    await commit(accessor,
-                 additions=additions,
-                 deletions=deletions,
-                 message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
-                 description=fl.as_str("commit_description") or "",
-                 create_pr=bool(fl.as_bool("create_pr")))
-    home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
-    url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
-    return text_out(f"{url}\n", mutated=True)
+    async with hub_for(inv, repo_id, repo_type,
+                       fl.as_str("revision")) as accessor:
+        await commit(accessor,
+                     additions=additions,
+                     deletions=deletions,
+                     message=fl.as_str("commit_message")
+                     or DEFAULT_COMMIT_MESSAGE,
+                     description=fl.as_str("commit_description") or "",
+                     create_pr=bool(fl.as_bool("create_pr")))
+        home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
+        url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
+        return text_out(f"{url}\n", mutated=True)

@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseConfig, schemaFor } from '../kit/typescript/index.ts'
-import type { KitConfig, KitRoute } from '../kit/typescript/index.ts'
+import { Prisma } from '../../generated/gws/index.js'
+import { parseConfig, schemaFor, unroutedLine } from '../kit/typescript/index.ts'
+import type { Dmmf, Fake, KitConfig, KitRoute } from '../kit/typescript/index.ts'
 import { calendarRoutes } from './calendar/routes.ts'
 import { docsRoutes } from './docs/routes.ts'
 import { driveRoutes } from './drive/routes.ts'
@@ -21,24 +22,67 @@ import { formsRoutes } from './forms/routes.ts'
 import { gmailRoutes } from './gmail/routes.ts'
 import { sheetsRoutes } from './sheets/routes.ts'
 import { slidesRoutes } from './slides/routes.ts'
-import type { GwsState } from './store/state.ts'
-import { ok } from './wire/reply.ts'
+import { applyExtras } from './seed.ts'
+import { PrismaClient } from './store/client.ts'
+import type { C } from './store/client.ts'
+import { loadState } from './store/load.ts'
+import { saveState } from './store/save.ts'
+import { ok, unknownRoute } from './wire/reply.ts'
 import { route } from './wire/route.ts'
+import type { RouteOpts } from './wire/route.ts'
 
 export const GWS_DEFAULT_PORT = 19999
 
-// `schema` names the proposal at integ/prisma/gws.prisma. Nothing pushes it
-// yet: this pass moves gws onto the kit's control plane only, and the store
-// is still the in-memory GwsState, so no ClientPool is constructed.
+// `tenantKind: 'pk-column'` is what buys the two things a run-only fake cannot
+// have: a /reset SCOPED to the tenants it names, so two hosts sharing one
+// server stop deleting each other's world, and a fresh run served by COPYING an
+// already-seeded template rather than reseeding from scratch.
+//
+// gws does NOT read the tenant off a bearer token. Every google client here
+// sends `Authorization: Bearer gws-integ-token`, the same string for everybody,
+// so a bearer fallback would file every caller under one tenant named after
+// that constant. The tenant is the mirage header or the query parameter, which
+// is what the adapters already have a base URL to carry.
+//
+// `mintSharing` is inert now and kept off the config for that reason: gws mints
+// through its own persisted Counter rows, because the kit's Minter lives in
+// memory and would restart at zero inside a template copy whose rows already
+// used the ids.
 export const gwsConfig: KitConfig = parseConfig({
   service: 'gws',
   schema: schemaFor('gws'),
   defaultPort: GWS_DEFAULT_PORT,
-  mintSharing: 'per-kind',
+  tenantKind: 'pk-column',
 })
 
+// A path no route matched, answered in google's error envelope rather than the
+// kit's. The kit's own `unrouted` is one shape across every fake, which is what
+// a caller diffing two of them wants; here it would be the SECOND shape gws
+// gives for the same condition, because a path that matches a route whose
+// in-segment verb suffix is not one gws serves is already answered by
+// `unknownRoute` from inside the handler. One fake, one 404.
+//
+// It is a route rather than a hook because the kit has no hook, and it is
+// declared LAST so every real route wins. The stderr line is the kit's own,
+// written here because reaching this route means the kit's `unrouted` -- which
+// is what normally writes it, and what CI greps for -- was never called.
+function catchAllRoutes(): KitRoute<C>[] {
+  const REST: RouteOpts = { classes: { rest: 'rest' } }
+  return ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((method) =>
+    route(
+      method,
+      '/:rest',
+      (ctx) => {
+        process.stderr.write(`${unroutedLine('gws', method, ctx.url.pathname)}\n`)
+        return unknownRoute(method, ctx.url.pathname)
+      },
+      REST,
+    ),
+  )
+}
+
 // The fake OAuth exchange every google client makes before its first call.
-function tokenRoutes(): KitRoute<GwsState>[] {
+function tokenRoutes(): KitRoute<C>[] {
   return [
     route('POST', '/token', () =>
       ok({ access_token: 'gws-integ-token', expires_in: 3600, token_type: 'Bearer' }),
@@ -91,7 +135,7 @@ function tokenRoutes(): KitRoute<GwsState>[] {
 // One list, in the order the old single route() function tried its patterns:
 // the API-prefixed surfaces first, then Drive, then the editors. Order only
 // matters inside a surface, and each module states its own.
-export function gwsRoutes(): KitRoute<GwsState>[] {
+export function gwsRoutes(): KitRoute<C>[] {
   return [
     ...tokenRoutes(),
     ...gmailRoutes(),
@@ -101,5 +145,23 @@ export function gwsRoutes(): KitRoute<GwsState>[] {
     ...docsRoutes(),
     ...sheetsRoutes(),
     ...slidesRoutes(),
+    ...catchAllRoutes(),
   ]
+}
+
+// The base world is fixture rows; only the two states no API call can produce
+// ride /reset, as `extras`. The epoch is written into the Meta row here rather
+// than left to the first request, because every row this seed creates is
+// stamped with it and a seed that guessed would put the template's timestamps
+// an unbounded distance from the run's.
+export const gwsFake: Fake<C> = {
+  config: gwsConfig,
+  client: PrismaClient,
+  dmmf: Prisma.dmmf as unknown as Dmmf,
+  routes: gwsRoutes,
+  afterSeed: async (db, tenant, _counts, extras, _fixtureRoot, epoch) => {
+    const st = await loadState(db, tenant, epoch === undefined ? undefined : Date.parse(epoch))
+    applyExtras(st, extras)
+    await saveState(db, gwsFake.dmmf, tenant, st)
+  },
 }

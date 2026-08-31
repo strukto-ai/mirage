@@ -16,7 +16,7 @@ import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import type { KitRoute } from '../../kit/typescript/index.ts'
 import { createDriveItem, touchNative } from '../drive/item.ts'
-import type { GwsState } from '../store/state.ts'
+import type { C } from '../store/client.ts'
 import type { FormDoc } from '../store/types.ts'
 import { asObj, asObjArr, asStr } from '../wire/json.ts'
 import { FORM_MIME } from '../wire/mime.ts'
@@ -27,7 +27,7 @@ import { applyFormRequest, fmtForm } from './form.ts'
 const ID: RouteOpts = { classes: { id: 'id' } }
 const RESPONSE: RouteOpts = { classes: { id: 'id', responseId: 'id' } }
 
-export function formsRoutes(): KitRoute<GwsState>[] {
+export function formsRoutes(): KitRoute<C>[] {
   return [
     route(
       'POST',

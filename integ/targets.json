@@ -42,10 +42,12 @@
     },
     "email": {
       "python": [
-        "EMAIL_HOST"
+        "EMAIL_HOST",
+        "MAIL_URL"
       ],
       "typescript": [
-        "EMAIL_HOST"
+        "EMAIL_HOST",
+        "MAIL_URL"
       ]
     },
     "github": {

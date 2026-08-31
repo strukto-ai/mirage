@@ -14,19 +14,22 @@
 
 from typing import Any
 
+from mirage.core.api.client import SessionArg
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.config import SlackConfig
 
 
-async def list_emoji(config: SlackConfig) -> dict[str, Any]:
+async def list_emoji(config: SlackConfig,
+                     session: SessionArg = None) -> dict[str, Any]:
     """List the workspace's custom emoji.
 
     Args:
         config (SlackConfig): Slack credentials.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: emoji name to image URL (or alias:<name>) mapping.
     """
-    data = await slack_get(config, "emoji.list")
+    data = await slack_get(config, "emoji.list", session=session)
     emoji = data.get("emoji")
     return emoji if isinstance(emoji, dict) else {}

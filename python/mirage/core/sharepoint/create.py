@@ -20,6 +20,6 @@ async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
                    resolved.drive_id,
                    resolved.item_path,
                    action="/content")
-    await graph_put_bytes(accessor.config, url, b"")
+    await graph_put_bytes(accessor.config, url, b"", session=accessor.pool)
     record("create", stripped, "sharepoint", 0, start_ms)
     await invalidate_after_write(path)

@@ -15,19 +15,20 @@
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from mirage.core.api.client import SessionArg
 from mirage.core.discord.client import discord_get
 from mirage.core.discord.config import DiscordConfig
 
 
 async def after_id_pages(
-    config: DiscordConfig,
-    endpoint: str,
-    base_params: dict[str, Any],
-    last_id_fn: Callable[[dict[str, Any]], str],
-    page_size: int = 100,
-    start_after: str = "0",
-    newest_first: bool = False,
-) -> AsyncIterator[list[dict[str, Any]]]:
+        config: DiscordConfig,
+        endpoint: str,
+        base_params: dict[str, Any],
+        last_id_fn: Callable[[dict[str, Any]], str],
+        page_size: int = 100,
+        start_after: str = "0",
+        newest_first: bool = False,
+        session: SessionArg = None) -> AsyncIterator[list[dict[str, Any]]]:
     """Walk an after-id paginated Discord endpoint.
 
     Used for endpoints that return a flat list and accept `after=<id>` +
@@ -48,6 +49,7 @@ async def after_id_pages(
             members and guilds do not, and the cursor is the newest id in
             the page either way, so it is the first item there and the last
             item here.
+        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: items in each page. Generator returns when the API
@@ -58,7 +60,10 @@ async def after_id_pages(
         params = dict(base_params)
         params["after"] = last
         params["limit"] = page_size
-        data = await discord_get(config, endpoint, params=params)
+        data = await discord_get(config,
+                                 endpoint,
+                                 params=params,
+                                 session=session)
         if not isinstance(data, list) or not data:
             return
         yield data
@@ -76,16 +81,15 @@ def _get_nested(d: dict[str, Any], path: tuple[str, ...]) -> Any:
     return cur
 
 
-async def offset_pages(
-    config: DiscordConfig,
-    endpoint: str,
-    base_params: dict[str, Any],
-    items_path: tuple[str, ...],
-    total_key: str = "total_results",
-    page_size: int = 25,
-    start_offset: int = 0,
-    max_pages: int | None = None,
-) -> AsyncIterator[list[Any]]:
+async def offset_pages(config: DiscordConfig,
+                       endpoint: str,
+                       base_params: dict[str, Any],
+                       items_path: tuple[str, ...],
+                       total_key: str = "total_results",
+                       page_size: int = 25,
+                       start_offset: int = 0,
+                       max_pages: int | None = None,
+                       session: SessionArg = None) -> AsyncIterator[list[Any]]:
     """Walk an offset-paginated Discord endpoint (search).
 
     Args:
@@ -99,6 +103,7 @@ async def offset_pages(
         page_size (int): per-page count (Discord search returns 25).
         start_offset (int): initial offset.
         max_pages (int | None): cap on pages fetched; None = unbounded.
+        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[Any]: items from each page (search returns context arrays;
@@ -110,7 +115,10 @@ async def offset_pages(
     while True:
         params = dict(base_params)
         params["offset"] = offset
-        data = await discord_get(config, endpoint, params=params)
+        data = await discord_get(config,
+                                 endpoint,
+                                 params=params,
+                                 session=session)
         if not isinstance(data, dict):
             return
         items = _get_nested(data, items_path) or []

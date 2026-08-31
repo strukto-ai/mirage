@@ -17,7 +17,7 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import api_request
+from mirage.core.api.client import SessionArg, api_request
 from mirage.core.linear.config import LinearConfig
 from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
@@ -61,11 +61,10 @@ def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
     return LinearAPIError(message, errors=errors, status=resp.status)
 
 
-async def graphql_request(
-    config: LinearConfig,
-    query: str,
-    variables: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+async def graphql_request(config: LinearConfig,
+                          query: str,
+                          variables: dict[str, Any] | None = None,
+                          session: SessionArg = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "query": query,
         "variables": variables or {},
@@ -74,7 +73,8 @@ async def graphql_request(
                                              config.base_url,
                                              error_of=_error_of,
                                              headers=linear_headers(config),
-                                             json_body=payload)
+                                             json_body=payload,
+                                             session=session)
     # GraphQL reports failures in-band: a 200 whose body carries an
     # errors array is still a failed call.
     if data.get("errors"):
@@ -96,17 +96,20 @@ def _error_message(errors: list[dict[str, Any]] | None) -> str | None:
 
 
 async def paginate_connection(
-    config: LinearConfig,
-    query: str,
-    variables: dict[str, Any] | None,
-    path: tuple[str, ...],
-) -> list[dict[str, Any]]:
+        config: LinearConfig,
+        query: str,
+        variables: dict[str, Any] | None,
+        path: tuple[str, ...],
+        session: SessionArg = None) -> list[dict[str, Any]]:
     merged_vars = dict(variables or {})
     merged_vars.setdefault("first", 50)
     merged_vars["after"] = None
     nodes: list[dict[str, Any]] = []
     while True:
-        data = await graphql_request(config, query, merged_vars)
+        data = await graphql_request(config,
+                                     query,
+                                     merged_vars,
+                                     session=session)
         cursor = data
         for key in path:
             cursor = cursor[key]
@@ -118,100 +121,106 @@ async def paginate_connection(
     return nodes
 
 
-async def list_teams(config: LinearConfig) -> list[dict[str, Any]]:
-    return await paginate_connection(config, TEAM_LIST_QUERY, None,
-                                     ("teams", ))
+async def list_teams(config: LinearConfig,
+                     session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_LIST_QUERY,
+                                     None, ("teams", ),
+                                     session=session)
 
 
-async def list_team_members(config: LinearConfig,
-                            team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_MEMBERS_QUERY,
-        {"teamId": team_id},
-        ("team", "members"),
-    )
+async def list_team_members(
+        config: LinearConfig,
+        team_id: str,
+        session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_MEMBERS_QUERY, {"teamId": team_id},
+                                     ("team", "members"),
+                                     session=session)
 
 
 async def list_team_issues(config: LinearConfig,
-                           team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_ISSUES_QUERY,
-        {"teamId": team_id},
-        ("team", "issues"),
-    )
+                           team_id: str,
+                           session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_ISSUES_QUERY, {"teamId": team_id},
+                                     ("team", "issues"),
+                                     session=session)
 
 
-async def list_team_projects(config: LinearConfig,
-                             team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_PROJECTS_QUERY,
-        {"teamId": team_id},
-        ("team", "projects"),
-    )
+async def list_team_projects(
+        config: LinearConfig,
+        team_id: str,
+        session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_PROJECTS_QUERY, {"teamId": team_id},
+                                     ("team", "projects"),
+                                     session=session)
 
 
 async def list_team_cycles(config: LinearConfig,
-                           team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_CYCLES_QUERY,
-        {"teamId": team_id},
-        ("team", "cycles"),
-    )
+                           team_id: str,
+                           session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_CYCLES_QUERY, {"teamId": team_id},
+                                     ("team", "cycles"),
+                                     session=session)
 
 
 async def list_team_labels(config: LinearConfig,
-                           team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_LABELS_QUERY,
-        {"teamId": team_id},
-        ("team", "labels"),
-    )
+                           team_id: str,
+                           session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_LABELS_QUERY, {"teamId": team_id},
+                                     ("team", "labels"),
+                                     session=session)
 
 
-async def list_team_documents(config: LinearConfig,
-                              team_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        TEAM_DOCUMENTS_QUERY,
-        {"teamId": team_id},
-        ("team", "documents"),
-    )
+async def list_team_documents(
+        config: LinearConfig,
+        team_id: str,
+        session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     TEAM_DOCUMENTS_QUERY, {"teamId": team_id},
+                                     ("team", "documents"),
+                                     session=session)
 
 
-async def resolve_team(config: LinearConfig, key_or_id: str) -> dict[str, Any]:
-    teams = await list_teams(config)
+async def resolve_team(config: LinearConfig,
+                       key_or_id: str,
+                       session: SessionArg = None) -> dict[str, Any]:
+    teams = await list_teams(config, session=session)
     for team in teams:
         if team.get("id") == key_or_id or team.get("key") == key_or_id:
             return team
     raise FileNotFoundError(key_or_id)
 
 
-async def get_issue(config: LinearConfig, issue_id: str) -> dict[str, Any]:
-    data = await graphql_request(config, ISSUE_QUERY, {"issueId": issue_id})
+async def get_issue(config: LinearConfig,
+                    issue_id: str,
+                    session: SessionArg = None) -> dict[str, Any]:
+    data = await graphql_request(config,
+                                 ISSUE_QUERY, {"issueId": issue_id},
+                                 session=session)
     issue: dict[str, Any] = data["issue"]
     return issue
 
 
-async def list_issue_comments(config: LinearConfig,
-                              issue_id: str) -> list[dict[str, Any]]:
-    return await paginate_connection(
-        config,
-        ISSUE_COMMENTS_QUERY,
-        {"issueId": issue_id},
-        ("issue", "comments"),
-    )
+async def list_issue_comments(
+        config: LinearConfig,
+        issue_id: str,
+        session: SessionArg = None) -> list[dict[str, Any]]:
+    return await paginate_connection(config,
+                                     ISSUE_COMMENTS_QUERY,
+                                     {"issueId": issue_id},
+                                     ("issue", "comments"),
+                                     session=session)
 
 
-async def resolve_issue_id(
-    config: LinearConfig,
-    issue_id: str | None = None,
-    issue_key: str | None = None,
-) -> str:
+async def resolve_issue_id(config: LinearConfig,
+                           issue_id: str | None = None,
+                           issue_key: str | None = None,
+                           session: SessionArg = None) -> str:
     if issue_id:
         return issue_id
     if not issue_key:
@@ -219,14 +228,12 @@ async def resolve_issue_id(
     team_key, _, number_str = issue_key.partition("-")
     if not team_key or not number_str.isdigit():
         raise ValueError(f"invalid issue key: {issue_key}")
-    data = await graphql_request(
-        config,
-        ISSUE_LOOKUP_QUERY,
-        {
-            "teamKey": team_key,
-            "number": float(number_str),
-        },
-    )
+    data = await graphql_request(config,
+                                 ISSUE_LOOKUP_QUERY, {
+                                     "teamKey": team_key,
+                                     "number": float(number_str),
+                                 },
+                                 session=session)
     nodes: list[dict[str, Any]] = data["issues"]["nodes"]
     if not nodes:
         raise FileNotFoundError(issue_key)
@@ -234,17 +241,17 @@ async def resolve_issue_id(
     return found
 
 
-async def resolve_user_id(
-    config: LinearConfig,
-    assignee_id: str | None = None,
-    assignee_email: str | None = None,
-) -> str:
+async def resolve_user_id(config: LinearConfig,
+                          assignee_id: str | None = None,
+                          assignee_email: str | None = None,
+                          session: SessionArg = None) -> str:
     if assignee_id:
         return assignee_id
     if not assignee_email:
         raise ValueError("assignee id or assignee email is required")
-    data = await graphql_request(config, USER_LOOKUP_QUERY,
-                                 {"email": assignee_email})
+    data = await graphql_request(config,
+                                 USER_LOOKUP_QUERY, {"email": assignee_email},
+                                 session=session)
     nodes: list[dict[str, Any]] = data["users"]["nodes"]
     if not nodes:
         raise FileNotFoundError(assignee_email)
@@ -252,37 +259,34 @@ async def resolve_user_id(
     return found
 
 
-async def issue_create(
-    config: LinearConfig,
-    *,
-    team_id: str,
-    title: str,
-    description: str | None,
-) -> dict[str, Any]:
+async def issue_create(config: LinearConfig,
+                       *,
+                       team_id: str,
+                       title: str,
+                       description: str | None,
+                       session: SessionArg = None) -> dict[str, Any]:
     input_payload: dict[str, JsonValue] = {"title": title, "teamId": team_id}
     if description:
         input_payload["description"] = description
-    data = await graphql_request(
-        config,
-        ISSUE_CREATE_MUTATION,
-        {"input": input_payload},
-    )
+    data = await graphql_request(config,
+                                 ISSUE_CREATE_MUTATION,
+                                 {"input": input_payload},
+                                 session=session)
     issue = data["issueCreate"]["issue"]
-    return await get_issue(config, issue["id"])
+    return await get_issue(config, issue["id"], session=session)
 
 
-async def issue_update(
-    config: LinearConfig,
-    *,
-    issue_id: str,
-    title: str | None,
-    description: str | None,
-    state_id: str | None = None,
-    assignee_id: str | None = None,
-    priority: int | None = None,
-    project_id: str | None = None,
-    label_ids: list[str] | None = None,
-) -> dict[str, Any]:
+async def issue_update(config: LinearConfig,
+                       *,
+                       issue_id: str,
+                       title: str | None,
+                       description: str | None,
+                       state_id: str | None = None,
+                       assignee_id: str | None = None,
+                       priority: int | None = None,
+                       project_id: str | None = None,
+                       label_ids: list[str] | None = None,
+                       session: SessionArg = None) -> dict[str, Any]:
     payload: dict[str, JsonValue] = {}
     if title is not None:
         payload["title"] = title
@@ -300,76 +304,66 @@ async def issue_update(
         payload["labelIds"] = list(label_ids)
     if not payload:
         raise ValueError("no updates provided")
-    await graphql_request(
-        config,
-        ISSUE_UPDATE_MUTATION,
-        {
-            "id": issue_id,
-            "input": payload,
-        },
-    )
-    return await get_issue(config, issue_id)
+    await graphql_request(config,
+                          ISSUE_UPDATE_MUTATION, {
+                              "id": issue_id,
+                              "input": payload,
+                          },
+                          session=session)
+    return await get_issue(config, issue_id, session=session)
 
 
-async def comment_create(
-    config: LinearConfig,
-    *,
-    issue_id: str,
-    body: str,
-) -> dict[str, Any]:
-    await graphql_request(
-        config,
-        COMMENT_CREATE_MUTATION,
-        {"input": {
-            "issueId": issue_id,
-            "body": body
-        }},
-    )
-    comments = await list_issue_comments(config, issue_id)
+async def comment_create(config: LinearConfig,
+                         *,
+                         issue_id: str,
+                         body: str,
+                         session: SessionArg = None) -> dict[str, Any]:
+    await graphql_request(config,
+                          COMMENT_CREATE_MUTATION,
+                          {"input": {
+                              "issueId": issue_id,
+                              "body": body
+                          }},
+                          session=session)
+    comments = await list_issue_comments(config, issue_id, session=session)
     if not comments:
         raise RuntimeError("comment was created but no comments were returned")
     return comments[-1]
 
 
-async def comment_update(
-    config: LinearConfig,
-    *,
-    comment_id: str,
-    body: str,
-) -> dict[str, Any]:
-    data = await graphql_request(
-        config,
-        COMMENT_UPDATE_MUTATION,
-        {
-            "id": comment_id,
-            "input": {
-                "body": body
-            }
-        },
-    )
+async def comment_update(config: LinearConfig,
+                         *,
+                         comment_id: str,
+                         body: str,
+                         session: SessionArg = None) -> dict[str, Any]:
+    data = await graphql_request(config,
+                                 COMMENT_UPDATE_MUTATION, {
+                                     "id": comment_id,
+                                     "input": {
+                                         "body": body
+                                     }
+                                 },
+                                 session=session)
     comment: dict[str, Any] = data["commentUpdate"]["comment"]
     issue = comment.get("issue") or {}
     issue_id = issue.get("id")
     if issue_id:
-        comments = await list_issue_comments(config, issue_id)
+        comments = await list_issue_comments(config, issue_id, session=session)
         for item in comments:
             if item.get("id") == comment_id:
                 return item
     return comment
 
 
-async def search_issues(
-    config: LinearConfig,
-    query: str,
-    limit: int = 50,
-) -> list[dict[str, Any]]:
-    data = await graphql_request(
-        config,
-        ISSUE_SEARCH_QUERY,
-        {
-            "term": query,
-            "first": limit
-        },
-    )
+async def search_issues(config: LinearConfig,
+                        query: str,
+                        limit: int = 50,
+                        session: SessionArg = None) -> list[dict[str, Any]]:
+    data = await graphql_request(config,
+                                 ISSUE_SEARCH_QUERY, {
+                                     "term": query,
+                                     "first": limit
+                                 },
+                                 session=session)
     nodes: list[dict[str, Any]] = data.get("searchIssues", {}).get("nodes", [])
     return nodes

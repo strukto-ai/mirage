@@ -31,7 +31,7 @@ async def dify_request(
                                     params=params,
                                     json_body=json_body,
                                     retry=_policy(accessor.config),
-                                    session=accessor.get_session())
+                                    session=accessor.pool)
     if not isinstance(payload, dict):
         raise ValueError("Dify response must be a JSON object")
     return payload

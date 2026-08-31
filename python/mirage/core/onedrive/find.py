@@ -65,4 +65,5 @@ async def find(
                             path_pattern=path_pattern,
                             mindepth=mindepth,
                             empty=empty,
-                            tree=tree)
+                            tree=tree,
+                            session=accessor.pool)

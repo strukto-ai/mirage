@@ -16,7 +16,6 @@ import asyncio
 import base64
 import functools
 import gzip
-import imaplib
 import importlib.util
 import inspect
 import json
@@ -28,7 +27,6 @@ import uuid
 from collections.abc import Awaitable, Callable
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -120,21 +118,22 @@ from mirage.types import ConsistencyPolicy
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
-EMAIL_API_PORT = int(os.environ.get("EMAIL_API_PORT", "8080"))
 EMAIL_USERNAME = "integ@example.com"
 # The repository the `gh` install defaults to, standing in for the current
 # git remote real gh reads. Seeded by the fake alongside the mounted one.
 GH_CLI_REPO = "integ/repo-cli"
-EMAIL_PASSWORD = "secret"
-# Two more GreenMail accounts, provisioned through the REST API after
-# every reset (the reset restores the startup user list). The mount
-# keeps the primary account; the renamed CLI installs h1 and h2 hold
-# these two, so the mount and the CLIs never share an account.
+# Two more accounts. The mount keeps the primary; the renamed CLI installs h1
+# and h2 hold these two, so the mount and the CLIs never share an account and a
+# line's behavior proves which config it ran under.
 EMAIL_USERNAME_ALPHA = "alpha@example.com"
-EMAIL_PASSWORD_ALPHA = "secret1"
 EMAIL_USERNAME_BETA = "beta@example.com"
-EMAIL_PASSWORD_BETA = "secret2"
-EMAIL_SENT_FOLDER = "Sent"
+# The tenants the fake seeds, which are the local parts of the three addresses
+# above. One served domain, so the local part is the whole identity.
+EMAIL_ACCOUNTS = ("integ", "alpha", "beta")
+# The directory the shared mail manifest lives in, and the one the fake expands
+# from. A target names `email/v1`; the fake takes fixture NAMES, never paths,
+# so the prefix is checked off here rather than passed through.
+EMAIL_MANIFEST_DIR = "email"
 # Doubles as the workspace id on the fake notion server.
 NOTION_TOKEN = "integ-test"
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
@@ -548,13 +547,19 @@ class GwsService:
         reset_body: dict = {"epoch": epoch} if epoch else {}
         # Secondary calendars and seeded form responses are declared to
         # /reset rather than inserted: a calendar's accessRole and a form
-        # response are both states no API call can produce.
+        # response are both states no API call can produce. They ride
+        # `extras`, which is the kit's channel for exactly this and is what
+        # the gws fake reads now that it seeds through the kit; the base
+        # world (system labels, the primary calendar) is fixture rows.
+        extras: dict = {}
         calendar = cls._manifest(target.get("calendar"))
         if calendar and calendar.get("calendars"):
-            reset_body["calendars"] = calendar["calendars"]
+            extras["calendars"] = calendar["calendars"]
         forms = cls._manifest(target.get("forms"))
         if forms:
-            reset_body["forms"] = forms
+            extras["forms"] = forms
+        if extras:
+            reset_body["extras"] = extras
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{url}/reset", json=reset_body) as resp:
                 resp.raise_for_status()
@@ -749,74 +754,53 @@ class GwsService:
 
 
 class EmailService:
-    """Points the email mount at a GreenMail IMAP+SMTP server.
+    """Points the email mount and the himalaya installs at the mail fake.
 
-    The server is external (a greenmail/standalone container) and shared
-    across runs; its REST API /api/service/reset purges every mailbox.
-    Seeding appends RFC822 payloads over IMAP so folder UIDs are the append
-    order (1, 2, ...) and date dirs come from the manifest Date headers.
+    The server is external (integ/server/mail/) and shared across runs. It is
+    not GreenMail: the IMAP PASSWORD is the run, so two runs log in at the same
+    address with the same username and see different mail. GreenMail cannot do
+    that at all, since one account is one mailbox for every caller of the
+    process, which is why a run had to purge the whole server between targets
+    and why two hosts could never share one.
+
+    Seeding is server-side. The fake reads the same shared manifest this
+    adapter used to walk, so there is no IMAP APPEND loop here and no account
+    provisioning: one POST states the accounts and the scenario.
     """
 
-    def __init__(self, host: str) -> None:
+    def __init__(self, host: str, password: str) -> None:
         self.host = host
+        # The run id, which every account authenticates with. Harness-side on
+        # both arms and in no task file, exactly as the mount password was.
+        self.password = password
+
+    @classmethod
+    def _manifest_name(cls, mail: str) -> str:
+        """The fixture name inside the fake's manifest directory.
+
+        Args:
+            mail (str): the target's `mail` key, e.g. ``email/v1``.
+
+        Raises:
+            ValueError: the key names a directory the fake does not read.
+        """
+        prefix = f"{EMAIL_MANIFEST_DIR}/"
+        if not mail.startswith(prefix):
+            raise ValueError(
+                f"email target mail={mail!r} must live under {prefix}")
+        return mail[len(prefix):]
 
     @classmethod
     async def create(cls, run_id: str, target: dict) -> "EmailService":
-        host = os.environ["EMAIL_HOST"]
-        api = f"http://{host}:{EMAIL_API_PORT}/api/service/reset"
-        users = f"http://{host}:{EMAIL_API_PORT}/api/user"
-        extras = ((EMAIL_USERNAME_ALPHA, EMAIL_PASSWORD_ALPHA),
-                  (EMAIL_USERNAME_BETA, EMAIL_PASSWORD_BETA))
-        async with aiohttp.ClientSession() as session:
-            async with session.post(api) as resp:
-                resp.raise_for_status()
-            # The reset restores the startup user list, dropping any
-            # API-provisioned account, so the CLI accounts are created
-            # after every reset rather than once.
-            for user, password in extras:
-                async with session.post(users,
-                                        json={
-                                            "email": user,
-                                            "login": user,
-                                            "password": password,
-                                        }) as resp:
-                    resp.raise_for_status()
+        url = f'{os.environ["MAIL_URL"].rstrip("/")}/_run/{run_id}'
+        body: dict = {"tenants": list(EMAIL_ACCOUNTS)}
         mail = target.get("mail")
         if mail:
-            manifest = Path(
-                __file__).resolve().parents[2] / "fixtures" / f"{mail}.json"
-            entries = json.loads(manifest.read_text())
-            for user, password in ((EMAIL_USERNAME, EMAIL_PASSWORD), *extras):
-                rows = [
-                    e for e in entries
-                    if e.get("account", EMAIL_USERNAME) == user
-                ]
-                cls._seed_imap(host, user, password, rows)
-        return cls(host)
-
-    @staticmethod
-    def _seed_imap(host: str, user: str, password: str,
-                   entries: list[dict]) -> None:
-        # Sync imaplib is fine here: this is test scaffolding running
-        # before the workspace opens, not backend code.
-        imap = imaplib.IMAP4(host, EMAIL_IMAP_PORT)
-        imap.login(user, password)
-        # GreenMail hands a new account nothing but an INBOX, where every
-        # real provider ships a sent mailbox already made. himalaya files
-        # a copy of each sent message into one, so create it here rather
-        # than leave the copy with nowhere to land.
-        imap.create(EMAIL_SENT_FOLDER)
-        known = {"INBOX", EMAIL_SENT_FOLDER}
-        for entry in entries:
-            folder = entry["folder"]
-            if folder not in known:
-                imap.create(folder)
-                known.add(folder)
-            flags = "(\\Seen)" if entry.get("seen") else None
-            date = imaplib.Time2Internaldate(
-                parsedate_to_datetime(entry["date"]))
-            imap.append(folder, flags, date, manifest_mime(entry).as_bytes())
-        imap.logout()
+            body["extras"] = {"manifest": cls._manifest_name(str(mail))}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{url}/reset", json=body) as resp:
+                resp.raise_for_status()
+        return cls(os.environ["EMAIL_HOST"], run_id)
 
     def resource(self, mount: dict) -> EmailResource:
         return EmailResource(
@@ -825,7 +809,7 @@ class EmailService:
                         smtp_host=self.host,
                         smtp_port=EMAIL_SMTP_PORT,
                         username=EMAIL_USERNAME,
-                        password=EMAIL_PASSWORD,
+                        password=self.password,
                         use_ssl=False))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
@@ -838,15 +822,11 @@ class EmailService:
             "smtp_host": self.host,
             "smtp_port": EMAIL_SMTP_PORT,
             "username": EMAIL_USERNAME,
-            "password": EMAIL_PASSWORD,
+            "password": self.password,
             "use_ssl": False,
         }
-        alpha = dict(integ,
-                     username=EMAIL_USERNAME_ALPHA,
-                     password=EMAIL_PASSWORD_ALPHA)
-        beta = dict(integ,
-                    username=EMAIL_USERNAME_BETA,
-                    password=EMAIL_PASSWORD_BETA)
+        alpha = dict(integ, username=EMAIL_USERNAME_ALPHA)
+        beta = dict(integ, username=EMAIL_USERNAME_BETA)
         return {
             "himalaya": (cli_spec_for("himalaya"), integ),
             "h1": (cli_spec_for("himalaya"), alpha),

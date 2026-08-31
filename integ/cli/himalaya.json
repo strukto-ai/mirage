@@ -360,7 +360,7 @@
       "command": "himalaya envelope search date 2026-01-05 | jq -r '.[].subject'",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "Standup notes\nQ2 Budget Review\n",
         "stderr": ""
       }
     },

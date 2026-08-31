@@ -28,7 +28,7 @@ from mirage.core.notion.scope import detect_scope
 
 async def _list_pages_root(accessor: NotionAccessor,
                            match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
-    pages = await search_pages(accessor.config)
+    pages = await search_pages(accessor.config, session=accessor.pool)
     top_level = [
         p for p in pages if p.get("parent", {}).get("type") == "workspace"
     ]
@@ -54,13 +54,16 @@ async def _list_databases_root(
     # retrieve, because only the database object carries the title and
     # url this directory is named and rendered from.
     seen: list[str] = []
-    for data_source in await search_data_sources(accessor.config):
+    for data_source in await search_data_sources(accessor.config,
+                                                 session=accessor.pool):
         owner = data_source.get("parent", {}).get("database_id", "")
         if owner and owner not in seen:
             seen.append(owner)
     entries = []
     for database_id in seen:
-        database = await get_database(accessor.config, database_id)
+        database = await get_database(accessor.config,
+                                      database_id,
+                                      session=accessor.pool)
         dirname = database_dirname(database)
         entries.append((dirname,
                         IndexEntry(
@@ -76,7 +79,9 @@ async def _list_databases_root(
 async def _list_page(accessor: NotionAccessor,
                      match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
     page_id = match.slots["page_id"]
-    blocks = await list_block_children(accessor.config, page_id)
+    blocks = await list_block_children(accessor.config,
+                                       page_id,
+                                       session=accessor.pool)
     child_pages = [b for b in blocks if b.get("type") == "child_page"]
 
     # page.json renders from get_page plus the *recursive* block tree
@@ -110,7 +115,9 @@ async def _list_page(accessor: NotionAccessor,
 async def _list_database(accessor: NotionAccessor,
                          match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
     database_id = match.slots["database_id"]
-    database = await get_database(accessor.config, database_id)
+    database = await get_database(accessor.config,
+                                  database_id,
+                                  session=accessor.pool)
     # database.json renders the database object this listing already
     # fetched, so its exact size is free here.
     entries = [("database.json",
@@ -137,8 +144,12 @@ async def _list_database(accessor: NotionAccessor,
 async def _list_data_source(accessor: NotionAccessor,
                             match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
     data_source_id = match.slots["data_source_id"]
-    data_source = await get_data_source(accessor.config, data_source_id)
-    rows = await query_data_source(accessor.config, data_source_id)
+    data_source = await get_data_source(accessor.config,
+                                        data_source_id,
+                                        session=accessor.pool)
+    rows = await query_data_source(accessor.config,
+                                   data_source_id,
+                                   session=accessor.pool)
     entries = [
         ("data_source.json",
          IndexEntry(

@@ -65,7 +65,9 @@ async def _run_board_list(accessor: TrelloAccessor, texts: list[str],
 
 async def _run_board_show(accessor: TrelloAccessor, texts: list[str],
                           fl: FlagView) -> bytes:
-    board = await get_board(accessor.config, _first(texts, "board id"))
+    board = await get_board(accessor.config,
+                            _first(texts, "board id"),
+                            session=accessor.pool)
     return to_json_bytes(normalize_board(board))
 
 
@@ -99,7 +101,9 @@ async def _run_card_list(accessor: TrelloAccessor, texts: list[str],
 
 async def _run_card_show(accessor: TrelloAccessor, texts: list[str],
                          fl: FlagView) -> bytes:
-    card = await get_card(accessor.config, _first(texts, "card id"))
+    card = await get_card(accessor.config,
+                          _first(texts, "card id"),
+                          session=accessor.pool)
     return to_json_bytes(normalize_card(card))
 
 

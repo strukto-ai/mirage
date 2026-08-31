@@ -15,16 +15,17 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.core.api.client import SessionArg
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.config import SlackConfig
 
 
 async def cursor_pages(
-    config: SlackConfig,
-    endpoint: str,
-    base_params: dict[str, Any],
-    items_key: str,
-) -> AsyncIterator[list[dict[str, Any]]]:
+        config: SlackConfig,
+        endpoint: str,
+        base_params: dict[str, Any],
+        items_key: str,
+        session: SessionArg = None) -> AsyncIterator[list[dict[str, Any]]]:
     """Walk a cursor-paginated Slack endpoint, one page per round-trip.
 
     Args:
@@ -33,6 +34,7 @@ async def cursor_pages(
         base_params (dict): per-request params; "cursor" is set here.
         items_key (str): top-level response key holding the page list
             (e.g. "channels", "members", "messages").
+        session (SessionArg): pool or live session to ride.
     Yields:
         list[dict]: items in each page. Generator returns when Slack
         signals last page (empty next_cursor).
@@ -42,7 +44,10 @@ async def cursor_pages(
         params = dict(base_params)
         if cursor:
             params["cursor"] = cursor
-        data = await slack_get(config, endpoint, params=params)
+        data = await slack_get(config,
+                               endpoint,
+                               params=params,
+                               session=session)
         yield data.get(items_key, []) or []
         cursor = data.get("response_metadata", {}).get("next_cursor") or None
         if cursor is None:

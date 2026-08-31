@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.core.slack.config import SlackConfig
 
 
-class SlackAccessor(Accessor):
+class SlackAccessor(SessionAccessor):
 
     def __init__(self, config: SlackConfig) -> None:
+        super().__init__()
         self.config = config

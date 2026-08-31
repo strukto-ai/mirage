@@ -14,9 +14,10 @@ async def unlink(accessor: SharePointAccessor, path: PathSpec) -> None:
     if resolved.drive_id is None or resolved.item_path is None:
         raise enoent(virtual)
     try:
-        await graph_delete(
-            accessor.config,
-            item_url(accessor.config, resolved.drive_id, resolved.item_path))
+        await graph_delete(accessor.config,
+                           item_url(accessor.config, resolved.drive_id,
+                                    resolved.item_path),
+                           session=accessor.pool)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)

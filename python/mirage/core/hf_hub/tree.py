@@ -196,7 +196,10 @@ async def walk_pages(
     """
     for _ in range(limit):
         try:
-            response = await hub_get_response(accessor.token, url, params)
+            response = await hub_get_response(accessor.token,
+                                              url,
+                                              params,
+                                              session=accessor.pool)
         except HfHubError as exc:
             if exc.status in _ABSENT_STATUSES:
                 log.debug("hf tree %s answered %s: %s", url, exc.status, exc)

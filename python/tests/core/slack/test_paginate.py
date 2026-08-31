@@ -39,7 +39,7 @@ async def test_cursor_pages_walks_until_empty_cursor():
     ]
     calls = []
 
-    async def fake_get(_cfg, _method, params=None, token=None):
+    async def fake_get(_cfg, _method, params=None, token=None, session=None):
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 
@@ -83,7 +83,7 @@ async def test_cursor_pages_propagates_cancellation():
     ]
     calls = []
 
-    async def fake_get(_cfg, _method, params=None, token=None):
+    async def fake_get(_cfg, _method, params=None, token=None, session=None):
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]
 

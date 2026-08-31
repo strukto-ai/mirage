@@ -32,7 +32,8 @@ async def stat(accessor: OneDriveAccessor,
         # instead of synthesizing a bare directory stat.
         try:
             item = await graph_get(accessor.config,
-                                   drive_loc(accessor.config, "").item())
+                                   drive_loc(accessor.config, "").item(),
+                                   session=accessor.pool)
         except GraphError as exc:
             if exc.status == 404:
                 raise enoent(virtual)
@@ -48,6 +49,9 @@ async def stat(accessor: OneDriveAccessor,
                             "child_count": folder_child_count(item),
                         })
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
-    return await stat_item(accessor.config, drive_loc(accessor.config,
-                                                      stripped), virtual,
-                           virtual_key, index)
+    return await stat_item(accessor.config,
+                           drive_loc(accessor.config, stripped),
+                           virtual,
+                           virtual_key,
+                           index,
+                           session=accessor.pool)

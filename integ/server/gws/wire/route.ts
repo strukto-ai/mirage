@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Prisma } from '../../../generated/gws/index.js'
 import { RouteError } from '../../kit/typescript/index.ts'
-import type { KitHandler, KitRoute } from '../../kit/typescript/index.ts'
+import type { Ctx, Dmmf, KitHandler, KitRoute, Reply } from '../../kit/typescript/index.ts'
+import type { C } from '../store/client.ts'
+import { loadState } from '../store/load.ts'
+import { saveState } from '../store/save.ts'
+import type { GwsState } from '../store/state.ts'
 
 // gws's own path compiler, because the kit's differs from the regexes this
 // fake is a port of in two ways that are both observable.
@@ -41,15 +46,55 @@ const CLASSES: Record<ParamClass, string> = {
 const PARAM_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g
 const ESCAPE_RE = /[.*+?^${}()|[\]\\]/g
 
+const DMMF = Prisma.dmmf as unknown as Dmmf
+
 export interface RouteOpts {
   write?: boolean
   classes?: Record<string, ParamClass>
 }
 
-export function route<C>(
+// The store boundary, and the only place it exists. A handler is written
+// against GwsState -- the whole tenant world in the shapes the renderers read
+// -- and this is what turns one into a Prisma request: load before, call, and
+// on a write route flush after. Wrapping in `route()` rather than in each
+// handler is what keeps the port from touching 38 call sites, and it means a
+// route CANNOT forget the flush, because declaring `write: true` is the same
+// act as asking for one.
+//
+// A read is not flushed, so a handler on a read route must not mutate. That is
+// true of every route today, and the two things a read could plausibly advance
+// without looking like a mutation -- the clock and the mint counters, which a
+// handler touches by calling `now()` or `nextId()` -- are checked below rather
+// than trusted. Losing one silently is exactly the failure this whole port is
+// meant to remove: the request that advanced the counter still answers with
+// the new id, and only the NEXT request finds it handed out twice.
+function stateful(handler: KitHandler<GwsState>, write: boolean): KitHandler<C> {
+  return async (ctx: Ctx<C>): Promise<Reply> => {
+    const st = await loadState(ctx.db, ctx.tenant)
+    const before = write ? 0 : fingerprint(st)
+    const reply = await handler({ ...ctx, db: st })
+    if (write) {
+      await saveState(ctx.db, DMMF, ctx.tenant, st)
+    } else if (fingerprint(st) !== before) {
+      process.stderr.write(
+        `gws fake: read route advanced the clock or a mint counter and the ` +
+          `advance was dropped; mark it write: true\n`,
+      )
+    }
+    return reply
+  }
+}
+
+function fingerprint(st: GwsState): number {
+  let sum = st.ticks
+  for (const n of st.counters.values()) sum += n
+  return sum
+}
+
+export function route(
   method: string,
   path: string,
-  handler: KitHandler<C>,
+  handler: KitHandler<GwsState>,
   opts: RouteOpts = {},
 ): KitRoute<C> {
   if (!path.startsWith('/')) throw new RouteError(`route path must start with /: ${path}`)
@@ -59,12 +104,13 @@ export function route<C>(
     params.push(name)
     return CLASSES[classes[name] ?? 'seg']
   })
+  const write = opts.write === true
   return {
     method: method.toUpperCase(),
     path,
     pattern: new RegExp(`^${body}$`),
     params,
-    handler,
-    write: opts.write === true,
+    handler: stateful(handler, write),
+    write,
   }
 }

@@ -15,7 +15,7 @@
 import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
-import { blobSha, treeSha } from './wire.ts'
+import { INVALID_PERSON, blobSha, bodyPerson, commitPeople, personJson, treeSha } from './wire.ts'
 import { addBranch, branchFor, branchNames, commitList, treeOfBranch } from './store.ts'
 import type { RepoRow, Tree } from './store.ts'
 import { authedRoute, everywhere, fail, jsonBodyOf, param, route, str, withRepo } from './http.ts'
@@ -125,6 +125,10 @@ const createCommit = withRepo(async (ctx, repo) => {
     if (was === undefined || !was.equals(d)) touched.add(p)
   }
   const message = str(body, 'message') === '' ? 'Update' : str(body, 'message')
+  const author = bodyPerson(body, 'author')
+  if (author === INVALID_PERSON) return fail(422, 'Invalid request.\n\n"author" is invalid.')
+  const committer = bodyPerson(body, 'committer')
+  if (committer === INVALID_PERSON) return fail(422, 'Invalid request.\n\n"committer" is invalid.')
   const commit = await recordCommit(
     ctx.db,
     ctx.tenant,
@@ -133,8 +137,16 @@ const createCommit = withRepo(async (ctx, repo) => {
     [...touched].sort(),
     repo.defaultBranch,
     tree,
+    { author, committer },
   )
-  return { status: 201, body: { sha: commit.sha, message, tree: { sha: tree } } }
+  const people = commitPeople({
+    authorJson: personJson(author),
+    committerJson: personJson(committer),
+  })
+  return {
+    status: 201,
+    body: { sha: commit.sha, message, tree: { sha: tree }, ...(people ?? {}) },
+  }
 })
 
 // A branch starts as a copy of whatever the base sha resolves to, which is what
@@ -216,6 +228,7 @@ const gitCommit = withRepo(async (ctx, repo) => {
       sha,
       message: row.message,
       tree: { sha: row.treeSha === '' ? treeSha('') : row.treeSha },
+      ...(commitPeople(row) ?? {}),
     },
   }
 })

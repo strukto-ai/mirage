@@ -27,10 +27,11 @@ async def send(
         inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    result = await send_message(TokenManager(inv.config),
-                                fl.as_str("to") or "",
-                                fl.as_str("subject") or "",
-                                fl.as_str("body") or "")
+    async with TokenManager(inv.config) as tm:
+        result = await send_message(tm,
+                                    fl.as_str("to") or "",
+                                    fl.as_str("subject") or "",
+                                    fl.as_str("body") or "")
     out = json.dumps(result, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

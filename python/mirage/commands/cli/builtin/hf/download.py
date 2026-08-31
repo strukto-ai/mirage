@@ -121,7 +121,7 @@ async def write_file(dispatch: DispatchFn, accessor: HfHubAccessor,
     """
     url = resolve_url(accessor.endpoint, accessor.repo_type, accessor.repo_id,
                       accessor.revision, repo_path)
-    data = await hub_bytes(accessor.token, url)
+    data = await hub_bytes(accessor.token, url, session=accessor.pool)
     target = posixpath.join(local_dir, repo_path)
     await ensure_dir(dispatch, posixpath.dirname(target))
     await dispatch("write", PathSpec.from_str_path(target), data=data)
@@ -204,7 +204,7 @@ async def cache_file(dispatch: DispatchFn, accessor: HfHubAccessor,
     if force or not await path_exists(dispatch, blob):
         url = resolve_url(accessor.endpoint, accessor.repo_type,
                           accessor.repo_id, accessor.revision, entry.path)
-        data = await hub_bytes(accessor.token, url)
+        data = await hub_bytes(accessor.token, url, session=accessor.pool)
         await ensure_dir(dispatch, posixpath.dirname(blob))
         await dispatch("write", PathSpec.from_str_path(blob), data=data)
     link = snapshot_path(cache_dir, folder, sha, entry.path)
@@ -358,25 +358,26 @@ async def download_cmd(
         refuse_variadic(names, "--include", include)
     if exclude:
         refuse_variadic(names, "--exclude", exclude)
-    accessor = hub_for(inv, repo_id, repo_type_of(fl), fl.as_str("revision"))
-    tree = await fetch_tree(accessor)
-    paths = selected(tree, names, include, exclude)
-    if not paths:
-        await refuse_absent(accessor, names)
-    workers = fl.as_int("max_workers") or MAX_DOWNLOAD_WORKERS
-    if local_dir:
-        # A named local directory downloads straight into it, with no
-        # cache in between; that is what upstream does too, which is why
-        # --force-download only means anything in cache mode.
-        base = local_dir.rstrip("/")
-        written = await fetch_all(inv.doors.dispatch, accessor, paths, base,
-                                  workers)
-    else:
-        base, written = await fetch_into_cache(
-            inv.doors.dispatch, accessor, tree, paths, (cache_dir
-                                                        or "").rstrip("/"),
-            bool(fl.as_bool("force_download")), workers)
-    if fl.as_bool("quiet"):
-        return text_out(f"{base}\n", mutated=True)
-    body = "".join(f"{path}\n" for path in written)
-    return text_out(f"{body}{base}\n", mutated=True)
+    async with hub_for(inv, repo_id, repo_type_of(fl),
+                       fl.as_str("revision")) as accessor:
+        tree = await fetch_tree(accessor)
+        paths = selected(tree, names, include, exclude)
+        if not paths:
+            await refuse_absent(accessor, names)
+        workers = fl.as_int("max_workers") or MAX_DOWNLOAD_WORKERS
+        if local_dir:
+            # A named local directory downloads straight into it, with no
+            # cache in between; that is what upstream does too, which is why
+            # --force-download only means anything in cache mode.
+            base = local_dir.rstrip("/")
+            written = await fetch_all(inv.doors.dispatch, accessor, paths,
+                                      base, workers)
+        else:
+            base, written = await fetch_into_cache(
+                inv.doors.dispatch, accessor, tree, paths, (cache_dir
+                                                            or "").rstrip("/"),
+                bool(fl.as_bool("force_download")), workers)
+        if fl.as_bool("quiet"):
+            return text_out(f"{base}\n", mutated=True)
+        body = "".join(f"{path}\n" for path in written)
+        return text_out(f"{body}{base}\n", mutated=True)

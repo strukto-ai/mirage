@@ -32,7 +32,7 @@ from mirage.core.trello.scope import detect_scope
 async def _list_workspaces_dir(
         accessor: TrelloAccessor,
         match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
-    workspaces = await list_workspaces(accessor.config)
+    workspaces = await list_workspaces(accessor.config, session=accessor.pool)
     if accessor.config.workspace_id:
         workspaces = [
             w for w in workspaces
@@ -85,7 +85,8 @@ async def _list_workspace(accessor: TrelloAccessor, match: ScopeMatch,
 async def _list_boards(accessor: TrelloAccessor, match: ScopeMatch,
                        entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
     boards = await list_workspace_boards(accessor.config,
-                                         match.slots["workspace_id"])
+                                         match.slots["workspace_id"],
+                                         session=accessor.pool)
     if accessor.config.board_ids:
         boards = [
             b for b in boards if b.get("id") in accessor.config.board_ids
@@ -143,7 +144,8 @@ async def _list_board(accessor: TrelloAccessor, match: ScopeMatch,
 async def _list_members(accessor: TrelloAccessor, match: ScopeMatch,
                         entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
     members = await list_board_members(accessor.config,
-                                       match.slots["board_id"])
+                                       match.slots["board_id"],
+                                       session=accessor.pool)
     entries = []
     for member in members:
         filename = member_filename(member)
@@ -162,7 +164,9 @@ async def _list_members(accessor: TrelloAccessor, match: ScopeMatch,
 
 async def _list_labels(accessor: TrelloAccessor, match: ScopeMatch,
                        entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
-    labels = await list_board_labels(accessor.config, match.slots["board_id"])
+    labels = await list_board_labels(accessor.config,
+                                     match.slots["board_id"],
+                                     session=accessor.pool)
     entries = []
     for label in labels:
         filename = label_filename(label)
@@ -181,7 +185,9 @@ async def _list_labels(accessor: TrelloAccessor, match: ScopeMatch,
 
 async def _list_lists(accessor: TrelloAccessor, match: ScopeMatch,
                       entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
-    lists = await list_board_lists(accessor.config, match.slots["board_id"])
+    lists = await list_board_lists(accessor.config,
+                                   match.slots["board_id"],
+                                   session=accessor.pool)
     entries = []
     for lst in lists:
         dirname = list_dirname(lst)
@@ -223,7 +229,9 @@ async def _list_list(accessor: TrelloAccessor, match: ScopeMatch,
 
 async def _list_cards(accessor: TrelloAccessor, match: ScopeMatch,
                       entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
-    cards = await list_list_cards(accessor.config, match.slots["list_id"])
+    cards = await list_list_cards(accessor.config,
+                                  match.slots["list_id"],
+                                  session=accessor.pool)
     entries = []
     for card in cards:
         dirname = card_dirname(card)

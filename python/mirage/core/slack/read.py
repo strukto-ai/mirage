@@ -64,8 +64,10 @@ async def _read_chat(accessor: SlackAccessor, match: ScopeMatch,
         if channel is None:
             raise enoent(path.virtual)
         channel_id = channel.id
-    return await get_history_jsonl(accessor.config, channel_id,
-                                   match.slots["day"])
+    return await get_history_jsonl(accessor.config,
+                                   channel_id,
+                                   match.slots["day"],
+                                   session=accessor.pool)
 
 
 async def _read_user(accessor: SlackAccessor, match: ScopeMatch,
@@ -73,7 +75,9 @@ async def _read_user(accessor: SlackAccessor, match: ScopeMatch,
     entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
-    user = await get_user_profile(accessor.config, entry.id)
+    user = await get_user_profile(accessor.config,
+                                  entry.id,
+                                  session=accessor.pool)
     return user_json_bytes(user)
 
 
@@ -91,14 +95,22 @@ async def _blob_url(accessor: SlackAccessor, path: PathSpec,
 async def _read_blob(accessor: SlackAccessor, match: ScopeMatch,
                      path: PathSpec, index: IndexCacheStore) -> bytes:
     url = await _blob_url(accessor, path, index)
-    return await slack_files.download_file(accessor.config, url, 0, None)
+    return await slack_files.download_file(accessor.config,
+                                           url,
+                                           0,
+                                           None,
+                                           session=accessor.pool)
 
 
 async def _read_blob_range(accessor: SlackAccessor, match: ScopeMatch,
                            path: PathSpec, index: IndexCacheStore, offset: int,
                            size: int | None) -> bytes:
     url = await _blob_url(accessor, path, index)
-    return await slack_files.download_file(accessor.config, url, offset, size)
+    return await slack_files.download_file(accessor.config,
+                                           url,
+                                           offset,
+                                           size,
+                                           session=accessor.pool)
 
 
 read = make_read(

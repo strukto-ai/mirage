@@ -62,3 +62,45 @@ async def test_concurrent_callers_share_one_refresh():
 async def test_the_base_class_demands_a_refresh():
     with pytest.raises(NotImplementedError):
         await TokenManager().get_token()
+
+
+@pytest.mark.asyncio
+async def test_the_session_is_one_pool_reused():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    first = tm.session()
+    assert tm.session() is first
+    await tm.close()
+    assert first.closed
+
+
+@pytest.mark.asyncio
+async def test_a_closed_manager_reopens_on_demand():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    first = tm.session()
+    await tm.close()
+    second = tm.session()
+    assert second is not first
+    assert not second.closed
+    await tm.close()
+
+
+@pytest.mark.asyncio
+async def test_close_before_any_session_is_a_noop():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    await tm.close()
+    await tm.close()
+
+
+@pytest.mark.asyncio
+async def test_the_context_manager_drains_the_pool():
+    async with _FakeManager(expires_in=3600, buffer_seconds=300) as tm:
+        session = tm.session()
+        assert not session.closed
+    assert session.closed
+
+
+@pytest.mark.asyncio
+async def test_the_pool_is_inert_until_a_session_is_asked_for():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    assert tm.pool._session is None
+    await tm.close()

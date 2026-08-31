@@ -17,8 +17,11 @@ import type { ChildProcessByStdio } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
 import type { JsonValue } from '../kit/typescript/types.ts'
+import { loadToolDoc, startHfMcpServer } from './mcp.ts'
 
 // The battery cannot reach any of this, the same way it cannot reach the kit's
 // run and tenant isolation. Listing and search are HTTP surface with no client
@@ -37,6 +40,19 @@ function check(name: string, ok: boolean, detail = ''): void {
   const line = `  ${ok ? 'ok  ' : 'FAIL'} ${String(checks).padStart(2, '0')} ${name}`
   process.stdout.write(detail === '' ? `${line}\n` : `${line}  [${detail}]\n`)
   if (!ok) throw new Error(`hf_hub selftest failed: ${name} ${detail}`)
+}
+
+// JSON with every object's keys sorted, so two documents that differ only in
+// key order compare equal.
+function canonical(v: JsonValue): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
+  if (typeof v === 'object' && v !== null) {
+    return `{${Object.keys(v)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(v[k] as JsonValue)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(v)
 }
 
 function eq(name: string, got: JsonValue, want: JsonValue): void {
@@ -112,6 +128,262 @@ async function repoWithCard(
     ].join('\n'),
   })
   check(`${name} gets its card`, pushed.status === 200, String(pushed.status))
+}
+
+// The MCP arm. It answers the SAME seeded world as the REST arm and it answers
+// it through the same routes, so what is asserted here is the two things that
+// arm adds on top: that `tools/list` REPLAYS the captured document rather than
+// anything this repo authored, and that the markdown a tool answers with is the
+// shape captured from the live server.
+async function mcpChecks(): Promise<void> {
+  const doc = loadToolDoc()
+  check(
+    'the tool document records its source',
+    doc.capturedFrom === 'https://huggingface.co/mcp',
+    doc.capturedFrom,
+  )
+  const mcp = await startHfMcpServer()
+  const client = new Client({ name: 'hf-hub-selftest', version: '0' }, { capabilities: {} })
+  try {
+    // The same cast the notion arm needs: this project sets
+    // exactOptionalPropertyTypes and the SDK's transport declares an optional
+    // `sessionId` the strict Transport type will not accept.
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${String(mcp.port)}/mcp`),
+    )
+    await client.connect(transport as Parameters<typeof client.connect>[0])
+    const listed = await client.listTools()
+    // Verbatim replay is the point: a schema this repo wrote would put a
+    // mirage-shaped tool surface in front of the agent being measured.
+    eq(
+      'tools/list replays the captured document',
+      listed.tools.map((one) => one.name).sort(),
+      doc.tools.map((one) => one.name).sort(),
+    )
+    // Compared field for field rather than byte for byte: the SDK re-emits a
+    // tool through its own zod schema, which reorders the keys (`outputSchema`
+    // moves ahead of `annotations`) without touching a value. Key order is not
+    // part of the contract; every schema being present and unchanged is.
+    eq(
+      'the captured schemas are replayed unchanged',
+      canonical(listed.tools as unknown as JsonValue) ===
+        canonical(doc.tools as unknown as JsonValue),
+      true,
+    )
+
+    const text = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      const out = await client.callTool({ name, arguments: args })
+      const content = out.content as { type: string; text?: string }[]
+      return content.map((one) => one.text ?? '').join('')
+    }
+
+    const who = await text('hf_whoami', {})
+    check(
+      'hf_whoami renders the authenticated form',
+      who.includes('Authenticated as'),
+      who.slice(0, 60),
+    )
+
+    const search = await text('hub_repo_search', {
+      query: 'card-model',
+      repo_types: ['model'],
+      limit: 5,
+    })
+    check(
+      'search finds the seeded model',
+      search.includes('### integ/card-model'),
+      search.slice(0, 80),
+    )
+    // The block shape is the live server's, down to the pipe-joined facts line
+    // and the abbreviated download count (5000 -> 5.0K).
+    check(
+      'search renders the facts line',
+      search.includes('**Downloads:** 5.0K'),
+      search.slice(0, 400),
+    )
+    check('search renders a hf.co link', search.includes('[https://hf.co/integ/card-model]'), '')
+
+    // A run-scoped endpoint answers THAT run's world. `/_run/scoped/mcp` is a
+    // fresh empty run, so the repo seeded into the default run must not leak
+    // into it; the default-path client above keeps finding it.
+    const scopedClient = new Client(
+      { name: 'hf-hub-selftest-run', version: '0' },
+      { capabilities: {} },
+    )
+    const scopedTransport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${String(mcp.port)}/_run/scoped/mcp`),
+    )
+    await scopedClient.connect(scopedTransport as Parameters<typeof scopedClient.connect>[0])
+    const scopedOut = await scopedClient.callTool({
+      name: 'hub_repo_search',
+      arguments: { query: 'card-model', repo_types: ['model'], limit: 5 },
+    })
+    const scopedText = (scopedOut.content as { type: string; text?: string }[])
+      .map((one) => one.text ?? '')
+      .join('')
+    check(
+      'a run-scoped MCP call answers that run, not the default world',
+      !scopedText.includes('integ/card-model'),
+      scopedText.slice(0, 80),
+    )
+    await scopedClient.close()
+
+    const details = await text('hub_repo_details', { repo_ids: ['integ/card-model'] })
+    check('details name the type', details.startsWith('**Type: Model**'), details.slice(0, 40))
+    check('details lift the card task', details.includes('- **Task:** summarization'), '')
+    check('details render the license', details.includes('- **License:** apache-2.0'), '')
+
+    // The Dataset Viewer operations are refused rather than approximated: the
+    // fake has no parquet behind a dataset, and a plausible preview of rows
+    // nobody uploaded is the one failure that would corrupt a measurement
+    // without ever looking wrong.
+    const preview = await text('hub_repo_details', {
+      repo_ids: ['integ/card-data-a'],
+      operations: ['overview', 'dataset_preview'],
+    })
+    check(
+      'an unservable operation is named',
+      preview.includes('**Unsupported operations:** dataset_preview'),
+      '',
+    )
+
+    const ls = await text('hf_fs', {
+      operations: [{ cmd: 'ls', args: ['hf://models/integ/card-model'] }],
+    })
+    check(
+      'ls renders the captured table header',
+      ls.includes('| Type | Path | URI | Target | Details |'),
+      '',
+    )
+    check('ls lists the seeded files', ls.includes('| file | README.md |'), ls.slice(0, 300))
+
+    const cat = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://models/integ/card-model/config.json'] }],
+    })
+    check('cat reports the byte count', /Bytes: \d+/.test(cat), cat.slice(0, 200))
+
+    const stat = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/README.md'] }],
+    })
+    check('stat reports existence', stat.includes('- Exists: yes'), stat.slice(0, 200))
+    check('stat reports a size', stat.includes('- Size: '), stat.slice(0, 200))
+
+    // Both error codes are the live server's own, captured rather than coined,
+    // because an agent may branch on the bracketed code.
+    const missing = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://models/integ/card-model/nope.txt'] }],
+    })
+    check(
+      'a missing file is HF_FS_NOT_FOUND',
+      missing.includes('[HF_FS_NOT_FOUND]'),
+      missing.slice(0, 120),
+    )
+    const bad = await text('hf_fs', { operations: [{ cmd: 'ls', args: ['/not/a/uri'] }] })
+    check(
+      'a bad URI is HF_FS_INVALID_ARGUMENT',
+      bad.includes('[HF_FS_INVALID_ARGUMENT]'),
+      bad.slice(0, 120),
+    )
+
+    const two = await text('hf_fs', {
+      operations: [
+        { cmd: 'ls', args: ['hf://models/integ/card-model'] },
+        { cmd: 'stat', args: ['hf://models/integ/card-model/README.md'] },
+      ],
+    })
+    check(
+      'a batch is numbered',
+      two.includes('## Operation 1') && two.includes('## Operation 2'),
+      '',
+    )
+    check('a batch is rule-separated', two.includes('\n---\n'), '')
+  } finally {
+    await client.close()
+    await mcp.close()
+  }
+}
+
+// Launchability, which is a separate fact from correctness and was the gap:
+// every check above runs the MCP arm IN PROCESS, and an agent harness cannot do
+// that. toolathlon builds each server from a dict and picks its transport by
+// shape -- `{"url": ...}` becomes MCPServerHttp, anything else MCPServerStdio
+// -- so what it needs from mirage is a process that prints a URL. This spawns
+// `main.ts` exactly as a harness would and drives the announced URL.
+async function launchChecks(): Promise<void> {
+  const child = spawn(
+    join(INTEG, 'node_modules', '.bin', 'tsx'),
+    [join(HERE, 'main.ts'), '--port', '0', '--mcp-port', '0'],
+    { cwd: INTEG, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
+  )
+  let err = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (d: string) => {
+    err += d
+  })
+  const lines = await new Promise<string[]>((ok, bad) => {
+    let out = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (d: string) => {
+      out += d
+      const found = out.split('\n').filter((l) => l !== '')
+      if (found.length >= 2) ok(found)
+    })
+    child.on('exit', (code) => {
+      bad(new Error(`hf_hub exited ${String(code)} before announcing both arms\n${err}`))
+    })
+  })
+  try {
+    check(
+      'the REST arm announces first',
+      (lines[0] ?? '').startsWith('HF_HUB_URL='),
+      lines[0] ?? '',
+    )
+    const mcpLine = lines[1] ?? ''
+    check('the MCP arm announces its own token', mcpLine.startsWith('HF_MCP_URL='), mcpLine)
+    check('and both announce lines are announce-shaped', ANNOUNCE_RE.test(mcpLine), mcpLine)
+    const url = mcpLine.split('=').slice(1).join('=')
+    check('the announced URL carries the vendor path', url.endsWith('/mcp'), url)
+    // A harness pointed at the wrong path must be told, not quietly served.
+    const stray = await fetch(url.replace(/\/mcp$/, '/nope'))
+    check('a path that is not /mcp is 404', stray.status === 404, String(stray.status))
+    const client = new Client({ name: 'hf-hub-launch', version: '0' }, { capabilities: {} })
+    try {
+      const transport = new StreamableHTTPClientTransport(new URL(url))
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      const listed = await client.listTools()
+      eq(
+        'a spawned server serves the same four tools',
+        listed.tools.map((one) => one.name).sort(),
+        ['hf_fs', 'hf_whoami', 'hub_repo_details', 'hub_repo_search'],
+      )
+      // One store behind both arms: a REST read and a tool call in the same run
+      // must see the same rows, which two runtimes would not.
+      // The REST arm reads its tenant off the bearer (the Hub's token IS the
+      // account), while the MCP arm is bound to the default tenant when it is
+      // constructed -- so the bearer here has to name that same tenant for the
+      // two reads to be comparable at all.
+      const rest = (lines[0] ?? '').split('=').slice(1).join('=')
+      const viaRest = (await (
+        await fetch(`${rest}/api/models?search=card`, {
+          headers: { Authorization: 'Bearer default' },
+        })
+      ).json()) as JsonValue[]
+      const called = await client.callTool({
+        name: 'hub_repo_search',
+        arguments: { query: 'card', type: 'model' },
+      })
+      const text = JSON.stringify(called.content)
+      check(
+        'and both arms answer from the same store',
+        Array.isArray(viaRest) && viaRest.length > 0 && text.includes('card-model'),
+        `${String(Array.isArray(viaRest) ? viaRest.length : -1)} rest rows`,
+      )
+    } finally {
+      await client.close()
+    }
+  } finally {
+    child.kill('SIGTERM')
+  }
 }
 
 async function main(): Promise<void> {
@@ -709,6 +981,9 @@ async function main(): Promise<void> {
 
     const unauth = await fetch(`${fake.endpoint}/api/models`)
     check('an unauthenticated listing is refused', unauth.status === 401, String(unauth.status))
+
+    await mcpChecks()
+    await launchChecks()
 
     process.stdout.write(`hf_hub selftest: ${String(checks)} checks passed\n`)
   } finally {

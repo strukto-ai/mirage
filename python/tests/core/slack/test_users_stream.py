@@ -65,7 +65,7 @@ async def test_list_users_stream_walks_pages_and_filters():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         assert method == "users.list"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]

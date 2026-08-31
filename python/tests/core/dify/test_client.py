@@ -36,8 +36,8 @@ class SleepRecorder:
 @pytest.mark.asyncio
 async def test_accessor_reuses_session_and_closes_it():
     dify_accessor = accessor()
-    first = dify_accessor.get_session()
-    second = dify_accessor.get_session()
+    first = dify_accessor.pool.get()
+    second = dify_accessor.pool.get()
 
     assert first is second
     assert first.timeout == aiohttp.ClientTimeout(total=30.0)
@@ -45,7 +45,7 @@ async def test_accessor_reuses_session_and_closes_it():
     await dify_accessor.close()
 
     assert first.closed is True
-    assert dify_accessor._session is None
+    assert dify_accessor.pool._session is None
 
 
 @pytest.mark.asyncio
@@ -58,7 +58,7 @@ async def test_accessor_uses_configured_request_timeout():
             request_timeout=12.5,
         ))
 
-    session = dify_accessor.get_session()
+    session = dify_accessor.pool.get()
 
     assert session.timeout == aiohttp.ClientTimeout(total=12.5)
 

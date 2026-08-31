@@ -33,7 +33,7 @@ async def test_list_emoji_returns_mapping():
                    },
                }) as get:
         emoji = await list_emoji(CONFIG)
-    get.assert_awaited_once_with(CONFIG, "emoji.list")
+    get.assert_awaited_once_with(CONFIG, "emoji.list", session=None)
     assert emoji == {"shipit": "https://emoji/shipit.png"}
 
 

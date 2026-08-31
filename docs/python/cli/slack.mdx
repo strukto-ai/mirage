@@ -4,8 +4,14 @@ description: "Slack Web API client speaking the OpenClaw Slack action vocabulary
 icon: slack
 ---
 
-Slack Web API client speaking the OpenClaw Slack action vocabulary. Install it on the workspace and the whole tree is
-discoverable with `slack --help`.
+Mirage's built-in Slack Web API client follows the Slack action vocabulary
+from the upstream [OpenClaw](https://github.com/openclaw/openclaw) project.
+The Mirage command tree is discoverable with `slack --help`.
+
+**Licenses:** OpenClaw uses the
+[MIT License](https://github.com/openclaw/openclaw/blob/main/LICENSE); Mirage's
+independent Slack implementation uses
+[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
 
 ## Install
 
@@ -25,7 +31,7 @@ install rides the `clis:` section; see the [CLI overview](/python/cli/index).
 
 ## Verbs
 
-The verbs follow the OpenClaw Slack action vocabulary (kebab verbs:
+The verbs follow that OpenClaw Slack action vocabulary (kebab verbs:
 `send-message`, `read-messages`, `pin-message`, `list-pins`,
 `member-info`, `emoji-list`); `search` and `list-members` are mirage
 extensions. Search needs a user token (`search_token`), the rest run on

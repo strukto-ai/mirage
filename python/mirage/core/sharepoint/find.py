@@ -86,7 +86,8 @@ async def _find_namespace(
                 accessor.config,
                 ResolvedPath(level="drive", site_id=site_id,
                              drive_id=drive_id), drive_key)
-            is_empty = (await drive_root_empty(accessor.config, loc)
+            is_empty = (await drive_root_empty(
+                accessor.config, loc, session=accessor.pool)
                         if empty else None)
             _push_namespace_dir(results, "/" + drive_key, drive_name,
                                 offset + 1, is_empty, tree, maxdepth, mindepth,
@@ -110,7 +111,8 @@ async def _find_namespace(
                                             empty=empty,
                                             tree=tree,
                                             depth_offset=offset + 1,
-                                            emit_start=False))
+                                            emit_start=False,
+                                            session=accessor.pool))
     emit_start_path(results,
                     "/" + base if base else "/",
                     start_basename(path),
@@ -196,4 +198,5 @@ async def find(
                             path_pattern=path_pattern,
                             mindepth=mindepth,
                             empty=empty,
-                            tree=tree)
+                            tree=tree,
+                            session=accessor.pool)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { gwsConfig, gwsRoutes } from './fake.ts'
-import { serveGws } from './serve.ts'
+import { serve } from '../kit/typescript/index.ts'
+import { gwsFake } from './fake.ts'
 
-await serveGws({ config: gwsConfig, routes: gwsRoutes })
+await serve(gwsFake)

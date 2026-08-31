@@ -35,11 +35,23 @@ export interface Fake<C extends MinimalClient> {
   // `afterSeed` runs once per seeded tenant, for state a fixture cannot state
   // (a mint counter primed past the fixture's own ids, say).
   seedRoots?: Record<string, string>
+  // `fixtureRoot` is passed rather than imported, because `--fixture-root`
+  // moves it: a fake that expands a `sourceDir` into file rows (github, hf_hub)
+  // has to read the tree under the root this SERVER was launched with, and a
+  // module constant would keep reading the checkout's own.
+  // `epoch` is the reset's own, and it is passed for the same reason
+  // `fixtureRoot` is: a fake whose seed WRITES a timestamp (gws stamps a
+  // createdTime on every row it seeds through the Drive table) has to stamp
+  // the one this reset asked for. It participates in the template key, so two
+  // epochs are two templates rather than one carrying the first caller's
+  // clock.
   afterSeed?: (
     db: C,
     tenant: string,
     counts: Record<string, number>,
     extras: Record<string, JsonValue>,
+    fixtureRoot: string,
+    epoch: string | undefined,
   ) => Promise<void>
   defaultTenants?: string[]
   // How this fake refuses a tenant it was never seeded with, and by being
@@ -117,6 +129,7 @@ export class RunState {
 export interface Runtime<C extends MinimalClient> {
   fake: Fake<C>
   pool: ClientPool<C>
+  fixtureRoot: string
   state: (run: string) => RunState
   reset: (body: JsonValue) => Promise<ResetResponse>
   dispose: () => Promise<void>

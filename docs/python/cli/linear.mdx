@@ -4,8 +4,16 @@ description: "Linear GraphQL API client with the noun/verb grammar of the mount 
 icon: /images/linear-logo.svg
 ---
 
-Linear GraphQL API client with the noun/verb grammar of the mount commands. Install it on the workspace and the whole tree is
-discoverable with `linear --help`.
+Mirage's built-in client for Linear's
+[GraphQL API](https://linear.app/developers/graphql) has a Mirage-native
+noun/verb command grammar partly inspired by
+[schpet/linear-cli](https://github.com/schpet/linear-cli). The Mirage command
+tree is discoverable with `linear --help`.
+
+**Licenses:** `schpet/linear-cli` uses the
+[ISC License](https://github.com/schpet/linear-cli/blob/main/LICENSE); Mirage's
+independent implementation uses
+[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
 
 ## Install
 
@@ -25,10 +33,11 @@ install rides the `clis:` section; see the [CLI overview](/python/cli/index).
 
 ## Verbs
 
-The grammar keeps the noun/verb structure the mount commands spoke
-(`linear issue create`, `linear team list`). Issues are addressed by a
-positional key or ID (`linear issue get ENG-42`); every command emits
-normalized JSON, so output pipes straight into `jq`.
+The shared shape is `linear issue ...` and noun groups such as `team`, `user`,
+`project`, and `document`. Mirage keeps the exact command tree from its former
+mount commands (`linear issue create`, `linear team list`). Issues are
+addressed by a positional key or ID (`linear issue get ENG-42`); every command
+emits normalized JSON, so output pipes straight into `jq`.
 
 ### Reads
 

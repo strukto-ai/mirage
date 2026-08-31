@@ -22,29 +22,24 @@ runs:
       uses: actions/setup-python@v7
       with:
         python-version: "3.12"
-
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
-
     - name: Install Python dependencies
       working-directory: python
       shell: bash
       run: uv sync --all-extras --no-extra camel
-
     - name: Set up pnpm
       uses: pnpm/action-setup@v6
       with:
         version: 10.32.1
-
     - name: Set up Node
       uses: actions/setup-node@v7
       with:
         node-version: '24'
         cache: pnpm
         cache-dependency-path: typescript/pnpm-lock.yaml
-
     - name: Install dependencies
       working-directory: typescript
       shell: bash
@@ -58,32 +53,27 @@ runs:
       working-directory: integ
       shell: bash
       run: pnpm run prisma:clients
-
     - name: Download TypeScript build outputs
       if: ${{ inputs.typescript-build-artifact != '' }}
       uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.typescript-build-artifact }}
         path: typescript/packages
-
     - name: Build mirage-core
       if: ${{ inputs.build-packages == 'true' && inputs.typescript-build-artifact == '' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-core build
-
     - name: Build mirage-node
       if: ${{ inputs.build-packages == 'true' && inputs.typescript-build-artifact == '' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-node build
-
     - name: Build mirage-browser
       if: ${{ inputs.build-packages == 'true' && inputs.typescript-build-artifact == '' }}
       working-directory: typescript
       shell: bash
       run: pnpm --filter @struktoai/mirage-browser build
-
     - name: Start moto S3
       shell: bash
       run: |
@@ -96,7 +86,6 @@ runs:
         echo "S3_REGION=us-east-1" >> "$GITHUB_ENV"
         echo "AWS_ACCESS_KEY_ID=testing" >> "$GITHUB_ENV"
         echo "AWS_SECRET_ACCESS_KEY=testing" >> "$GITHUB_ENV"
-
     - name: Start sftp server
       shell: bash
       run: |
@@ -108,137 +97,6 @@ runs:
         cat /tmp/sshsrv.log
         echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
         echo "SSH_PORT=2222" >> "$GITHUB_ENV"
-
-    - name: Start fake Google Workspace server
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup pnpm exec tsx server/gws/main.ts --port 19999 > /tmp/gws.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "GWS_URL=" /tmp/gws.log && break
-          sleep 1
-        done
-        cat /tmp/gws.log
-        echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
-
-    - name: Start fake Hugging Face hub (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/hf/main.ts --port 5099 > /tmp/hfsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "HF_URL=" /tmp/hfsrv.log && break
-          sleep 1
-        done
-        cat /tmp/hfsrv.log
-        echo "HF_URL=http://127.0.0.1:5099" >> "$GITHUB_ENV"
-
-    # A different Hugging Face product from the one above: hf/ is the Xet
-    # object store, hf_hub/ is the git-backed Hub the repo resources mount.
-    - name: Start fake Hugging Face Hub (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/hf_hub/main.ts --port 5086 > /tmp/hfhubsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "HF_HUB_URL=" /tmp/hfhubsrv.log && break
-          sleep 1
-        done
-        cat /tmp/hfhubsrv.log
-        echo "HF_HUB_URL=http://127.0.0.1:5086" >> "$GITHUB_ENV"
-
-    - name: Wait for GreenMail
-      shell: bash
-      run: |
-        for i in $(seq 1 30); do
-          curl -sf -X POST http://localhost:8080/api/service/reset && break
-          sleep 2
-        done
-
-    - name: Start fake Box API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/box/main.ts --port 5096 > /tmp/boxsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "BOX_URL=" /tmp/boxsrv.log && break
-          sleep 1
-        done
-        cat /tmp/boxsrv.log
-        echo "BOX_URL=http://127.0.0.1:5096" >> "$GITHUB_ENV"
-
-    - name: Start fake GitHub API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/github/main.ts --port 5098 > /tmp/ghsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "GITHUB_URL=" /tmp/ghsrv.log && break
-          sleep 1
-        done
-        cat /tmp/ghsrv.log
-        echo "GITHUB_URL=http://127.0.0.1:5098" >> "$GITHUB_ENV"
-
-    - name: Start fake Slack Web API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/slack/main.ts --port 5097 > /tmp/slacksrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "SLACK_URL=" /tmp/slacksrv.log && break
-          sleep 1
-        done
-        cat /tmp/slacksrv.log
-        echo "SLACK_URL=http://127.0.0.1:5097" >> "$GITHUB_ENV"
-
-    - name: Start fake Dropbox API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/dropbox/main.ts --port 5088 > /tmp/dropboxsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "DROPBOX_URL=" /tmp/dropboxsrv.log && break
-          sleep 1
-        done
-        cat /tmp/dropboxsrv.log
-        echo "DROPBOX_URL=http://127.0.0.1:5088" >> "$GITHUB_ENV"
-
-    - name: Start fake Microsoft Graph API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/onedrive/main.ts --port 5089 > /tmp/onedrivesrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "ONEDRIVE_URL=" /tmp/onedrivesrv.log && break
-          sleep 1
-        done
-        cat /tmp/onedrivesrv.log
-        echo "ONEDRIVE_URL=http://127.0.0.1:5089" >> "$GITHUB_ENV"
-
-    - name: Start fake Trello API (Prisma)
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/trello/main.ts --port 5095 > /tmp/trellosrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "TRELLO_URL=" /tmp/trellosrv.log && break
-          sleep 1
-        done
-        cat /tmp/trellosrv.log
-        echo "TRELLO_URL=http://127.0.0.1:5095" >> "$GITHUB_ENV"
-
-    - name: Start fake Linear API
-      working-directory: integ
-      shell: bash
-      run: |
-        nohup ./node_modules/.bin/tsx server/linear/main.ts --port 5094 > /tmp/linearsrv.log 2>&1 &
-        for i in $(seq 1 30); do
-          grep -q "LINEAR_URL=" /tmp/linearsrv.log && break
-          sleep 1
-        done
-        cat /tmp/linearsrv.log
-        echo "LINEAR_URL=http://127.0.0.1:5094" >> "$GITHUB_ENV"
-
     - name: Start jaeger all-in-one and seed traces over OTLP
       shell: bash
       run: |
@@ -252,3 +110,36 @@ runs:
         ./python/.venv/bin/python integ/server/jaeger_seed.py \
           --host http://localhost:16686 --otlp http://localhost:4318
         echo "JAEGER_URL=http://localhost:16686" >> "$GITHUB_ENV"
+
+    # ONE process hosting every kit fake, each still on its OWN port and on the
+    # SAME port number the eleven separate steps used. Only the process count
+    # changes; ci/fakes.json says why every port stays pinned rather than
+    # becoming ephemeral, which is a trap this suite falls into hard.
+    #
+    # The trade: a crash in any one fake now takes the whole process down,
+    # where eleven processes lost only one. server/launcher has its own
+    # selftest for that reason.
+    - name: Start the kit fakes
+      working-directory: integ
+      shell: bash
+      run: |
+        : > /tmp/fakes.log
+        nohup ./node_modules/.bin/tsx server/launcher/main.ts \
+          --config ci/fakes.json > /tmp/fakes.log 2>&1 &
+        # `grep -c` PRINTS the count and still exits 1 when it is zero, so a
+        # `|| echo 0` fallback appends a second line and the test sees "0\n0".
+        for i in $(seq 1 60); do
+          seen=$(grep -c '_URL=' /tmp/fakes.log || true)
+          [ "${seen:-0}" -ge 14 ] && break
+          sleep 1
+        done
+        cat /tmp/fakes.log
+        # Fail HERE, not twenty minutes later as a connection refused inside a
+        # battery. 14 lines is 11 fakes plus mail's IMAP and SMTP and hf_hub's
+        # MCP arm.
+        seen=$(grep -c '_URL=' /tmp/fakes.log || true)
+        if [ "${seen:-0}" -lt 14 ]; then
+          echo "only ${seen:-0} of 14 endpoints came up"
+          exit 1
+        fi
+        grep -E '^[A-Z0-9_]+_URL=' /tmp/fakes.log >> "$GITHUB_ENV"

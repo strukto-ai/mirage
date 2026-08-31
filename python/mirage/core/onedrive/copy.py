@@ -23,4 +23,7 @@ async def copy(accessor: OneDriveAccessor, src: PathSpec,
     _, src_s = split_path(src)
     _, dst_s = split_path(dst)
     config = accessor.config
-    await copy_tree(config, drive_loc(config, src_s), drive_loc(config, dst_s))
+    await copy_tree(config,
+                    drive_loc(config, src_s),
+                    drive_loc(config, dst_s),
+                    session=accessor.pool)

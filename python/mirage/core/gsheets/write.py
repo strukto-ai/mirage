@@ -48,7 +48,8 @@ async def append_values(
                                              error_of=status_error,
                                              headers=await
                                              google_headers(token_manager),
-                                             json_body={"values": values})
+                                             json_body={"values": values},
+                                             session=token_manager.pool)
     return data
 
 
@@ -80,5 +81,6 @@ async def update_values(
                                              error_of=status_error,
                                              headers=await
                                              google_headers(token_manager),
-                                             json_body={"values": values})
+                                             json_body={"values": values},
+                                             session=token_manager.pool)
     return data

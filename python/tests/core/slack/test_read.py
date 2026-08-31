@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from aioresponses import aioresponses
@@ -121,7 +121,10 @@ async def test_read_jsonl(accessor, index):
         result = await read(accessor, spec(CHAT), index)
 
     assert result == history_bytes
-    mock_hist.assert_called_once_with(accessor.config, "C001", "2023-11-14")
+    mock_hist.assert_called_once_with(accessor.config,
+                                      "C001",
+                                      "2023-11-14",
+                                      session=ANY)
 
 
 async def test_read_file_blob(accessor, index):
@@ -179,8 +182,10 @@ async def test_read_file_blob_pushes_the_window_down(accessor, index):
         data = await read_range(accessor, spec(BLOB), index, offset=5, size=5)
     assert data == b"1.4 f"
     mock_dl.assert_called_once_with(accessor.config,
-                                    "https://files.slack.com/x/report.pdf", 5,
-                                    5)
+                                    "https://files.slack.com/x/report.pdf",
+                                    5,
+                                    5,
+                                    session=ANY)
 
 
 async def test_read_jsonl_window_is_sliced_locally(accessor, index):

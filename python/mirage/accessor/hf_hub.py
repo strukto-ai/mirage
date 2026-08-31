@@ -16,7 +16,7 @@ import asyncio
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.cache.index import IndexEntry
 from mirage.core.hf_hub.constants import DEFAULT_REVISION
 from mirage.core.hf_hub.tree_entry import TreeEntry
@@ -86,7 +86,7 @@ class HfRepoConfig(BaseModel):
         return parts[1] if len(parts) == 2 else parts[0]
 
 
-class HfHubAccessor(Accessor):
+class HfHubAccessor(SessionAccessor):
     """A mount onto one Hugging Face Hub repository.
 
     Holds the whole repository tree, the way GitHubAccessor holds a git
@@ -114,6 +114,7 @@ class HfHubAccessor(Accessor):
                 the mount's tree and commit code instead of growing a
                 second Hub client.
         """
+        super().__init__()
         self.config = config
         self._repo_type = repo_type or self.REPO_TYPE
         # Guards the lazy hydration so concurrent first reads make one

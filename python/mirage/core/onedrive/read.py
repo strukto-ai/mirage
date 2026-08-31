@@ -32,4 +32,5 @@ async def read_bytes(accessor: OneDriveAccessor,
                            stripped,
                            "onedrive",
                            offset=offset,
-                           size=size)
+                           size=size,
+                           session=accessor.pool)

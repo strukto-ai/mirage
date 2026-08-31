@@ -25,7 +25,8 @@ async def unlink(accessor: OneDriveAccessor, path: PathSpec) -> None:
     _, stripped = split_path(path)
     try:
         await graph_delete(accessor.config,
-                           item_url(accessor.config, "/" + stripped))
+                           item_url(accessor.config, "/" + stripped),
+                           session=accessor.pool)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)

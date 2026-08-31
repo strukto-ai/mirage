@@ -14,12 +14,12 @@
 
 import asyncio
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
 
 
-class GitHubAccessor(Accessor):
+class GitHubAccessor(SessionAccessor):
 
     def __init__(self,
                  config: GitHubConfig,
@@ -29,6 +29,7 @@ class GitHubAccessor(Accessor):
                  default_branch: str | None = None,
                  tree: dict[str, TreeEntry] | None = None,
                  truncated: bool = False) -> None:
+        super().__init__()
         self.config = config
         self.owner = owner
         self.repo = repo

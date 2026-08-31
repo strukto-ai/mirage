@@ -204,7 +204,8 @@ async def test_ensure_default_branch_fetches_once_and_caches() -> None:
         assert await ensure_default_branch(resource.accessor) == "develop"
         assert await ensure_default_branch(resource.accessor) == "develop"
     assert resource.accessor.default_branch == "develop"
-    mock_branch.assert_awaited_once_with(CONFIG, OWNER, REPO)
+    mock_branch.assert_awaited_once_with(CONFIG, OWNER, REPO,
+                                         resource.accessor.pool)
 
 
 @pytest.mark.asyncio

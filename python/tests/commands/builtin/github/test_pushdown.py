@@ -32,7 +32,7 @@ _NGLOBALS = narrow_scope.__globals__
 def counting_read(monkeypatch):
     reads: list[str] = []
 
-    async def _read_bytes(config, owner, repo, sha):
+    async def _read_bytes(config, owner, repo, sha, session=None):
         reads.append(sha)
         return MOCK_BLOBS.get(sha, b"")
 

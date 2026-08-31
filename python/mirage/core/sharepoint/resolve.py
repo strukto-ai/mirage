@@ -35,14 +35,17 @@ async def _list_sites(accessor: SharePointAccessor) -> list[dict[str, Any]]:
     search = config.site_filter or "*"
     url = f"{graph_api(config)}/sites"
     params = {"search": search, "$select": "id,displayName,name"}
-    return await graph_list(config, url, params=params)
+    return await graph_list(config, url, params=params, session=accessor.pool)
 
 
 async def _list_drives(accessor: SharePointAccessor,
                        site_id: str) -> list[dict[str, Any]]:
     url = f"{graph_api(accessor.config)}/sites/{id_segment(site_id)}/drives"
     params = {"$select": "id,name"}
-    return await graph_list(accessor.config, url, params=params)
+    return await graph_list(accessor.config,
+                            url,
+                            params=params,
+                            session=accessor.pool)
 
 
 async def _resolve_site_id(accessor: SharePointAccessor,

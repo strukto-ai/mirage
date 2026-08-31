@@ -31,8 +31,13 @@ async def read_stream(
     virtual = path.virtual if isinstance(path, PathSpec) else path
     _, stripped = split_path(path)
     loc = drive_loc(accessor.config, stripped)
-    async for chunk in stream_item(accessor.config, loc, virtual, stripped,
-                                   "onedrive", chunk_size):
+    async for chunk in stream_item(accessor.config,
+                                   loc,
+                                   virtual,
+                                   stripped,
+                                   "onedrive",
+                                   chunk_size,
+                                   session=accessor.pool):
         yield chunk
 
 

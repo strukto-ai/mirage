@@ -40,4 +40,5 @@ async def size(accessor: OneDriveAccessor,
         return info.size or 0
     _, base = split_path(path)
     return await du_tree_total(accessor.config,
-                               drive_loc(accessor.config, base))
+                               drive_loc(accessor.config, base),
+                               session=accessor.pool)

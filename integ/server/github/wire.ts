@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import type { JsonValue } from '../kit/typescript/index.ts'
-import { DEFAULT_LOGIN, ROOT_COMMIT_DATE } from './config.ts'
+import { DEFAULT_LOGIN, ROOT_COMMIT_DATE, WRITE_COMMIT_DATE } from './config.ts'
 
 // Real git object ids, so shas look plausible and stay stable across runs.
 export function blobSha(data: Uint8Array): string {
@@ -37,6 +37,87 @@ export function commitPerson(name: string, when: string): JsonValue {
   return { name, email: `${handle}@users.noreply.github.com`, date: when }
 }
 
+// The git author or committer as `POST /git/commits` takes it. This is NOT the
+// `authorLogin` above turned into a person: a git identity carries whatever
+// email the commit says, and its date is the caller's to state, which is the
+// whole reason a fixture can pin one. Stored as posted and echoed back
+// unchanged, because normalizing the offset away would silently answer a
+// different instant than the one the fixture wrote down.
+export interface GitPerson {
+  name: string
+  email: string
+  date: string
+}
+
+// A supplied `author` or `committer`, or null when the caller named none, or
+// INVALID_PERSON when the key is there but is not an object. That third answer
+// matters: reading a malformed value as "absent" would accept the request, drop
+// the identity, and answer 201, so a client's typo would look like a commit
+// that simply chose not to carry a date.
+export const INVALID_PERSON = 'invalid-person'
+
+export function bodyPerson(
+  body: Record<string, JsonValue>,
+  key: string,
+): GitPerson | null | typeof INVALID_PERSON {
+  const raw = body[key]
+  if (raw === undefined || raw === null) return null
+  if (typeof raw !== 'object' || Array.isArray(raw)) return INVALID_PERSON
+  const pick = (k: string, fallback: string): string => {
+    const v = raw[k]
+    return typeof v === 'string' && v !== '' ? v : fallback
+  }
+  const name = pick('name', DEFAULT_LOGIN)
+  const handle = name.toLowerCase().replace(/ /g, '-')
+  return {
+    name,
+    email: pick('email', `${handle}@users.noreply.github.com`),
+    date: pick('date', WRITE_COMMIT_DATE),
+  }
+}
+
+// The identity the vendor fills in when a body names no author at all: the
+// authenticated user, carrying the same pinned stamp a partial person gets,
+// so the answer stays deterministic.
+export function defaultPerson(): GitPerson {
+  return {
+    name: DEFAULT_LOGIN,
+    email: `${DEFAULT_LOGIN}@users.noreply.github.com`,
+    date: WRITE_COMMIT_DATE,
+  }
+}
+
+export function personJson(person: GitPerson | null): string {
+  return person === null ? '' : JSON.stringify(person)
+}
+
+export function parsePerson(raw: string): GitPerson | null {
+  if (raw === '') return null
+  const parsed = JSON.parse(raw) as JsonValue
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const pick = (k: string): string => {
+    const v = parsed[k]
+    return typeof v === 'string' ? v : ''
+  }
+  return { name: pick('name'), email: pick('email'), date: pick('date') }
+}
+
+// A commit's `commit.author`/`commit.committer` pair, or null when it carries
+// none. A missing committer reads as the author, and a missing author beside
+// a supplied committer reads as the endpoint's default identity: both are the
+// vendor's own defaults, and both keep a one-sided body from rendering half a
+// commit.
+export function commitPeople(row: {
+  authorJson: string
+  committerJson: string
+}): { author: JsonValue; committer: JsonValue } | null {
+  const author = parsePerson(row.authorJson)
+  const committer = parsePerson(row.committerJson)
+  if (author === null && committer === null) return null
+  const named = author ?? defaultPerson()
+  return { author: { ...named }, committer: { ...(committer ?? named) } }
+}
+
 // The store keeps a commit's paths as strings, because that is all a write
 // knows; the endpoints that report what changed answer with objects.
 export function commitFiles(paths: string[], status = 'added'): JsonValue {
@@ -50,6 +131,8 @@ export interface CommitRow {
   date: string
   filesJson: string
   treeSha: string
+  authorJson: string
+  committerJson: string
   seq: number
 }
 
@@ -67,7 +150,12 @@ export function pathsOf(row: { filesJson: string }): string[] {
 // golden renders the difference. An empty author is what tells them apart,
 // because that is what `recordCommit` stores.
 export function commitJson(row: CommitRow): JsonValue {
-  if (row.authorLogin === '') return writtenCommitJson(row)
+  if (row.authorLogin === '') {
+    const people = commitPeople(row)
+    return people === null
+      ? writtenCommitJson(row)
+      : { sha: row.sha, commit: { message: row.message, ...people } }
+  }
   return {
     sha: row.sha,
     commit: {
@@ -92,6 +180,8 @@ export function rootCommit(tree: Array<[string, string]>): CommitRow {
     date: ROOT_COMMIT_DATE,
     filesJson: '[]',
     treeSha: '',
+    authorJson: '',
+    committerJson: '',
     seq: -1,
   }
 }

@@ -34,7 +34,7 @@ from mirage.utils.errors import enoent
 async def _read_team_json(accessor: LinearAccessor, match: ScopeMatch,
                           path: PathSpec, index: IndexCacheStore) -> bytes:
     team_id = match.slots["team_id"]
-    teams = await list_teams(accessor.config)
+    teams = await list_teams(accessor.config, session=accessor.pool)
     if accessor.config.team_ids:
         teams = [
             team for team in teams
@@ -49,7 +49,9 @@ async def _read_team_json(accessor: LinearAccessor, match: ScopeMatch,
 async def _read_member(accessor: LinearAccessor, match: ScopeMatch,
                        path: PathSpec, index: IndexCacheStore) -> bytes:
     member_id = match.slots["member_id"]
-    users = await list_team_members(accessor.config, match.slots["team_id"])
+    users = await list_team_members(accessor.config,
+                                    match.slots["team_id"],
+                                    session=accessor.pool)
     for user in users:
         if user.get("id") == member_id:
             return to_json_bytes(normalize_user(user))
@@ -58,16 +60,20 @@ async def _read_member(accessor: LinearAccessor, match: ScopeMatch,
 
 async def _read_issue_json(accessor: LinearAccessor, match: ScopeMatch,
                            path: PathSpec, index: IndexCacheStore) -> bytes:
-    issue = await get_issue(accessor.config, match.slots["issue_id"])
+    issue = await get_issue(accessor.config,
+                            match.slots["issue_id"],
+                            session=accessor.pool)
     return to_json_bytes(normalize_issue(issue))
 
 
 async def _read_comments(accessor: LinearAccessor, match: ScopeMatch,
                          path: PathSpec, index: IndexCacheStore) -> bytes:
     issue_id = match.slots["issue_id"]
-    issue = await get_issue(accessor.config, issue_id)
+    issue = await get_issue(accessor.config, issue_id, session=accessor.pool)
     norm_issue = normalize_issue(issue)
-    comments = await list_issue_comments(accessor.config, issue_id)
+    comments = await list_issue_comments(accessor.config,
+                                         issue_id,
+                                         session=accessor.pool)
     rows = [
         normalize_comment(comment,
                           issue_id=issue_id,
@@ -81,10 +87,14 @@ async def _read_project(accessor: LinearAccessor, match: ScopeMatch,
                         path: PathSpec, index: IndexCacheStore) -> bytes:
     team_id = match.slots["team_id"]
     project_id = match.slots["project_id"]
-    teams = await list_teams(accessor.config)
+    teams = await list_teams(accessor.config, session=accessor.pool)
     team = next((item for item in teams if item.get("id") == team_id), {})
-    projects = await list_team_projects(accessor.config, team_id)
-    team_issues = await list_team_issues(accessor.config, team_id)
+    projects = await list_team_projects(accessor.config,
+                                        team_id,
+                                        session=accessor.pool)
+    team_issues = await list_team_issues(accessor.config,
+                                         team_id,
+                                         session=accessor.pool)
     for project in projects:
         if project.get("id") == project_id:
             project_issues = project_issue_rows(team_issues, project_id)
@@ -102,7 +112,9 @@ async def _read_project(accessor: LinearAccessor, match: ScopeMatch,
 async def _read_cycle(accessor: LinearAccessor, match: ScopeMatch,
                       path: PathSpec, index: IndexCacheStore) -> bytes:
     team_id = match.slots["team_id"]
-    cycles = await list_team_cycles(accessor.config, team_id)
+    cycles = await list_team_cycles(accessor.config,
+                                    team_id,
+                                    session=accessor.pool)
     for cycle in cycles:
         if cycle.get("id") == match.slots["cycle_id"]:
             return to_json_bytes(normalize_cycle(cycle, team_id=team_id))
@@ -112,7 +124,8 @@ async def _read_cycle(accessor: LinearAccessor, match: ScopeMatch,
 async def _read_document(accessor: LinearAccessor, match: ScopeMatch,
                          path: PathSpec, index: IndexCacheStore) -> bytes:
     documents = await list_team_documents(accessor.config,
-                                          match.slots["team_id"])
+                                          match.slots["team_id"],
+                                          session=accessor.pool)
     for document in documents:
         if document.get("id") == match.slots["document_id"]:
             return to_json_bytes(normalize_document(document))

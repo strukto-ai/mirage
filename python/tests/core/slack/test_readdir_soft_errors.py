@@ -80,12 +80,12 @@ async def test_day_listing_seals_empty_dir_on_not_in_channel(config, index):
         },
     }
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         if method == "conversations.list":
             return channels_page
         raise AssertionError(f"unexpected {method}")
 
-    async def fake_history(_cfg, channel_id, date_str):
+    async def fake_history(_cfg, channel_id, date_str, session=None):
         raise err
 
     day = "/slack/channels/foo__C_INACCESSIBLE/2026-05-10"
@@ -121,7 +121,7 @@ async def test_readdir_channel_inaccessible_yields_no_dates(config, index):
     err = RuntimeError(
         "Slack API error (conversations.history): not_in_channel")
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         if method == "conversations.list":
             return channels_page
         if method == "conversations.history":

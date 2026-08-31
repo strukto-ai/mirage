@@ -14,7 +14,7 @@
 
 import { clearTenants } from './clear.ts'
 import { ResetBodyError } from './errors.ts'
-import { loadFixture, DEFAULT_FIXTURE } from './fixture.ts'
+import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT, loadFixture } from './fixture.ts'
 import { seedFixture } from './seed.ts'
 import { checkName, DEFAULT_RUN, DEFAULT_TENANT } from './tenant.ts'
 import type { MinimalClient } from './db.ts'
@@ -92,13 +92,14 @@ export async function applyReset<C extends MinimalClient>(
   pool: ClientPool<C>,
   state: (run: string) => RunState,
   req: ResetRequest,
+  fixtureRoot: string = DEFAULT_FIXTURE_ROOT,
 ): Promise<ResetResponse> {
   // The fixture is read BEFORE anything is destroyed. An unreadable name is a
   // 400, and answering one after having already deleted the caller's rows
   // leaves them with neither their data nor the seed they asked for. It did
   // not matter when a reset recreated the whole file, because that file was
   // gone either way; it matters now that a reset is a delete.
-  const fixture = loadFixture(fake.config.service, req.fixture)
+  const fixture = loadFixture(fake.config.service, req.fixture, fixtureRoot)
   const scoped = fake.config.tenantKind !== 'none'
   // A run that does not exist yet can be COPIED into being from a template
   // that is already seeded, which is the difference between a file copy and a
@@ -120,7 +121,9 @@ export async function applyReset<C extends MinimalClient>(
         tenantKind: fake.config.tenantKind,
         ...(fake.seedRoots === undefined ? {} : { roots: fake.seedRoots }),
       })
-      if (fake.afterSeed !== undefined) await fake.afterSeed(into, tenant, rows, req.extras)
+      if (fake.afterSeed !== undefined) {
+        await fake.afterSeed(into, tenant, rows, req.extras, fixtureRoot, req.epoch)
+      }
       out.push({ tenant, rows })
       onSeeded?.(tenant)
     }
@@ -168,8 +171,9 @@ export async function applyReset<C extends MinimalClient>(
 // Everything a seed can depend on, and nothing else. The fixture NAME rather
 // than its content because a fixture file is fixed on disk; the tenants
 // because every seeded row carries the tenant column and afterSeed is handed
-// the name; extras because afterSeed reads them. Epoch is absent on purpose:
-// it sets the run's in-memory clock and never reaches a row.
+// the name; extras because afterSeed reads them; the epoch because afterSeed
+// is handed that too and a seed that stamps it into a row would otherwise
+// serve the FIRST caller's clock to every later run that shared the template.
 //
 // The tenants are NOT sorted. Sorting would let ['b','a'] and ['a','b'] share
 // a template whose cached report is in the first caller's order, so the second
@@ -177,7 +181,7 @@ export async function applyReset<C extends MinimalClient>(
 // path has both in request order. Two orders are two keys, which costs a
 // second template in a case that does not arise and cannot disagree.
 function templateKey(req: ResetRequest): string {
-  return JSON.stringify([req.fixture, req.tenants, req.extras])
+  return JSON.stringify([req.fixture, req.tenants, req.extras, req.epoch ?? null])
 }
 
 // A /reset reached through `/_run/<id>/reset` is about THAT run, so the prefix

@@ -207,7 +207,8 @@ async def box_get(
                                                               url=url),
                                              headers=await
                                              box_auth_headers(tm),
-                                             params=_str_params(params))
+                                             params=_str_params(params),
+                                             session=tm.pool)
     return data
 
 
@@ -234,7 +235,8 @@ async def box_get_bytes(
                                     headers=await box_auth_headers(tm),
                                     params=_str_params(params),
                                     read="bytes",
-                                    window=window)
+                                    window=window,
+                                    session=tm.pool)
     return data
 
 
@@ -245,16 +247,18 @@ async def box_get_stream(
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     headers = await box_auth_headers(tm)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url,
-                               headers=headers,
-                               params=_str_params(params)) as resp:
-            if resp.status >= 400:
-                text = await resp.text()
-                raise BoxApiError(f"Box GET {url} -> {resp.status} {text}",
-                                  resp.status)
-            async for chunk in resp.content.iter_chunked(chunk_size):
-                yield chunk
+    # The manager's shared pool, not a per-call session: the response
+    # context releases its connection back to the pool when the stream
+    # ends, so streaming holds one connection, never a whole session.
+    async with tm.session().get(url,
+                                headers=headers,
+                                params=_str_params(params)) as resp:
+        if resp.status >= 400:
+            text = await resp.text()
+            raise BoxApiError(f"Box GET {url} -> {resp.status} {text}",
+                              resp.status)
+        async for chunk in resp.content.iter_chunked(chunk_size):
+            yield chunk
 
 
 async def box_post_json(
@@ -269,7 +273,8 @@ async def box_post_json(
                                                               url=url),
                                              headers=await
                                              box_auth_headers(tm),
-                                             json_body=body)
+                                             json_body=body,
+                                             session=tm.pool)
     return data
 
 
@@ -285,7 +290,8 @@ async def box_put_json(
                                                               url=url),
                                              headers=await
                                              box_auth_headers(tm),
-                                             json_body=body)
+                                             json_body=body,
+                                             session=tm.pool)
     return data
 
 
@@ -299,7 +305,8 @@ async def box_delete(
                       error_of=partial(_error_of, label="DELETE", url=url),
                       headers=await box_auth_headers(tm),
                       params=_str_params(params),
-                      read="none")
+                      read="none",
+                      session=tm.pool)
 
 
 async def box_upload_multipart(
@@ -322,5 +329,6 @@ async def box_upload_multipart(
                                                             label="upload",
                                                             url=url),
                                            headers=await box_auth_headers(tm),
-                                           data=form)
+                                           data=form,
+                                           session=tm.pool)
     return payload

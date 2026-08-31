@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.core.api.client import api_request, status_error
+from mirage.core.api.client import SessionArg, api_request, status_error
 from mirage.utils.naming import fit_id_name
 from mirage.utils.ranges import window_for
 from mirage.utils.sanitize import path_safe_name
@@ -42,7 +42,8 @@ def file_blob_name(att: dict[str, Any]) -> str:
 
 async def download_file(url: str,
                         offset: int = 0,
-                        size: int | None = None) -> bytes:
+                        size: int | None = None,
+                        session: SessionArg = None) -> bytes:
     """Download a Discord-hosted file blob, optionally only a byte range.
 
     Discord CDN URLs (``cdn.discordapp.com`` for ``url``,
@@ -57,6 +58,7 @@ async def download_file(url: str,
             attachment object).
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: raw file content.
@@ -65,5 +67,6 @@ async def download_file(url: str,
                                     url,
                                     error_of=status_error,
                                     read="bytes",
-                                    window=window_for(offset, size))
+                                    window=window_for(offset, size),
+                                    session=session)
     return data

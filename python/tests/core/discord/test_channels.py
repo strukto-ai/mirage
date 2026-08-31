@@ -60,7 +60,9 @@ async def test_list_channels(config):
     assert result[0]["name"] == "general"
     assert result[1]["name"] == "announcements"
     assert result[2]["name"] == "forum"
-    mock_get.assert_called_once_with(config, "/guilds/G001/channels")
+    mock_get.assert_called_once_with(config,
+                                     "/guilds/G001/channels",
+                                     session=None)
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import type { KitRoute, Reply } from '../../kit/typescript/index.ts'
 import { createDriveItem, touchNative } from '../drive/item.ts'
+import type { C } from '../store/client.ts'
 import type { GwsState } from '../store/state.ts'
 import { asGrid, asObj, asObjArr, asStrArr } from '../wire/json.ts'
 import { SHEET_MIME } from '../wire/mime.ts'
@@ -145,7 +146,7 @@ function putValues(ctx: GwsCtx): Reply {
   })
 }
 
-export function sheetsRoutes(): KitRoute<GwsState>[] {
+export function sheetsRoutes(): KitRoute<C>[] {
   return [
     route(
       'POST',

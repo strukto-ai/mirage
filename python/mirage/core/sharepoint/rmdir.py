@@ -34,9 +34,10 @@ async def rmdir(accessor: SharePointAccessor,
     if resolved.drive_id is None or resolved.item_path is None:
         return
     loc = drive_loc(accessor.config, resolved, path.virtual)
-    if not await drive_root_empty(accessor.config, loc):
+    if not await drive_root_empty(accessor.config, loc, session=accessor.pool):
         raise enotempty(path)
-    await graph_delete(
-        accessor.config,
-        item_url(accessor.config, resolved.drive_id, resolved.item_path))
+    await graph_delete(accessor.config,
+                       item_url(accessor.config, resolved.drive_id,
+                                resolved.item_path),
+                       session=accessor.pool)
     await invalidate_after_unlink(path)

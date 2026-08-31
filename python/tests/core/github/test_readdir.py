@@ -127,7 +127,7 @@ async def test_readdir_refills_an_expired_index(tree, monkeypatch):
     await index.invalidate()
     calls = []
 
-    async def fake_fetch_tree(config, owner, repo, ref):
+    async def fake_fetch_tree(config, owner, repo, ref, session=None):
         calls.append((owner, repo, ref))
         return tree, False
 
@@ -149,7 +149,7 @@ async def test_readdir_does_not_refill_on_a_real_miss(tree, monkeypatch):
     index = _index_from_tree(tree)
     calls = []
 
-    async def fake_fetch_tree(config, owner, repo, ref):
+    async def fake_fetch_tree(config, owner, repo, ref, session=None):
         calls.append((owner, repo, ref))
         return tree, False
 

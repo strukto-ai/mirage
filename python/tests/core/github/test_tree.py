@@ -133,6 +133,7 @@ async def test_fetch_tree_passes_params(mock_get, config):
         "/repos/{owner}/{repo}/git/trees/{ref}",
         params={"recursive": "1"},
         base_url=None,
+        session=None,
         owner="acme",
         repo="proj",
         ref="v1",

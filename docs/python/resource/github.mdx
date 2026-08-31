@@ -3,8 +3,9 @@ title: GitHub
 description: Mount a GitHub repository as a read-only Mirage filesystem for agents to list, read, search, and inspect code.
 icon: github
 ---
-The GitHub resource mounts a GitHub repository as a read-only virtual
-filesystem.
+The GitHub resource uses GitHub's [REST API](https://docs.github.com/en/rest)
+to mount a repository as a read-only virtual filesystem. It does not imitate
+another CLI.
 
 For token setup, see [GitHub Setup](/python/setup/github).
 

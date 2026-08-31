@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
+from mirage.core.api.client import SessionArg
 from mirage.core.github.client import (GitHubApiError, github_get,
                                        github_request)
 from mirage.core.github.config import GhConfig, GitHubConfig
@@ -30,13 +31,16 @@ class RepoRef:
     repo: str
 
 
-async def fetch_default_branch(config: GitHubConfig, owner: str,
-                               repo: str) -> str:
+async def fetch_default_branch(config: GitHubConfig,
+                               owner: str,
+                               repo: str,
+                               session: SessionArg = None) -> str:
     data = await github_get(config.token,
                             "/repos/{owner}/{repo}",
                             base_url=config.base_url,
                             owner=owner,
-                            repo=repo)
+                            repo=repo,
+                            session=session)
     return data["default_branch"]
 
 
@@ -59,7 +63,7 @@ async def ensure_default_branch(accessor: GitHubAccessor, ) -> str:
     async with accessor.branch_lock:
         if accessor.default_branch is None:
             accessor.default_branch = await fetch_default_branch(
-                accessor.config, accessor.owner, accessor.repo)
+                accessor.config, accessor.owner, accessor.repo, accessor.pool)
         return accessor.default_branch
 
 

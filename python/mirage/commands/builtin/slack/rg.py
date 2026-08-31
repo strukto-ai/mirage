@@ -70,12 +70,14 @@ async def rg(accessor: SlackAccessor, paths: list[PathSpec], texts: list[str],
             try:
                 raw = await search_messages(accessor.config,
                                             query,
-                                            count=SEARCH_MAX_RESULTS)
+                                            count=SEARCH_MAX_RESULTS,
+                                            session=accessor.pool)
                 native_lines.extend(
                     format_grep_results(raw, target, file_prefix))
                 raw_f = await search_files(accessor.config,
                                            query,
-                                           count=SEARCH_MAX_RESULTS)
+                                           count=SEARCH_MAX_RESULTS,
+                                           session=accessor.pool)
                 native_lines.extend(
                     format_file_grep_results(raw_f, target, file_prefix))
             except Exception as exc:

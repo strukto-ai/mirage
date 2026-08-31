@@ -18,9 +18,10 @@ import pytest
 from aioresponses import aioresponses
 from yarl import URL
 
+from mirage.core.api.client import SessionArg, SessionPool
 from mirage.core.notion.client import (NotionAPIError, notion_get,
                                        notion_headers, notion_post,
-                                       paginate_post)
+                                       paginate_list, paginate_post)
 from mirage.core.notion.config import NotionConfig
 
 BASE = "https://api.notion.com/v1"
@@ -45,7 +46,7 @@ def test_notion_api_error():
 async def test_paginate_post_stops_at_max_results():
     calls = []
 
-    async def fake_notion_post(config, path, body):
+    async def fake_notion_post(config, path, body, session=None):
         calls.append(dict(body))
         return {
             "results": [{
@@ -69,6 +70,32 @@ async def test_paginate_post_stops_at_max_results():
     assert [r["n"] for r in results] == [1, 2, 3]
     assert len(calls) == 2
     assert calls[0]["page_size"] == 100
+
+
+@pytest.mark.asyncio
+async def test_paginate_list_rides_one_session_across_pages():
+    """The partial dropped the session, so every page of a cursor walk
+    opened and closed its own ClientSession."""
+    pool = SessionPool()
+    seen: list[SessionArg] = []
+
+    async def fake_notion_get(config, path, params=None, session=None):
+        seen.append(session)
+        more = len(seen) == 1
+        return {
+            "results": [{
+                "n": len(seen)
+            }],
+            "has_more": more,
+            "next_cursor": "c1" if more else None,
+        }
+
+    config = NotionConfig(api_key="ntn_test123")
+    with patch("mirage.core.notion.client.notion_get", new=fake_notion_get):
+        rows = await paginate_list(config, "/blocks/b1/children", session=pool)
+    assert [r["n"] for r in rows] == [1, 2]
+    assert len(seen) == 2
+    assert all(s is pool for s in seen)
 
 
 @pytest.mark.asyncio

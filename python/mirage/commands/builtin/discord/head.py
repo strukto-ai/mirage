@@ -94,7 +94,7 @@ async def head(accessor: DiscordAccessor, paths: list[PathSpec],
                     "after": after,
                     "limit": lines
                 },
-            )
+                session=accessor.pool)
             assert isinstance(msgs, list)
             # With `after`, a short day spills into the next one: the API
             # keeps returning messages past midnight until `limit` is met,

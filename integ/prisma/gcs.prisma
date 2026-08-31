@@ -1,0 +1,102 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+
+// Schema for the Cloud Storage fake (integ/server/gcs/). Three tables, not the
+// one an object store looks like it needs, and both extra tables are forced by
+// a consumer rather than by the vendor's data model:
+//
+//  1. `GcsBucket` exists because an EMPTY bucket has to be listable. The
+//     seeder's whole job is `delete(force=True)` then `create_bucket`, which
+//     leaves every bucket empty, and `buckets list` must still name them; a
+//     bucket derived from the distinct prefixes of the objects (which is what
+//     HfObject does, and what the vendor does for a namespace the token owns)
+//     reports nothing at all at exactly that moment. `bucket.exists()` is the
+//     same fact asked directly.
+//  2. `GcsUpload` exists because a resumable upload is several requests. The
+//     python client's chunked writer PUTs 256 KiB at a time and the object
+//     does not exist until the last one, so the partial bytes have to live
+//     somewhere between them. They live here rather than in a module-level Map
+//     because state in memory is what stops a fake from having per-run
+//     persistence -- the same reason gws is being moved onto this kit.
+//
+// `tenant` is a constant here: Cloud Storage reached through
+// STORAGE_EMULATOR_HOST is unauthenticated, so there is no credential to read
+// an account off and no `tenantFromBearer`. Runs separate on the kit's
+// `/_run/<id>` path prefix instead, which survives the trip because it is part
+// of the base URL the client is handed. The column is still present on every
+// table, because a model without one blocks a scoped /reset outright (see kit
+// `untenanted`).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/gcs"
+}
+
+datasource db {
+  provider     = "sqlite"
+  url          = env("INTEG_DB_URL")
+  relationMode = "prisma"
+}
+
+model GcsBucket {
+  tenant String
+  name   String
+  // Echoed back on the bucket body and nowhere else. The vendor scopes a
+  // bucket to a project and `buckets list` filters by it; the fake stores what
+  // the creator said rather than deriving one, so a listing under the wrong
+  // project is empty rather than wrong.
+  project     String
+  timeCreated String
+  updated     String
+  seq         Int    @default(0)
+
+  @@id([tenant, name])
+}
+
+model GcsObject {
+  tenant  String
+  bucket  String
+  name    String
+  content Bytes
+  // The media part's own Content-Type, stored rather than guessed: the Go
+  // client that BigQuery's extract job runs on sends `text/plain; charset=utf-8`
+  // and the CLI sends `application/octet-stream`, and the object body echoes
+  // whichever arrived.
+  contentType String
+  timeCreated String
+  updated     String
+  // A string on the wire, because it is a 64-bit number the vendor renders as
+  // one, and the python client sends it back verbatim as `?generation=` on a
+  // delete.
+  generation String
+  seq        Int    @default(0)
+
+  @@id([tenant, bucket, name])
+  @@index([tenant, bucket])
+}
+
+// One resumable session, alive between the POST that opens it and the PUT that
+// finishes it. `content` is what has arrived so far, appended chunk by chunk.
+model GcsUpload {
+  tenant      String
+  id          String
+  bucket      String
+  name        String
+  contentType String
+  content     Bytes  @default("")
+  seq         Int    @default(0)
+
+  @@id([tenant, id])
+}

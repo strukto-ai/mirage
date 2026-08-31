@@ -47,8 +47,8 @@ def test_is_trace_id(value, valid):
 @pytest.mark.asyncio
 async def test_accessor_reuses_session_and_closes_it():
     accessor = JaegerAccessor(JaegerConfig(request_timeout=12))
-    first = accessor.get_session()
-    second = accessor.get_session()
+    first = accessor.pool.get()
+    second = accessor.pool.get()
 
     assert first is second
     assert first.timeout == aiohttp.ClientTimeout(total=12)
@@ -56,7 +56,7 @@ async def test_accessor_reuses_session_and_closes_it():
     await accessor.close()
 
     assert first.closed is True
-    assert accessor._session is None
+    assert accessor.pool._session is None
 
 
 @pytest.mark.asyncio

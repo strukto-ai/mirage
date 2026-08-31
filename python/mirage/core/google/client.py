@@ -185,7 +185,8 @@ async def google_get(
                                              error_of=_error_of,
                                              headers=await
                                              google_headers(token_manager),
-                                             params=params)
+                                             params=params,
+                                             session=token_manager.pool)
     return data
 
 
@@ -199,7 +200,8 @@ async def google_post(
                                              error_of=_error_of,
                                              headers=await
                                              google_headers(token_manager),
-                                             json_body=json)
+                                             json_body=json,
+                                             session=token_manager.pool)
     return data
 
 
@@ -213,7 +215,8 @@ async def google_put(
                                              error_of=_error_of,
                                              headers=await
                                              google_headers(token_manager),
-                                             json_body=json)
+                                             json_body=json,
+                                             session=token_manager.pool)
     return data
 
 
@@ -229,7 +232,8 @@ async def google_patch(
                                              headers=await
                                              google_headers(token_manager),
                                              params=params,
-                                             json_body=json)
+                                             json_body=json,
+                                             session=token_manager.pool)
     return data
 
 
@@ -258,7 +262,8 @@ async def google_send_bytes(
                                                 error_of=_error_of,
                                                 headers=headers,
                                                 params=params,
-                                                data=data)
+                                                data=data,
+                                                session=token_manager.pool)
     return payload
 
 
@@ -270,7 +275,8 @@ async def google_delete(
                       url,
                       error_of=_error_of,
                       headers=await google_headers(token_manager),
-                      read="none")
+                      read="none",
+                      session=token_manager.pool)
 
 
 async def google_get_bytes(
@@ -292,5 +298,6 @@ async def google_get_bytes(
                                     headers=await
                                     google_headers(token_manager),
                                     read="bytes",
-                                    window=window)
+                                    window=window,
+                                    session=token_manager.pool)
     return data

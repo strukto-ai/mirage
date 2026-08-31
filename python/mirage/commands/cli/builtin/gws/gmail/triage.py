@@ -30,22 +30,22 @@ async def triage(
     fl = FlagView(inv.flags)
     query = fl.as_str("query") or "is:unread"
     max_results = fl.as_int("max") or 20
-    token_manager = TokenManager(inv.config)
-    msgs = await list_messages(token_manager,
-                               query=query,
-                               max_results=max_results)
     summaries = []
-    for m in msgs:
-        mid = m["id"]
-        raw = await get_message_raw(token_manager, mid)
-        headers = raw.get("payload", {}).get("headers", [])
-        summaries.append({
-            "id": mid,
-            "from": _extract_header(headers, "From"),
-            "subject": _extract_header(headers, "Subject"),
-            "date": _extract_header(headers, "Date"),
-            "snippet": raw.get("snippet", ""),
-        })
+    async with TokenManager(inv.config) as token_manager:
+        msgs = await list_messages(token_manager,
+                                   query=query,
+                                   max_results=max_results)
+        for m in msgs:
+            mid = m["id"]
+            raw = await get_message_raw(token_manager, mid)
+            headers = raw.get("payload", {}).get("headers", [])
+            summaries.append({
+                "id": mid,
+                "from": _extract_header(headers, "From"),
+                "subject": _extract_header(headers, "Subject"),
+                "date": _extract_header(headers, "Date"),
+                "snippet": raw.get("snippet", ""),
+            })
     out = json.dumps(summaries, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

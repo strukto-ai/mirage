@@ -12,7 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { serve } from '../kit/typescript/index.ts'
+import { emit, parseFlagPort, serve } from '../kit/typescript/index.ts'
+import { startHubArms } from './arms.ts'
 import { hfHubFake } from './fake.ts'
 
-await serve(hfHubFake)
+// TWO arms, one store. The REST arm is what a mirage `hf` mount and the `hf`
+// CLI talk to; the MCP arm is what an agent harness talks to, and it exists
+// because HuggingFace ships no server anyone can vendor -- notion's arm is the
+// real upstream server pointed at the fake, so notion's main.ts starts nothing.
+// Here `mcp.ts` IS the server, so a harness that cannot spawn a process cannot
+// reach it at all, which is what this entry point fixes.
+//
+// Both arms are announced. A consumer picks by transport: toolathlon's server
+// builder returns `{"url": ...}` for an HTTP MCP server and `{"command": ...}`
+// for a stdio one, so HF_MCP_URL is the value that builder needs and the REST
+// token stays first for the runners, which read the first line.
+const MCP_PORT_FLAG = '--mcp-port'
+
+const started = await serve(hfHubFake, [MCP_PORT_FLAG])
+const arms = await startHubArms(
+  started.runtime,
+  parseFlagPort(MCP_PORT_FLAG, process.argv.slice(2)),
+)
+for (const a of arms.announces) emit(a)

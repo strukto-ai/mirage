@@ -25,7 +25,8 @@ async def read(
         inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    result = await read_values(TokenManager(inv.config),
-                               fl.as_str("spreadsheet") or "",
-                               fl.as_str("range") or "")
+    async with TokenManager(inv.config) as tm:
+        result = await read_values(tm,
+                                   fl.as_str("spreadsheet") or "",
+                                   fl.as_str("range") or "")
     return yield_bytes(result), IOResult()

@@ -19,7 +19,7 @@ def _root() -> PathSpec:
 def _hook(monkeypatch, channel: dict, user: dict | None = None) -> tuple:
     calls: list[tuple[str, dict]] = []
 
-    async def fake_get(config, method, params=None):
+    async def fake_get(config, method, params=None, session=None):
         calls.append((method, params or {}))
         if method == "conversations.info":
             return {"ok": True, "channel": channel}

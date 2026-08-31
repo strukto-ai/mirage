@@ -4,7 +4,9 @@ icon: github
 description: Mount a GitHub repository as a Mirage filesystem from Node or the browser.
 ---
 
-`GitHubResource` exposes a single repository at a ref as a read-only filesystem. Reads stream blobs through the GitHub API.
+`GitHubResource` exposes a single repository at a ref as a read-only
+filesystem. Reads stream blobs through GitHub's
+[REST API](https://docs.github.com/en/rest); it does not imitate another CLI.
 
 Setup steps for the personal access token live at [GitHub Credentials](/home/setup/github).
 

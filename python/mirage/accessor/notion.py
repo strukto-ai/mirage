@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.core.notion.config import NotionConfig
 
 
-class NotionAccessor(Accessor):
+class NotionAccessor(SessionAccessor):
 
     def __init__(self, config: NotionConfig) -> None:
+        super().__init__()
         self.config = config

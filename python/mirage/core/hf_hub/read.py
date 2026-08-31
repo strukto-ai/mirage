@@ -85,6 +85,6 @@ async def read_bytes(accessor: HfHubAccessor,
     window = ByteWindow(offset=offset,
                         size=size) if offset or size is not None else None
     start_ms = int(time.monotonic() * 1000)
-    data = await hub_bytes(accessor.token, url, window)
+    data = await hub_bytes(accessor.token, url, window, session=accessor.pool)
     record("read", raw, accessor.RESOURCE_NAME, len(data), start_ms)
     return data

@@ -67,12 +67,14 @@ async def rg(accessor: DiscordAccessor, paths: list[PathSpec],
                     pattern_str,
                     channel_id=match.slots.get("channel_id"),
                     limit=SEARCH_MAX_RESULTS,
-                )
+                    session=accessor.pool)
                 file_prefix = mount_prefix_of(operand.virtual,
                                               operand.resource_path) or ""
                 resource_first = match.resource_path.strip("/").split("/",
                                                                       1)[0]
-                channels = await list_channels(accessor.config, guild_id)
+                channels = await list_channels(accessor.config,
+                                               guild_id,
+                                               session=accessor.pool)
                 channel_map = {c["id"]: channel_dirname(c) for c in channels}
                 lines = format_grep_results(msgs, file_prefix, resource_first,
                                             channel_map)

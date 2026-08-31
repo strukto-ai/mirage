@@ -20,8 +20,8 @@ from urllib.parse import quote
 import aiohttp
 from pydantic import SecretStr
 
-from mirage.core.api.client import (ApiResponse, RetryPolicy, api_request,
-                                    status_error)
+from mirage.core.api.client import (ApiResponse, RetryPolicy, SessionArg,
+                                    api_request, resolve_session, status_error)
 from mirage.core.hf_hub.constants import (API_BASE, API_SEGMENTS, MAX_RETRIES,
                                           RESOLVE_SEGMENTS, RETRY_STATUSES)
 from mirage.resource.secrets import reveal_secret
@@ -188,7 +188,7 @@ async def hub_get(
     url: str,
     params: dict[str, Any] | None = None,
     *,
-    session: aiohttp.ClientSession | None = None,
+    session: SessionArg = None,
 ) -> JsonValue:
     """One GET against the Hub API, decoded as JSON."""
     data: JsonValue = await api_request(
@@ -208,7 +208,7 @@ async def hub_get_response(
     url: str,
     params: dict[str, Any] | None = None,
     *,
-    session: aiohttp.ClientSession | None = None,
+    session: SessionArg = None,
 ) -> ApiResponse:
     """One GET retaining status and headers, which tree pagination reads."""
     response: ApiResponse = await api_request(
@@ -229,6 +229,8 @@ async def hub_post(
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
+    *,
+    session: SessionArg = None,
 ) -> JsonValue:
     """One JSON POST against the Hub API."""
     data: JsonValue = await api_request(
@@ -240,6 +242,7 @@ async def hub_post(
         json_body=body,
         json_body_present=True,
         retry=RETRY,
+        session=session,
     )
     return data
 
@@ -250,6 +253,8 @@ async def hub_request(
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
+    *,
+    session: SessionArg = None,
 ) -> JsonValue:
     """One arbitrary JSON call against the Hub API.
 
@@ -264,6 +269,7 @@ async def hub_request(
         url (str): the absolute URL.
         body (JsonValue): the JSON body.
         params (dict[str, Any] | None): query parameters.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         JsonValue: the decoded body, None for an empty one.
@@ -277,6 +283,7 @@ async def hub_request(
         json_body=body,
         json_body_present=body is not None,
         retry=RETRY,
+        session=session,
     )
     return data
 
@@ -286,6 +293,8 @@ async def hub_post_ndjson(
     url: str,
     payload: bytes,
     params: dict[str, Any] | None = None,
+    *,
+    session: SessionArg = None,
 ) -> JsonValue:
     """One newline-delimited-JSON POST, which is the commit endpoint's shape.
 
@@ -294,6 +303,7 @@ async def hub_post_ndjson(
         url (str): the commit URL.
         payload (bytes): the already-serialized ndjson body.
         params (dict[str, Any] | None): query parameters.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         JsonValue: the decoded commit response.
@@ -310,6 +320,7 @@ async def hub_post_ndjson(
         params=params,
         data=payload,
         retry=RETRY,
+        session=session,
     )
     return data
 
@@ -318,6 +329,8 @@ async def hub_bytes(
     token: SecretStr | None,
     url: str,
     window: ByteWindow | None = None,
+    *,
+    session: SessionArg = None,
 ) -> bytes:
     """Fetch file content, optionally a byte window of it.
 
@@ -329,6 +342,7 @@ async def hub_bytes(
         token (SecretStr | None): the user access token.
         url (str): the resolve URL.
         window (ByteWindow | None): the byte range to ask for.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: the content, trimmed to the window when the CDN ignored
@@ -342,6 +356,7 @@ async def hub_bytes(
         retry=RETRY,
         read="bytes",
         window=window,
+        session=session,
     )
     return content
 
@@ -350,6 +365,8 @@ async def hub_stream(
     token: SecretStr | None,
     url: str,
     chunk_size: int,
+    *,
+    session: SessionArg = None,
 ) -> AsyncIterator[bytes]:
     """Stream file content without holding it whole in memory.
 
@@ -361,6 +378,7 @@ async def hub_stream(
         token (SecretStr | None): the user access token.
         url (str): the resolve URL.
         chunk_size (int): bytes per yielded chunk.
+        session (SessionArg): pool or live session to ride.
 
     Yields:
         bytes: the next chunk of content.
@@ -368,12 +386,16 @@ async def hub_stream(
     Raises:
         HfHubError: the Hub or the CDN refused.
     """
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=hub_headers(token)) as resp:
+    sess, own = resolve_session(session)
+    try:
+        async with sess.get(url, headers=hub_headers(token)) as resp:
             if resp.status >= 400:
                 raise _error_of(resp, await resp.text())
             async for chunk in resp.content.iter_chunked(chunk_size):
                 yield chunk
+    finally:
+        if own:
+            await sess.close()
 
 
 __all__ = [

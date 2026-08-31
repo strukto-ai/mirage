@@ -39,7 +39,8 @@ async def test_fetch_default_branch_main(mock_get, config):
                                       "/repos/{owner}/{repo}",
                                       base_url=None,
                                       owner="acme",
-                                      repo="proj")
+                                      repo="proj",
+                                      session=None)
 
 
 @pytest.mark.asyncio

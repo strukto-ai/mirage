@@ -15,6 +15,7 @@
 import type { JsonValue, KitRoute, Reply } from '../../kit/typescript/index.ts'
 import { route } from '../wire/route.ts'
 import type { Ctx } from '../../kit/typescript/index.ts'
+import type { C } from '../store/client.ts'
 import type { GwsState } from '../store/state.ts'
 import type { CalendarEntry, CalendarEvent } from '../store/types.ts'
 import { asObj, asObjArr, asStr } from '../wire/json.ts'
@@ -115,7 +116,7 @@ function freeBusy(ctx: GwsCtx): Reply {
   return ok({ kind: 'calendar#freeBusy', timeMin, timeMax, calendars })
 }
 
-export function calendarRoutes(): KitRoute<GwsState>[] {
+export function calendarRoutes(): KitRoute<C>[] {
   return [
     route('GET', '/calendar/v3/users/me/calendarList', (ctx) => {
       const showHidden = ctx.query.get('showHidden') === 'true'

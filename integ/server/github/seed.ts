@@ -14,7 +14,8 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { FIXTURE_ROOT } from '../kit/typescript/index.ts'
+
+import type { JsonValue } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { commitSha } from './wire.ts'
 import { addBranch, allRepos } from './store.ts'
@@ -157,9 +158,14 @@ interface TreeCounts {
   submodules: number
 }
 
-async function loadTree(db: C, tenant: string, repo: RepoRow): Promise<TreeCounts> {
+async function loadTree(
+  db: C,
+  tenant: string,
+  repo: RepoRow,
+  fixtureRoot: string,
+): Promise<TreeCounts> {
   if (repo.sourceDir === '') return { files: 0, submodules: 0 }
-  const root = join(FIXTURE_ROOT, ...repo.sourceDir.split('/'))
+  const root = join(fixtureRoot, ...repo.sourceDir.split('/'))
   const branch = repo.sourceBranch === '' ? repo.defaultBranch : repo.sourceBranch
   await addBranch(db, tenant, repo.fullName, branch)
   let seq = 0
@@ -231,12 +237,14 @@ export async function seedRepos(
   db: C,
   tenant: string,
   counts: Record<string, number>,
+  _extras: Record<string, JsonValue>,
+  fixtureRoot: string,
 ): Promise<void> {
   let files = 0
   let submodules = 0
   for (const repo of await allRepos(db, tenant)) {
     await initRepo(db, tenant, repo, counts)
-    const loaded = await loadTree(db, tenant, repo)
+    const loaded = await loadTree(db, tenant, repo, fixtureRoot)
     files += loaded.files
     submodules += loaded.submodules
   }

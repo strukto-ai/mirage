@@ -36,5 +36,9 @@ async def readdir(accessor: OneDriveAccessor,
     if listing.entries is not None:
         return listing.entries
     return await readdir_items(accessor.config,
-                               drive_loc(accessor.config, stripped), index,
-                               prefix, stripped, virtual_key)
+                               drive_loc(accessor.config, stripped),
+                               index,
+                               prefix,
+                               stripped,
+                               virtual_key,
+                               session=accessor.pool)

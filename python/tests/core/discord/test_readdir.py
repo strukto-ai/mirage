@@ -42,7 +42,7 @@ async def test_readdir_root(api, accessor, index):
 async def test_readdir_root_with_slash_in_name(api, accessor, index,
                                                monkeypatch):
 
-    async def guilds(config):
+    async def guilds(config, session=None):
         return [{"id": "G001", "name": "A/B Test Server"}]
 
     monkeypatch.setattr(readdir_mod, "list_guilds", guilds)
@@ -52,7 +52,7 @@ async def test_readdir_root_with_slash_in_name(api, accessor, index,
 
 async def test_readdir_root_with_apostrophe(api, accessor, index, monkeypatch):
 
-    async def guilds(config):
+    async def guilds(config, session=None):
         return [{"id": "G001", "name": "Zecheng's Server"}]
 
     monkeypatch.setattr(readdir_mod, "list_guilds", guilds)

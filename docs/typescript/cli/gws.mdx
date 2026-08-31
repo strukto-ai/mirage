@@ -4,8 +4,15 @@ description: "Google Workspace API client: Discovery passthroughs plus ergonomic
 icon: google
 ---
 
-Google Workspace API client: Discovery passthroughs plus ergonomic helpers. Install it on the workspace and the whole tree is
-discoverable with `gws --help`.
+Mirage's built-in Google Workspace API client follows the command surface of
+the upstream [googleworkspace/cli](https://github.com/googleworkspace/cli)
+project, with Discovery passthroughs plus ergonomic helpers. The Mirage command
+tree is discoverable with `gws --help`.
+
+**Licenses:** The upstream project uses
+[Apache-2.0](https://github.com/googleworkspace/cli/blob/main/LICENSE); Mirage's
+independent implementation uses
+[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
 
 ## Install
 
@@ -23,10 +30,8 @@ install rides the `clis:` section; see the [CLI overview](/typescript/cli/index)
 
 ## Verbs
 
-The syntax mirrors the official
-[Google Workspace CLI](https://github.com/googleworkspace/cli): one
-passthrough leaf per Discovery method, plus hand-written helpers under
-each service.
+The syntax mirrors the upstream Google Workspace CLI: one passthrough leaf per
+Discovery method, plus hand-written helpers under each service.
 
 ```bash
 gws <service> <resource> <method> [--params JSON] [--json JSON]   # API passthrough

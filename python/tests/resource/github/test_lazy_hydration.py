@@ -34,7 +34,7 @@ TREE = {
 def tree_calls(monkeypatch):
     calls = []
 
-    async def _fetch_tree(config, owner, repo, ref):
+    async def _fetch_tree(config, owner, repo, ref, session=None):
         calls.append((owner, repo, ref))
         return dict(TREE), False
 
@@ -64,7 +64,7 @@ async def test_an_empty_repo_hydrates_once(tree_calls, monkeypatch):
     # empty repository read as "never hydrated" and refetched forever:
     # twice per call with an index wired, since the refill seeds an empty
     # root and then the fallback runs anyway.
-    async def _empty(config, owner, repo, ref):
+    async def _empty(config, owner, repo, ref, session=None):
         tree_calls.append((owner, repo, ref))
         return {}, False
 
@@ -90,7 +90,7 @@ async def test_a_tree_passed_to_the_constructor_counts_as_hydrated(tree_calls):
 @pytest.fixture
 def default_branch(monkeypatch):
 
-    async def _fetch(config, owner, repo):
+    async def _fetch(config, owner, repo, session=None):
         return "master"
 
     monkeypatch.setattr("mirage.core.github.repo.fetch_default_branch", _fetch)

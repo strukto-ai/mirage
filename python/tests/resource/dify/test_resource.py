@@ -111,9 +111,9 @@ async def test_dify_resource_close_closes_shared_client():
             "dataset_id": "dataset-1",
         },
     )
-    session = resource.accessor.get_session()
+    session = resource.accessor.pool.get()
 
     await resource.close()
 
     assert session.closed is True
-    assert resource.accessor._session is None
+    assert resource.accessor.pool._session is None

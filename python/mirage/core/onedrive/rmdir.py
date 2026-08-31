@@ -45,8 +45,9 @@ async def rmdir(accessor: OneDriveAccessor,
     if not stripped:
         return
     loc = drive_loc(accessor.config, stripped)
-    if not await drive_root_empty(accessor.config, loc):
+    if not await drive_root_empty(accessor.config, loc, session=accessor.pool):
         raise enotempty(path)
     await graph_delete(accessor.config,
-                       item_url(accessor.config, "/" + stripped))
+                       item_url(accessor.config, "/" + stripped),
+                       session=accessor.pool)
     await invalidate_after_unlink(path)

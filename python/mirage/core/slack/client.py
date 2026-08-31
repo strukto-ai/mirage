@@ -18,7 +18,7 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import api_request
+from mirage.core.api.client import SessionArg, api_request
 from mirage.core.slack.config import SlackConfig
 from mirage.resource.secrets import reveal_secret
 
@@ -79,29 +79,29 @@ def _checked(method: str, data: Any) -> dict[str, Any]:
     return payload
 
 
-async def slack_get(
-    config: SlackConfig,
-    method: str,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+async def slack_get(config: SlackConfig,
+                    method: str,
+                    params: dict[str, Any] | None = None,
+                    session: SessionArg = None) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/{method}"
     data = await api_request("GET",
                              url,
                              error_of=partial(_error_of, method=method),
                              headers=slack_headers(config, method),
-                             params=params)
+                             params=params,
+                             session=session)
     return _checked(method, data)
 
 
-async def slack_post(
-    config: SlackConfig,
-    method: str,
-    body: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+async def slack_post(config: SlackConfig,
+                     method: str,
+                     body: dict[str, Any] | None = None,
+                     session: SessionArg = None) -> dict[str, Any]:
     url = f"{config.base_url.rstrip('/')}/{method}"
     data = await api_request("POST",
                              url,
                              error_of=partial(_error_of, method=method),
                              headers=slack_headers(config, method),
-                             json_body=body or {})
+                             json_body=body or {},
+                             session=session)
     return _checked(method, data)

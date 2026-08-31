@@ -23,5 +23,6 @@ async def rm_r(accessor: OneDriveAccessor, path: PathSpec) -> None:
     if not stripped:
         return
     await graph_delete(accessor.config,
-                       item_url(accessor.config, "/" + stripped))
+                       item_url(accessor.config, "/" + stripped),
+                       session=accessor.pool)
     await invalidate_subtree(path)

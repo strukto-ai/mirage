@@ -16,7 +16,7 @@ import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import type { KitRoute } from '../../kit/typescript/index.ts'
 import { createDriveItem } from '../drive/item.ts'
-import type { GwsState } from '../store/state.ts'
+import type { C } from '../store/client.ts'
 import { asObj, asObjArr } from '../wire/json.ts'
 import { DOC_MIME } from '../wire/mime.ts'
 import { NOT_FOUND, idVerbOf, ok, unknownRoute } from '../wire/reply.ts'
@@ -26,7 +26,7 @@ import { fmtDocument } from './body.ts'
 // The old fake spelled a document id `[^/:]+`.
 const ID: RouteOpts = { classes: { id: 'id' } }
 
-export function docsRoutes(): KitRoute<GwsState>[] {
+export function docsRoutes(): KitRoute<C>[] {
   return [
     route(
       'POST',

@@ -382,18 +382,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      greenmail:
-        image: greenmail/standalone:2.1.3
-        ports:
-          - 3025:3025
-          - 3143:3143
-          - 8080:8080
-        env:
-          GREENMAIL_OPTS: >-
-            -Dgreenmail.setup.test.all
-            -Dgreenmail.users=integ:secret@example.com
-            -Dgreenmail.users.login=email
-            -Dgreenmail.hostname=0.0.0.0
       mongodb:
         image: mongo:8
         ports:
@@ -405,7 +393,11 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379/0
-      EMAIL_HOST: localhost
+      # The mail fake serves IMAP and SMTP on the ports GreenMail used, so only
+      # the reset URL is new: seeding moved from an IMAP APPEND loop in each
+      # adapter to one POST the fake answers.
+      EMAIL_HOST: 127.0.0.1
+      MAIL_URL: http://127.0.0.1:5085
       MONGODB_URI: mongodb://localhost:27017
       QUICKJS_BUILD: v0.16.2
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
@@ -457,18 +449,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      greenmail:
-        image: greenmail/standalone:2.1.3
-        ports:
-          - 3025:3025
-          - 3143:3143
-          - 8080:8080
-        env:
-          GREENMAIL_OPTS: >-
-            -Dgreenmail.setup.test.all
-            -Dgreenmail.users=integ:secret@example.com
-            -Dgreenmail.users.login=email
-            -Dgreenmail.hostname=0.0.0.0
       mongodb:
         image: mongo:8
         ports:
@@ -480,7 +460,11 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379/0
-      EMAIL_HOST: localhost
+      # The mail fake serves IMAP and SMTP on the ports GreenMail used, so only
+      # the reset URL is new: seeding moved from an IMAP APPEND loop in each
+      # adapter to one POST the fake answers.
+      EMAIL_HOST: 127.0.0.1
+      MAIL_URL: http://127.0.0.1:5085
       MONGODB_URI: mongodb://localhost:27017
     steps:
       - uses: actions/checkout@v7
@@ -511,10 +495,63 @@ jobs:
       # Same reason one fake down. Listing and search are HTTP surface with no
       # client inside mirage: the `hf` CLI has no `models ls` verb and a mount
       # never calls /api/models, so no corpus case can send the request and the
-      # whole endpoint would otherwise ship untested.
-      - name: Assert the hf_hub fake (card metadata, facets, search)
+      # whole endpoint would otherwise ship untested. The MCP arm is here for a
+      # sharper version of the same reason: nothing in mirage is an MCP client
+      # of the Hub at all, and the arm exists to be compared against, so a
+      # tool document that stopped being the captured one, or a tool that
+      # stopped answering the shape its output schema declares, would only be
+      # noticed by whoever was running the measurement.
+      - name: Assert the hf_hub fake (card metadata, facets, search, MCP arm)
         working-directory: integ
         run: pnpm run hf-hub:selftest
+
+      # And one fake further. Nothing inside mirage speaks to Cloud Storage at
+      # all, so this fake has no corpus case of any kind: its three consumers
+      # are a CLI, a python seeder and the BigQuery emulator's Go client, and
+      # each of the three uses a DIFFERENT upload protocol (media, resumable,
+      # multipart). Untested here, the two the CLI does not use ship unproven.
+      - name: Assert the gcs fake (three upload protocols, checksums, runs)
+        working-directory: integ
+        run: pnpm run gcs:selftest
+
+      # And the mail fake, which the battery reaches even less than the others:
+      # it speaks IMAP and SMTP rather than HTTP, so nothing in the declarative
+      # corpus can send it a line at all. The two things asserted here are the
+      # ones it exists for -- run separation at ONE address (the password is the
+      # run, so two runs log in as the same account and see different mail) and
+      # the SEARCH operators himalaya's query language compiles to, which a
+      # key-at-a-time matcher answers wrongly by ignoring them.
+      - name: Assert the mail fake (IMAP verbs, SEARCH operators, SMTP, runs)
+        working-directory: integ
+        run: pnpm run mail:selftest
+
+      # gws is the opposite case: the battery drives its seven surfaces harder
+      # than anything else here, and sees none of what this asserts. Everything
+      # below the surfaces changed when gws moved onto the kit's store -- state
+      # between requests, a /reset scoped to the tenants it names, a fresh run
+      # served by copying a seeded template -- and the corpus, which resets once
+      # and then talks to one run as one tenant, cannot tell any of it apart.
+      - name: Assert the gws fake (store round trip, scoped reset, template copy)
+        working-directory: integ
+        run: pnpm run gws:selftest
+
+      # github's corpus coverage is the `gh` porcelain, which never builds
+      # history: a client that does calls POST /git/trees then /git/commits, and
+      # that is the only path on which a commit can state its own author and
+      # date. A fixture pins those, so a commit that quietly dropped them would
+      # read as a repository where every commit happened at once.
+      - name: Assert the github fake (git plumbing, commit author and date)
+        working-directory: integ
+        run: pnpm run github:selftest
+
+      # The launcher hosts several fakes in ONE process, each still on its own
+      # port. What it can quietly break is exactly what this asserts: two
+      # instances of one fake holding one world instead of two, a non-HTTP arm
+      # never coming up, and a bad config leaving half the fakes listening with
+      # nobody holding a handle to close them.
+      - name: Assert the multi-fake launcher (isolation, arms, refusals)
+        working-directory: integ
+        run: pnpm run launcher:selftest
 
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
@@ -1474,21 +1511,23 @@ jobs:
       # The cli facet drives the builtin CLIs (himalaya, gws, slack, discord,
       # ntn, linear) end to end against the same mocks the email, chat and
       # project facets use.
-      - name: Start GreenMail and the fake Google Workspace server
+      - name: Start the fake mail and Google Workspace servers
         if: matrix.facet == 'email' || matrix.facet == 'cli'
         run: |
-          docker run -d --name mirage-greenmail \
-            -p 3025:3025 -p 3143:3143 -p 8080:8080 \
-            -e GREENMAIL_OPTS="-Dgreenmail.setup.test.all -Dgreenmail.users=integ:secret@example.com -Dgreenmail.users.login=email -Dgreenmail.hostname=0.0.0.0" \
-            greenmail/standalone:2.1.3
-          cd integ && nohup pnpm exec tsx server/gws/main.ts --port 19999 > /tmp/gws.log 2>&1 &
+          cd integ
+          nohup pnpm exec tsx server/mail/main.ts --port 5085 \
+            --imap-port 3143 --smtp-port 3025 > /tmp/mail.log 2>&1 &
+          nohup pnpm exec tsx server/gws/main.ts --port 19999 > /tmp/gws.log 2>&1 &
           for i in $(seq 1 30); do grep -q "GWS_URL=" /tmp/gws.log && break; sleep 1; done
-          cat /tmp/gws.log
-          for i in $(seq 1 30); do
-            curl -sf -X POST http://localhost:8080/api/service/reset && break
-            sleep 2
-          done
-          echo "EMAIL_HOST=localhost" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do grep -q "MAIL_SMTP_URL=" /tmp/mail.log && break; sleep 1; done
+          cat /tmp/gws.log /tmp/mail.log
+          # Fail HERE, not 20 minutes later as a connection refused inside the
+          # battery. The mail fake announces THREE lines and the last one is the
+          # SMTP socket, so waiting on it waits for every listener.
+          grep -q "GWS_URL=" /tmp/gws.log
+          grep -q "MAIL_SMTP_URL=" /tmp/mail.log
+          echo "EMAIL_HOST=127.0.0.1" >> "$GITHUB_ENV"
+          echo "MAIL_URL=http://127.0.0.1:5085" >> "$GITHUB_ENV"
           echo "GWS_URL=http://127.0.0.1:19999" >> "$GITHUB_ENV"
 
       - name: Start fake Slack Web API
@@ -1571,10 +1610,6 @@ jobs:
             exit 1
           fi
           echo "no unrouted GitHub requests"
-
-      - name: Stop GreenMail
-        if: always() && (matrix.facet == 'email' || matrix.facet == 'cli')
-        run: docker rm -f mirage-greenmail || true
 
   gate:
     name: integ-gate

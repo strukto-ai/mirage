@@ -65,8 +65,10 @@ async def _read_chat(accessor: DiscordAccessor, match: ScopeMatch,
         if channel is None:
             raise enoent(path.virtual)
         channel_id = channel.id
-    return await get_history_jsonl(accessor.config, channel_id,
-                                   match.slots["day"])
+    return await get_history_jsonl(accessor.config,
+                                   channel_id,
+                                   match.slots["day"],
+                                   session=accessor.pool)
 
 
 async def _read_member(accessor: DiscordAccessor, match: ScopeMatch,
@@ -74,7 +76,9 @@ async def _read_member(accessor: DiscordAccessor, match: ScopeMatch,
     entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
-    members = await list_members(accessor.config, match.slots["guild_id"])
+    members = await list_members(accessor.config,
+                                 match.slots["guild_id"],
+                                 session=accessor.pool)
     for m in members:
         user = m.get("user", {})
         if user.get("id") == entry.id:
@@ -95,14 +99,19 @@ async def _blob_url(accessor: DiscordAccessor, path: PathSpec,
 
 async def _read_blob(accessor: DiscordAccessor, match: ScopeMatch,
                      path: PathSpec, index: IndexCacheStore) -> bytes:
-    return await download_file(await _blob_url(accessor, path, index), 0, None)
+    return await download_file(await _blob_url(accessor, path, index),
+                               0,
+                               None,
+                               session=accessor.pool)
 
 
 async def _read_blob_range(accessor: DiscordAccessor, match: ScopeMatch,
                            path: PathSpec, index: IndexCacheStore, offset: int,
                            size: int | None) -> bytes:
-    return await download_file(await _blob_url(accessor, path, index), offset,
-                               size)
+    return await download_file(await _blob_url(accessor, path, index),
+                               offset,
+                               size,
+                               session=accessor.pool)
 
 
 read = make_read(

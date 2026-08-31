@@ -28,11 +28,13 @@ async def test_add_reaction_posts_reactions_add():
                new_callable=AsyncMock,
                return_value={"ok": True}) as post:
         await add_reaction(CONFIG, "C001", "111.222", "shipit")
-    post.assert_awaited_once_with(CONFIG, "reactions.add", {
-        "channel": "C001",
-        "timestamp": "111.222",
-        "name": "shipit",
-    })
+    post.assert_awaited_once_with(CONFIG,
+                                  "reactions.add", {
+                                      "channel": "C001",
+                                      "timestamp": "111.222",
+                                      "name": "shipit",
+                                  },
+                                  session=None)
 
 
 @pytest.mark.asyncio
@@ -45,8 +47,10 @@ async def test_get_reactions_returns_the_message_item():
                    "message": message,
                }) as get:
         result = await get_reactions(CONFIG, "C001", "111.222")
-    get.assert_awaited_once_with(CONFIG, "reactions.get", {
-        "channel": "C001",
-        "timestamp": "111.222",
-    })
+    get.assert_awaited_once_with(CONFIG,
+                                 "reactions.get", {
+                                     "channel": "C001",
+                                     "timestamp": "111.222",
+                                 },
+                                 session=None)
     assert result == message

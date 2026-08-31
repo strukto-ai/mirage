@@ -12,36 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// PROPOSAL ONLY. Nothing pushes or generates this yet: the gws fake still
-// keeps its state in GwsState (integ/server/gws/store/state.ts). It is
-// checked in so the storage pass starts from a reviewed schema rather than
-// from a blank file, and it is kept validating (`prisma validate`) so it
-// cannot rot.
-//
-// Five rules the live fake's behaviour forces on this schema, each of which a
-// naive translation gets wrong:
+// gws's store. Five rules the fake's behaviour forces on this schema, each of
+// which a naive translation gets wrong:
 //
 //  1. Meta is a singleton per (run file, tenant) and CANNOT be
 //     `id Int @id @default(1)`. Prisma compiles an Int @id with a scalar
 //     default on SQLite to INTEGER PRIMARY KEY AUTOINCREMENT, which ignores
 //     the default and hands out 1, 2, 3 -- so the "singleton" grows a second
 //     row. It is keyed by tenant alone instead.
-//  2. DriveParent must NOT cascade. deleteTree today removes a folder and
-//     every child reachable from it, but a child with a second parent
-//     outside the doomed subtree SURVIVES with its other parent. A cascade
-//     from Drive would delete the edge and the row.
-//  3. addParents with an id no file has is accepted today (the edge is
-//     stored and files.list simply never matches it). relationMode = "prisma"
-//     is what keeps that a stored edge rather than a foreign-key 500.
-//  4. Repeat addParents is NOT deduplicated today: `parents.push(...)` can
-//     hold the same id twice and fmtFile echoes it twice. So DriveParent
-//     carries a surrogate pk and NO @@unique([childId, parentId]).
-//  5. A second messages.trash on one message appends TRASH again today, so
+//  2. DriveParent must NOT cascade. deleteTree removes a folder and every
+//     child reachable from it, but a child with a second parent outside the
+//     doomed subtree SURVIVES with its other parent. A cascade from Drive
+//     would delete the edge and the row.
+//  3. addParents with an id no file has is accepted (the edge is stored and
+//     files.list simply never matches it). relationMode = "prisma" is what
+//     keeps that a stored edge rather than a foreign-key 500.
+//  4. Repeat addParents is NOT deduplicated: `parents.push(...)` can hold the
+//     same id twice and fmtFile echoes it twice. So DriveParent carries a
+//     surrogate pk and NO @@unique([childId, parentId]).
+//  5. A second messages.trash on one message appends TRASH again, so
 //     MessageLabel carries a surrogate pk and NO @@unique([messageId,
 //     labelId]) either.
 //
 // Ordering: `include` does not read back insertion order, so every listable
 // table carries `seq` and every caller-visible read must `orderBy: { seq }`.
+//
+// Every model carries `tenant`, and that is a hard requirement rather than a
+// convention: clearTenants refuses a scoped /reset on a schema with even one
+// untenanted model, because rows every tenant shares would survive one
+// tenant's reset and its next seed would read the previous run's state.
 
 datasource db {
   provider     = "sqlite"
@@ -54,18 +53,28 @@ generator client {
   output   = "../generated/gws"
 }
 
-// The clock and the mint counters, which /reset pins and every write
-// advances. One row per tenant; see rule 1 above for why the key is the
-// tenant and not a literal 1.
+// gws's clock, persisted rather than held in memory like the kit's. It has to
+// be: a fresh run is served by COPYING an already-seeded template file, and
+// the seed advances the clock once per timestamped row. An in-memory clock
+// would restart at the epoch in the copy while the copied rows already carry
+// later stamps, so the next created file would claim a time before a file that
+// already exists. Same argument as Counter below, one field over.
+//
+// `ticks` is the count, not the time: nowMs() is epochMs + ticks * TICK_MS,
+// which keeps the arithmetic identical to the kit's Clock and makes the stored
+// value the thing that actually has to survive.
+//
+// See rule 1 above for why the key is the tenant and not a literal 1.
 model Meta {
-  tenant     String @id
-  epochMs    BigInt
-  ticks      Int    @default(0)
-  calendarTz String
+  tenant  String @id
+  epochMs BigInt
+  ticks   Int    @default(0)
 }
 
 // One counter per (tenant, kind): gws mints per-kind, so a new Doc does not
-// advance the next file id.
+// advance the next file id. A row rather than the kit's in-memory Minter for
+// the reason Meta gives: a run served from a seeded template copy starts with
+// the template's rows and would otherwise mint `f0001` a second time.
 model Counter {
   tenant String
   kind   String
@@ -187,8 +196,13 @@ model Spreadsheet {
 // written: a new tab reports 1000 rows holding nothing. `seq` is the tab
 // order inside the spreadsheet, which duplicateSheet's insertSheetIndex
 // rewrites.
+//
+// Keyed by its own (spreadsheet, sheetId) rather than by a surrogate pk so
+// that SheetCell can name its tab in columns the writer already holds. A
+// surrogate would have to be read back from each insert before its cells could
+// reference it, which is the one thing that stops the whole flush being
+// createMany.
 model SheetTab {
-  pk            Int    @id @default(autoincrement())
   tenant        String
   spreadsheetId String
   sheetId       Int
@@ -200,24 +214,24 @@ model SheetTab {
   spreadsheet Spreadsheet @relation(fields: [tenant, spreadsheetId], references: [tenant, id])
   cells       SheetCell[]
 
-  @@unique([tenant, spreadsheetId, sheetId])
+  @@id([tenant, spreadsheetId, sheetId])
   @@index([tenant, spreadsheetId])
 }
 
-// The sparse cell map, one row per written cell. Unique on its coordinate
-// because that IS the map key; a second write to one cell overwrites.
+// The sparse cell map, one row per written cell. The coordinate IS the map
+// key, so it is the id; a second write to one cell overwrites.
 model SheetCell {
-  pk     Int    @id @default(autoincrement())
-  tenant String
-  tabPk  Int
-  row    Int
-  col    Int
-  text   String
+  tenant        String
+  spreadsheetId String
+  sheetId       Int
+  row           Int
+  col           Int
+  text          String
 
-  tab SheetTab @relation(fields: [tabPk], references: [pk])
+  tab SheetTab @relation(fields: [tenant, spreadsheetId, sheetId], references: [tenant, spreadsheetId, sheetId])
 
-  @@unique([tabPk, row, col])
-  @@index([tenant, tabPk])
+  @@id([tenant, spreadsheetId, sheetId, row, col])
+  @@index([tenant, spreadsheetId, sheetId])
 }
 
 model Presentation {
@@ -231,8 +245,10 @@ model Presentation {
   @@id([tenant, id])
 }
 
+// Object ids are unique across a WHOLE presentation, which is why
+// duplicateObject re-keys every copied element and why both tables here are
+// keyed by (presentation, objectId) rather than by a surrogate pk.
 model Slide {
-  pk             Int    @id @default(autoincrement())
   tenant         String
   presentationId String
   objectId       String
@@ -241,24 +257,22 @@ model Slide {
   presentation Presentation   @relation(fields: [tenant, presentationId], references: [tenant, id])
   elements     SlideElement[]
 
-  @@unique([tenant, presentationId, objectId])
+  @@id([tenant, presentationId, objectId])
   @@index([tenant, presentationId])
 }
 
-// Object ids are unique across a whole presentation, which is why
-// duplicateObject re-keys every copied element.
 model SlideElement {
-  pk       Int    @id @default(autoincrement())
-  tenant   String
-  slidePk  Int
-  objectId String
-  text     String @default("")
-  seq      Int    @default(0)
+  tenant         String
+  presentationId String
+  objectId       String
+  slideObjectId  String
+  text           String @default("")
+  seq            Int    @default(0)
 
-  slide Slide @relation(fields: [slidePk], references: [pk])
+  slide Slide @relation(fields: [tenant, presentationId, slideObjectId], references: [tenant, presentationId, objectId])
 
-  @@unique([slidePk, objectId])
-  @@index([tenant, slidePk])
+  @@id([tenant, presentationId, objectId])
+  @@index([tenant, presentationId, slideObjectId])
 }
 
 model Label {

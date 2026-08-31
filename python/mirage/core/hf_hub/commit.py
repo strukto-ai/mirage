@@ -108,7 +108,7 @@ async def upload_modes(
                 len(add.data),
             } for add in chunk]
         }
-        data = await hub_post(accessor.token, url, body)
+        data = await hub_post(accessor.token, url, body, session=accessor.pool)
         rows = data.get("files") if isinstance(data, dict) else None
         for row in rows if isinstance(rows, list) else []:
             if isinstance(row, dict):
@@ -207,7 +207,10 @@ async def commit(
     body = payload(adds, deletions or [], folders or [], message, description)
     params = {"create_pr": "1"} if create_pr else None
     data = await hub_post_ndjson(accessor.token,
-                                 commit_url(accessor, revision), body, params)
+                                 commit_url(accessor, revision),
+                                 body,
+                                 params,
+                                 session=accessor.pool)
     return data if isinstance(data, dict) else {}
 
 

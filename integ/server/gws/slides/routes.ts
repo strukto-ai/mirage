@@ -16,7 +16,7 @@ import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import type { KitRoute } from '../../kit/typescript/index.ts'
 import { createDriveItem } from '../drive/item.ts'
-import type { GwsState } from '../store/state.ts'
+import type { C } from '../store/client.ts'
 import { asObj, asObjArr } from '../wire/json.ts'
 import { SLIDE_MIME } from '../wire/mime.ts'
 import { NOT_FOUND, idVerbOf, ok, unknownRoute } from '../wire/reply.ts'
@@ -27,7 +27,7 @@ import { fmtPage, fmtPresentation } from './page.ts'
 const ID: RouteOpts = { classes: { id: 'id' } }
 const PAGE: RouteOpts = { classes: { id: 'id', pageId: 'id' } }
 
-export function slidesRoutes(): KitRoute<GwsState>[] {
+export function slidesRoutes(): KitRoute<C>[] {
   return [
     route(
       'POST',

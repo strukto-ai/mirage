@@ -77,7 +77,7 @@ async def test_read_refills_an_expired_index(monkeypatch):
     await index.invalidate()
     calls = []
 
-    async def fake_fetch_tree(config, owner, repo, ref):
+    async def fake_fetch_tree(config, owner, repo, ref, session=None):
         calls.append(ref)
         return {
             "src":
@@ -86,7 +86,7 @@ async def test_read_refills_an_expired_index(monkeypatch):
             TreeEntry(path="src/main.py", type="blob", sha="bbb", size=3),
         }, False
 
-    async def fake_read_bytes(config, owner, repo, sha):
+    async def fake_read_bytes(config, owner, repo, sha, session=None):
         return b"hi\n"
 
     monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
@@ -107,7 +107,7 @@ async def test_read_does_not_refill_on_a_real_miss(monkeypatch):
     index = _index()
     calls = []
 
-    async def fake_fetch_tree(config, owner, repo, ref):
+    async def fake_fetch_tree(config, owner, repo, ref, session=None):
         calls.append(ref)
         return {}, False
 

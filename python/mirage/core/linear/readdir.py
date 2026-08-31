@@ -36,7 +36,7 @@ TEAM_DIRS = ("members", "issues", "projects", "cycles", "documents")
 
 async def _list_teams_dir(accessor: LinearAccessor,
                           match: ScopeMatch) -> list[tuple[str, IndexEntry]]:
-    teams = await list_teams(accessor.config)
+    teams = await list_teams(accessor.config, session=accessor.pool)
     if accessor.config.team_ids:
         teams = [
             team for team in teams
@@ -101,7 +101,9 @@ async def _list_team(accessor: LinearAccessor, match: ScopeMatch,
 
 async def _list_members(accessor: LinearAccessor, match: ScopeMatch,
                         entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
-    users = await list_team_members(accessor.config, match.slots["team_id"])
+    users = await list_team_members(accessor.config,
+                                    match.slots["team_id"],
+                                    session=accessor.pool)
     entries = []
     for user in users:
         filename = member_filename(user)
@@ -120,7 +122,9 @@ async def _list_members(accessor: LinearAccessor, match: ScopeMatch,
 
 async def _list_issues(accessor: LinearAccessor, match: ScopeMatch,
                        entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
-    issues = await list_team_issues(accessor.config, match.slots["team_id"])
+    issues = await list_team_issues(accessor.config,
+                                    match.slots["team_id"],
+                                    session=accessor.pool)
     entries = []
     for issue in issues:
         dirname = issue_dirname(issue)
@@ -147,7 +151,9 @@ async def _list_issue(accessor: LinearAccessor, match: ScopeMatch,
     # comments.jsonl costs the one bounded comments call, paid only when
     # this directory is entered.
     issue_id = entry.id
-    comments = await list_issue_comments(accessor.config, issue_id)
+    comments = await list_issue_comments(accessor.config,
+                                         issue_id,
+                                         session=accessor.pool)
     rows = [
         normalize_comment(comment,
                           issue_id=issue_id,
@@ -181,8 +187,12 @@ async def _list_issue(accessor: LinearAccessor, match: ScopeMatch,
 async def _list_projects(accessor: LinearAccessor, match: ScopeMatch,
                          entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
     team_id = match.slots["team_id"]
-    projects = await list_team_projects(accessor.config, team_id)
-    team_issues = await list_team_issues(accessor.config, team_id)
+    projects = await list_team_projects(accessor.config,
+                                        team_id,
+                                        session=accessor.pool)
+    team_issues = await list_team_issues(accessor.config,
+                                         team_id,
+                                         session=accessor.pool)
     entries = []
     for project in projects:
         rendered = normalize_project(
@@ -208,7 +218,9 @@ async def _list_projects(accessor: LinearAccessor, match: ScopeMatch,
 async def _list_cycles(accessor: LinearAccessor, match: ScopeMatch,
                        entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
     team_id = match.slots["team_id"]
-    cycles = await list_team_cycles(accessor.config, team_id)
+    cycles = await list_team_cycles(accessor.config,
+                                    team_id,
+                                    session=accessor.pool)
     entries = []
     for cycle in cycles:
         filename = cycle_filename(cycle)
@@ -229,7 +241,8 @@ async def _list_cycles(accessor: LinearAccessor, match: ScopeMatch,
 async def _list_documents(accessor: LinearAccessor, match: ScopeMatch,
                           entry: IndexEntry) -> list[tuple[str, IndexEntry]]:
     documents = await list_team_documents(accessor.config,
-                                          match.slots["team_id"])
+                                          match.slots["team_id"],
+                                          session=accessor.pool)
     entries = []
     for document in documents:
         filename = document_filename(document)

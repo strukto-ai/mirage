@@ -27,8 +27,8 @@ async def read(
         inv: CLIInvocation[GoogleConfig]
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(inv.flags)
-    processed = await get_message_processed(TokenManager(inv.config),
-                                            fl.as_str("id") or "")
+    async with TokenManager(inv.config) as tm:
+        processed = await get_message_processed(tm, fl.as_str("id") or "")
     out = json.dumps(processed, ensure_ascii=False,
                      separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

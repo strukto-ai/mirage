@@ -18,7 +18,8 @@ from typing import Any, cast
 import aiohttp
 from pydantic import SecretStr
 
-from mirage.core.api.client import ApiResponse, api_request, status_error
+from mirage.core.api.client import (ApiResponse, SessionArg, api_request,
+                                    status_error)
 from mirage.core.github.constants import API_BASE, API_VERSION
 from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
@@ -61,13 +62,15 @@ async def github_get(token: SecretStr,
                      params: dict[str, Any] | None = None,
                      *,
                      base_url: str | None = None,
+                     session: SessionArg = None,
                      **kwargs: str) -> dict[str, Any]:
     url = github_url(path, base_url, **kwargs)
     data: dict[str, Any] = await api_request("GET",
                                              url,
                                              error_of=status_error,
                                              headers=github_headers(token),
-                                             params=params)
+                                             params=params,
+                                             session=session)
     return data
 
 
@@ -78,7 +81,8 @@ async def github_request(token: SecretStr,
                          params: dict[str, str] | None = None,
                          *,
                          base_url: str | None = None,
-                         headers: dict[str, str] | None = None) -> "JsonValue":
+                         headers: dict[str, str] | None = None,
+                         session: SessionArg = None) -> "JsonValue":
     """One arbitrary API call, the shape `gh api` needs.
 
     A GET carries its fields in the query string and every other method in
@@ -95,6 +99,7 @@ async def github_request(token: SecretStr,
             an explicit None sends JSON null.
         params (dict[str, str] | None): query parameters.
         base_url (str | None): API base, defaulting to github.com's.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         JsonValue: the decoded body, None for an empty one.
@@ -108,19 +113,20 @@ async def github_request(token: SecretStr,
                                              body,
                                              params,
                                              base_url=base_url,
-                                             headers=headers)
+                                             headers=headers,
+                                             session=session)
     return cast(JsonValue, response.data)
 
 
-async def github_request_response(
-        token: SecretStr,
-        method: str,
-        path: str,
-        body: "JsonValue | _NoBody" = _NO_BODY,
-        params: dict[str, str] | None = None,
-        *,
-        base_url: str | None = None,
-        headers: dict[str, str] | None = None) -> ApiResponse:
+async def github_request_response(token: SecretStr,
+                                  method: str,
+                                  path: str,
+                                  body: "JsonValue | _NoBody" = _NO_BODY,
+                                  params: dict[str, str] | None = None,
+                                  *,
+                                  base_url: str | None = None,
+                                  headers: dict[str, str] | None = None,
+                                  session: SessionArg = None) -> ApiResponse:
     """One GitHub call retaining status and headers for CLI pagination."""
     url = (base_url or API_BASE) + path
     merged = github_headers(token)
@@ -139,7 +145,8 @@ async def github_request_response(
         params=params,
         json_body=None if not present else cast(JsonValue, body),
         json_body_present=present,
-        read="response")
+        read="response",
+        session=session)
     return response
 
 

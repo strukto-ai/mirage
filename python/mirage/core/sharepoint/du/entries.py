@@ -40,5 +40,7 @@ async def entries(
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return [], 0
-    return await du_tree_entries(
-        accessor.config, drive_loc(accessor.config, resolved, path.mount_path))
+    return await du_tree_entries(accessor.config,
+                                 drive_loc(accessor.config, resolved,
+                                           path.mount_path),
+                                 session=accessor.pool)

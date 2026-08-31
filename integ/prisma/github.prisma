@@ -118,24 +118,31 @@ model GithubSubmodule {
 }
 
 model GithubCommit {
-  pk          Int    @id @default(autoincrement())
-  tenant      String
-  repo        String
-  branch      String
+  pk            Int    @id @default(autoincrement())
+  tenant        String
+  repo          String
+  branch        String
   // Derived from the content rather than stored by the fixture, so a mirror of
   // a fixture answers the same sha twice.
-  sha         String
-  message     String
-  authorLogin String
-  date        String
+  sha           String
+  message       String
+  authorLogin   String
+  date          String
   // Paths this commit touched, as a JSON array of strings. The vendor reports
   // them as objects carrying a status; the fixture states the paths and the
   // renderer adds the rest.
-  filesJson   String @default("[]")
+  filesJson     String @default("[]")
   // The staged tree this commit points at, for the git plumbing write path.
   // Empty on a seeded commit, which has no staged tree behind it.
-  treeSha     String @default("")
-  seq         Int
+  treeSha       String @default("")
+  // The git author and committer as `POST /git/commits` supplied them, each a
+  // JSON {name, email, date}, empty when the caller named none. They are stored
+  // rather than derived because a git person is not the `authorLogin` above: an
+  // email is whatever the commit says, not a handle turned into a noreply
+  // address, and a date is the caller's to pin.
+  authorJson    String @default("")
+  committerJson String @default("")
+  seq           Int
 
   repository GithubRepo @relation(fields: [tenant, repo], references: [tenant, fullName])
 

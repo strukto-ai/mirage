@@ -24,7 +24,9 @@ async def rename(accessor: OneDriveAccessor, src: PathSpec,
     _, src_s = split_path(src)
     _, dst_s = split_path(dst)
     config = accessor.config
-    await rename_replace(config, drive_loc(config, src_s),
-                         drive_loc(config, dst_s))
+    await rename_replace(config,
+                         drive_loc(config, src_s),
+                         drive_loc(config, dst_s),
+                         session=accessor.pool)
     await invalidate_subtree(dst)
     await invalidate_subtree(src)

@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
 
-_ACCESSOR = SimpleNamespace(config=None)
+_ACCESSOR = SimpleNamespace(config=None, pool=None)
 
 TOP_ID = "aaaa1111-2222-3333-4444-555566667777"
 
@@ -46,7 +46,7 @@ _TOP_PAGE = {
 }
 
 
-async def _fake_search_pages(config):
+async def _fake_search_pages(config, session=None):
     return [_TOP_PAGE]
 
 

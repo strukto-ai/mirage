@@ -118,7 +118,7 @@ async def _get(accessor: JaegerAccessor,
                                 url,
                                 error_of=_error_of,
                                 params=params,
-                                session=accessor.get_session())
+                                session=accessor.pool)
     if not isinstance(payload, dict):
         raise JaegerApiError("Jaeger response must be a JSON object")
     return payload

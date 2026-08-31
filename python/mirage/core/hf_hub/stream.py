@@ -61,7 +61,10 @@ async def read_stream(
     url = resolve_url(accessor.endpoint, accessor.repo_type, accessor.repo_id,
                       accessor.revision, accessor.repo_path(raw))
     rec = record_stream("read", raw, accessor.RESOURCE_NAME)
-    async for chunk in hub_stream(accessor.token, url, chunk_size):
+    async for chunk in hub_stream(accessor.token,
+                                  url,
+                                  chunk_size,
+                                  session=accessor.pool):
         if rec is not None:
             rec.bytes += len(chunk)
         yield chunk

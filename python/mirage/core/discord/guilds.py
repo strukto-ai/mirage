@@ -15,46 +15,47 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.core.api.client import SessionArg
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.paginate import after_id_pages
 
 
 def list_guilds_stream(
-    config: DiscordConfig,
-    page_size: int = 200,
-) -> AsyncIterator[list[dict[str, Any]]]:
+        config: DiscordConfig,
+        page_size: int = 200,
+        session: SessionArg = None) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming variant of list_guilds.
 
     Args:
         config (DiscordConfig): Discord credentials.
         page_size (int): per-page limit (Discord caps at 200).
+        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: guild dicts per page.
     """
-    return after_id_pages(
-        config,
-        "/users/@me/guilds",
-        base_params={},
-        last_id_fn=lambda g: g["id"],
-        page_size=page_size,
-    )
+    return after_id_pages(config,
+                          "/users/@me/guilds",
+                          base_params={},
+                          last_id_fn=lambda g: g["id"],
+                          page_size=page_size,
+                          session=session)
 
 
-async def list_guilds(
-    config: DiscordConfig,
-    page_size: int = 200,
-) -> list[dict[str, Any]]:
+async def list_guilds(config: DiscordConfig,
+                      page_size: int = 200,
+                      session: SessionArg = None) -> list[dict[str, Any]]:
     """List all guilds the bot is in (paginated).
 
     Args:
         config (DiscordConfig): Discord credentials.
         page_size (int): per-page limit.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: guild dicts with id, name.
     """
     out: list[dict[str, Any]] = []
-    async for page in list_guilds_stream(config, page_size):
+    async for page in list_guilds_stream(config, page_size, session=session):
         out.extend(page)
     return out

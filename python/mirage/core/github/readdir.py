@@ -77,7 +77,7 @@ async def _fallback_readdir(
     if parent_sha is None:
         raise enoent(virtual)
     entries = await fetch_dir_tree(accessor.config, accessor.owner,
-                                   accessor.repo, parent_sha)
+                                   accessor.repo, parent_sha, accessor.pool)
     norm = virtual_key.rstrip("/")
     child_keys: list[str] = []
     dir_entries: list[tuple[str, IndexEntry]] = []
@@ -125,7 +125,8 @@ async def _resolve_dir_sha(
     current_path = stem
     for part in parts:
         entries = await fetch_dir_tree(accessor.config, accessor.owner,
-                                       accessor.repo, current_sha)
+                                       accessor.repo, current_sha,
+                                       accessor.pool)
         found = False
         for entry in entries:
             if entry.path == part:

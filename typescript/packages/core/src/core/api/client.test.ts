@@ -219,6 +219,29 @@ describe('apiRequest', () => {
     ).toBe('https://api.test/monitor/1')
   })
 
+  it('drains the body on read none so the connection is released', async () => {
+    const response = jsonResponse({ ok: true })
+    const drain = vi.spyOn(response, 'arrayBuffer')
+    const fakeFetch: typeof fetch = () => Promise.resolve(response)
+    expect(
+      await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read: 'none' }),
+    ).toBeNull()
+    expect(drain).toHaveBeenCalledTimes(1)
+  })
+
+  it('drains the body on read location while returning the header', async () => {
+    const response = new Response('ignored', {
+      status: 202,
+      headers: { Location: 'https://api.test/monitor/1' },
+    })
+    const drain = vi.spyOn(response, 'arrayBuffer')
+    const fakeFetch: typeof fetch = () => Promise.resolve(response)
+    expect(
+      await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read: 'location' }),
+    ).toBe('https://api.test/monitor/1')
+    expect(drain).toHaveBeenCalledTimes(1)
+  })
+
   it('a raw body is sent as-is', async () => {
     let sentBody: BodyInit | null | undefined
     const fakeFetch: typeof fetch = (_url, init) => {

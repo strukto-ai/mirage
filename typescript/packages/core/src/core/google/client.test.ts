@@ -125,7 +125,7 @@ describe('TokenManager.refreshFn delegation', () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve({ access_token: 'direct-tok', expires_in: 3600 }),
-      text: () => Promise.resolve(''),
+      text: () => Promise.resolve(JSON.stringify({ access_token: 'direct-tok', expires_in: 3600 })),
     } as unknown as Response) as unknown as typeof fetch
     globalThis.fetch = fakeFetch
     const tm = new TokenManager({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' })

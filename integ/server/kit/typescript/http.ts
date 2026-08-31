@@ -20,7 +20,7 @@ import type { MinimalClient } from './db.ts'
 import { FixtureError, KitError, ResetBodyError, TenantError } from './errors.ts'
 import { Router } from './route.ts'
 import type { Ctx } from './route.ts'
-import { DEFAULT_FIXTURE } from './fixture.ts'
+import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT } from './fixture.ts'
 import { applyReset, defaultTenantsOf, parseResetBody, withPathRun } from './reset.ts'
 import { DEFAULT_RUN, RUN_PREFIX, resolveRun, resolveTenant, splitRunPath } from './tenant.ts'
 import type { Headers } from './tenant.ts'
@@ -30,7 +30,10 @@ import type { JsonValue, Reply } from './types.ts'
 export const HEALTH_PATH = '/_kit/health'
 export const RESET_PATH = '/reset'
 
-export function makeRuntime<C extends MinimalClient>(fake: Fake<C>): Runtime<C> {
+export function makeRuntime<C extends MinimalClient>(
+  fake: Fake<C>,
+  fixtureRoot: string = DEFAULT_FIXTURE_ROOT,
+): Runtime<C> {
   const pool = makePool(fake)
   const states = new Map<string, RunState>()
   const state = (run: string): RunState => {
@@ -49,6 +52,7 @@ export function makeRuntime<C extends MinimalClient>(fake: Fake<C>): Runtime<C> 
   return {
     fake,
     pool,
+    fixtureRoot,
     state,
     reset: async (body: JsonValue) => {
       const req = parseResetBody(body, defaultTenantsOf(fake), current)
@@ -57,7 +61,7 @@ export function makeRuntime<C extends MinimalClient>(fake: Fake<C>): Runtime<C> 
       // 400 for an unknown name left `current` pointing at that name, so the
       // next reset that named nothing failed too, and the fake was wedged by a
       // request it had already refused.
-      const out = await applyReset(fake, pool, state, req)
+      const out = await applyReset(fake, pool, state, req, fixtureRoot)
       current = req.fixture
       return out
     },

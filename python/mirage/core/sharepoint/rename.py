@@ -19,6 +19,7 @@ async def rename(accessor: SharePointAccessor, src: PathSpec,
     dst_virt = dst.mount_path if isinstance(dst, PathSpec) else dst
     await rename_replace(accessor.config,
                          drive_loc(accessor.config, src_resolved, src_virt),
-                         drive_loc(accessor.config, dst_resolved, dst_virt))
+                         drive_loc(accessor.config, dst_resolved, dst_virt),
+                         session=accessor.pool)
     await invalidate_subtree(dst)
     await invalidate_subtree(src)

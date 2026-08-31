@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from mirage.core.api.client import SessionArg
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.config import SlackConfig
@@ -27,43 +28,43 @@ def _is_real_user(m: dict[str, Any]) -> bool:
 
 
 async def list_users_stream(
-    config: SlackConfig,
-    limit: int = 200,
-) -> AsyncIterator[list[dict[str, Any]]]:
+        config: SlackConfig,
+        limit: int = 200,
+        session: SessionArg = None) -> AsyncIterator[list[dict[str, Any]]]:
     """Page-streaming user list; yields filtered humans per page.
 
     Args:
         config (SlackConfig): Slack credentials.
         limit (int): max per page.
+        session (SessionArg): pool or live session to ride.
 
     Yields:
         list[dict]: real users in one Slack page (bots, deleted, and
         slackbot are filtered out before yielding).
     """
-    async for page in cursor_pages(
-            config,
-            "users.list",
-            base_params={"limit": limit},
-            items_key="members",
-    ):
+    async for page in cursor_pages(config,
+                                   "users.list",
+                                   base_params={"limit": limit},
+                                   items_key="members",
+                                   session=session):
         yield [m for m in page if _is_real_user(m)]
 
 
-async def list_users(
-    config: SlackConfig,
-    limit: int = 200,
-) -> list[dict[str, Any]]:
+async def list_users(config: SlackConfig,
+                     limit: int = 200,
+                     session: SessionArg = None) -> list[dict[str, Any]]:
     """List workspace users (eager; collects all pages).
 
     Args:
         config (SlackConfig): Slack credentials.
         limit (int): max per page.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: user dicts.
     """
     out: list[dict[str, Any]] = []
-    async for page in list_users_stream(config, limit=limit):
+    async for page in list_users_stream(config, limit=limit, session=session):
         out.extend(page)
     return out
 
@@ -90,39 +91,42 @@ def user_json_bytes(user: dict[str, Any]) -> bytes:
     return compact_json_bytes(user)
 
 
-async def get_user_profile(
-    config: SlackConfig,
-    user_id: str,
-) -> dict[str, Any]:
+async def get_user_profile(config: SlackConfig,
+                           user_id: str,
+                           session: SessionArg = None) -> dict[str, Any]:
     """Get a single user's profile.
 
     Args:
         config (SlackConfig): Slack credentials.
         user_id (str): user ID.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         dict: user info.
     """
-    data = await slack_get(config, "users.info", params={"user": user_id})
+    data = await slack_get(config,
+                           "users.info",
+                           params={"user": user_id},
+                           session=session)
     return data.get("user", {})
 
 
-async def search_users(
-    config: SlackConfig,
-    query: str,
-    limit: int = 200,
-) -> list[dict[str, Any]]:
+async def search_users(config: SlackConfig,
+                       query: str,
+                       limit: int = 200,
+                       session: SessionArg = None) -> list[dict[str, Any]]:
     """Search users by name, real name, or email.
 
     Args:
         config (SlackConfig): Slack credentials.
         query (str): search query.
         limit (int): max per page.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         list[dict]: matching users.
     """
-    all_users = await list_users(config, limit=limit)
+    all_users = await list_users(config, limit=limit, session=session)
     q = query.lower()
     return [
         u for u in all_users

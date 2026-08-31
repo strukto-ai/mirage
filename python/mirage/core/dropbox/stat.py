@@ -95,10 +95,15 @@ async def stat(
                          resource_path=mount_key(parent_virtual, prefix)),
                 index=index,
             )
-        except (FileNotFoundError, DropboxApiError) as exc:
-            # Parent listing failed (missing dir surfaces as a 409 from
-            # the API): fall through to enoent, mirroring the TS stat.
-            logger.debug("stat populate failed for %s: %s", virtual, exc)
+        except FileNotFoundError as exc:
+            # readdir already maps a genuinely missing path to ENOENT, so
+            # catch only that. A non-409 DropboxApiError (a 5xx/429 while
+            # listing the parent) was previously swallowed here and
+            # re-answered as a destructively actionable false ENOENT; it now
+            # surfaces. NotADirectoryError (a path under a file) was never in
+            # this catch and already propagated.
+            logger.debug("stat found no parent listing for %s: %s", virtual,
+                         exc)
         result = await index.get(virtual_key)
         if result.entry is None:
             raise enoent(virtual)

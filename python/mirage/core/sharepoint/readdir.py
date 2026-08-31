@@ -58,4 +58,8 @@ async def readdir(accessor: SharePointAccessor,
 
     return await readdir_items(accessor.config,
                                drive_loc(accessor.config, resolved, stripped),
-                               index, prefix, stripped, virtual_key)
+                               index,
+                               prefix,
+                               stripped,
+                               virtual_key,
+                               session=accessor.pool)

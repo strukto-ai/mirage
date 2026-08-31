@@ -74,6 +74,11 @@ class DropboxResource(BaseResource):
         for op in DROPBOX_VFS_OPS:
             self.register_op(op)
 
+    async def close(self) -> None:
+        """Drain the token manager's connection pool with the resource."""
+        await self._token_manager.close()
+        await super().close()
+
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 

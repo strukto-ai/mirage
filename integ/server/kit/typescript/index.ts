@@ -38,7 +38,7 @@ export {
 } from './errors.ts'
 export {
   DEFAULT_FIXTURE,
-  FIXTURE_ROOT,
+  DEFAULT_FIXTURE_ROOT,
   INTEG_ROOT,
   SCHEMA_ROOT,
   fixturePath,
@@ -47,7 +47,7 @@ export {
 } from './fixture.ts'
 export { HEALTH_PATH, RESET_PATH, createKitServer, makeRuntime, parseBody } from './http.ts'
 export { Minter } from './mint.ts'
-export { checkArgv, parseFixture, parsePort } from './port.ts'
+export { checkArgv, parseFixture, parseFixtureRoot, parseFlagPort, parsePort } from './port.ts'
 export { parseRange, rangeHeaderOf, rangeReply } from './range.ts'
 export type { ByteRange } from './range.ts'
 export { Router, compilePath, route } from './route.ts'
@@ -75,7 +75,7 @@ export type { Headers } from './tenant.ts'
 export { SEQ_FIELD, delegateFor, delegateName, seedFixture } from './seed.ts'
 export type { Dmmf, DmmfField, DmmfModel, SeedOptions } from './seed.ts'
 export { serve, start } from './serve.ts'
-export type { Started } from './serve.ts'
+export type { Arm, Started } from './serve.ts'
 export type {
   Announce,
   JsonValue,

@@ -84,7 +84,7 @@ def _container_entry(name: str, guild_id: str) -> IndexEntry:
 
 
 async def _list_root(accessor: DiscordAccessor, match: ScopeMatch) -> Listed:
-    guilds = await list_guilds(accessor.config)
+    guilds = await list_guilds(accessor.config, session=accessor.pool)
     entries = [guild_entry(g) for g in guilds]
     return [(entry.vfs_name, entry) for entry in entries]
 
@@ -99,14 +99,18 @@ async def _list_guild(accessor: DiscordAccessor, match: ScopeMatch,
 
 async def _list_channels_dir(accessor: DiscordAccessor, match: ScopeMatch,
                              own: IndexEntry) -> Listed:
-    channels = await list_channels(accessor.config, own.id)
+    channels = await list_channels(accessor.config,
+                                   own.id,
+                                   session=accessor.pool)
     entries = [channel_entry(c) for c in channels]
     return [(entry.vfs_name, entry) for entry in entries]
 
 
 async def _list_members_dir(accessor: DiscordAccessor, match: ScopeMatch,
                             own: IndexEntry) -> Listed:
-    members = await list_members(accessor.config, own.id)
+    members = await list_members(accessor.config,
+                                 own.id,
+                                 session=accessor.pool)
     entries = [member_entry(m) for m in members]
     return [(entry.vfs_name, entry) for entry in entries]
 
@@ -137,8 +141,10 @@ async def _day_listing(accessor: DiscordAccessor, channel_id: str,
         date_str (str): the day, ``YYYY-MM-DD``.
     """
     try:
-        messages = await list_messages_for_day(accessor.config, channel_id,
-                                               date_str)
+        messages = await list_messages_for_day(accessor.config,
+                                               channel_id,
+                                               date_str,
+                                               session=accessor.pool)
     except aiohttp.ClientResponseError as e:
         if _is_soft_error(e):
             logger.debug("discord: history denied for %s/%s (%d); empty day",

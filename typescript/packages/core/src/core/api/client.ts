@@ -183,8 +183,18 @@ export async function apiRequest(
     }
     if (response.status >= 400) throw options.errorOf(response, await response.text())
     const read = options.read ?? 'json'
-    if (read === 'none') return null
-    if (read === 'location') return response.headers.get('Location')
+    // The reads that do not consume the body still have to release it, or
+    // Node/undici holds the connection until GC; python's api_request drains
+    // it the same way when its `async with` response context exits.
+    if (read === 'none') {
+      await response.arrayBuffer()
+      return null
+    }
+    if (read === 'location') {
+      const location = response.headers.get('Location')
+      await response.arrayBuffer()
+      return location
+    }
     if (read === 'bytes') {
       const data = new Uint8Array(await response.arrayBuffer())
       return windowOf(data, response.status, options.window)

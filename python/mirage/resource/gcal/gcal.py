@@ -50,6 +50,11 @@ class GCalResource(BaseResource):
         for fn in GCAL_VFS_OPS:
             self.register_op(fn)
 
+    async def close(self) -> None:
+        """Drain the token manager's connection pool with the resource."""
+        await self._token_manager.close()
+        await super().close()
+
     async def resolve_glob(
         self,
         paths: list[PathSpec],

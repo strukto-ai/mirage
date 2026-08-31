@@ -112,13 +112,13 @@ def github_config():
 @pytest.fixture
 def mock_github_api(monkeypatch):
 
-    async def _fetch_default_branch(config, owner, repo):
+    async def _fetch_default_branch(config, owner, repo, session=None):
         return MOCK_DEFAULT_BRANCH
 
-    async def _fetch_tree(config, owner, repo, ref):
+    async def _fetch_tree(config, owner, repo, ref, session=None):
         return dict(MOCK_TREE), False
 
-    async def _read_bytes(config, owner, repo, sha):
+    async def _read_bytes(config, owner, repo, sha, session=None):
         return MOCK_BLOBS[sha]
 
     async def _search_code(config, owner, repo, query, path_filter=None):

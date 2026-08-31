@@ -1,22 +1,9 @@
 {
   "extends": "./tsconfig.json",
-  "include": [
-    "server/kit/**/*.ts",
-    "server/discord/**/*.ts",
-    "server/linear/**/*.ts",
-    "server/trello/**/*.ts",
-    "server/gws/**/*.ts",
-    "server/hf/**/*.ts",
-    "server/hf_hub/**/*.ts",
-    "server/dropbox/**/*.ts",
-    "server/box/**/*.ts",
-    "server/onedrive/**/*.ts",
-    "server/slack/**/*.ts",
-    "server/notion/**/*.ts",
-    "server/mem0/**/*.ts",
-    "server/databricks/**/*.ts",
-    "server/dify/**/*.ts",
-    "server/http/**/*.ts",
-    "server/github/**/*.ts"
-  ]
+  // Every server directory, as a GLOB rather than a list. The list version was
+  // a trap: a new fake's directory was simply absent from it, so the files
+  // typechecked clean by never being looked at, and `tsc -p tsconfig.check.json`
+  // reported success over three fakes it had not read. A plain type error
+  // (calling http.Server's closeAllConnections on a net.Server) shipped that way.
+  "include": ["server/**/*.ts"]
 }

@@ -45,7 +45,7 @@ async def test_list_channels_stream_yields_pages():
     ]
     calls = []
 
-    async def fake_get(_cfg, method, params=None, token=None):
+    async def fake_get(_cfg, method, params=None, token=None, session=None):
         assert method == "conversations.list"
         calls.append(dict(params or {}))
         return pages[len(calls) - 1]

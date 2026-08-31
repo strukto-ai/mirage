@@ -20,19 +20,18 @@ from functools import partial
 from typing import Any, Protocol, TypeVar
 from urllib.parse import quote
 
-import aiohttp
-
 from mirage.accessor.base import Accessor
 from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 ResourceType)
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep)
+from mirage.core.api.client import SessionArg
 from mirage.core.msgraph.client import (GraphError, graph_delete, graph_get,
                                         graph_get_bytes, graph_list,
                                         graph_patch, graph_post,
                                         graph_post_monitor, graph_stream,
-                                        new_session, poll_monitor,
+                                        poll_monitor, session_scope,
                                         upload_chunk)
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.observe.context import (active_recorder, record, record_stream,
@@ -107,8 +106,10 @@ def _virt_spec(loc: DriveLoc) -> PathSpec:
                                   stripped)
 
 
-async def copy_once(config: MsGraphConfig, src: DriveLoc,
-                    dst: DriveLoc) -> tuple[str, str] | None:
+async def copy_once(config: MsGraphConfig,
+                    src: DriveLoc,
+                    dst: DriveLoc,
+                    session: SessionArg = None) -> tuple[str, str] | None:
     """One Graph copy attempt, surfacing a conflict instead of raising.
 
     Graph copies default to ``fail`` on a name conflict and the
@@ -121,6 +122,7 @@ async def copy_once(config: MsGraphConfig, src: DriveLoc,
         config (MsGraphConfig): Graph config.
         src (DriveLoc): source item.
         dst (DriveLoc): destination item.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         tuple[str, str] | None: ``(code, message)`` of a failed copy, or
@@ -131,12 +133,17 @@ async def copy_once(config: MsGraphConfig, src: DriveLoc,
         "parentReference": _parent_reference(src, dst),
     }
     try:
-        monitor = await graph_post_monitor(config, src.item("/copy"), body)
+        monitor = await graph_post_monitor(config,
+                                           src.item("/copy"),
+                                           body,
+                                           session=session)
     except GraphError as exc:
         if exc.status == 409 or exc.code == "nameAlreadyExists":
             return exc.code, str(exc)
         raise
-    result = await poll_monitor(monitor, timeout=config.timeout)
+    result = await poll_monitor(monitor,
+                                timeout=config.timeout,
+                                session=session)
     status = result.get("status")
     if status == "failed":
         err = result.get("error", {}) if isinstance(result, dict) else {}
@@ -148,29 +155,36 @@ async def copy_once(config: MsGraphConfig, src: DriveLoc,
     return None
 
 
-async def copy_tree(config: MsGraphConfig, src: DriveLoc,
-                    dst: DriveLoc) -> None:
-    err = await copy_once(config, src, dst)
+async def copy_tree(config: MsGraphConfig,
+                    src: DriveLoc,
+                    dst: DriveLoc,
+                    session: SessionArg = None) -> None:
+    err = await copy_once(config, src, dst, session=session)
     if err is None:
         await invalidate_after_write(_virt_spec(dst))
         return
     code, message = err
     if code != "nameAlreadyExists":
         raise GraphError(500, code, message)
-    src_item = await graph_get(config, src.item())
-    dst_item = await graph_get(config, dst.item())
+    src_item = await graph_get(config, src.item(), session=session)
+    dst_item = await graph_get(config, dst.item(), session=session)
     if "folder" in src_item and "folder" in dst_item:
         # GNU cp -r merges into an existing directory; Graph never merges
         # folders, so recurse per child instead.
-        children = await graph_list(config, src.item("/children"))
+        children = await graph_list(config,
+                                    src.item("/children"),
+                                    session=session)
         for child in children:
             name = child.get("name", "")
-            await copy_tree(config, src.child(name), dst.child(name))
+            await copy_tree(config,
+                            src.child(name),
+                            dst.child(name),
+                            session=session)
         return
     if "folder" in src_item or "folder" in dst_item:
         raise GraphError(409, code, message)
-    await graph_delete(config, dst.item())
-    err = await copy_once(config, src, dst)
+    await graph_delete(config, dst.item(), session=session)
+    err = await copy_once(config, src, dst, session=session)
     if err is not None:
         raise GraphError(500, err[0], err[1])
     await invalidate_after_write(_virt_spec(dst))
@@ -183,11 +197,13 @@ def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
     return body
 
 
-async def rename_replace(config: MsGraphConfig, src: DriveLoc,
-                         dst: DriveLoc) -> None:
+async def rename_replace(config: MsGraphConfig,
+                         src: DriveLoc,
+                         dst: DriveLoc,
+                         session: SessionArg = None) -> None:
     body = _move_body(src, dst)
     try:
-        await graph_patch(config, src.item(), body)
+        await graph_patch(config, src.item(), body, session=session)
     except GraphError as exc:
         if exc.status != 409 and exc.code != "nameAlreadyExists":
             raise
@@ -196,24 +212,28 @@ async def rename_replace(config: MsGraphConfig, src: DriveLoc,
         # conflicting file (or empty folder) and retry. A non-empty
         # folder conflict keeps the original error, mirroring mv's
         # "Directory not empty".
-        dst_item = await graph_get(config, dst.item())
+        dst_item = await graph_get(config, dst.item(), session=session)
         if "folder" in dst_item:
-            children = await graph_list(config, dst.item("/children"))
+            children = await graph_list(config,
+                                        dst.item("/children"),
+                                        session=session)
             if children:
                 raise
-        await graph_delete(config, dst.item())
-        await graph_patch(config, src.item(), body)
+        await graph_delete(config, dst.item(), session=session)
+        await graph_patch(config, src.item(), body, session=session)
 
 
-async def create_child_folder(config: MsGraphConfig, parent_url: str,
-                              name: str) -> None:
+async def create_child_folder(config: MsGraphConfig,
+                              parent_url: str,
+                              name: str,
+                              session: SessionArg = None) -> None:
     body = {
         "name": name,
         "folder": {},
         "@microsoft.graph.conflictBehavior": "fail",
     }
     try:
-        await graph_post(config, parent_url, body)
+        await graph_post(config, parent_url, body, session=session)
     except GraphError as exc:
         # mkdir is idempotent on object-store-style backends (matches the
         # s3 core); "replace" is unreliable for folders on real Graph, so
@@ -222,21 +242,30 @@ async def create_child_folder(config: MsGraphConfig, parent_url: str,
             raise
 
 
-async def upload_session_write(config: MsGraphConfig, session_url: str,
-                               data: bytes) -> None:
+async def upload_session_write(config: MsGraphConfig,
+                               session_url: str,
+                               data: bytes,
+                               session: SessionArg = None) -> None:
     # createUploadSession defaults to "fail": without replace, overwriting
     # an existing file 409s on the final chunk.
-    session = await graph_post(
-        config, session_url,
+    created = await graph_post(
+        config,
+        session_url,
         {"item": {
             "@microsoft.graph.conflictBehavior": "replace"
-        }})
-    upload_url = session["uploadUrl"]
+        }},
+        session=session)
+    upload_url = created["uploadUrl"]
     total = len(data)
     start = 0
     while start < total:
         chunk = data[start:start + UPLOAD_CHUNK]
-        result = await upload_chunk(config, upload_url, chunk, start, total)
+        result = await upload_chunk(config,
+                                    upload_url,
+                                    chunk,
+                                    start,
+                                    total,
+                                    session=session)
         ranges = result.get("nextExpectedRanges") if result else None
         if ranges:
             start = int(ranges[0].split("-", 1)[0])
@@ -326,10 +355,14 @@ def current_version_id(versions: list[dict[str, Any]]) -> str | None:
     return current.get("id")
 
 
-async def capture_item_metadata(
-        config: MsGraphConfig,
-        loc: DriveLoc) -> tuple[str | None, str | None, str | None]:
-    item = await graph_get(config, loc.item(), params={"$expand": "versions"})
+async def capture_item_metadata(config: MsGraphConfig,
+                                loc: DriveLoc,
+                                session: SessionArg = None
+                                ) -> tuple[str | None, str | None, str | None]:
+    item = await graph_get(config,
+                           loc.item(),
+                           params={"$expand": "versions"},
+                           session=session)
     fingerprint = item.get("cTag")
     revision = current_version_id(item.get("versions", []))
     download_url = item.get("@microsoft.graph.downloadUrl")
@@ -342,7 +375,8 @@ async def read_item(config: MsGraphConfig,
                     label: str,
                     backend: str,
                     offset: int = 0,
-                    size: int | None = None) -> bytes:
+                    size: int | None = None,
+                    session: SessionArg = None) -> bytes:
     pinned = revision_for(virtual)
     window = window_for(offset, size)
     start_ms = int(time.monotonic() * 1000)
@@ -351,20 +385,29 @@ async def read_item(config: MsGraphConfig,
     try:
         if pinned:
             action = f"/versions/{quote(pinned, safe='')}/content"
-            data = await graph_get_bytes(config, loc.item(action), window)
+            data = await graph_get_bytes(config,
+                                         loc.item(action),
+                                         window,
+                                         session=session)
         elif active_recorder() is not None:
             fingerprint, revision, download_url = await capture_item_metadata(
-                config, loc)
+                config, loc, session=session)
             if download_url:
                 data = await graph_get_bytes(config,
                                              download_url,
                                              window,
-                                             auth=False)
+                                             auth=False,
+                                             session=session)
             else:
-                data = await graph_get_bytes(config, loc.item("/content"),
-                                             window)
+                data = await graph_get_bytes(config,
+                                             loc.item("/content"),
+                                             window,
+                                             session=session)
         else:
-            data = await graph_get_bytes(config, loc.item("/content"), window)
+            data = await graph_get_bytes(config,
+                                         loc.item("/content"),
+                                         window,
+                                         session=session)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)
@@ -384,7 +427,8 @@ async def stream_item(config: MsGraphConfig,
                       virtual: str,
                       label: str,
                       backend: str,
-                      chunk_size: int = 8192) -> AsyncIterator[bytes]:
+                      chunk_size: int = 8192,
+                      session: SessionArg = None) -> AsyncIterator[bytes]:
     pinned = revision_for(virtual)
     rec = record_stream("read", label, backend)
     url = loc.item("/content")
@@ -396,11 +440,17 @@ async def stream_item(config: MsGraphConfig,
                 rec.revision = pinned
         elif rec is not None:
             (rec.fingerprint, rec.revision,
-             download_url) = await capture_item_metadata(config, loc)
+             download_url) = await capture_item_metadata(config,
+                                                         loc,
+                                                         session=session)
             if download_url:
                 url = download_url
                 auth = False
-        async for chunk in graph_stream(config, url, chunk_size, auth=auth):
+        async for chunk in graph_stream(config,
+                                        url,
+                                        chunk_size,
+                                        auth=auth,
+                                        session=session):
             if rec is not None:
                 rec.bytes += len(chunk)
             yield chunk
@@ -413,7 +463,7 @@ async def stream_item(config: MsGraphConfig,
 async def iter_tree(
     config: MsGraphConfig,
     loc: DriveLoc,
-    session: aiohttp.ClientSession | None = None,
+    session: SessionArg = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
     children = await graph_list(config, loc.item("/children"), session=session)
     for child in children:
@@ -426,18 +476,21 @@ async def iter_tree(
                 yield entry
 
 
-async def du_tree_total(config: MsGraphConfig, loc: DriveLoc) -> int:
+async def du_tree_total(config: MsGraphConfig,
+                        loc: DriveLoc,
+                        session: SessionArg = None) -> int:
     total = 0
-    async with new_session(config) as session:
-        async for _rel, item, is_dir in iter_tree(config, loc,
-                                                  session=session):
+    async with session_scope(config, session) as sess:
+        async for _rel, item, is_dir in iter_tree(config, loc, session=sess):
             if not is_dir:
                 total += item.get("size", 0)
     return total
 
 
-async def du_tree_entries(config: MsGraphConfig,
-                          loc: DriveLoc) -> tuple[list[tuple[str, int]], int]:
+async def du_tree_entries(
+        config: MsGraphConfig,
+        loc: DriveLoc,
+        session: SessionArg = None) -> tuple[list[tuple[str, int]], int]:
     """Per-file sizes under a drive item plus their total.
 
     Paths are mount-relative and leaf files only; the caller lifts them
@@ -446,11 +499,12 @@ async def du_tree_entries(config: MsGraphConfig,
     Args:
         config (MsGraphConfig): Graph credentials and endpoint.
         loc (DriveLoc): the drive item to walk.
+        session (SessionArg): pool or live session to ride.
     """
     results: list[tuple[str, int]] = []
     total = 0
-    async with new_session(config) as session:
-        async for rel, item, is_dir in iter_tree(config, loc, session=session):
+    async with session_scope(config, session) as sess:
+        async for rel, item, is_dir in iter_tree(config, loc, session=sess):
             if is_dir:
                 continue
             size = item.get("size", 0)
@@ -479,6 +533,7 @@ async def find_items(
     tree: PredNode | None = None,
     depth_offset: int = 0,
     emit_start: bool = True,
+    session: SessionArg = None,
 ) -> list[str]:
     """Walk a drive subtree and return the matching mount-relative keys.
 
@@ -508,6 +563,7 @@ async def find_items(
         tree (PredNode | None): pre-built predicate tree.
         depth_offset (int): added to every reported depth.
         emit_start (bool): whether to emit the start path itself.
+        session (SessionArg): pool or live session to ride.
     """
     base = loc.virt
     results: list[str] = []
@@ -520,8 +576,8 @@ async def find_items(
                                                     name_exclude=name_exclude,
                                                     or_names=or_names,
                                                     empty=empty)
-    async with new_session(config) as session:
-        async for rel, item, is_dir in iter_tree(config, loc, session=session):
+    async with session_scope(config, session) as sess:
+        async for rel, item, is_dir in iter_tree(config, loc, session=sess):
             relative = rel[len(base):].lstrip("/") if base else rel
             rel_depth = relative.count("/") + 1
             depth = rel_depth + depth_offset
@@ -568,7 +624,9 @@ async def find_items(
     return sorted(results)
 
 
-async def drive_root_empty(config: MsGraphConfig, loc: DriveLoc) -> bool:
+async def drive_root_empty(config: MsGraphConfig,
+                           loc: DriveLoc,
+                           session: SessionArg = None) -> bool:
     """Whether a drive item has no children, in one request.
 
     One bounded page, not ``graph_list``: the answer is a yes/no, and
@@ -582,47 +640,67 @@ async def drive_root_empty(config: MsGraphConfig, loc: DriveLoc) -> bool:
     Args:
         config (MsGraphConfig): Graph config.
         loc (DriveLoc): the folder to probe.
+        session (SessionArg): pool or live session to ride.
     """
-    page = await graph_get(config, loc.item("/children"), {
-        "$top": 1,
-        "$select": "id"
-    })
+    page = await graph_get(config,
+                           loc.item("/children"), {
+                               "$top": 1,
+                               "$select": "id"
+                           },
+                           session=session)
     children = page.get("value")
     return not (isinstance(children, list) and children)
 
 
-async def _item_or_none(config: MsGraphConfig, loc: DriveLoc,
-                        path: str) -> dict[str, Any] | None:
+async def _item_or_none(config: MsGraphConfig,
+                        loc: DriveLoc,
+                        path: str,
+                        session: SessionArg = None) -> dict[str, Any] | None:
     """One drive item addressed off ``loc``, or None when Graph has none.
 
     Args:
         config (MsGraphConfig): Graph config.
         loc (DriveLoc): any loc on the drive being probed.
         path (str): drive path of the item to fetch.
+        session (SessionArg): pool or live session to ride.
     """
     try:
-        return await graph_get(config, loc.item_at(path.strip("/")))
+        return await graph_get(config,
+                               loc.item_at(path.strip("/")),
+                               session=session)
     except GraphError as exc:
         if exc.status == 404:
             return None
         raise
 
 
-async def _is_file(config: MsGraphConfig, loc: DriveLoc, path: str) -> bool:
-    item = await _item_or_none(config, loc, path)
+async def _is_file(config: MsGraphConfig,
+                   loc: DriveLoc,
+                   path: str,
+                   session: SessionArg = None) -> bool:
+    item = await _item_or_none(config, loc, path, session=session)
     return item is not None and "folder" not in item
 
 
-async def _is_dir(config: MsGraphConfig, loc: DriveLoc, path: str) -> bool:
-    item = await _item_or_none(config, loc, path)
+async def _is_dir(config: MsGraphConfig,
+                  loc: DriveLoc,
+                  path: str,
+                  session: SessionArg = None) -> bool:
+    item = await _item_or_none(config, loc, path, session=session)
     return item is not None and "folder" in item
 
 
-async def readdir_items(config: MsGraphConfig, loc: DriveLoc,
-                        index: IndexCacheStore, prefix: str, stripped: str,
-                        virtual_key: str) -> list[str]:
+async def readdir_items(config: MsGraphConfig,
+                        loc: DriveLoc,
+                        index: IndexCacheStore,
+                        prefix: str,
+                        stripped: str,
+                        virtual_key: str,
+                        session: SessionArg = None) -> list[str]:
     try:
-        children = await graph_list(config, loc.item("/children"))
+        children = await graph_list(config,
+                                    loc.item("/children"),
+                                    session=session)
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -630,9 +708,10 @@ async def readdir_items(config: MsGraphConfig, loc: DriveLoc,
         # under a file alike, so the errno comes from walking the
         # ancestors: one item request per component, on this failure
         # path only.
-        raise await listing_error(virtual_key, loc.path,
-                                  partial(_is_file, config, loc),
-                                  partial(_is_dir, config, loc)) from exc
+        raise await listing_error(
+            virtual_key, loc.path,
+            partial(_is_file, config, loc, session=session),
+            partial(_is_dir, config, loc, session=session)) from exc
     base = "/" + stripped if stripped else ""
     names: list[str] = []
     index_entries: list[tuple[str, IndexEntry]] = []
@@ -662,8 +741,12 @@ async def readdir_items(config: MsGraphConfig, loc: DriveLoc,
     return virtual_entries
 
 
-async def stat_item(config: MsGraphConfig, loc: DriveLoc, virtual: str,
-                    virtual_key: str, index: IndexCacheStore) -> FileStat:
+async def stat_item(config: MsGraphConfig,
+                    loc: DriveLoc,
+                    virtual: str,
+                    virtual_key: str,
+                    index: IndexCacheStore,
+                    session: SessionArg = None) -> FileStat:
     lookup = await index.get(virtual_key)
     if lookup.entry is not None:
         entry = lookup.entry
@@ -684,7 +767,7 @@ async def stat_item(config: MsGraphConfig, loc: DriveLoc, virtual: str,
     if parent_listing.entries is not None:
         raise enoent(virtual)
     try:
-        item = await graph_get(config, loc.item())
+        item = await graph_get(config, loc.item(), session=session)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)

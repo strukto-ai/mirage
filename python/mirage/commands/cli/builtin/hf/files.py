@@ -37,12 +37,14 @@ async def delete_cmd(
     repo_id, *patterns = list(inv.texts)
     files = [p for p in patterns if not p.endswith("/")]
     folders = [p.rstrip("/") for p in patterns if p.endswith("/")]
-    accessor = hub_for(inv, repo_id, repo_type_of(fl), fl.as_str("revision"))
-    await commit(accessor,
-                 deletions=files,
-                 folders=folders,
-                 message=fl.as_str("commit_message") or DEFAULT_COMMIT_MESSAGE,
-                 description=fl.as_str("commit_description") or "",
-                 create_pr=bool(fl.as_bool("create_pr")))
-    body = "".join(f"Deleted {p} from {repo_id}\n" for p in patterns)
-    return text_out(body, mutated=True)
+    async with hub_for(inv, repo_id, repo_type_of(fl),
+                       fl.as_str("revision")) as accessor:
+        await commit(accessor,
+                     deletions=files,
+                     folders=folders,
+                     message=fl.as_str("commit_message")
+                     or DEFAULT_COMMIT_MESSAGE,
+                     description=fl.as_str("commit_description") or "",
+                     create_pr=bool(fl.as_bool("create_pr")))
+        body = "".join(f"Deleted {p} from {repo_id}\n" for p in patterns)
+        return text_out(body, mutated=True)

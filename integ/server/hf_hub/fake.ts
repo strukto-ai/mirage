@@ -13,15 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { Prisma, PrismaClient } from '../../generated/hf_hub/index.js'
 import type { Dmmf, Fake } from '../kit/typescript/index.ts'
 import { config, type C } from './config.ts'
 import { hfHubRoutes } from './routes.ts'
 import { gitOid } from './wire.ts'
-
-const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'fixtures')
 
 /** Every file under `dir`, as paths relative to it, sorted. */
 function filesUnder(dir: string, prefix = ''): string[] {
@@ -62,7 +59,7 @@ export const hfHubFake: Fake<C> = {
   // corpus under integ/fixtures/files/ is shared with every other target:
   // inlining it would make a second copy that drifts, and the bytes have to
   // be real for `wc -c` and a ranged read to mean anything.
-  afterSeed: async (db, tenant) => {
+  afterSeed: async (db, tenant, _counts, _extras, fixtureRoot) => {
     let seq = 0
     for (const repo of await db.hfRepo.findMany({ where: { tenant } })) {
       if (repo.sourceDir === '') continue
@@ -71,7 +68,7 @@ export const hfHubFake: Fake<C> = {
       if (head === null) continue
       const commit = await db.hfCommit.findFirst({ where: { tenant, repo: key, sha: head.sha } })
       const when = commit?.createdAt ?? repo.createdAt
-      const root = join(FIXTURE_DIR, repo.sourceDir)
+      const root = join(fixtureRoot, repo.sourceDir)
       for (const path of filesUnder(root)) {
         const content = readFileSync(join(root, path))
         await db.hfBlob.create({

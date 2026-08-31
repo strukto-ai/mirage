@@ -22,8 +22,13 @@ async def read_stream(
     if resolved.drive_id is None or resolved.item_path is None:
         raise enoent(virtual)
     loc = drive_loc(accessor.config, resolved, stripped)
-    async for chunk in stream_item(accessor.config, loc, virtual, stripped,
-                                   "sharepoint", chunk_size):
+    async for chunk in stream_item(accessor.config,
+                                   loc,
+                                   virtual,
+                                   stripped,
+                                   "sharepoint",
+                                   chunk_size,
+                                   session=accessor.pool):
         yield chunk
 
 

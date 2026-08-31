@@ -41,10 +41,13 @@ def test_uuid7_timestamp_never_runs_ahead_of_the_clock():
     # Minting faster than one id per millisecond must not borrow from
     # the future: these ids are database keys, and a timestamp ahead of
     # the clock is wrong data that never corrects itself.
+    # The clock is read after the mint, never before: a bound taken
+    # first is stale by the millisecond that ticks over between the two
+    # lines, which fails an id that was honest when it was stamped.
     for _ in range(5000):
         uuid7()
-    after_ms = time.time_ns() // 1_000_000
     embedded_ms = uuid.UUID(uuid7()).int >> 80
+    after_ms = time.time_ns() // 1_000_000
     assert embedded_ms <= after_ms
 
 

@@ -100,7 +100,6 @@ import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/types'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'
-import { ImapFlow } from 'imapflow'
 import { Double, MongoClient } from 'mongodb'
 import pg from 'pg'
 import {
@@ -110,6 +109,8 @@ import {
 import { integRoot, walkFiles } from './harness.ts'
 import type { ExecWorkspace, Mount, Target } from './harness.ts'
 import { start as startKitFake } from '../../server/kit/typescript/index.ts'
+import { buildRfc822 } from '../../server/mail/rfc822.ts'
+import type { MailEntry } from '../../server/mail/rfc822.ts'
 
 export interface Open {
   ws: ExecWorkspace
@@ -503,82 +504,57 @@ async function openNextcloud(target: Target): Promise<Open> {
 
 const EMAIL_IMAP_PORT = Number(process.env.EMAIL_IMAP_PORT ?? '3143')
 const EMAIL_SMTP_PORT = Number(process.env.EMAIL_SMTP_PORT ?? '3025')
-const EMAIL_API_PORT = Number(process.env.EMAIL_API_PORT ?? '8080')
 const EMAIL_USERNAME = 'integ@example.com'
-const EMAIL_PASSWORD = 'secret'
-// Two more GreenMail accounts, provisioned through the REST API after
-// every reset (the reset restores the startup user list). The mount
-// keeps the primary account; the renamed CLI installs h1 and h2 hold
-// these two, so the mount and the CLIs never share an account.
+// Two more accounts. The mount keeps the primary; the renamed CLI installs h1
+// and h2 hold these two, so the mount and the CLIs never share an account.
 const EMAIL_USERNAME_ALPHA = 'alpha@example.com'
-const EMAIL_PASSWORD_ALPHA = 'secret1'
 const EMAIL_USERNAME_BETA = 'beta@example.com'
-const EMAIL_PASSWORD_BETA = 'secret2'
-const EMAIL_SENT_FOLDER = 'Sent'
+// The tenants the fake seeds, which are the local parts of the three addresses
+// above. One served domain, so the local part is the whole identity.
+const EMAIL_ACCOUNTS = ['integ', 'alpha', 'beta']
+// The directory the shared mail manifest lives in, and the one the fake expands
+// from. A target names `email/v1`; the fake takes fixture NAMES, never paths,
+// so the prefix is checked off here rather than passed through.
+const EMAIL_MANIFEST_DIR = 'email'
+
+function emailManifestName(mail: string): string {
+  const prefix = `${EMAIL_MANIFEST_DIR}/`
+  if (!mail.startsWith(prefix)) {
+    throw new Error(`email target mail=${mail} must live under ${prefix}`)
+  }
+  return mail.slice(prefix.length)
+}
 // Doubles as the workspace id on the fake notion server.
 const NOTION_TOKEN = 'integ-test'
 
-// The GreenMail server is external and shared; its REST API purges every
-// mailbox between runs. Seeding appends RFC822 payloads over IMAP so folder
-// UIDs are the append order (1, 2, ...) and date dirs come from the
-// manifest Date headers.
+// The mail fake is external and shared, and it is not GreenMail: the IMAP
+// PASSWORD is the run, so two runs log in at the same address with the same
+// username and see different mail. GreenMail cannot do that at all -- one
+// account is one mailbox for every caller of the process -- which is why a run
+// had to purge the whole server between targets and why the two hosts could
+// never share one.
+//
+// Seeding is server-side. The fake reads the same shared manifest this adapter
+// used to walk, so there is no IMAP APPEND loop here and no account
+// provisioning: one POST states the accounts and the scenario.
 async function openEmail(target: Target): Promise<Open> {
   const host = process.env.EMAIL_HOST
   if (host === undefined || host === '') throw new Error('email target requires EMAIL_HOST')
-  const reset = await fetch(`http://${host}:${String(EMAIL_API_PORT)}/api/service/reset`, {
-    method: 'POST',
-  })
-  if (!reset.ok) throw new Error(`greenmail reset failed: ${String(reset.status)}`)
-  // The reset restores the startup user list, dropping any
-  // API-provisioned account, so the CLI accounts are created after
-  // every reset rather than once.
-  const extras = [
-    [EMAIL_USERNAME_ALPHA, EMAIL_PASSWORD_ALPHA],
-    [EMAIL_USERNAME_BETA, EMAIL_PASSWORD_BETA],
-  ]
-  for (const [user, password] of extras) {
-    const provision = await fetch(`http://${host}:${String(EMAIL_API_PORT)}/api/user`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: user, login: user, password }),
-    })
-    if (!provision.ok) throw new Error(`greenmail user create failed: ${String(provision.status)}`)
-  }
+  const base = process.env.MAIL_URL
+  if (base === undefined || base === '') throw new Error('email target requires MAIL_URL')
+  // The run id, which every account authenticates with. Harness-side on both
+  // arms and in no task file, exactly as the mount password was.
+  const password = runId()
+  const body: Record<string, unknown> = { tenants: EMAIL_ACCOUNTS }
   if (target.mail !== undefined) {
-    const manifest = join(integRoot(), 'fixtures', `${target.mail}.json`)
-    const entries = JSON.parse(readFileSync(manifest, 'utf8')) as MailEntry[]
-    for (const [user, pass] of [[EMAIL_USERNAME, EMAIL_PASSWORD], ...extras]) {
-      const rows = entries.filter((e) => (e.account ?? EMAIL_USERNAME) === user)
-      const imap = new ImapFlow({
-        host,
-        port: EMAIL_IMAP_PORT,
-        secure: false,
-        auth: { user, pass },
-        logger: false,
-      })
-      await imap.connect()
-      // GreenMail hands a new account nothing but an INBOX, where every
-      // real provider ships a sent mailbox already made. himalaya files a
-      // copy of each sent message into one, so create it here rather than
-      // leave the copy with nowhere to land.
-      await imap.mailboxCreate(EMAIL_SENT_FOLDER)
-      const known = new Set(['INBOX', EMAIL_SENT_FOLDER])
-      for (const entry of rows) {
-        const folder = entry.folder ?? 'INBOX'
-        if (!known.has(folder)) {
-          await imap.mailboxCreate(folder)
-          known.add(folder)
-        }
-        await imap.append(
-          folder,
-          buildRfc822(entry),
-          entry.seen === true ? ['\\Seen'] : [],
-          new Date(entry.date),
-        )
-      }
-      await imap.logout()
-    }
+    body.extras = { manifest: emailManifestName(target.mail) }
   }
+  const reset = await fetch(`${base.replace(/\/$/, '')}/_run/${password}/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!reset.ok) throw new Error(`mail reset failed: ${String(reset.status)}`)
   const mounts: Record<string, EmailResource | RAMResource> = {}
   for (const m of target.mounts) {
     if (m.resource === 'ram') {
@@ -591,7 +567,7 @@ async function openEmail(target: Target): Promise<Open> {
       smtpHost: host,
       smtpPort: EMAIL_SMTP_PORT,
       username: EMAIL_USERNAME,
-      password: EMAIL_PASSWORD,
+      password,
       useSsl: false,
       maxMessages: 200,
     })
@@ -610,11 +586,11 @@ async function openEmail(target: Target): Promise<Open> {
     smtp_host: host,
     smtp_port: EMAIL_SMTP_PORT,
     username: EMAIL_USERNAME,
-    password: EMAIL_PASSWORD,
+    password,
     use_ssl: false,
   }
-  const alpha = { ...integ, username: EMAIL_USERNAME_ALPHA, password: EMAIL_PASSWORD_ALPHA }
-  const beta = { ...integ, username: EMAIL_USERNAME_BETA, password: EMAIL_PASSWORD_BETA }
+  const alpha = { ...integ, username: EMAIL_USERNAME_ALPHA }
+  const beta = { ...integ, username: EMAIL_USERNAME_BETA }
   const installs: Record<string, Record<string, unknown>> = {
     himalaya: integ,
     h1: alpha,
@@ -1525,57 +1501,6 @@ function gwsManifest<T>(name: string | undefined): T | undefined {
   return JSON.parse(readFileSync(join(integRoot(), 'fixtures', `${name}.json`), 'utf8')) as T
 }
 
-interface MailEntry {
-  account?: string
-  from: string
-  to: string
-  cc?: string[]
-  subject: string
-  date: string
-  body: string
-  labels?: string[]
-  folder?: string
-  seen?: boolean
-  attachments?: { filename: string; content: string }[]
-}
-
-function mimeTextPart(content: string, filename?: string): string {
-  const lines = [
-    'Content-Type: text/plain; charset="utf-8"',
-    'MIME-Version: 1.0',
-    'Content-Transfer-Encoding: base64',
-  ]
-  if (filename !== undefined) {
-    lines.push(`Content-Disposition: attachment; filename="${filename}"`)
-  }
-  return `${lines.join('\r\n')}\r\n\r\n${Buffer.from(content, 'utf-8').toString('base64')}`
-}
-
-// Builds the same constrained RFC822 shape python's email.mime emits: one
-// base64 text/plain body plus base64 text attachments under multipart/mixed.
-function buildRfc822(entry: MailEntry): string {
-  const headers = [`From: ${entry.from}`, `To: ${entry.to}`]
-  if (entry.cc !== undefined && entry.cc.length > 0) headers.push(`Cc: ${entry.cc.join(', ')}`)
-  headers.push(`Subject: ${entry.subject}`, `Date: ${entry.date}`)
-  const attachments = entry.attachments ?? []
-  if (attachments.length === 0) {
-    return `${headers.join('\r\n')}\r\n${mimeTextPart(entry.body)}`
-  }
-  const boundary = 'integ-mime-boundary'
-  const parts = [
-    mimeTextPart(entry.body),
-    ...attachments.map((att) => mimeTextPart(att.content, att.filename)),
-  ]
-  return [
-    ...headers,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    'MIME-Version: 1.0',
-    '',
-    ...parts.map((part) => `--${boundary}\r\n${part}`),
-    `--${boundary}--`,
-  ].join('\r\n')
-}
-
 // Messages are API objects: each manifest entry becomes an RFC822 payload
 // inserted through messages.insert with internalDateSource=dateHeader, so
 // date dirs come from the manifest, not the server clock.
@@ -1636,13 +1561,17 @@ async function openGws(target: Target): Promise<Open> {
   // filenames, so those targets pin the server clock. Secondary calendars
   // and seeded form responses ride the same call rather than being
   // inserted: a calendar's accessRole and a form response are both states
-  // no API call can produce.
+  // no API call can produce. They go under `extras`, the kit's channel for
+  // a seed a fixture row cannot state; the base world (system labels, the
+  // primary calendar) is fixture rows now that gws seeds through the kit.
   const calendar = gwsManifest<CalendarFixture>(target.calendar)
   const forms = gwsManifest<SeedForm[]>(target.forms)
   const reset: Record<string, unknown> = {}
+  const extras: Record<string, unknown> = {}
   if (target.epoch !== undefined) reset.epoch = target.epoch
-  if (calendar?.calendars !== undefined) reset.calendars = calendar.calendars
-  if (forms !== undefined) reset.forms = forms
+  if (calendar?.calendars !== undefined) extras.calendars = calendar.calendars
+  if (forms !== undefined) extras.forms = forms
+  if (Object.keys(extras).length > 0) reset.extras = extras
   await gwsJson(`${base}/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -16,6 +16,7 @@ import type { JsonValue, KitRoute, Reply } from '../../kit/typescript/index.ts'
 import { route } from '../wire/route.ts'
 import type { RouteOpts } from '../wire/route.ts'
 import { parseMultipartRelated } from '../gmail/mime.ts'
+import type { C } from '../store/client.ts'
 import type { GwsState } from '../store/state.ts'
 import type { DriveItem, Permission, Revision } from '../store/types.ts'
 import { asObj, asStr, asStrArr, asBool } from '../wire/json.ts'
@@ -227,7 +228,7 @@ function findPermission(ctx: GwsCtx): [DriveItem, Permission] | Reply {
   return [item, permission]
 }
 
-export function driveRoutes(): KitRoute<GwsState>[] {
+export function driveRoutes(): KitRoute<C>[] {
   return [
     route('POST', '/upload/drive/v3/files', uploadCreate, { write: true }),
     route('PATCH', '/upload/drive/v3/files/:id', uploadPatch, { write: true }),
@@ -259,15 +260,23 @@ export function driveRoutes(): KitRoute<GwsState>[] {
     // files.generateIds and files.emptyTrash sit at fixed names under /files,
     // so they must be declared before the files/{fileId} routes below, which
     // would otherwise read them as ids and 404.
-    route('GET', '/drive/v3/files/generateIds', (ctx) => {
-      const count = Number.parseInt(ctx.query.get('count') ?? String(DEFAULT_GENERATE_COUNT), 10)
-      const total = Number.isNaN(count) || count < 1 ? DEFAULT_GENERATE_COUNT : count
-      return ok({
-        kind: 'drive#generatedIds',
-        space: ctx.query.get('space') ?? 'drive',
-        ids: Array.from({ length: total }, () => ctx.db.nextId('f')),
-      })
-    }),
+    // A GET that WRITES: the whole point of generateIds is that the ids it
+    // hands out are never handed out again, so it advances the mint counter
+    // and the advance has to reach the store like any other.
+    route(
+      'GET',
+      '/drive/v3/files/generateIds',
+      (ctx) => {
+        const count = Number.parseInt(ctx.query.get('count') ?? String(DEFAULT_GENERATE_COUNT), 10)
+        const total = Number.isNaN(count) || count < 1 ? DEFAULT_GENERATE_COUNT : count
+        return ok({
+          kind: 'drive#generatedIds',
+          space: ctx.query.get('space') ?? 'drive',
+          ids: Array.from({ length: total }, () => ctx.db.nextId('f')),
+        })
+      },
+      { write: true },
+    ),
     route(
       'DELETE',
       '/drive/v3/files/trash',

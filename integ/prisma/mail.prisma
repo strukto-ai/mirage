@@ -1,0 +1,83 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+
+// Schema for the mail fake (integ/server/mail/), which serves IMAP and SMTP
+// rather than HTTP and so uses the kit for storage, tenanting and /reset only.
+//
+// Two tables, and the second is not optional. A mailbox cannot be derived from
+// the messages in it: CREATE makes an EMPTY one that LIST must then show, and
+// the seeder makes `Sent` on every account precisely because it is empty until
+// something is filed there. `uidNext` and `uidValidity` live on the mailbox for
+// the same reason -- they are per-mailbox facts that survive the mailbox going
+// empty, and a client that sees a UIDVALIDITY change is entitled to throw its
+// whole cache away.
+//
+// `tenant` is the IMAP USERNAME and the run is the IMAP PASSWORD, which is the
+// one arrangement that lets two runs log in at the same address as the same
+// account without sharing a mailbox. It works because the password is
+// harness-side on both arms and appears in no task text: the agent never sees
+// it, so nothing it does can depend on which run it is in. GreenMail cannot do
+// this at all -- with auth disabled, two runs logging in as the same user get
+// one mailbox, and with auth enabled the credential is the account.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/mail"
+}
+
+datasource db {
+  provider     = "sqlite"
+  url          = env("INTEG_DB_URL")
+  relationMode = "prisma"
+}
+
+model MailMailbox {
+  tenant String
+  name   String
+  // The UID the next APPEND takes, which RFC 3501 requires to be
+  // monotonic per mailbox and never reused, even after an EXPUNGE.
+  uidNext Int @default(1)
+  // Bumped only when a mailbox is deleted and remade under the same name,
+  // which is the case the constant this used to be got wrong: a client
+  // caching by (mailbox, uid) would have served the old mailbox's messages.
+  uidValidity Int @default(1)
+  seq         Int @default(0)
+
+  @@id([tenant, name])
+}
+
+model MailMessage {
+  tenant  String
+  mailbox String
+  uid     Int
+  // The server's received-at stamp, milliseconds since the epoch. It is NOT
+  // the Date: header: a date search (SINCE/BEFORE) reads this one and a sent
+  // search (SENTSINCE/SENTBEFORE) reads the header, and himalaya's query
+  // language compiles to the SENT* forms specifically so that imported mail
+  // lands on the day it was written rather than the day it arrived.
+  internalDate BigInt
+  // Space-joined, backslash included ("\\Seen \\Answered"). A list column
+  // would be a second table for a field that is never queried on its own:
+  // SEARCH walks the messages it already loaded.
+  flags String @default("")
+  // The whole RFC822 message, which is the only thing any consumer here ever
+  // asks for. All three clients fetch BODY.PEEK[] or RFC822 and parse the MIME
+  // themselves, so this fake stores bytes and never a parsed structure.
+  source Bytes
+  seq    Int   @default(0)
+
+  @@id([tenant, mailbox, uid])
+  @@index([tenant, mailbox])
+}

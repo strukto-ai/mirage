@@ -21,9 +21,11 @@ import {
   commitJson,
   commitSha,
   pathsOf,
+  personJson,
   treeSha,
   writtenCommitJson,
 } from './wire.ts'
+import type { GitPerson } from './wire.ts'
 import {
   branchFor,
   branchNames,
@@ -109,6 +111,10 @@ export async function recordCommit(
   paths: string[],
   branch: string,
   tree = '',
+  people: { author: GitPerson | null; committer: GitPerson | null } = {
+    author: null,
+    committer: null,
+  },
 ): Promise<{ sha: string; message: string }> {
   const seq = await nextCommitSeq(db, tenant, repo.fullName, branch)
   const sha = commitSha(`${repo.fullName}@${branch}:${String(seq)}:${message}`)
@@ -123,6 +129,8 @@ export async function recordCommit(
       date: '',
       filesJson: JSON.stringify(paths),
       treeSha: tree,
+      authorJson: personJson(people.author),
+      committerJson: personJson(people.committer),
       seq,
     },
   })

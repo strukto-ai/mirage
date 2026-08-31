@@ -29,7 +29,8 @@ vi.mock('../stat.ts', async () => {
 
 import { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { DropboxTokenManager } from '../client.ts'
+import { enoent } from '../../../utils/errors.ts'
+import { DropboxApiError, type DropboxTokenManager } from '../client.ts'
 import { size, entries } from './index.ts'
 import * as readdirMod from '../readdir.ts'
 import * as statMod from '../stat.ts'
@@ -43,7 +44,7 @@ function makeAccessor(): DropboxAccessor {
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
     const children = tree[spec.virtual]
-    if (children === undefined) return Promise.reject(new Error(`ENOENT: ${spec.virtual}`))
+    if (children === undefined) return Promise.reject(enoent(spec.virtual))
     return Promise.resolve(children)
   })
 }
@@ -51,7 +52,7 @@ function mockTree(tree: Record<string, string[]>): void {
 function mockStats(stats: Record<string, { size?: number }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
     const entry = stats[spec.virtual]
-    if (entry === undefined) return Promise.reject(new Error(`ENOENT: ${spec.virtual}`))
+    if (entry === undefined) return Promise.reject(enoent(spec.virtual))
     const name = spec.virtual.split('/').pop() ?? ''
     return Promise.resolve(
       new FileStat({
@@ -138,5 +139,13 @@ describe('dropbox core du', () => {
     mockTree(TREE)
     mockStats({})
     expect(await size(makeAccessor(), ROOT)).toBe(0)
+  })
+
+  it('propagates a 5xx instead of under-counting the total', async () => {
+    // A server error is not absence: swallowing it (the old bare catch)
+    // silently reported a wrong total. Only ENOENT counts as zero.
+    mockTree(TREE)
+    vi.mocked(statMod.stat).mockRejectedValue(new DropboxApiError('boom', 500))
+    await expect(size(makeAccessor(), ROOT)).rejects.toMatchObject({ status: 500 })
   })
 })

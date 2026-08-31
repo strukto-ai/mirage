@@ -29,8 +29,10 @@ async def test_send_message_posts_content():
                new_callable=AsyncMock,
                return_value={"id": "M1"}) as post:
         await send_message(CONFIG, "C1", "hello")
-    post.assert_awaited_once_with(CONFIG, "/channels/C1/messages",
-                                  {"content": "hello"})
+    post.assert_awaited_once_with(CONFIG,
+                                  "/channels/C1/messages",
+                                  {"content": "hello"},
+                                  session=None)
 
 
 @pytest.mark.asyncio
@@ -39,12 +41,14 @@ async def test_send_message_with_reference():
                new_callable=AsyncMock,
                return_value={"id": "M2"}) as post:
         await send_message(CONFIG, "C1", "re", "M1")
-    post.assert_awaited_once_with(CONFIG, "/channels/C1/messages", {
-        "content": "re",
-        "message_reference": {
-            "message_id": "M1"
-        },
-    })
+    post.assert_awaited_once_with(CONFIG,
+                                  "/channels/C1/messages", {
+                                      "content": "re",
+                                      "message_reference": {
+                                          "message_id": "M1"
+                                      },
+                                  },
+                                  session=None)
 
 
 @pytest.mark.asyncio
@@ -53,8 +57,10 @@ async def test_edit_message_patches_content():
                new_callable=AsyncMock,
                return_value={"id": "M1"}) as patch_fn:
         await edit_message(CONFIG, "C1", "M1", "edited")
-    patch_fn.assert_awaited_once_with(CONFIG, "/channels/C1/messages/M1",
-                                      {"content": "edited"})
+    patch_fn.assert_awaited_once_with(CONFIG,
+                                      "/channels/C1/messages/M1",
+                                      {"content": "edited"},
+                                      session=None)
 
 
 @pytest.mark.asyncio
@@ -62,7 +68,9 @@ async def test_delete_message_deletes():
     with patch("mirage.core.discord.post.discord_delete",
                new_callable=AsyncMock) as delete_fn:
         await delete_message(CONFIG, "C1", "M1")
-    delete_fn.assert_awaited_once_with(CONFIG, "/channels/C1/messages/M1")
+    delete_fn.assert_awaited_once_with(CONFIG,
+                                       "/channels/C1/messages/M1",
+                                       session=None)
 
 
 @pytest.mark.asyncio

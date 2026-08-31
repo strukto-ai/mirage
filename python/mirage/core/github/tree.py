@@ -20,6 +20,7 @@ from typing import Any
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
+from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.repo import ensure_ref
@@ -58,12 +59,14 @@ async def fetch_tree(
     owner: str,
     repo: str,
     ref: str,
+    session: SessionArg = None,
 ) -> tuple[dict[str, TreeEntry], bool]:
     data = await github_get(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{ref}",
         params={"recursive": "1"},
         base_url=config.base_url,
+        session=session,
         owner=owner,
         repo=repo,
         ref=ref,
@@ -76,6 +79,7 @@ async def fetch_dir_tree(
     owner: str,
     repo: str,
     tree_sha: str,
+    session: SessionArg = None,
 ) -> list[TreeEntry]:
     """Fetch a single directory's tree (non-recursive).
 
@@ -85,6 +89,7 @@ async def fetch_dir_tree(
         config.token,
         "/repos/{owner}/{repo}/git/trees/{tree_sha}",
         base_url=config.base_url,
+        session=session,
         owner=owner,
         repo=repo,
         tree_sha=tree_sha,
@@ -204,7 +209,7 @@ async def refill_index(
         return False
     ref = await ensure_ref(accessor)
     tree, truncated = await fetch_tree(accessor.config, accessor.owner,
-                                       accessor.repo, ref)
+                                       accessor.repo, ref, accessor.pool)
     accessor.truncated = truncated
     accessor.tree = tree
     accessor.tree_loaded = True
@@ -305,7 +310,7 @@ async def ensure_tree(
                 return
         ref = await ensure_ref(accessor)
         tree, truncated = await fetch_tree(accessor.config, accessor.owner,
-                                           accessor.repo, ref)
+                                           accessor.repo, ref, accessor.pool)
         accessor.truncated = truncated
         accessor.tree = tree
         accessor.tree_loaded = True

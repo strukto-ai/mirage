@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.dropbox.client import DropboxTokenManager
+from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.du import size
 from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
@@ -61,6 +61,10 @@ async def _fake_list(_tm, path):
     return _TREE[path]
 
 
+async def _rpc_500(_tm, _endpoint, _body):
+    raise DropboxApiError("boom", 500)
+
+
 @pytest.fixture
 def accessor():
     config = DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
@@ -90,3 +94,15 @@ async def test_size_missing_path_is_zero(accessor, index):
             PathSpec(resource_path="ghost", virtual="/ghost", directory="/"),
             index)
     assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_size_propagates_server_error(accessor, index):
+    # A 5xx is not absence: du must surface it, not silently under-count
+    # (mirrors du/walk.py's `except FileNotFoundError`).
+    with patch("mirage.core.dropbox.api.dropbox_rpc", new=_rpc_500):
+        with pytest.raises(DropboxApiError):
+            await size(
+                accessor,
+                PathSpec(resource_path="data", virtual="/data", directory="/"),
+                index)

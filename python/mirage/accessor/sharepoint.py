@@ -1,6 +1,7 @@
+import aiohttp
 from pydantic import field_validator
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.utils import key_prefix as kp
 
@@ -20,7 +21,8 @@ class SharePointConfig(MsGraphConfig):
         return normalized or None
 
 
-class SharePointAccessor(Accessor):
+class SharePointAccessor(SessionAccessor):
 
     def __init__(self, config: SharePointConfig) -> None:
+        super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
         self.config = config

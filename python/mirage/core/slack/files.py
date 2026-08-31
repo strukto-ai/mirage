@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.core.api.client import api_request, status_error
+from mirage.core.api.client import SessionArg, api_request, status_error
 from mirage.core.slack.config import SlackConfig
 from mirage.resource.secrets import reveal_secret
 from mirage.utils.naming import fit_id_name
@@ -45,7 +45,8 @@ def file_blob_name(file_meta: dict[str, Any]) -> str:
 async def download_file(config: SlackConfig,
                         url: str,
                         offset: int = 0,
-                        size: int | None = None) -> bytes:
+                        size: int | None = None,
+                        session: SessionArg = None) -> bytes:
     """Download a Slack-hosted file blob, optionally only a byte range.
 
     Takes the window rather than a prepared header so the answer can be
@@ -58,6 +59,7 @@ async def download_file(config: SlackConfig,
         url (str): Slack file URL (typically url_private_download).
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
+        session (SessionArg): pool or live session to ride.
 
     Returns:
         bytes: raw file content.
@@ -68,5 +70,6 @@ async def download_file(config: SlackConfig,
                                     error_of=status_error,
                                     headers=headers,
                                     read="bytes",
-                                    window=window_for(offset, size))
+                                    window=window_for(offset, size),
+                                    session=session)
     return data

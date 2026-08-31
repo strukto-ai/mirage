@@ -16,8 +16,10 @@ async def _create_dir(accessor: SharePointAccessor, drive_id: str,
                    drive_id,
                    "/" + parent if parent else "/",
                    action="/children")
-    await create_child_folder(accessor.config, url,
-                              posixpath.basename(stripped))
+    await create_child_folder(accessor.config,
+                              url,
+                              posixpath.basename(stripped),
+                              session=accessor.pool)
 
 
 async def mkdir(accessor: SharePointAccessor,

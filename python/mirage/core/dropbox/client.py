@@ -118,7 +118,8 @@ async def dropbox_rpc(
                                         error_of=partial(_rpc_error,
                                                          endpoint=endpoint),
                                         headers=await dropbox_auth_headers(tm),
-                                        json_body=body)
+                                        json_body=body,
+                                        session=tm.pool)
     return data
 
 
@@ -142,7 +143,8 @@ async def dropbox_upload(tm: DropboxTokenManager, path: str,
                       error_of=partial(_upload_error, path=path),
                       headers=headers,
                       data=data,
-                      read="none")
+                      read="none",
+                      session=tm.pool)
 
 
 def _download_error(resp: aiohttp.ClientResponse, text: str, *,
@@ -170,7 +172,8 @@ async def dropbox_download(tm: DropboxTokenManager,
                                                      path=path),
                                     headers=headers,
                                     read="bytes",
-                                    window=window)
+                                    window=window,
+                                    session=tm.pool)
     return data
 
 
@@ -182,12 +185,11 @@ async def dropbox_download_stream(
     headers = await dropbox_auth_headers(tm)
     headers["Dropbox-API-Arg"] = json.dumps({"path": path})
     url = f"{tm.content_base}/files/download"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers) as resp:
-            if resp.status >= 400:
-                text = await resp.text()
-                raise DropboxApiError(
-                    f"Dropbox download {path} → {resp.status} {text}",
-                    resp.status)
-            async for chunk in resp.content.iter_chunked(chunk_size):
-                yield chunk
+    # The manager's shared pool, for the reason box_get_stream states.
+    async with tm.session().post(url, headers=headers) as resp:
+        if resp.status >= 400:
+            text = await resp.text()
+            raise DropboxApiError(
+                f"Dropbox download {path} → {resp.status} {text}", resp.status)
+        async for chunk in resp.content.iter_chunked(chunk_size):
+            yield chunk

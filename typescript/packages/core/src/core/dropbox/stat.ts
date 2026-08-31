@@ -20,7 +20,7 @@ import { DropboxApiError } from './client.ts'
 import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 import { readdir as coreReaddir } from './readdir.ts'
-import { enoent } from '../../utils/errors.ts'
+import { enoent, isEnoent } from '../../utils/errors.ts'
 import { guessType } from '../../utils/filetype.ts'
 
 function statFromEntry(entry: DropboxEntry): FileStat {
@@ -88,8 +88,12 @@ export async function stat(
         }),
         index,
       )
-    } catch {
-      // parent listing failed — fall through
+    } catch (err) {
+      // readdir already maps a genuinely missing path to ENOENT; a listing
+      // that fails any other way — ENOTDIR under a file, or a 5xx/429 from
+      // the API — is not absence and must surface, never read back as a
+      // (destructively actionable) false ENOENT.
+      if (!isEnoent(err)) throw err
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {

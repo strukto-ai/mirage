@@ -33,7 +33,8 @@ async def _read_workspace_json(accessor: TrelloAccessor, match: ScopeMatch,
                                path: PathSpec,
                                index: IndexCacheStore) -> bytes:
     workspace_id = match.slots["workspace_id"]
-    for workspace in await list_workspaces(accessor.config):
+    for workspace in await list_workspaces(accessor.config,
+                                           session=accessor.pool):
         if workspace.get("id") == workspace_id:
             return to_json_bytes(normalize_workspace(workspace))
     raise enoent(path.virtual)
@@ -41,7 +42,9 @@ async def _read_workspace_json(accessor: TrelloAccessor, match: ScopeMatch,
 
 async def _read_board_json(accessor: TrelloAccessor, match: ScopeMatch,
                            path: PathSpec, index: IndexCacheStore) -> bytes:
-    board = await get_board(accessor.config, match.slots["board_id"])
+    board = await get_board(accessor.config,
+                            match.slots["board_id"],
+                            session=accessor.pool)
     return to_json_bytes(normalize_board(board))
 
 
@@ -49,7 +52,8 @@ async def _read_member(accessor: TrelloAccessor, match: ScopeMatch,
                        path: PathSpec, index: IndexCacheStore) -> bytes:
     member_id = match.slots["member_id"]
     members = await list_board_members(accessor.config,
-                                       match.slots["board_id"])
+                                       match.slots["board_id"],
+                                       session=accessor.pool)
     for member in members:
         if member.get("id") == member_id:
             return to_json_bytes(normalize_member(member))
@@ -59,7 +63,9 @@ async def _read_member(accessor: TrelloAccessor, match: ScopeMatch,
 async def _read_label(accessor: TrelloAccessor, match: ScopeMatch,
                       path: PathSpec, index: IndexCacheStore) -> bytes:
     label_id = match.slots["label_id"]
-    labels = await list_board_labels(accessor.config, match.slots["board_id"])
+    labels = await list_board_labels(accessor.config,
+                                     match.slots["board_id"],
+                                     session=accessor.pool)
     for label in labels:
         if label.get("id") == label_id:
             return to_json_bytes(normalize_label(label))
@@ -69,7 +75,9 @@ async def _read_label(accessor: TrelloAccessor, match: ScopeMatch,
 async def _read_list_json(accessor: TrelloAccessor, match: ScopeMatch,
                           path: PathSpec, index: IndexCacheStore) -> bytes:
     list_id = match.slots["list_id"]
-    lists = await list_board_lists(accessor.config, match.slots["board_id"])
+    lists = await list_board_lists(accessor.config,
+                                   match.slots["board_id"],
+                                   session=accessor.pool)
     for lst in lists:
         if lst.get("id") == list_id:
             return to_json_bytes(normalize_list(lst))
@@ -78,14 +86,18 @@ async def _read_list_json(accessor: TrelloAccessor, match: ScopeMatch,
 
 async def _read_card_json(accessor: TrelloAccessor, match: ScopeMatch,
                           path: PathSpec, index: IndexCacheStore) -> bytes:
-    card = await get_card(accessor.config, match.slots["card_id"])
+    card = await get_card(accessor.config,
+                          match.slots["card_id"],
+                          session=accessor.pool)
     return to_json_bytes(normalize_card(card))
 
 
 async def _read_comments(accessor: TrelloAccessor, match: ScopeMatch,
                          path: PathSpec, index: IndexCacheStore) -> bytes:
     card_id = match.slots["card_id"]
-    comments = await list_card_comments(accessor.config, card_id)
+    comments = await list_card_comments(accessor.config,
+                                        card_id,
+                                        session=accessor.pool)
     rows = [
         normalize_comment(comment, card_id=card_id) for comment in comments
     ]

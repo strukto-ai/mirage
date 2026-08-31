@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import mirage.core.msgraph.drive_ops as drive_ops
+from mirage.core.api.client import SessionPool
 from mirage.core.sharepoint import find as find_mod
 from mirage.core.sharepoint.resolve import ResolvedPath
 from mirage.types import PathSpec
@@ -27,15 +28,6 @@ _TREE = [
 ]
 
 
-class _FakeSession:
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-
 async def _fake_iter_tree(config, loc, session=None):
     for rel, item, is_dir in _TREE:
         yield rel, item, is_dir
@@ -49,8 +41,6 @@ async def _fake_resolve(accessor, path):
 def _patched(monkeypatch):
     monkeypatch.setattr(find_mod, "resolve", _fake_resolve)
     monkeypatch.setattr(drive_ops, "iter_tree", _fake_iter_tree)
-    monkeypatch.setattr(drive_ops, "new_session",
-                        lambda config: _FakeSession())
 
 
 def _spec() -> PathSpec:
@@ -61,7 +51,7 @@ def _spec() -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_find_emits_mount_root(_patched):
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _spec())
     assert out == [
         "/reports", "/reports/a.txt", "/reports/sub", "/reports/sub/b.txt"
@@ -70,21 +60,21 @@ async def test_find_emits_mount_root(_patched):
 
 @pytest.mark.asyncio
 async def test_find_name_matches_mount_root_start_path(_patched):
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _spec(), name="reports")
     assert out == ["/reports"]
 
 
 @pytest.mark.asyncio
 async def test_find_type_dir_includes_root(_patched):
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _spec(), type="d")
     assert out == ["/reports", "/reports/sub"]
 
 
 @pytest.mark.asyncio
 async def test_find_maxdepth_one(_patched):
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _spec(), maxdepth=1)
     assert out == ["/reports", "/reports/a.txt", "/reports/sub"]
 
@@ -113,8 +103,6 @@ async def _fake_lib_iter_tree(config, loc, session=None):
 @pytest.fixture
 def _unscoped(monkeypatch):
     monkeypatch.setattr(drive_ops, "iter_tree", _fake_lib_iter_tree)
-    monkeypatch.setattr(drive_ops, "new_session",
-                        lambda config: _FakeSession())
     monkeypatch.setattr(find_mod, "site_entries", _fake_site_entries)
     monkeypatch.setattr(find_mod, "drive_entries", _fake_drive_entries)
     monkeypatch.setattr(find_mod, "drive_root_empty", _fake_drive_root_empty)
@@ -147,7 +135,7 @@ async def test_find_unscoped_root_walks_sites_and_libraries(
         _unscoped, monkeypatch):
     monkeypatch.setattr(find_mod, "resolve",
                         lambda accessor, path: _resolved("root", None))
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _root_spec())
     assert out == [
         "/",
@@ -163,7 +151,7 @@ async def test_find_unscoped_root_maxdepth_stops_at_sites(
         _unscoped, monkeypatch):
     monkeypatch.setattr(find_mod, "resolve",
                         lambda accessor, path: _resolved("root", None))
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _root_spec(), maxdepth=1)
     assert out == ["/", "/Team"]
 
@@ -172,7 +160,7 @@ async def test_find_unscoped_root_maxdepth_stops_at_sites(
 async def test_find_unscoped_site_walks_libraries(_unscoped, monkeypatch):
     monkeypatch.setattr(find_mod, "resolve",
                         lambda accessor, path: _resolved("site", "s"))
-    acc = SimpleNamespace(config=None)
+    acc = SimpleNamespace(config=None, pool=SessionPool())
     out = await find_mod.find(acc, _site_spec(), type="f")
     assert out == ["/Team/Documents/a.txt"]
 

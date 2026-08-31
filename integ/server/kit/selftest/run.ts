@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { dirname, join, resolve } from 'node:path'
@@ -745,6 +747,33 @@ async function main(): Promise<void> {
       JSON.stringify(rowsOf(report.json, 'x')),
     )
 
+    // The epoch is an input to the seed, so it is part of the template key.
+    // Without it the SECOND epoch is served the FIRST one's rows: the template
+    // is cached under (fixture, tenants, extras) and a seed that stamped a
+    // timestamp stamped the first caller's clock into every later run.
+    const stampOf = async (run: string, epoch: string): Promise<string> => {
+      await call(fake, '/reset', {
+        method: 'POST',
+        runInPath: run,
+        body: { tenants: ['stamped'], epoch },
+      })
+      const cards = await call(fake, '/boards/brd_1/cards', { runInPath: run, tenant: 'stamped' })
+      const body = cards.json as Record<string, JsonValue> | null
+      const rows = Array.isArray(body?.cards) ? body.cards : []
+      const found = rows.find((r) => (r as Record<string, JsonValue>).id === 'crd_epoch')
+      return String((found as Record<string, JsonValue> | undefined)?.title ?? 'missing')
+    }
+    const stampA = await stampOf('ep1', '2026-01-01T00:00:00Z')
+    const stampB = await stampOf('ep2', '2031-07-04T00:00:00Z')
+    const stampC = await stampOf('ep3', '2026-01-01T00:00:00Z')
+    check('a seed reads the reset epoch', stampA === '2026-01-01T00:00:00Z', stampA)
+    check(
+      'a second epoch does not reuse the first template',
+      stampB === '2031-07-04T00:00:00Z',
+      stampB,
+    )
+    check('and the same epoch does reuse it', stampC === stampA, `${stampC} vs ${stampA}`)
+
     process.stdout.write('\n19. a seed that fails leaves nothing behind\n')
     const boom = await call(fake, '/reset', {
       method: 'POST',
@@ -842,6 +871,58 @@ async function main(): Promise<void> {
       )
     } finally {
       lazy.child.kill('SIGTERM')
+    }
+
+    // 20. The fixture root is a LAUNCH argument, and moving it moves the whole
+    // tree the fake reads: a harness pointing a fake at its own fixtures used
+    // to bind-mount files into the checkout one at a time, and then whole
+    // directories once fakes began seeding from `sourceDir`. What a REQUEST may
+    // ask for is unchanged, which is the half that has to be re-proved: a
+    // pathed name is still refused, now against the moved root.
+    process.stdout.write('\n20. --fixture-root moves the tree without opening the name\n')
+    const rootDir = mkdtempSync(join(tmpdir(), 'mirage-fixture-root-'))
+    mkdirSync(join(rootDir, 'selftest'), { recursive: true })
+    writeFileSync(
+      join(rootDir, 'selftest', 'v1.json'),
+      JSON.stringify({
+        boards: [
+          { id: 'brd_root', name: 'Rooted', cards: [{ id: 'crd_root', title: 'from-the-root' }] },
+        ],
+      }),
+    )
+    const rooted = await launch({}, ['--fixture-root', rootDir])
+    try {
+      const seeded = await call(rooted, '/reset', { method: 'POST', body: { fixture: 'v1' } })
+      check('a reset under a moved root is 200', seeded.status === 200, JSON.stringify(seeded.json))
+      eq(
+        'and it seeded the fixture from THERE, not from the checkout',
+        titles((await call(rooted, '/boards/brd_root/cards')).json),
+        ['from-the-root'],
+      )
+      // The checkout's own v1 has brd_1 with three cards; if the root had
+      // merged rather than moved, this would answer those three. The fake
+      // answers an unknown board with an empty list rather than a 404, so the
+      // emptiness is what says the board was never seeded.
+      eq(
+        'and the checkout fixture is not reachable from there',
+        titles((await call(rooted, '/boards/brd_1/cards')).json),
+        [],
+      )
+      // The hole #937 closed stays closed. `alt.json` exists in the CHECKOUT's
+      // selftest directory and not under the moved root, so a name that walks
+      // out of the moved root would find it -- and is refused before it can.
+      const escape = await call(rooted, '/reset', {
+        method: 'POST',
+        body: { fixture: `../../${'fixtures'}/selftest/alt` },
+      })
+      check(
+        'a pathed name is still 400 under a moved root',
+        escape.status === 400,
+        JSON.stringify(escape.json),
+      )
+    } finally {
+      rooted.child.kill('SIGTERM')
+      rmSync(rootDir, { recursive: true, force: true })
     }
 
     process.stdout.write(`\nselftest: ${String(checks)} checks passed\n`)

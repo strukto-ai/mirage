@@ -4,11 +4,17 @@ description: "Act on GitHub in the official CLI's vocabulary, alongside a github
 icon: github
 ---
 
-Act on GitHub in the official [CLI](https://cli.github.com)'s vocabulary.
-A repository is a tree, so mirage already reads one as files: the
+Mirage's built-in `gh` implementation uses the vocabulary of the official
+[`cli/cli`](https://github.com/cli/cli) project. A repository is a tree, so
+mirage already reads one as files: the
 [`github` mount](/typescript/setup/github) is the read half, and `ls`,
 `cat` and `grep` are how an agent explores it. `gh` is the write half,
 plus the account-level operations a filesystem has no shape for.
+
+**Licenses:** The upstream `cli/cli` project uses the
+[MIT License](https://github.com/cli/cli/blob/trunk/LICENSE); Mirage's
+independent implementation uses
+[Apache-2.0](https://github.com/strukto-ai/mirage/blob/main/LICENSE).
 
 ## Install
 

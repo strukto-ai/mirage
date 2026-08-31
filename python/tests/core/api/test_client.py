@@ -19,8 +19,9 @@ import pytest
 from aioresponses import aioresponses
 from yarl import URL
 
-from mirage.core.api.client import (NO_RETRY, RetryPolicy, _body_delay,
-                                    api_request, header_delay, status_error)
+from mirage.core.api.client import (NO_RETRY, RetryPolicy, SessionPool,
+                                    _body_delay, api_request, header_delay,
+                                    resolve_session, status_error)
 from mirage.utils.ranges import ByteWindow
 
 TARGET = "https://api.test/v1/thing"
@@ -361,3 +362,74 @@ async def test_transport_retry_covers_timeouts():
         m.get(TARGET, exception=asyncio.TimeoutError())
         with pytest.raises(asyncio.TimeoutError):
             await api_request("GET", TARGET, error_of=_error_of)
+
+
+@pytest.mark.asyncio
+async def test_a_pool_is_one_session_reused_and_recreated_after_close():
+    pool = SessionPool()
+    first = pool.get()
+    assert pool.get() is first
+    await pool.close()
+    assert first.closed
+    second = pool.get()
+    assert second is not first
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_the_pool_replaces_a_session_from_a_dead_loop():
+    pool = SessionPool()
+    first = pool.get()
+    dead = asyncio.new_event_loop()
+    dead.close()
+    pool._loop = dead
+    second = pool.get()
+    assert second is not first
+    assert pool.get() is second
+    await first.close()
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_materializes_a_pool_without_owning_it():
+    pool = SessionPool()
+    sess, own = resolve_session(pool)
+    assert sess is pool.get()
+    assert own is False
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_borrows_a_live_session():
+    async with aiohttp.ClientSession() as session:
+        sess, own = resolve_session(session)
+        assert sess is session
+        assert own is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_owns_one_when_absent():
+    sess, own = resolve_session(None)
+    assert own is True
+    assert not sess.closed
+    await sess.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pool_rides_api_request_and_stays_open():
+    pool = SessionPool()
+    with aioresponses() as m:
+        m.get(TARGET, payload={"n": 1})
+        m.get(TARGET, payload={"n": 2})
+        first = await api_request("GET",
+                                  TARGET,
+                                  error_of=_error_of,
+                                  session=pool)
+        second = await api_request("GET",
+                                   TARGET,
+                                   error_of=_error_of,
+                                   session=pool)
+    assert first == {"n": 1}
+    assert second == {"n": 2}
+    assert not pool.get().closed
+    await pool.close()

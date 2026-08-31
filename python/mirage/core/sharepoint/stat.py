@@ -34,4 +34,7 @@ async def stat(accessor: SharePointAccessor,
     virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
     return await stat_item(accessor.config,
                            drive_loc(accessor.config, resolved, stripped),
-                           virtual, virtual_key, index)
+                           virtual,
+                           virtual_key,
+                           index,
+                           session=accessor.pool)

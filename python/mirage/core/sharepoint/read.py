@@ -23,4 +23,5 @@ async def read_bytes(accessor: SharePointAccessor,
                            stripped,
                            "sharepoint",
                            offset=offset,
-                           size=size)
+                           size=size,
+                           session=accessor.pool)

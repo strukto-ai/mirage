@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.core.linear.config import LinearConfig
 
 
-class LinearAccessor(Accessor):
+class LinearAccessor(SessionAccessor):
 
     def __init__(self, config: LinearConfig) -> None:
+        super().__init__()
         self.config = config
