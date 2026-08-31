@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import {
+  RECORDED_BIND_TIMEOUT_MS,
   activeRecords,
   record,
   revisionFor,
@@ -288,5 +289,91 @@ describe('recording on the fallback storage', () => {
     })
     await expect(done).rejects.toThrow('boom')
     expect(records.map((r) => r.path)).toEqual(['/partial'])
+  })
+})
+
+describe('the queue is bounded, so re-entry degrades instead of hanging', () => {
+  it('a frame opened from inside the one ahead binds once the bound lapses', async () => {
+    // Reentrancy and concurrency are indistinguishable at call time on
+    // this storage, so the queue does not try to tell them apart: it
+    // waits, and gives up waiting. Without the bound this is a promise
+    // cycle -- the nested frame waits for the outer frame's tail, which
+    // cannot settle until the nested one returns -- and the whole run
+    // hangs forever.
+    vi.useFakeTimers()
+    try {
+      let nested!: RecordedRun<string>
+      const outer = runRecorded(async () => {
+        // The nested call has to land after an await to be queued at
+        // all: a synchronous one runs before `runRecorded` has even
+        // published this frame's tail.
+        await Promise.resolve()
+        nested = runRecorded(() => {
+          record('read', '/nested', 'test', 1, performance.now(), { revision: 'rev-n' })
+          return Promise.resolve('inner')
+        })
+        const inner = await nested.done
+        record('read', '/outer', 'test', 1, performance.now(), { revision: 'rev-o' })
+        return inner
+      })
+      await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
+      expect(await outer.done).toBe('inner')
+      // Both reads completed, and each still reads its own marker off
+      // its own path: the bound costs the wait, not the identity.
+      expect(readIdentity(nested.records, '/nested')?.revision).toBe('rev-n')
+      expect(readIdentity(outer.records, '/outer')?.revision).toBe('rev-o')
+      expect(readIdentity(nested.records, '/outer')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a frame opened from inside a queued frame binds too', async () => {
+    // The other reentrant shape, and the worse one: the frame ahead has
+    // already settled, so the re-entrant call waits on the tail of the
+    // frame it is running inside. Unbounded, this wedged every later
+    // frame in the process, not just this run.
+    vi.useFakeTimers()
+    try {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const ahead = runRecorded(() => held)
+      const behind = runRecorded(async () => {
+        const nested = runRecorded(() => Promise.resolve('inner'))
+        return await nested.done
+      })
+      release()
+      await ahead.done
+      await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
+      expect(await behind.done).toBe('inner')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a frame the queue releases normally never waits out the bound', async () => {
+    // The bound must not become the ordinary cost of queueing: a second
+    // caller is released by the frame ahead settling, so with the
+    // timers frozen it still completes.
+    vi.useFakeTimers()
+    try {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const first = runRecorded(() => held)
+      const second = runRecorded(() => {
+        record('read', '/second', 'test', 1, performance.now(), { revision: 'rev-2' })
+        return Promise.resolve('B')
+      })
+      release()
+      await first.done
+      expect(await second.done).toBe('B')
+      expect(second.records.map((r) => r.path)).toEqual(['/second'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

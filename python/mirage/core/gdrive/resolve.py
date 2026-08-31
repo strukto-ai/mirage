@@ -143,6 +143,44 @@ def drive_target_name(basename: str, node: DriveNode) -> str:
     return basename
 
 
+def duplicate_rank(modified_time: str, item_id: str) -> tuple[str, str]:
+    """Selection rank among Drive siblings that share one vfs name.
+
+    Drive allows duplicate names in a folder, so a vfs path can name
+    more than one item and something has to choose. **Newest
+    ``modifiedTime`` wins, ties broken by the greater id**, and the rule
+    is written here once because two paths reach the same file: the
+    direct query in :func:`resolve_segment` (which ``live_identity`` and
+    every mutation go through) and the listing that warms the index
+    (which every read goes through). Ordering them differently made
+    ``live_identity(path)`` name a different item than the read of that
+    same path, which a read-check-write caller sees as a conflict with
+    no writer.
+
+    Both halves are compared as strings: Drive stamps ``modifiedTime``
+    RFC3339 with a fixed ``Z`` offset, so lexical order is chronological
+    order, and the id is a deterministic tiebreak rather than a
+    server-order accident.
+
+    Args:
+        modified_time (str): the item's ``modifiedTime``.
+        item_id (str): the item's Drive id.
+    """
+    return (modified_time, item_id)
+
+
+def pick_duplicate(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """The one Drive item a name resolves to, by :func:`duplicate_rank`.
+
+    Args:
+        items (list[dict[str, Any]]): candidates sharing one name; must
+            not be empty.
+    """
+    return max(
+        items,
+        key=lambda f: duplicate_rank(f.get("modifiedTime", ""), f["id"]))
+
+
 def node_from_item(item: dict[str, Any], drive_id: str | None) -> DriveNode:
     return DriveNode(
         id=item["id"],
@@ -176,7 +214,10 @@ async def resolve_segment(
                                    name=name,
                                    mime_type=mime)
         if matches:
-            return node_from_item(matches[0], drive_id)
+            # Not matches[0]: the server's own order is only a proxy for
+            # the rule, and the listing that warms the index cannot read
+            # it at all. See duplicate_rank.
+            return node_from_item(pick_duplicate(matches), drive_id)
     if at_root:
         # Shared Drive enumeration is best-effort, mirroring readdir: a
         # missing scope must not break resolution of My Drive paths.

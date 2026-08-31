@@ -18,7 +18,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
-import { rootContext } from './resolve.ts'
+import { duplicateRank, ranksAbove, rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { enotdir } from '../../utils/errors.ts'
@@ -32,6 +32,41 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const SHEET_MIME = 'application/vnd.google-apps.spreadsheet'
 const SLIDE_MIME = 'application/vnd.google-apps.presentation'
+
+interface DirRow {
+  name: string
+  entry: IndexEntry
+  isDir: boolean
+}
+
+/**
+ * Keep one row per rendered vfs name, the one the resolver picks.
+ *
+ * Drive allows two siblings to share a name; a vfs path names exactly
+ * one file, so the listing has to choose, and it chooses by
+ * {@link duplicateRank} — the same rule `resolveKey` applies. It used to
+ * choose by accident and in the opposite direction: the index stores one
+ * entry per path, so writing every row left whichever the server listed
+ * *last* (its oldest, under `modifiedTime desc`) while the resolver
+ * answered with the first. Listing both also printed a row no path could
+ * reach. Mirrors python's `collapse_duplicates`.
+ */
+export function collapseDuplicates(rows: readonly DirRow[]): DirRow[] {
+  const best = new Map<string, DirRow>()
+  for (const row of rows) {
+    const current = best.get(row.name)
+    if (
+      current === undefined ||
+      ranksAbove(
+        duplicateRank(row.entry.remoteTime, row.entry.id),
+        duplicateRank(current.entry.remoteTime, current.entry.id),
+      )
+    ) {
+      best.set(row.name, row)
+    }
+  }
+  return [...best.values()]
+}
 
 function resourceTypeFor(mime: string): string {
   if (mime === FOLDER_MIME) return 'gdrive/folder'
@@ -108,7 +143,7 @@ export async function readdir(
   }
 
   const files = await listFiles(accessor.tokenManager, { folderId, driveId })
-  const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
+  const listed: DirRow[] = []
   for (const f of files) {
     const mime = f.mimeType ?? ''
     const ext = MIME_TO_EXT[mime] ?? ''
@@ -138,8 +173,9 @@ export async function readdir(
       size,
       extra,
     })
-    entries.push({ name: filename, entry, isDir })
+    listed.push({ name: filename, entry, isDir })
   }
+  const entries = collapseDuplicates(listed)
 
   let complete = true
   if (key === '' && folderId === 'root') {

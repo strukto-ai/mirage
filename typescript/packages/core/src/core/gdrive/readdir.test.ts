@@ -298,3 +298,45 @@ describe('readdir sizes', () => {
     expect(doc?.extra.source_size).toBe(9999)
   })
 })
+
+describe('readdir duplicate sibling names', () => {
+  // Drive allows two siblings to share a name; a vfs path names exactly one
+  // file, so the listing reports the one resolveKey would answer with and
+  // the index binds the path to that same item. Blind last-wins in setDir
+  // used to leave whichever the server listed last, so only one of the two
+  // orders ever agreed with the resolver, by accident.
+  function dup(id: string, modifiedTime: string): DriveModule.DriveFile {
+    return { id, name: 'dup.txt', mimeType: 'text/plain', modifiedTime }
+  }
+
+  const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+
+  it('keeps the newest when the oldest is listed first', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      dup('old-id', '2026-01-01T00:00:00Z'),
+      dup('new-id', '2026-06-01T00:00:00Z'),
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/dup.txt'])
+    expect((await index.get('/dup.txt')).entry?.id).toBe('new-id')
+  })
+
+  it('keeps the newest when the newest is listed first', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      dup('new-id', '2026-06-01T00:00:00Z'),
+      dup('old-id', '2026-01-01T00:00:00Z'),
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/dup.txt'])
+    expect((await index.get('/dup.txt')).entry?.id).toBe('new-id')
+  })
+
+  it('leaves distinct names alone', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      { id: 'b', name: 'b.txt', mimeType: 'text/plain', modifiedTime: '2026-06-01T00:00:00Z' },
+      { id: 'a', name: 'a.txt', mimeType: 'text/plain', modifiedTime: '2026-01-01T00:00:00Z' },
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/a.txt', '/b.txt'])
+  })
+})

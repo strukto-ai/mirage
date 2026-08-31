@@ -32,8 +32,11 @@ import { PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
 import {
   driveTargetName,
+  duplicateRank,
   eaccesOnDenied,
+  pickDuplicate,
   queryCandidates,
+  ranksAbove,
   resolveDir,
   resolveKey,
 } from './resolve.ts'
@@ -148,5 +151,71 @@ describe('eaccesOnDenied', () => {
       message: expect.stringContaining('/gd/a.txt') as string,
     })
     await expect(serverError(null, spec)).rejects.toBeInstanceOf(GoogleApiError)
+  })
+})
+
+describe('gdrive duplicate sibling names', () => {
+  it('ranks newest modifiedTime first, breaking ties by the greater id', () => {
+    expect(
+      ranksAbove(
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+        duplicateRank('2026-01-01T00:00:00Z', 'zzz'),
+      ),
+    ).toBe(true)
+    // The id is a tiebreak, never the primary key.
+    expect(
+      ranksAbove(
+        duplicateRank('2026-06-01T00:00:00Z', 'bbb'),
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+      ),
+    ).toBe(true)
+    expect(
+      ranksAbove(
+        duplicateRank('2026-01-01T00:00:00Z', 'zzz'),
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+      ),
+    ).toBe(false)
+  })
+
+  it('pickDuplicate takes the newest whatever order it was listed in', () => {
+    const old = { id: 'id1', name: 'dup.txt', modifiedTime: '2026-01-01T00:00:00Z' }
+    const fresh = { id: 'id2', name: 'dup.txt', modifiedTime: '2026-06-01T00:00:00Z' }
+    expect(pickDuplicate([old, fresh])?.id).toBe('id2')
+    expect(pickDuplicate([fresh, old])?.id).toBe('id2')
+    expect(pickDuplicate([])).toBeUndefined()
+  })
+
+  it('pickDuplicate tolerates a missing modifiedTime', () => {
+    const unstamped = { id: 'id1', name: 'dup.txt' }
+    const stamped = { id: 'id2', name: 'dup.txt', modifiedTime: '2026-01-01T00:00:00Z' }
+    expect(pickDuplicate([unstamped, stamped])?.id).toBe('id2')
+  })
+
+  it('resolveKey picks the newest of two same-named siblings, oldest listed first', async () => {
+    // The fake answers in insertion order and honours no orderBy, which
+    // is the point: the rule has to hold without the server sorting.
+    fake.add('dup.txt', 'root', undefined, undefined, undefined, '2026-01-01T00:00:00Z')
+    const newest = fake.add(
+      'dup.txt',
+      'root',
+      undefined,
+      undefined,
+      undefined,
+      '2026-06-01T00:00:00Z',
+    )
+    expect((await resolveKey(accessor, 'dup.txt'))?.id).toBe(newest)
+  })
+
+  it('resolveKey picks the newest of two same-named siblings, newest listed first', async () => {
+    const newest = fake.add(
+      'dup.txt',
+      'root',
+      undefined,
+      undefined,
+      undefined,
+      '2026-06-01T00:00:00Z',
+    )
+    fake.add('dup.txt', 'root', undefined, undefined, undefined, '2026-01-01T00:00:00Z')
+    expect((await resolveKey(accessor, 'dup.txt'))?.id).toBe(newest)
   })
 })

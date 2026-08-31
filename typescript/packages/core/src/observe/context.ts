@@ -56,6 +56,51 @@ export interface RecordedRun<T> {
 let recordedTail: Promise<void> | null = null
 
 /**
+ * How long a queued frame waits for the one ahead of it before binding
+ * anyway.
+ *
+ * The queue below cannot tell a genuinely concurrent caller from a
+ * caller that re-entered from inside the frame it is queued behind, and
+ * on the fallback storage nothing at the call site can: the ambient
+ * store is the live frame either way, so a discriminator that let the
+ * re-entrant one through would let a concurrent one through with it and
+ * un-fix the interleaving the queue exists for. So the wait is bounded
+ * instead of decided. A re-entrant caller costs this long and then runs
+ * exactly as it did before the queue existed; a concurrent one is
+ * unaffected, because it was always going to be released by the frame
+ * ahead settling long before this.
+ *
+ * Two seconds is chosen to sit far above any backend read a frame ahead
+ * is plausibly still waiting on and far below a caller's patience for a
+ * hang.
+ */
+export const RECORDED_BIND_TIMEOUT_MS = 2000
+
+/**
+ * Wait for `tail`, but not forever, then bind.
+ *
+ * The timer is cleared as soon as the tail wins, so a queue that is
+ * merely busy holds nothing open beyond the wait its caller is already
+ * doing. It is deliberately not `unref`'d: the whole point is that this
+ * frame still binds when the tail never settles, and an unreferenced
+ * timer would let the runtime exit that window instead of serving it.
+ */
+function bindAfter<T>(
+  tail: Promise<void>,
+  state: RecordingState,
+  fn: () => Promise<T>,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const lapsed = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, RECORDED_BIND_TIMEOUT_MS)
+  })
+  return Promise.race([tail, lapsed]).then(() => {
+    if (timer !== undefined) clearTimeout(timer)
+    return bindFrame(state, fn)
+  })
+}
+
+/**
  * Open a recording frame and hand back that frame's records array
  * *and* the pending result, so the caller holds both whether `fn`
  * resolves or throws.
@@ -91,10 +136,24 @@ let recordedTail: Promise<void> | null = null
  * up on the way out, and the array to hand it to can only be read at
  * the instant the frame binds. See {@link bindFrame}.
  *
- * One constraint follows from the queue: a serialized frame must not
- * open another one inside itself, since it would be waiting for its own
- * settle. There is one caller ({@link Ops.readFileWithIdentity}) and it
- * does not nest.
+ * One constraint follows from the queue, and it belongs in the same
+ * family as the FUSE rule about never touching your own mountpoint from
+ * the process serving it: **on a fallback runtime, code servicing a read
+ * must not re-enter the identity surface.** A frame that opens another
+ * one inside itself is waiting for its own settle, which is a promise
+ * cycle and not a slow path. The single in-repo caller
+ * ({@link Ops.readFileWithIdentity}) does not nest, but an embedder's
+ * custom read op or an ops policy closing over the workspace can reach
+ * it, so the wait is bounded ({@link RECORDED_BIND_TIMEOUT_MS}) rather
+ * than trusted: the re-entrant frame binds once the bound lapses and
+ * runs exactly as it did before this queue existed. A hang becomes a
+ * bounded degradation — at most the timeout, plus the same residual
+ * window an ordinary frame already opens below, where a read answers a
+ * null identity rather than a wrong one because {@link readIdentity}
+ * filters by path. A re-entry that names the *same* path is the one
+ * shape that filter cannot separate, which is why the rule is stated as
+ * "do not re-enter" rather than "re-entry is free"; such a call is
+ * unbounded recursion on its own terms anyway.
  *
  * Ordinary {@link runWithRecording} frames deliberately do NOT join
  * this queue: an identity read runs *inside* an executing command's
@@ -115,7 +174,7 @@ export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
   // is live, so there is nothing to wait behind, and `fn` starts where
   // it always did. A live one is waited out first.
   const done: Promise<T> =
-    recordedTail === null ? bindFrame(state, fn) : recordedTail.then(() => bindFrame(state, fn))
+    recordedTail === null ? bindFrame(state, fn) : bindAfter(recordedTail, state, fn)
   // The queue only sequences; `done` is what carries the outcome to the
   // caller, so the tail settles on either path rather than rejecting
   // with nobody left to hear it. It is cleared when this frame is the

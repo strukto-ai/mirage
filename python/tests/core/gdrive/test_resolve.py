@@ -19,7 +19,8 @@ from yarl import URL
 
 import mirage.core.gdrive.resolve as resolve_mod
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
-                                        eacces_on_denied, query_candidates,
+                                        duplicate_rank, eacces_on_denied,
+                                        pick_duplicate, query_candidates,
                                         resolve_dir, resolve_key,
                                         resolve_parent)
 from mirage.types import PathSpec
@@ -172,3 +173,50 @@ async def test_eacces_on_denied_maps_403():
         await denied(None, spec)
     with pytest.raises(aiohttp.ClientResponseError):
         await server_error(None, spec)
+
+
+def test_duplicate_rank_orders_newest_first_then_by_id():
+    older = duplicate_rank("2026-01-01T00:00:00Z", "zzz")
+    newer = duplicate_rank("2026-06-01T00:00:00Z", "aaa")
+    assert newer > older
+    # The id is a tiebreak, never the primary key: a newer file with a
+    # low id still outranks an older one with a high id.
+    same_time_low = duplicate_rank("2026-06-01T00:00:00Z", "aaa")
+    same_time_high = duplicate_rank("2026-06-01T00:00:00Z", "bbb")
+    assert same_time_high > same_time_low
+
+
+def test_pick_duplicate_takes_the_newest_regardless_of_listing_order():
+    old = {"id": "id1", "modifiedTime": "2026-01-01T00:00:00Z"}
+    new = {"id": "id2", "modifiedTime": "2026-06-01T00:00:00Z"}
+    assert pick_duplicate([old, new])["id"] == "id2"
+    assert pick_duplicate([new, old])["id"] == "id2"
+
+
+def test_pick_duplicate_tolerates_a_missing_modified_time():
+    stamped = {"id": "id2", "modifiedTime": "2026-01-01T00:00:00Z"}
+    unstamped = {"id": "id1"}
+    assert pick_duplicate([unstamped, stamped])["id"] == "id2"
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_picks_the_newest_of_two_same_named_siblings(
+        fake_drive, gdrive_accessor):
+    # Drive allows duplicate sibling names. The fake answers in
+    # insertion order and honours no orderBy, which is the point: the
+    # rule has to hold without the server sorting for us.
+    fake_drive.add("dup.txt", modified="2026-01-01T00:00:00Z")
+    newest = fake_drive.add("dup.txt", modified="2026-06-01T00:00:00Z")
+    node = await resolve_key(gdrive_accessor, "dup.txt")
+    assert node is not None
+    assert node.id == newest
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_picks_the_newest_when_it_is_listed_first(
+        fake_drive, gdrive_accessor):
+    newest = fake_drive.add("dup.txt", modified="2026-06-01T00:00:00Z")
+    fake_drive.add("dup.txt", modified="2026-01-01T00:00:00Z")
+    node = await resolve_key(gdrive_accessor, "dup.txt")
+    assert node is not None
+    assert node.id == newest

@@ -47,6 +47,7 @@ export class FakeDrive {
     mime = FILE_MIME,
     content: Uint8Array = new Uint8Array(0),
     driveId?: string,
+    modified = '2026-01-01T00:00:00Z',
   ): string {
     this.counter += 1
     const id = `id${String(this.counter)}`
@@ -55,7 +56,7 @@ export class FakeDrive {
       name,
       mimeType: mime,
       parents: [parent],
-      modifiedTime: '2026-01-01T00:00:00Z',
+      modifiedTime: modified,
       content,
       ...(driveId === undefined ? {} : { driveId }),
     })

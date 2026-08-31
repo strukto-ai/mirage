@@ -29,8 +29,11 @@ vi.mock('../google/drive.ts', async () => {
 
 import { googleGet } from '../google/client.ts'
 import { PathSpec } from '../../types.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { type FakeDrive, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { liveIdentity } from './identity.ts'
+import { read } from './read.ts'
+import { resolveKey } from './resolve.ts'
 
 const ENC = new TextEncoder()
 let fake: FakeDrive
@@ -89,4 +92,42 @@ describe('gdrive identity', () => {
     expect(result.revision).toBeNull()
     expect(result.fingerprint).toBeNull()
   })
+})
+
+describe('identity and a warmed read on a duplicate name', () => {
+  // The two halves of a read-check-write reach the file by different
+  // routes: identity resolves the name with a direct query, the read
+  // resolves it through the index the listing warmed. Disagreeing made
+  // every such caller see a conflict with no writer.
+  for (const newestFirst of [false, true]) {
+    it(`name the same file (newest listed ${newestFirst ? 'first' : 'second'})`, async () => {
+      const addOld = (): string =>
+        fake.add('dup.txt', 'root', undefined, ENC.encode('old'), undefined, '2026-01-01T00:00:00Z')
+      const addNew = (): string =>
+        fake.add('dup.txt', 'root', undefined, ENC.encode('new'), undefined, '2026-06-01T00:00:00Z')
+      let newest: string
+      if (newestFirst) {
+        newest = addNew()
+        addOld()
+      } else {
+        addOld()
+        newest = addNew()
+      }
+      const dup = path('dup.txt')
+
+      expect((await resolveKey(accessor, 'dup.txt'))?.id).toBe(newest)
+
+      const index = new RAMIndexCacheStore()
+      const data = await read(accessor, dup, index)
+      expect(data).toEqual(fake.items.get(newest)?.content)
+      expect((await index.get('/dup.txt')).entry?.id).toBe(newest)
+
+      vi.mocked(googleGet).mockResolvedValueOnce({ headRevisionId: 'r1', md5Checksum: 'abc' })
+      const result = await liveIdentity(accessor, dup)
+      expect(result.exists).toBe(true)
+      // The identity was captured for the file the read delivered, not
+      // for its same-named sibling.
+      expect(vi.mocked(googleGet).mock.calls[0]?.[1]).toContain(newest)
+    })
+  }
 })

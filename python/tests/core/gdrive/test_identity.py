@@ -16,7 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import mirage.core.gdrive.read as read_mod
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.identity import live_identity
+from mirage.core.gdrive.read import read
+from mirage.core.gdrive.resolve import resolve_key
 from mirage.types import PathSpec
 
 
@@ -89,3 +93,50 @@ async def test_identity_absent_path_with_a_trailing_slash_reports_absent(
     assert result.exists is False
     assert result.revision is None
     assert result.fingerprint is None
+
+
+@pytest.mark.parametrize("newest_first", [False, True])
+@pytest.mark.asyncio
+async def test_identity_and_a_warmed_read_name_the_same_duplicate(
+        fake_drive, gdrive_accessor, monkeypatch, newest_first):
+    # Drive allows duplicate sibling names, and the two halves of a
+    # read-check-write reach the file by different routes: identity
+    # resolves the name with a direct query, the read resolves it
+    # through the index the listing warmed. Disagreeing made every such
+    # caller see a conflict with no writer.
+    times = ["2026-06-01T00:00:00Z", "2026-01-01T00:00:00Z"]
+    if not newest_first:
+        times.reverse()
+    ids = [
+        fake_drive.add("dup.txt", content=f"body-{i}".encode(), modified=stamp)
+        for i, stamp in enumerate(times)
+    ]
+    newest = ids[times.index("2026-06-01T00:00:00Z")]
+
+    async def download(token_manager, file_id, window=None):
+        return await fake_drive.download_file(token_manager, file_id)
+
+    monkeypatch.setattr(read_mod, "download_file", download)
+    path = PathSpec(virtual="/dup.txt", directory="/", resource_path="dup.txt")
+
+    node = await resolve_key(gdrive_accessor, "dup.txt")
+    assert node is not None and node.id == newest
+
+    store = RAMIndexCacheStore()
+    data = await read(gdrive_accessor, path, index=store)
+    assert data == fake_drive.items[newest]["content"]
+    assert (await store.get("/dup.txt")).entry.id == newest
+
+    with patch(
+            "mirage.core.gdrive.versions.google_get",
+            new_callable=AsyncMock,
+            return_value={
+                "headRevisionId": "r1",
+                "md5Checksum": "abc"
+            },
+    ) as metadata:
+        result = await live_identity(gdrive_accessor, path)
+    assert result.exists is True
+    # The identity was captured for the file the read delivered, not
+    # for its same-named sibling.
+    assert newest in metadata.call_args.args[1]

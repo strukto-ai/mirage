@@ -108,6 +108,52 @@ export function driveTargetName(basename: string, node: DriveNode): string {
   return basename
 }
 
+/**
+ * Selection rank among Drive siblings that share one vfs name.
+ *
+ * Drive allows duplicate names in a folder, so a vfs path can name more
+ * than one item and something has to choose. **Newest `modifiedTime`
+ * wins, ties broken by the greater id**, and the rule is written here
+ * once because two paths reach the same file: the direct query in
+ * `resolveSegment` (which `liveIdentity` and every mutation go through)
+ * and the listing that warms the index (which every read goes through).
+ * Ordering them differently made `liveIdentity(path)` name a different
+ * item than the read of that same path, which a read-check-write caller
+ * sees as a conflict with no writer.
+ *
+ * Both halves are compared as strings: Drive stamps `modifiedTime`
+ * RFC3339 with a fixed `Z` offset, so lexical order is chronological
+ * order, and the id is a deterministic tiebreak rather than a
+ * server-order accident. Mirrors python's `duplicate_rank`.
+ */
+export function duplicateRank(modifiedTime: string, id: string): [string, string] {
+  return [modifiedTime, id]
+}
+
+// Whether `a` outranks `b` by duplicateRank. Python compares the tuples
+// with `>` directly; TypeScript has to spell the comparison out.
+export function ranksAbove(a: [string, string], b: [string, string]): boolean {
+  return a[0] === b[0] ? a[1] > b[1] : a[0] > b[0]
+}
+
+// The one Drive item a name resolves to, by duplicateRank. Mirrors
+// python's pick_duplicate.
+export function pickDuplicate(items: readonly DriveFile[]): DriveFile | undefined {
+  let best: DriveFile | undefined
+  for (const item of items) {
+    if (
+      best === undefined ||
+      ranksAbove(
+        duplicateRank(item.modifiedTime ?? '', item.id),
+        duplicateRank(best.modifiedTime ?? '', best.id),
+      )
+    ) {
+      best = item
+    }
+  }
+  return best
+}
+
 export function nodeFromItem(item: DriveFile, driveId: string | null): DriveNode {
   return {
     id: item.id,
@@ -131,7 +177,10 @@ export async function resolveSegment(
       name,
       mimeType: mime,
     })
-    const first = matches[0]
+    // Not matches[0]: the server's own order is only a proxy for the
+    // rule, and the listing that warms the index cannot read it at all.
+    // See duplicateRank.
+    const first = pickDuplicate(matches)
     if (first !== undefined) return nodeFromItem(first, driveId)
   }
   if (atRoot) {

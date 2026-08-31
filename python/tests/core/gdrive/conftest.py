@@ -53,14 +53,15 @@ class FakeDrive:
             parent: str = "root",
             mime: str = FILE_MIME,
             content: bytes = b"",
-            drive_id: str | None = None) -> str:
+            drive_id: str | None = None,
+            modified: str = "2026-01-01T00:00:00Z") -> str:
         item_id = f"id{next(self._ids)}"
         self.items[item_id] = {
             "id": item_id,
             "name": name,
             "mimeType": mime,
             "parents": [parent],
-            "modifiedTime": "2026-01-01T00:00:00Z",
+            "modifiedTime": modified,
             "content": content,
         }
         if drive_id is not None:
