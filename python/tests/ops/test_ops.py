@@ -23,7 +23,7 @@ from mirage.cache.index.config import IndexEntry, LookupResult, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
 from mirage.io import IOResult
-from mirage.observe.context import RecordingScope, record
+from mirage.observe.context import RecordingScope, record, revision_for
 from mirage.ops import Ops
 from mirage.ops.registry import RegisteredOp
 from mirage.ops.types import LiveFileIdentity
@@ -955,3 +955,41 @@ class TestProbesAndConveniences:
         run(ops.write("/data/dir/a.txt", b"1"))
         run(ops.mkdir("/data/dir/sub"))
         assert run(ops.list_files("/data/dir")) == ["a.txt"]
+
+
+class TestReadWithIdentityUnderARevisionPin:
+    """A revision pin is workspace state, not a memory: a pinned read is
+    one fresh backend call for that exact revision, and the identity it
+    pairs with is that revision's own. fresh silences caches and the
+    index, never the pin, so a restored snapshot keeps one consistent
+    view and the write-side check is what refuses the overwrite."""
+
+    def test_a_pinned_read_pairs_with_the_pinned_revision(self):
+        resource = RAMResource()
+
+        async def fake_read(accessor, path, **kwargs):
+            pinned = revision_for(path.virtual)
+            if pinned is not None:
+                record("read", path.virtual, "ram", 3, 0, revision=pinned)
+                return b"old"
+            record("read", path.virtual, "ram", 3, 0, revision="r2")
+            return b"new"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        mount = ws.namespace.registry.mount_for("/data/a.txt")
+        mount.revisions["/data/a.txt"] = "r1"
+
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"old"
+        assert identity is not None and identity.revision == "r1"
+
+        del mount.revisions["/data/a.txt"]
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"new"
+        assert identity is not None and identity.revision == "r2"

@@ -266,3 +266,24 @@ def test_inactive_scope_joins_enclosing():
     outer.close()
     assert [r.path for r in outer.records] == ["/a"]
     assert joined.records == []
+
+
+def test_record_normalizes_a_slashless_path_on_a_root_mount():
+    # A root mount's prefix is empty, so the slashless spelling the
+    # drive-family backends hand over would pass through as "a.txt" and
+    # no virtual-path lookup could ever match the record.
+    scope = RecordingScope()
+    records = scope.records
+    push_mount_prefix("")
+    record("read", "a.txt", "gdrive", 1, 0)
+    scope.close()
+    assert records[0].path == "/a.txt"
+
+
+def test_record_keeps_a_virtual_path_on_a_root_mount():
+    scope = RecordingScope()
+    records = scope.records
+    push_mount_prefix("")
+    record("read", "/a.txt", "disk", 1, 0)
+    scope.close()
+    assert records[0].path == "/a.txt"

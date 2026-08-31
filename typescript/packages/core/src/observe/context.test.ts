@@ -104,6 +104,20 @@ describe('runWithRecording / record / runWithMountPrefix', () => {
     expect(records[0]?.path).toBe('/drive/sub/report.json')
   })
 
+  it('normalizes a slashless path on a root mount', async () => {
+    const [, records] = await runWithRecording(async () => {
+      record('read', 'a.txt', 'gdrive', 1, 0)
+    })
+    expect(records[0]?.path).toBe('/a.txt')
+  })
+
+  it('keeps a virtual path on a root mount', async () => {
+    const [, records] = await runWithRecording(async () => {
+      record('read', '/a.txt', 'disk', 1, 0)
+    })
+    expect(records[0]?.path).toBe('/a.txt')
+  })
+
   it('restores the enclosing prefix when a nested mount scope ends', async () => {
     const [, records] = await runWithRecording(() =>
       runWithMountPrefix('/s3', async () => {

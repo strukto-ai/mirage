@@ -321,6 +321,10 @@ export function revisionFor(path: string): string | null {
 // Mirrors python's _virtual.
 function applyPrefix(prefix: string, path: string): string {
   const root = rstripSlash(prefix)
-  if (root === '' || path === root || path.startsWith(`${root}/`)) return path
+  // A root mount's prefix is empty, so a slashless mount-relative
+  // spelling (drive, graph, box hand these over) would pass through
+  // unprefixed and no virtual-path lookup could match the record.
+  if (root === '') return path.startsWith('/') ? path : `/${path}`
+  if (path === root || path.startsWith(`${root}/`)) return path
   return path.startsWith('/') ? root + path : `${root}/${path}`
 }

@@ -363,6 +363,12 @@ export class Ops {
    * stamp the identity of the file that used to live at this path onto
    * that file's bytes and both would be the wrong file's.
    *
+   * A revision pin is workspace state, not a memory, so `fresh` never
+   * overrides it: a pinned read is one fresh backend call for that
+   * exact revision and pairs with that revision's own identity, keeping
+   * a restored snapshot's view consistent. The write-side check is what
+   * refuses overwriting a newer head.
+   *
    * A failed read propagates as it is; no identity is synthesized for
    * it.
    *
