@@ -59,6 +59,10 @@ export type {
 export { ProvisionResult } from './provision/types.ts'
 export type { Resource } from './resource/base.ts'
 export { ChromaResource } from './resource/chroma/chroma.ts'
+export {
+  DatabricksVolumeApiError,
+  DatabricksVolumeAuthError,
+} from './core/databricks_volume/errors.ts'
 export { normalizeDatabricksVolumeConfig } from './resource/databricks_volume/config.ts'
 export { DevResource } from './resource/dev/dev.ts'
 export { DifyResource } from './resource/dify/dify.ts'

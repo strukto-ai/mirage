@@ -3,7 +3,7 @@ import pytest
 from mirage.commands.builtin.databricks_volume.io import resolve_glob
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.core.databricks_volume.conftest import file_entry
+from tests.core.databricks_volume._fakes import file_entry
 
 
 @pytest.mark.asyncio

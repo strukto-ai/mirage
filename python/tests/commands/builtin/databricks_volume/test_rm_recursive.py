@@ -16,29 +16,29 @@ import pytest
 
 from mirage import MountMode, Workspace
 from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+    FakeFilesClient, make_resource, seed_directory, seed_file)
 
 ROOT = "/Volumes/main/default/agent_files/root"
 
 
 @pytest.fixture
-def dbx_files() -> FakeFiles:
-    files = FakeFiles()
+def dbx_files() -> FakeFilesClient:
+    files = FakeFilesClient()
     seed_directory(files, ROOT)
-    files.create_directory(f"{ROOT}/d")
+    files.add_directory(f"{ROOT}/d")
     seed_file(files, f"{ROOT}/d/a.txt", b"a")
-    files.create_directory(f"{ROOT}/d/sub")
+    files.add_directory(f"{ROOT}/d/sub")
     seed_file(files, f"{ROOT}/d/sub/b.txt", b"b")
     return files
 
 
 @pytest.fixture
-def write_ws(dbx_files: FakeFiles) -> Workspace:
+def write_ws(dbx_files: FakeFilesClient) -> Workspace:
     return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.WRITE)
 
 
 @pytest.fixture
-def read_ws(dbx_files: FakeFiles) -> Workspace:
+def read_ws(dbx_files: FakeFilesClient) -> Workspace:
     return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.READ)
 
 

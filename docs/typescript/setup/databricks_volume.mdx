@@ -12,6 +12,8 @@ MIRAGE ships it in `@struktoai/mirage-node` only. The TypeScript client calls
 the Databricks Files REST API directly with `fetch`; the Databricks API does
 not allow cross-origin browser requests, so there is no browser runtime.
 
+The workspace **host** and the bearer **token** are both config.
+
 For auth and environment setup, see [Databricks Volume Setup](/home/setup/databricks).
 
 ## Node
@@ -28,8 +30,10 @@ import {
   normalizeDatabricksVolumeConfig,
 } from '@struktoai/mirage-node'
 
-const resource = await DatabricksVolumeResource.create(
+const resource = new DatabricksVolumeResource(
   normalizeDatabricksVolumeConfig({
+    host: process.env.DATABRICKS_HOST!,
+    token: process.env.DATABRICKS_TOKEN!,
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',
@@ -43,19 +47,69 @@ console.log(res.stdoutText)
 
 | Field | Default | Notes |
 | --- | --- | --- |
+| `host` | required | Databricks workspace URL. Trailing slashes are stripped. |
 | `catalog` | required | Unity Catalog catalog name. |
+| `token` | required | Bearer token, redacted in snapshots. |
 | `schema` | required | Unity Catalog schema name. |
 | `volume` | required | Unity Catalog volume name. |
 | `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | none | Optional workspace host override. |
-| `token` | none | Optional PAT override. Redacted in snapshots. |
-| `profile` | none | Optional `~/.databrickscfg` profile name. |
 | `timeout` | `30` | Request timeout in seconds. |
 
-Credentials resolve in order: explicit `host`/`token` in the config, then the
-`DATABRICKS_HOST`/`DATABRICKS_TOKEN` environment variables, then the
-`profile` section of `~/.databrickscfg` (or `DATABRICKS_CONFIG_PROFILE`,
-falling back to `DEFAULT`).
+There is no `profile` field, and no environment or `~/.databrickscfg`
+fallback. A mount described as data works like any other:
+
+```yaml
+mounts:
+  /dbx/:
+    resource: databricks_volume
+    config:
+      host: https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
+      token: dapi...
+      catalog: main
+      schema: default
+      volume: agent_files
+```
+
+## Where the token comes from
+
+Any credential your program can turn into a bearer token works: a personal
+access token, OAuth machine-to-machine for a service principal, the token of a
+signed-in user, or one read from a secret manager. Mint it your own way and
+pass the string as `token`.
+
+## When a token expires
+
+MIRAGE sends the configured token on every Files API call and never refreshes
+or retries it: a retry would send the same refused credential again and, for a
+write, would send the write twice. A refusal throws
+`DatabricksVolumeAuthError`, a subclass of `DatabricksVolumeApiError`:
+
+An op call propagates the typed error:
+
+```ts
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from '@struktoai/mirage-node'
+
+try {
+  await ws.readdir('/dbx/')
+} catch (err) {
+  if (err instanceof DatabricksVolumeAuthError) {
+    // mint a new token and build a new resource
+  } else if (err instanceof DatabricksVolumeApiError) {
+    // every other Files API refusal, with err.statusCode and err.errorCode
+  }
+}
+```
+
+A shell line does not. `Workspace.execute` turns every backend failure into a
+nonzero result the way a shell does, so the refusal arrives as an exit code and
+a message on stderr rather than as a thrown error:
+
+```ts
+const result = await ws.execute('ls /dbx/')
+if (result.exitCode !== 0) {
+  console.error(result.stderrText)
+}
+```
 
 ## Filesystem layout
 
@@ -88,9 +142,9 @@ server-side rename.
 
 ## Snapshot behavior
 
-`token` is redacted in resource state. Loading a snapshot back requires an
-override config that provides fresh credentials if the runtime auth chain does
-not already supply them.
+Resource state records the config with the token as `<REDACTED>`, so
+`Workspace.load` asks for a fresh resource rather than restoring one that
+cannot authenticate.
 
 ## Example
 

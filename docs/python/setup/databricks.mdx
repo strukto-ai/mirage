@@ -7,77 +7,138 @@ description: Set up the Databricks Unity Catalog volume resource in Python.
 ## Dependencies
 
 ```bash
-uv add 'mirage-ai[databricks]'
+uv add mirage-ai
 ```
+
+No extra to install: the resource speaks the Files REST API over `aiohttp`,
+which MIRAGE already depends on. It does **not** use `databricks-sdk`.
 
 For credential setup, see the [Databricks Volume Setup](/home/setup/databricks)
 guide.
 
 ## Configuration
 
-### Databricks Apps or SDK-default auth
+The config carries the workspace location, the bearer token, and the volume
+coordinates.
 
 ```python
-from mirage import Workspace, MountMode
+import os
+
+from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeResource,
 )
 
 config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
-)
-resource = DatabricksVolumeResource(config=config)
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
-```
-
-### Explicit host and token
-
-```python
-import os
-
-config = DatabricksVolumeConfig(
-    catalog="main",
-    schema="default",
-    volume="agent_files",
     host=os.environ["DATABRICKS_HOST"],
     token=os.environ["DATABRICKS_TOKEN"],
-    root_path="/reports",
-)
-resource = DatabricksVolumeResource(config=config)
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
-```
-
-### Profile-based auth
-
-```python
-config = DatabricksVolumeConfig(
     catalog="main",
     schema="default",
     volume="agent_files",
-    profile="DEV",
+    root_path="/reports",
 )
-resource = DatabricksVolumeResource(config=config)
-ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+ws = Workspace({"/dbx/": DatabricksVolumeResource(config)},
+               mode=MountMode.READ)
+```
+
+The same mount in YAML:
+
+```yaml
+mounts:
+  /dbx/:
+    resource: databricks_volume
+    config:
+      host: https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
+      token: dapi...
+      catalog: main
+      schema: default
+      volume: agent_files
 ```
 
 ## Config Reference
 
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
+| `host` | Yes |  | Databricks workspace URL. Trailing slashes are stripped. |
+| `token` | Yes |  | Bearer token, held as a secret and redacted in snapshots. |
 | `catalog` | Yes |  | Unity Catalog catalog name. |
 | `schema` | Yes |  | Unity Catalog schema name. |
 | `volume` | Yes |  | Unity Catalog volume name. |
 | `root_path` | No | `/` | Subdirectory inside the volume to expose. |
-| `host` | No |  | Databricks workspace host. |
-| `token` | No |  | Databricks personal access token. Redacted in snapshots. |
-| `profile` | No |  | Databricks SDK profile name. |
 | `timeout` | No | `30` | Request timeout in seconds. |
+
+There is no `profile` field and MIRAGE reads no environment variable of its
+own. Whatever your deployment uses to obtain a token, resolve it yourself and
+pass the string.
+
+## Where the token comes from
+
+A personal access token needs nothing more than the example above. For a
+credential your program mints (OAuth machine-to-machine for a service
+principal, on-behalf-of a signed-in user, a secret manager, or the Databricks
+CLI profile through `databricks-sdk`, which MIRAGE itself does not depend on),
+resolve it first and build the config with the result:
+
+```python
+config = DatabricksVolumeConfig(
+    host=host,
+    token=mint_my_token(),
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+)
+```
+
+## When a token expires
+
+MIRAGE sends the configured token on every Files API call. It never refreshes
+it and never retries a rejected call, because a retry would send the same
+refused credential again and, for a write, would send the write twice. A
+refusal surfaces as `DatabricksVolumeAuthError`, a subclass of
+`DatabricksVolumeApiError`:
+
+A rebuilt config is validated, not copied. `model_copy(update=...)` skips
+validation, so the new token would sit in the field as a plain `str` and its
+value would show up in the config's `repr`:
+
+```python
+from mirage.core.databricks_volume.errors import DatabricksVolumeAuthError
+
+
+def with_token(config: DatabricksVolumeConfig, token: str):
+    return DatabricksVolumeConfig.model_validate({
+        **config.model_dump(),
+        "token": token,
+    })
+```
+
+An op call propagates the typed error:
+
+```python
+try:
+    await ws.readdir("/dbx/")
+except DatabricksVolumeAuthError:
+    resource = DatabricksVolumeResource(with_token(config, mint_my_token()))
+```
+
+A shell line does not. `Workspace.execute` turns every backend failure into a
+nonzero result the way a shell does, so the refusal arrives as an exit code and
+a message on stderr rather than as an exception:
+
+```python
+result = await ws.execute("ls /dbx/")
+if result.exit_code != 0:
+    print(await result.stderr_str())
+```
+
+For a long-lived process against short-lived tokens, rebuild the resource on a
+schedule of your own rather than waiting for the 401.
 
 ## Notes
 
 - Supports both read and write mount modes (`MountMode.READ` / `MountMode.WRITE`).
-- Auth falls through to the Databricks SDK defaults when `host`, `token`, and `profile` are omitted.
 - `root_path` is normalized and cannot contain `..`.
+- A snapshot records the config with the token as `<REDACTED>`, so
+  `Workspace.load` asks for a fresh resource rather than restoring one that
+  cannot authenticate.

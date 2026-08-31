@@ -105,7 +105,7 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { DatabricksVolumeResource } = await import('./databricks_volume/databricks_volume.ts')
     const { normalizeDatabricksVolumeConfig } =
       await import('@struktoai/mirage-core/resource/databricks_volume/config')
-    return DatabricksVolumeResource.create(normalizeDatabricksVolumeConfig(config))
+    return new DatabricksVolumeResource(normalizeDatabricksVolumeConfig(config))
   },
   minio: async (config) => {
     const { MinIOResource } = await import('./minio/minio.ts')

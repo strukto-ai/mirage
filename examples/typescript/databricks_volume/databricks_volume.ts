@@ -50,17 +50,17 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 
 async function main(): Promise<void> {
   const config = normalizeDatabricksVolumeConfig({
+    host: process.env.DATABRICKS_HOST!,
+    token: process.env.DATABRICKS_TOKEN!,
     catalog: process.env.DATABRICKS_VOLUME_CATALOG!,
     schema: process.env.DATABRICKS_VOLUME_SCHEMA!,
     volume: process.env.DATABRICKS_VOLUME_NAME!,
     root_path: process.env.DATABRICKS_VOLUME_ROOT_PATH ?? '/',
-    ...(process.env.DATABRICKS_HOST !== undefined ? { host: process.env.DATABRICKS_HOST } : {}),
-    ...(process.env.DATABRICKS_TOKEN !== undefined ? { token: process.env.DATABRICKS_TOKEN } : {}),
-    ...(process.env.DATABRICKS_CONFIG_PROFILE !== undefined
-      ? { profile: process.env.DATABRICKS_CONFIG_PROFILE }
-      : {}),
   })
-  const resource = await DatabricksVolumeResource.create(config)
+  // A personal access token needs nothing more than this. An app whose token
+  // expires catches DatabricksVolumeAuthError, obtains a fresh one its own
+  // way, and builds a new resource with a new config.
+  const resource = new DatabricksVolumeResource(config)
   const ws = new Workspace({ '/dbx/': resource }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')

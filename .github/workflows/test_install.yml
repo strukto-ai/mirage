@@ -106,7 +106,6 @@ jobs:
             "chroma:mirage.resource.chroma"
             "lancedb:mirage.resource.lancedb"
             "qdrant:mirage.resource.qdrant"
-            "databricks:mirage.resource.databricks_volume"
             "pydantic-ai:mirage.agents.pydantic_ai"
             "openai:mirage.agents.openai_agents"
             "agno:mirage.agents.agno"

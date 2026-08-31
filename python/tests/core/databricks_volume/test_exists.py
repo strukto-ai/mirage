@@ -4,7 +4,7 @@ from mirage.core.databricks_volume.exists import exists
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
-from .conftest import file_metadata
+from ._fakes import file_metadata
 
 
 @pytest.mark.asyncio

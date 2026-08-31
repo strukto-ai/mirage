@@ -95,11 +95,6 @@ export {
   type DatabricksVolumeResourceState,
 } from './resource/databricks_volume/databricks_volume.ts'
 export {
-  loadDatabricksProfile,
-  parseDatabricksCfg,
-  type DatabricksProfile,
-} from './resource/databricks_volume/profile.ts'
-export {
   normalizeS3Config,
   redactConfig as redactS3Config,
   type S3Config,

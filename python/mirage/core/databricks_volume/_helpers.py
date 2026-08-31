@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
@@ -30,25 +30,3 @@ def parent_path(path: PathSpec) -> PathSpec:
         original = parent_relative
     return PathSpec.from_str_path(original or "/",
                                   mount_key(original or "/", prefix))
-
-
-def is_directory_metadata(metadata: JsonValue) -> bool:
-    """Whether a Files API metadata object describes a directory.
-
-    The SDK spells it two ways depending on the endpoint: directory
-    listings carry ``is_directory``, while a metadata HEAD carries
-    ``object_type`` ("DIRECTORY" / "VOLUME_DIRECTORY").
-
-    Args:
-        metadata (JsonValue): SDK metadata object for one entry.
-
-    Returns:
-        bool: True when the entry is a directory.
-    """
-    value = getattr(metadata, "is_directory", None)
-    if value is not None:
-        return bool(value)
-    object_type = getattr(metadata, "object_type", None)
-    if object_type is None:
-        return False
-    return str(object_type).lower().endswith("directory")

@@ -12,18 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import modified_to_iso
-from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 from mirage.types import PathSpec
 from mirage.utils.errors import listing_error
 from mirage.utils.key_prefix import mount_prefix_of
@@ -31,18 +28,23 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 SCOPE_ERROR = 10_000
 
-
-def _list_directory_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-) -> list[Any]:
-    return list(accessor.files.list_directory_contents(remote_path))
+Probe = Callable[[DatabricksVolumeAccessor, str], Awaitable[None]]
 
 
-async def _exists(config: DatabricksVolumeConfig, probe: Callable[[str], Any],
+async def _probe_file(accessor: DatabricksVolumeAccessor,
+                      remote_path: str) -> None:
+    await accessor.client.get_metadata(remote_path)
+
+
+async def _probe_directory(accessor: DatabricksVolumeAccessor,
+                           remote_path: str) -> None:
+    await accessor.client.get_directory_metadata(remote_path)
+
+
+async def _exists(accessor: DatabricksVolumeAccessor, probe: Probe,
                   key: str) -> bool:
     try:
-        await asyncio.to_thread(probe, backend_path(config, key))
+        await probe(accessor, backend_path(accessor.config, key))
     except Exception as exc:
         if is_not_found(exc):
             return False
@@ -51,12 +53,11 @@ async def _exists(config: DatabricksVolumeConfig, probe: Callable[[str], Any],
 
 
 async def _is_file(accessor: DatabricksVolumeAccessor, key: str) -> bool:
-    return await _exists(accessor.config, accessor.files.get_metadata, key)
+    return await _exists(accessor, _probe_file, key)
 
 
 async def _is_dir(accessor: DatabricksVolumeAccessor, key: str) -> bool:
-    return await _exists(accessor.config,
-                         accessor.files.get_directory_metadata, key)
+    return await _exists(accessor, _probe_directory, key)
 
 
 async def readdir(
@@ -71,11 +72,7 @@ async def readdir(
         return listing.entries
     remote_path = backend_path(accessor.config, list_path)
     try:
-        entries = await asyncio.to_thread(
-            _list_directory_sync,
-            accessor,
-            remote_path,
-        )
+        entries = await accessor.client.list_directory(remote_path)
     except Exception as exc:
         # The Files API answers 404 for a missing path and for a path under
         # a file alike, so the errno comes from walking the ancestors: one
@@ -100,17 +97,15 @@ async def readdir(
     index_entries = []
     for full_path, entry in pairs:
         name = full_path.rstrip("/").rsplit("/", 1)[-1]
-        is_dir = bool(getattr(entry, "is_directory", False))
-        resource_type = "folder" if is_dir else "file"
-        remote_time = modified_to_iso(getattr(entry, "last_modified", None))
-        size = getattr(entry, "file_size", None)
-        if not is_dir and size is None:
+        resource_type = "folder" if entry.is_directory else "file"
+        remote_time = modified_to_iso(entry.last_modified)
+        size = entry.file_size
+        if not entry.is_directory and size is None:
             # DirectoryEntry normally carries file_size; when the lister
             # omits it, one HEAD per affected file fills the gap so the
             # index never caches an unknown size.
-            metadata = await asyncio.to_thread(accessor.files.get_metadata,
-                                               entry.path)
-            size = getattr(metadata, "content_length", None)
+            metadata = await accessor.client.get_metadata(entry.path)
+            size = metadata.content_length
         index_entries.append((name,
                               IndexEntry(
                                   id=full_path,

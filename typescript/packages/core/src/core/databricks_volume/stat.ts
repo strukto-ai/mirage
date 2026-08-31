@@ -21,10 +21,20 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
 import { isNotFound, notFoundError } from './errors.ts'
 import { backendPath } from './path.ts'
+import type { DatabricksFileMeta } from './types.ts'
 
 function nameFromBackendPath(remotePath: string): string {
   const stripped = stripSlash(remotePath)
   return stripped.split('/').pop() ?? stripped
+}
+
+function fileMetaOf(headers: Headers): DatabricksFileMeta {
+  const length = headers.get('content-length')
+  return {
+    contentLength: length !== null && length !== '' ? Number(length) : null,
+    contentType: headers.get('content-type'),
+    lastModified: headers.get('last-modified'),
+  }
 }
 
 function modifiedFromHeader(value: string | null): string | null {
@@ -94,8 +104,7 @@ export async function stat(
     throw exc
   }
   const name = nameFromBackendPath(remotePath)
-  const lengthHeader = r.headers.get('content-length')
-  const size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
-  const modified = modifiedFromHeader(r.headers.get('last-modified'))
-  return new FileStat({ name, size, modified, type: guessType(name) })
+  const meta = fileMetaOf(r.headers)
+  const modified = modifiedFromHeader(meta.lastModified)
+  return new FileStat({ name, size: meta.contentLength, modified, type: guessType(name) })
 }

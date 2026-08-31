@@ -90,7 +90,6 @@ s3       = ["aioboto3>=13.0"]
 r2       = ["aioboto3>=13.0"]
 gcs      = ["aioboto3>=13.0"]
 oci      = ["aioboto3>=13.0"]
-databricks = ["databricks-sdk>=0.72.0"]
 
 # --- network / remote ---
 ssh      = ["asyncssh>=2.23.0"]
@@ -183,7 +182,6 @@ all = [
     "mirage-ai[r2]",
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
-    "mirage-ai[databricks]",
     "mirage-ai[ssh]",
     "mirage-ai[nextcloud]",
     "mirage-ai[hf-buckets]",
@@ -212,7 +210,6 @@ sandbox = [
     "mirage-ai[r2]",
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
-    "mirage-ai[databricks]",
     "mirage-ai[ssh]",
     "mirage-ai[nextcloud]",
     "mirage-ai[hf-buckets]",
@@ -347,10 +344,6 @@ module = [
     "mirage.config",
     "mirage.core.box.resolve",
     "mirage.core.chroma.stat",
-    "mirage.core.databricks_volume.copy",
-    "mirage.core.databricks_volume.read",
-    "mirage.core.databricks_volume.stat",
-    "mirage.core.databricks_volume.stream",
     "mirage.core.discord.members",
     "mirage.core.discord.read",
     "mirage.core.discord.readdir",
@@ -408,8 +401,6 @@ module = [
     "mirage.resource.box.box",
     "mirage.resource.chroma",
     "mirage.resource.chroma.chroma",
-    "mirage.resource.databricks_volume",
-    "mirage.resource.databricks_volume.databricks_volume",
     "mirage.resource.dev.dev",
     "mirage.resource.dify",
     "mirage.resource.dify.dify",

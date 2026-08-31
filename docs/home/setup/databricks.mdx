@@ -6,9 +6,12 @@ description: Set up Databricks credentials for the Unity Catalog volume resource
 
 ## Credentials
 
-The resource reads a Unity Catalog volume over the Databricks SDK. It needs a
-workspace host plus one auth method: a personal access token, a config
-profile, or the SDK defaults (handy inside Databricks Apps).
+The resource reads a Unity Catalog volume over the Databricks Files REST API.
+It needs two things: your workspace **host** and a **bearer token**, both given
+to the resource as config.
+
+The token is held as a secret, so a snapshot writes `<REDACTED>` in its place
+and restoring that snapshot asks for a fresh resource.
 
 ### 1. Get Your Workspace Host
 
@@ -28,11 +31,18 @@ DATABRICKS_HOST=https://dbc-xxxxxxxx-xxxx.cloud.databricks.com
 DATABRICKS_TOKEN=dapi...
 ```
 
-### Alternatives
+Your program reads these and passes them in; MIRAGE reads no environment
+variable of its own and no `~/.databrickscfg` profile.
 
-- **Config profile:** add a profile to `~/.databrickscfg` and pass
-  `profile="DEV"` instead of host/token.
-- **SDK defaults:** omit host, token, and profile to fall through to the
-  Databricks SDK default auth chain (for example inside Databricks Apps).
+### Beyond a personal access token
 
-For Python configuration, see the [Python Databricks Volume Setup](/python/setup/databricks) guide.
+Any credential your program can turn into a bearer token works: OAuth
+machine-to-machine, on-behalf-of a signed-in user, or a token read from a
+secret manager. Mint it your own way and pass the string as `token`.
+
+MIRAGE sends that token on every Files API call and never refreshes or retries
+it. When it expires the call fails with `DatabricksVolumeAuthError` (raised
+from an op call, reported as a nonzero result from a shell line), and your
+program obtains a new token and builds a new resource. See the
+[Python](/python/setup/databricks) and
+[TypeScript](/typescript/setup/databricks_volume) setup guides.

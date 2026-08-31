@@ -374,7 +374,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!created.ok) throw new Error(`databricks mkdir root failed: ${String(created.status)}`)
-    mounts[m.path] = await DatabricksVolumeResource.create({
+    mounts[m.path] = new DatabricksVolumeResource({
       catalog: 'main',
       schema: 'default',
       volume,
@@ -1885,7 +1885,14 @@ async function openLangfuse(target: Target): Promise<Open> {
 // hf_buckets validates the bucket id.
 const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
   databricks: () =>
-    new DatabricksVolumeResource({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+    new DatabricksVolumeResource({
+      host: 'https://h.example.com',
+      token: 't',
+      catalog: 'c',
+      schema: 's',
+      volume: 'v',
+      rootPath: '/',
+    }),
   discord: () => new DiscordResource({ token: 'x' }),
   email: () =>
     new EmailResource({

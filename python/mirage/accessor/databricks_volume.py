@@ -12,55 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
 from mirage.accessor.base import Accessor
+from mirage.core.databricks_volume.client import DatabricksFilesClient
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
-
-WorkspaceClient: Any
-WorkspaceConfig: Any
-try:
-    from databricks.sdk import WorkspaceClient as _WorkspaceClient
-    from databricks.sdk.config import Config as _WorkspaceConfig
-except ImportError:
-    WorkspaceClient = None
-    WorkspaceConfig = None
-else:
-    WorkspaceClient = _WorkspaceClient
-    WorkspaceConfig = _WorkspaceConfig
 
 
 class DatabricksVolumeAccessor(Accessor):
 
-    def __init__(
-        self,
-        config: DatabricksVolumeConfig,
-        client: Any | None = None,
-    ) -> None:
+    def __init__(self, config: DatabricksVolumeConfig,
+                 client: DatabricksFilesClient) -> None:
+        """Hold the volume's location and the client that reaches it.
+
+        Args:
+            config (DatabricksVolumeConfig): location and transport.
+            client (DatabricksFilesClient): the Files API client every
+                op calls; a test supplies its own implementation.
+        """
         self.config = config
-        self._client = client
-
-    @property
-    def client(self) -> Any:
-        if self._client is None:
-            if WorkspaceClient is None or WorkspaceConfig is None:
-                raise ImportError("DatabricksVolumeResource requires the "
-                                  "'databricks' extra. Install with: "
-                                  "pip install mirage-ai[databricks]")
-            kwargs: dict[str, Any] = {
-                "host": self.config.host,
-                "token": self.config.token,
-                "profile": self.config.profile,
-                "auth_type": "pat" if self.config.token is not None else None,
-                "http_timeout_seconds": self.config.timeout,
-            }
-            sdk_config = WorkspaceConfig(**{
-                k: v
-                for k, v in kwargs.items() if v is not None
-            })
-            self._client = WorkspaceClient(config=sdk_config)
-        return self._client
-
-    @property
-    def files(self) -> Any:
-        return self.client.files
+        self.client = client

@@ -16,15 +16,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { normalizeDatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
 import { dbxFetch, dbxUrl, encodeRemotePath } from './client.ts'
-import { DatabricksVolumeApiError } from './errors.ts'
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from './errors.ts'
 
-function makeAccessor(): DatabricksVolumeAccessor {
+function makeAccessor(token = 'tok-123'): DatabricksVolumeAccessor {
   const config = normalizeDatabricksVolumeConfig({
+    host: 'https://dbc.example.com/',
+    token,
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',
   })
-  return new DatabricksVolumeAccessor(config, 'https://dbc.example.com/', 'tok-123')
+  return new DatabricksVolumeAccessor(config)
 }
 
 afterEach(() => {
@@ -83,5 +85,44 @@ describe('dbxFetch', () => {
     expect(err.statusCode).toBe(500)
     expect(err.errorCode).toBeNull()
     expect(err.message).toContain('plain boom')
+  })
+})
+
+describe('dbxFetch token handling', () => {
+  it('sends the configured token on every request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const accessor = makeAccessor('tok-rotated')
+    await dbxFetch(accessor, 'GET', 'files', '/Volumes/x/a.txt')
+    await dbxFetch(accessor, 'GET', 'files', '/Volumes/x/a.txt')
+    const first = (fetchMock.mock.calls[0] as [string, RequestInit])[1]
+    const second = (fetchMock.mock.calls[1] as [string, RequestInit])[1]
+    expect((first.headers as Record<string, string>).Authorization).toBe('Bearer tok-rotated')
+    expect((second.headers as Record<string, string>).Authorization).toBe('Bearer tok-rotated')
+  })
+
+  it('reports a 401 as an auth error without replaying the request', async () => {
+    // The token is the one the config carries, so a replay would send the
+    // same refused credential again, and for a write it would send the write
+    // twice. The application catches this, obtains a fresh token and builds a
+    // new resource.
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const err = (await dbxFetch(makeAccessor(), 'PUT', 'files', '/Volumes/x/a.txt', {
+      body: new Uint8Array([1]),
+    }).catch((e: unknown) => e)) as DatabricksVolumeAuthError
+    expect(err).toBeInstanceOf(DatabricksVolumeAuthError)
+    expect(err).toBeInstanceOf(DatabricksVolumeApiError)
+    expect(err.statusCode).toBe(401)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a 403 as an ordinary api error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })))
+    const err = (await dbxFetch(makeAccessor(), 'GET', 'files', '/Volumes/x/a.txt').catch(
+      (e: unknown) => e,
+    )) as DatabricksVolumeApiError
+    expect(err).not.toBeInstanceOf(DatabricksVolumeAuthError)
+    expect(err.statusCode).toBe(403)
   })
 })

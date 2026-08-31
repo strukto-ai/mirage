@@ -23,6 +23,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.hf_buckets import HfBucketsResource
 from mirage.resource.registry import (REGISTRY, build_resource,
                                       known_resources, register_resource)
+from mirage.resource.secrets import REDACTED_SECRET
 
 SPEC_RESOURCES = (Path(__file__).resolve().parents[3] / "spec" / "python" /
                   "resources.json")
@@ -128,6 +129,27 @@ def test_build_redis_takes_raw_kwargs():
 def test_unknown_resource_raises_keyerror():
     with pytest.raises(KeyError, match="unknown resource 'nonsense'"):
         build_resource("nonsense")
+
+
+def test_build_databricks_volume_redacts_the_token():
+    """A databricks mount is declarable like any other account backend:
+    the token rides the config, so YAML and the daemon build it by name,
+    and the state it captures carries the redaction marker rather than
+    the credential."""
+    from mirage.resource.databricks_volume import DatabricksVolumeResource
+    built = build_resource(
+        "databricks_volume", {
+            "host": "https://dbc.example.com",
+            "token": "dapi-123",
+            "catalog": "main",
+            "schema": "default",
+            "volume": "agent_files",
+        })
+    assert isinstance(built, DatabricksVolumeResource)
+    assert built.config.host == "https://dbc.example.com"
+    state = built.get_state()
+    assert state["config"]["token"] == REDACTED_SECRET
+    assert "dapi-123" not in json.dumps(state)
 
 
 def test_registry_module_import_is_free_of_resource_deps():

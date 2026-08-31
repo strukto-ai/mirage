@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
-from urllib.parse import quote
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -23,58 +21,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.ranges import range_header, slice_window
-
-
-def _read_response_bytes(response) -> bytes:
-    if isinstance(response, dict):
-        contents = response.get("contents", response)
-    else:
-        contents = getattr(response, "contents", response)
-    if isinstance(contents, bytes):
-        return contents
-    if hasattr(contents, "read"):
-        return contents.read()
-    return bytes(contents)
-
-
-def _download_bytes_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-    window: str | None,
-) -> bytes:
-    """Download a file, optionally only a byte range of it.
-
-    Args:
-        accessor (DatabricksVolumeAccessor): Databricks accessor.
-        remote_path (str): path inside the volume.
-        window (str | None): an HTTP ``Range`` value, or None for all
-            of it.
-    """
-    if window is None:
-        return _read_response_bytes(accessor.files.download(remote_path))
-    headers = {
-        "Accept": "application/octet-stream",
-        "Range": window,
-    }
-    cfg = getattr(accessor.client.api_client, "_cfg", None)
-    workspace_id = getattr(cfg, "workspace_id", None)
-    if workspace_id:
-        headers["X-Databricks-Org-Id"] = workspace_id
-    response = accessor.client.api_client.do(
-        "GET",
-        f"/api/2.0/fs/files{quote(remote_path)}",
-        headers=headers,
-        response_headers=[
-            "content-length",
-            "content-range",
-            "accept-ranges",
-            "content-type",
-            "last-modified",
-        ],
-        raw=True,
-    )
-    return _read_response_bytes(response)
+from mirage.utils.ranges import window_for
 
 
 async def read_bytes(
@@ -91,25 +38,11 @@ async def read_bytes(
         record("read", virtual, "databricks_volume", 0, start_ms)
         return b""
     try:
-        data = await asyncio.to_thread(
-            _download_bytes_sync,
-            accessor,
-            remote_path,
-            range_header(offset, size),
-        )
+        data = await accessor.client.download(remote_path,
+                                              window_for(offset, size))
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
         raise
-    # A Range is a request, not an instruction: a gateway may answer with
-    # the whole object. The other HTTP backends tell the two apart by the
-    # 206, but the SDK hands back a dict of the headers it was asked for
-    # and no status, and the Files API answers a honored range with no
-    # Content-Range either, so neither proof is available here. A body
-    # longer than the window is one, though, and it is the only case that
-    # matters: it is the read that returns more bytes than the caller
-    # gave room for. A short answer is what EOF looks like and is kept.
-    if size is not None and len(data) > size:
-        data = slice_window(data, offset, size)
     record("read", virtual, "databricks_volume", len(data), start_ms)
     return data

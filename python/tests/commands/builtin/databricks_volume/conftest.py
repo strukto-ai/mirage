@@ -17,10 +17,11 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
-from tests.core.databricks_volume.conftest import (accessor, databricks_config,
-                                                   files, index, remote_root)
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.core.databricks_volume._fakes import (FakeFilesClient, accessor,
+                                                 databricks_config, files,
+                                                 index, make_resource,
+                                                 remote_root, seed_directory,
+                                                 seed_file)
 
 __all__ = [
     "accessor",
@@ -31,7 +32,7 @@ __all__ = [
 ]
 
 
-def seed_text_command_fixture(files: FakeFiles) -> str:
+def seed_text_command_fixture(files: FakeFilesClient) -> str:
     root = "/Volumes/main/default/agent_files/root"
     seed_directory(files, root)
     seed_file(files, f"{root}/words.txt", b"beta\nalpha\nalpha\n")
@@ -80,14 +81,15 @@ class IndexTrackingReader:
 
 
 @pytest.fixture
-def databricks_text_files() -> FakeFiles:
-    files = FakeFiles()
+def databricks_text_files() -> FakeFilesClient:
+    files = FakeFilesClient()
     seed_text_command_fixture(files)
     return files
 
 
 @pytest.fixture
-def databricks_text_workspace(databricks_text_files: FakeFiles) -> Workspace:
+def databricks_text_workspace(
+        databricks_text_files: FakeFilesClient) -> Workspace:
     # WRITE, because sed -i writes back through the command-tier write
     # slot, which now answers the mount mode like every other write.
     return Workspace({"/dbx/": make_resource(databricks_text_files)},

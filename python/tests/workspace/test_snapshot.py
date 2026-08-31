@@ -20,11 +20,18 @@ import tarfile
 import pytest
 from pydantic import BaseModel, SecretStr
 
+from mirage.accessor.ram import RAMAccessor
+from mirage.commands.builtin.ram.io import IO as RAM_IO
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
+from mirage.resource.chroma import ChromaConfig, ChromaResource
+from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
+                                               DatabricksVolumeResource)
 from mirage.resource.disk import DiskResource
+from mirage.resource.generic import GenericResource
 from mirage.resource.ram import RAMResource
+from mirage.resource.ram.store import RAMStore
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.resource.secrets import REDACTED_SECRET
 from mirage.runtime.types import ScriptSource
@@ -199,6 +206,88 @@ def test_s3_without_inline_secret_loads_without_override(tmp_path):
     mount = dst._registry.mount_for("/s3/")
     assert isinstance(mount.resource, S3Resource)
     assert mount.resource.config.aws_profile == "dev"
+
+
+# ── override enforcement ─────────────────────────────────────────────
+
+
+def databricks_config(token: str = "dapi-123") -> DatabricksVolumeConfig:
+    return DatabricksVolumeConfig(host="https://dbc.example.com",
+                                  token=token,
+                                  catalog="main",
+                                  schema="default",
+                                  volume="agent_files")
+
+
+def test_a_redacted_databricks_token_demands_a_fresh_resource(tmp_path):
+    """The token dumps as <REDACTED>, so a rebuild from state would 401
+    on its first read; the loader refuses instead, the way it does for
+    every other account backend."""
+    resource = DatabricksVolumeResource(databricks_config())
+    src = Workspace({"/dbx": (resource, MountMode.READ)}, mode=MountMode.READ)
+    snap = tmp_path / "dbx.tar"
+    asyncio.run(src.snapshot(snap))
+
+    with pytest.raises(ValueError, match=r"resources="):
+        _load(snap)
+
+
+def test_databricks_load_succeeds_with_a_replacement(tmp_path):
+    src = Workspace(
+        {
+            "/dbx":
+            (DatabricksVolumeResource(databricks_config()), MountMode.READ)
+        },
+        mode=MountMode.READ)
+    snap = tmp_path / "dbx-override.tar"
+    asyncio.run(src.snapshot(snap))
+
+    replacement = DatabricksVolumeResource(databricks_config("dapi-fresh"))
+    dst = _load(snap, resources={"/dbx": replacement})
+    assert dst._registry.mount_for("/dbx/").resource is replacement
+
+
+def test_generic_mount_demands_a_fresh_resource(tmp_path):
+    """A generic resource is assembled from live IO callables that no
+    state dict can carry, so its marker is the only thing standing
+    between a restore and a mount with nothing behind it."""
+    src = Workspace(
+        {
+            "/kit": (GenericResource(name="ram-kit",
+                                     accessor=RAMAccessor(RAMStore()),
+                                     io=RAM_IO), MountMode.WRITE)
+        },
+        mode=MountMode.WRITE)
+    snap = tmp_path / "kit.tar"
+    asyncio.run(src.snapshot(snap))
+
+    with pytest.raises(ValueError, match=r"resources="):
+        _load(snap)
+
+    replacement = GenericResource(name="ram-kit",
+                                  accessor=RAMAccessor(RAMStore()),
+                                  io=RAM_IO)
+    dst = _load(snap, resources={"/kit": replacement})
+    assert dst._registry.mount_for("/kit/").resource is replacement
+
+
+def test_chroma_loads_without_an_override(tmp_path):
+    """Chroma's config is host/port/collection and nothing else, so the
+    loader rebuilds its client from state; the marker it used to carry
+    demanded an override no deployment could explain."""
+    src = Workspace(
+        {
+            "/vec": (ChromaResource(
+                ChromaConfig(collection_name="docs")), MountMode.READ)
+        },
+        mode=MountMode.READ)
+    snap = tmp_path / "chroma.tar"
+    asyncio.run(src.snapshot(snap))
+
+    dst = _load(snap)
+    mount = dst._registry.mount_for("/vec/")
+    assert isinstance(mount.resource, ChromaResource)
+    assert mount.resource.config.collection_name == "docs"
 
 
 # ── cred redaction in raw bytes ─────────────────────────────────────

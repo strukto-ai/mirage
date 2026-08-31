@@ -25,15 +25,17 @@ from mirage.types import PathSpec
 load_dotenv(".env.development")
 
 config = DatabricksVolumeConfig(
+    host=os.environ["DATABRICKS_HOST"],
+    token=os.environ["DATABRICKS_TOKEN"],
     catalog=os.environ["DATABRICKS_VOLUME_CATALOG"],
     schema=os.environ["DATABRICKS_VOLUME_SCHEMA"],
     volume=os.environ["DATABRICKS_VOLUME_NAME"],
     root_path=os.environ.get("DATABRICKS_VOLUME_ROOT_PATH", "/"),
-    host=os.environ.get("DATABRICKS_HOST"),
-    token=os.environ.get("DATABRICKS_TOKEN"),
-    profile=os.environ.get("DATABRICKS_CONFIG_PROFILE"),
 )
-resource = DatabricksVolumeResource(config=config)
+# A personal access token needs nothing more than this. An app whose
+# token expires catches DatabricksVolumeAuthError, obtains a fresh one
+# its own way, and builds a new resource with a new config.
+resource = DatabricksVolumeResource(config)
 
 
 async def _run(ws, cmd):

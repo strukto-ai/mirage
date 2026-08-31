@@ -12,15 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
-from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.databricks_volume._helpers import (is_directory_metadata,
-                                                    parent_path)
+from mirage.core.databricks_volume._helpers import parent_path
+from mirage.core.databricks_volume.client import DatabricksFilesClient
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.observe.context import record
@@ -28,34 +26,35 @@ from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
 
-def _ensure_parent_directory_sync(
-    accessor: DatabricksVolumeAccessor,
+async def ensure_parent_directory(
+    client: DatabricksFilesClient,
     remote_parent: str,
     virtual_target: str,
 ) -> None:
+    """Refuse a write whose parent is missing or is a file.
+
+    A directory answers on /fs/directories and 404s on /fs/files, so
+    the two probes tell "no parent" from "parent is a file" apart.
+
+    Args:
+        client (DatabricksFilesClient): the Files API client.
+        remote_parent (str): the parent's absolute backend path.
+        virtual_target (str): the path the caller typed, for the errno.
+    """
     try:
-        accessor.files.get_directory_metadata(remote_parent)
+        await client.get_directory_metadata(remote_parent)
         return
     except Exception as exc:
         if not is_not_found(exc):
             raise
         not_found = exc
     try:
-        metadata = accessor.files.get_metadata(remote_parent)
+        await client.get_metadata(remote_parent)
     except Exception as exc:
         if is_not_found(exc):
             raise FileNotFoundError(virtual_target) from not_found
         raise
-    if not is_directory_metadata(metadata):
-        raise NotADirectoryError(virtual_target)
-
-
-def _upload_bytes_sync(
-    accessor: DatabricksVolumeAccessor,
-    remote_path: str,
-    data: bytes,
-) -> None:
-    accessor.files.upload(remote_path, BytesIO(data), overwrite=True)
+    raise NotADirectoryError(virtual_target)
 
 
 async def write_bytes(
@@ -68,16 +67,9 @@ async def write_bytes(
     remote_parent = backend_path(accessor.config, parent)
     remote_path = backend_path(accessor.config, path)
     start_ms = int(time.monotonic() * 1000)
-    # TODO native async client calling HTTP API as databricks sdk is sync
-    await asyncio.to_thread(
-        _ensure_parent_directory_sync,
-        accessor,
-        remote_parent,
-        path.virtual,
-    )
+    await ensure_parent_directory(accessor.client, remote_parent, path.virtual)
     try:
-        await asyncio.to_thread(_upload_bytes_sync, accessor, remote_path,
-                                data)
+        await accessor.client.upload(remote_path, data)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc

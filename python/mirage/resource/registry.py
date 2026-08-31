@@ -349,8 +349,7 @@ def build_resource(name: str,
     ``ensure_default_branch``, and never from ``__init__``, which cannot
     await and so would have to block the caller's event loop. This is a
     deliberate divergence from the TypeScript ``buildResource``, which
-    stays ``Promise<Resource>`` because two of its backends
-    (``github``, ``databricks_volume``) construct through
+    stays ``Promise<Resource>`` because ``github`` constructs through
     ``static async create``.
 
     Args:

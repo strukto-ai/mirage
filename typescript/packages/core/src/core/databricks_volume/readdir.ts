@@ -21,27 +21,20 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch, type DbxEndpoint } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
+import type { DatabricksEntry } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listingError } from '../../utils/errors.ts'
 
-export interface DbxDirectoryEntry {
-  path: string
-  is_directory?: boolean
-  file_size?: number
-  last_modified?: number
-  name?: string
-}
-
 interface DbxDirectoryPage {
-  contents?: DbxDirectoryEntry[]
+  contents?: DatabricksEntry[]
   next_page_token?: string
 }
 
 export async function listDirectoryContents(
   accessor: DatabricksVolumeAccessor,
   remotePath: string,
-): Promise<DbxDirectoryEntry[]> {
-  const entries: DbxDirectoryEntry[] = []
+): Promise<DatabricksEntry[]> {
+  const entries: DatabricksEntry[] = []
   let pageToken: string | undefined
   do {
     const query: Record<string, string> = pageToken !== undefined ? { page_token: pageToken } : {}
@@ -79,7 +72,7 @@ export async function readdir(
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
   }
   const remotePath = backendPath(accessor.config, listPath)
-  let entries: DbxDirectoryEntry[]
+  let entries: DatabricksEntry[]
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
@@ -102,7 +95,7 @@ export async function readdir(
         [
           virtualPath(accessor.config, entry.path, mountPrefixOf(path.virtual, path.resourcePath)),
           entry,
-        ] as [string, DbxDirectoryEntry],
+        ] as [string, DatabricksEntry],
     )
     .sort((a, b) => compareCodePoints(a[0], b[0]))
   const names: string[] = []

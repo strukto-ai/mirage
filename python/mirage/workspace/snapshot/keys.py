@@ -69,6 +69,7 @@ class JobKey(StrEnum):
 class ResourceStateKey(StrEnum):
     TYPE = "type"
     CONFIG = "config"
+    NEEDS_OVERRIDE = "needs_override"
     FILES = "files"
     DIRS = "dirs"
     MODIFIED = "modified"

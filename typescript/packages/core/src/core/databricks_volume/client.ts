@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { DatabricksVolumeApiError } from './errors.ts'
+import { DatabricksVolumeApiError, DatabricksVolumeAuthError } from './errors.ts'
 
 export type DbxEndpoint = 'files' | 'directories'
 
@@ -54,11 +54,14 @@ async function errorFromResponse(method: string, url: string, r: Response): Prom
   } catch {
     message = text
   }
-  return new DatabricksVolumeApiError(
-    `databricks_volume: ${method} ${url} → ${String(r.status)} ${message}`,
-    r.status,
-    errorCode,
-  )
+  const rendered = `databricks_volume: ${method} ${url} → ${String(r.status)} ${message}`
+  // A refused credential is its own type, because it is the one failure the
+  // application can act on: obtain a fresh token and rebuild the resource.
+  // Nothing here retries or replays.
+  if (r.status === 401) {
+    return new DatabricksVolumeAuthError(rendered, r.status, errorCode)
+  }
+  return new DatabricksVolumeApiError(rendered, r.status, errorCode)
 }
 
 export async function dbxFetch(
@@ -69,8 +72,11 @@ export async function dbxFetch(
   options: DbxFetchOptions = {},
 ): Promise<Response> {
   const url = dbxUrl(accessor, endpoint, remotePath, options.query)
+  // The token the config carries. A 401 is reported rather than replayed:
+  // the same refused credential would go out again, and for a write it would
+  // send the write twice.
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessor.token}`,
+    Authorization: `Bearer ${accessor.config.token}`,
     ...options.headers,
   }
   const controller = new AbortController()

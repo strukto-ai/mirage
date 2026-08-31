@@ -14,8 +14,8 @@ from mirage.core.databricks_volume.stat import stat
 from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.types import LsSortBy, PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
-                                                   directory_entry, file_entry)
+from tests.core.databricks_volume._fakes import (FakeFilesClient,
+                                                 directory_entry, file_entry)
 
 MODIFIED_MS = 1_700_000_000_000
 
@@ -25,22 +25,23 @@ AGES_DAYS = (1, 2, 3, 10, 20)
 
 
 def _rig(
-) -> tuple[DatabricksVolumeAccessor, FakeFiles, RAMIndexCacheStore, str]:
+) -> tuple[DatabricksVolumeAccessor, FakeFilesClient, RAMIndexCacheStore, str]:
     config = DatabricksVolumeConfig(
+        host="https://dbc.example.com",
+        token="dapi-test",
         catalog="main",
         schema="default",
         volume="agent_files",
         root_path="/root",
-        token="secret",
     )
-    files = FakeFiles()
-    accessor = DatabricksVolumeAccessor(config, FakeClient(files))
+    files = FakeFilesClient()
+    accessor = DatabricksVolumeAccessor(config, files)
     index = RAMIndexCacheStore(ttl=600)
     return accessor, files, index, backend_path(config,
                                                 PathSpec.from_str_path("/"))
 
 
-def _seed_flat(files: FakeFiles, root: str, count: int = 5) -> None:
+def _seed_flat(files: FakeFilesClient, root: str, count: int = 5) -> None:
     files.directories[f"{root}/sub"] = [
         file_entry(f"{root}/sub/f{i}.txt",
                    size=i + 1,

@@ -18,6 +18,8 @@ from typing import Any
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.commands.builtin.databricks_volume import \
     COMMANDS as DATABRICKS_VOLUME_COMMANDS
+from mirage.core.databricks_volume.client import (DatabricksFilesClient,
+                                                  HttpDatabricksFilesClient)
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.exists import exists
@@ -70,14 +72,40 @@ class DatabricksVolumeResource(BaseResource):
     _ops: dict[str, Any] = _DATABRICKS_VOLUME_OPS
     PROMPT: str = PROMPT
 
-    def __init__(
-        self,
-        config: DatabricksVolumeConfig,
-        client: Any | None = None,
-    ) -> None:
+    def __init__(self, config: DatabricksVolumeConfig) -> None:
+        """Mount one Unity Catalog volume over the Files API.
+
+        Args:
+            config (DatabricksVolumeConfig): workspace host, bearer
+                token, volume coordinates and transport.
+        """
         super().__init__()
+        self._initialize(config, HttpDatabricksFilesClient(config))
+
+    @classmethod
+    def _from_files_client(
+        cls,
+        config: DatabricksVolumeConfig,
+        files_client: DatabricksFilesClient,
+    ) -> "DatabricksVolumeResource":
+        """Build a resource around an already-made Files API client.
+
+        The seam a test drives the whole backend through without a
+        socket; deliberately not exported.
+
+        Args:
+            config (DatabricksVolumeConfig): location and transport.
+            files_client (DatabricksFilesClient): the client to use.
+        """
+        resource = cls.__new__(cls)
+        BaseResource.__init__(resource)
+        resource._initialize(config, files_client)
+        return resource
+
+    def _initialize(self, config: DatabricksVolumeConfig,
+                    files_client: DatabricksFilesClient) -> None:
         self.config = config
-        self.accessor = DatabricksVolumeAccessor(self.config, client)
+        self.accessor = DatabricksVolumeAccessor(config, files_client)
 
         for fn in DATABRICKS_VOLUME_COMMANDS:
             self.register(fn)
@@ -98,17 +126,9 @@ class DatabricksVolumeResource(BaseResource):
         return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
-        redacted = ["token"]
-        cfg = self.config.model_dump()
-        for field in redacted:
-            if cfg.get(field) is not None:
-                cfg[field] = "<REDACTED>"
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
-        }
+        # The token dumps as <REDACTED>, which is what makes the loader
+        # demand a fresh resource; no separate marker is needed.
+        return self.config_state(self.config)
 
     def load_state(self, state: dict[str, Any]) -> None:
         pass

@@ -17,9 +17,17 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
-  secretStr,
+  secretSchema,
 } from '../secrets.ts'
 import { normalizeFields } from '../../utils/normalize.ts'
+
+function normalizeHost(value: string): string {
+  const trimmed = value.replace(/\/+$/, '')
+  if (trimmed === '') {
+    throw new Error('host must be a non-empty workspace URL')
+  }
+  return trimmed
+}
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -34,14 +42,21 @@ function normalizeRootPath(value: string): string {
   return '/' + parts.join('/')
 }
 
+// The workspace credential is held the way every other account backend holds
+// one, so a snapshot dumps it as <REDACTED> and the loader demands a fresh
+// resource. No profile field and no environment discovery: the embedding
+// program decides where the token comes from and hands it over.
 const DatabricksVolumeConfigSchema = z.object({
+  host: z.string().transform(normalizeHost),
+  // `secretSchema` last, not `secretStr().min(1)`: the secret marker is
+  // metadata on the schema instance, and a check clones the instance, so a
+  // marker applied first would not survive and the token would stop being
+  // redacted. Python spells the same rule as `validate_token`.
+  token: secretSchema(z.string().min(1, 'token must be a non-empty bearer token')),
   catalog: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   schema: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   volume: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
   rootPath: z.string().transform(normalizeRootPath).default('/'),
-  host: z.string().optional(),
-  token: secretStr().optional(),
-  profile: z.string().optional(),
   timeout: z.number().default(30),
 })
 

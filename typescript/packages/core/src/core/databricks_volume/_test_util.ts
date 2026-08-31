@@ -21,12 +21,14 @@ export const TEST_ROOT = '/Volumes/main/default/agent_files/root'
 
 export function makeAccessor(rootPath = '/root'): DatabricksVolumeAccessor {
   const config = normalizeDatabricksVolumeConfig({
+    host: 'https://dbc.example.com',
+    token: 'tok-123',
     catalog: 'main',
     schema: 'default',
     volume: 'agent_files',
     root_path: rootPath,
   })
-  return new DatabricksVolumeAccessor(config, 'https://dbc.example.com', 'tok-123')
+  return new DatabricksVolumeAccessor(config)
 }
 
 export function spec(virtual: string, prefix = '/volume'): PathSpec {

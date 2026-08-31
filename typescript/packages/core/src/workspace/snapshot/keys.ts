@@ -66,6 +66,7 @@ export const JobKey = Object.freeze({
 export const ResourceStateKey = Object.freeze({
   TYPE: 'type',
   CONFIG: 'config',
+  NEEDS_OVERRIDE: 'needs_override',
   FILES: 'files',
   DIRS: 'dirs',
   MODIFIED: 'modified',

@@ -483,7 +483,23 @@ def _construct_resource(mount_state: dict[str, Any]):
 
 
 def requires_resource_override(mount_state: dict[str, Any]) -> bool:
+    """Whether restoring this mount needs a live resource handed in.
+
+    Two independent reasons. A redaction marker says the saved config
+    is missing a credential the reconstruction would need. An explicit
+    ``needs_override`` says the mount cannot be rebuilt from its state
+    at all, whatever the config looks like: the resource holds runtime
+    state that was never serialized (a token provider, a live client,
+    a generic backend's IO), so a class rebuilt from ``type`` would
+    come back inert. TypeScript has always read the flag
+    (``resourceStateRequiresOverride``); python now does too.
+
+    Args:
+        mount_state (dict[str, Any]): one captured ``mounts`` entry.
+    """
     resource_state = mount_state[MountKey.RESOURCE_STATE]
+    if resource_state.get(ResourceStateKey.NEEDS_OVERRIDE) is True:
+        return True
     config = resource_state.get(ResourceStateKey.CONFIG)
     config_cls = _config_class_for(_resource_class_for(mount_state))
     return has_redacted_secret(config, config_cls)
