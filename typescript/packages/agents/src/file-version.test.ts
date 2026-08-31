@@ -199,7 +199,7 @@ class RenderingVersionedFs {
     if (!(await this.inner.fs.exists(path))) {
       return { exists: false, revision: null, fingerprint: null }
     }
-    return { exists: true, revision: `r${this.marks.get(path) ?? 0}`, fingerprint: null }
+    return { exists: true, revision: `r${String(this.marks.get(path) ?? 0)}`, fingerprint: null }
   }
 
   async readFile(path: string): Promise<Uint8Array> {
