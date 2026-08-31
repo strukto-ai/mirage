@@ -19,12 +19,13 @@ import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
-from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
-                           Policy, PolicyDenied)
+from mirage.io import OpReport
+from mirage.policy import (Action, CommandRule, Deny, OpsContext,
+                           OpsResultContext, Policies, Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
 from mirage.resource.ram import RAMResource
-from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, MountMode,
-                          PathSpec)
+from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, Limit,
+                          MountMode, PathSpec)
 from mirage.utils.errors import ReadOnlyError
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher import Dispatcher
@@ -161,6 +162,68 @@ async def test_a_plain_read_leaves_the_index_to_the_mount():
     mount.resource.caches_reads = False
     await dispatcher.dispatch("read", _path("/data/a.txt"))
     assert "index" not in mount.execute_op.await_args.kwargs
+
+
+class CapReads(Policy):
+
+    def __init__(self, max_bytes: int) -> None:
+        self._max_bytes = max_bytes
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "read":
+            return Limit(max_bytes=self._max_bytes)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_cap_that_truncates_stamps_the_report():
+    # The cap runs after the backend answered, so `bytes` keeps the
+    # moved count and the delivered result no longer measures it. Only
+    # the door can say the two disagree because a cap ran: a caller
+    # comparing lengths cannot tell this from a rendered read, which
+    # legitimately returns a different count from the one it moved.
+    policies = Policies()
+    policies.add(CapReads(2))
+    dispatcher, _ = _dispatcher(policies)
+    report = OpReport()
+    result, _ = await dispatcher.dispatch("read",
+                                          _path("/data/a.txt"),
+                                          report=report,
+                                          fresh=True)
+    assert result == b"co"
+    assert report.bytes == len(b"cold")
+    assert report.capped is True
+
+
+@pytest.mark.asyncio
+async def test_a_bound_that_truncates_nothing_leaves_the_report_uncapped():
+    # A bound wider than the answer delivers the whole answer, so
+    # nothing was withheld and there is nothing to refuse over.
+    policies = Policies()
+    policies.add(CapReads(64))
+    dispatcher, _ = _dispatcher(policies)
+    report = OpReport()
+    result, _ = await dispatcher.dispatch("read",
+                                          _path("/data/a.txt"),
+                                          report=report,
+                                          fresh=True)
+    assert result == b"cold"
+    assert report.capped is False
+
+
+@pytest.mark.asyncio
+async def test_a_warm_read_the_cap_truncates_stamps_the_report_too():
+    # The cache path applies the same bound and must report it the same
+    # way, or a caller would read a truncated cached answer as whole.
+    policies = Policies()
+    policies.add(CapReads(2))
+    dispatcher, _ = _dispatcher(policies)
+    report = OpReport()
+    result, _ = await dispatcher.dispatch("read",
+                                          _path("/data/a.txt"),
+                                          report=report)
+    assert result == b"wa"
+    assert report.capped is True
 
 
 @pytest.mark.asyncio

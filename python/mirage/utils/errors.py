@@ -46,6 +46,27 @@ class ReadOnlyError(PermissionError):
     """
 
 
+class CappedReadError(OSError):
+    """A read a policy cap truncated, asked for with its identity.
+
+    ``Ops.read_with_identity`` raises it rather than pairing a prefix
+    with the whole file's markers: the bytes are not the file, and a
+    read-check-write caller that stamped them would later write the
+    fragment back under an identity that still verifies. The two ways
+    to degrade are both worse. Bypassing the cap makes the identity
+    read a policy bypass, and answering ``identity=None`` loses the
+    same data one step later, since the caller hashes the prefix and
+    writes it back anyway.
+
+    A distinct type, not a bare OSError, because the caller's recovery
+    is its own (read again without the identity, or run under a
+    workspace that does not cap this path); errno is EINVAL, since
+    what the caller asked for is unanswerable in this configuration
+    rather than refused, missing, or unsupported by the backend.
+    Mirrors the TS ``cappedRead`` stamp.
+    """
+
+
 class NoMountError(ValueError):
     """A path no mount owns: the registry's miss, and nothing else.
 
@@ -116,6 +137,12 @@ def eacces(path: str | PathSpec) -> PermissionError:
 
 def no_mount(path: str | PathSpec) -> NoMountError:
     return NoMountError(f"no mount matches path: {str(path)!r}")
+
+
+def capped_read(path: str | PathSpec) -> CappedReadError:
+    return CappedReadError(
+        errno.EINVAL, "a policy cap truncated this read; no identity "
+        "can describe these bytes", _virtual_of(path))
 
 
 # The three conditions below have no typed builtin, so their errno is

@@ -30,7 +30,8 @@ from mirage.ops.types import LiveFileIdentity
 from mirage.policy import (Action, Deny, OpsContext, OpsResultContext, Policy,
                            PolicyDenied)
 from mirage.resource.ram import RAMResource
-from mirage.types import FileType, HiddenPaths, MountMode
+from mirage.types import FileType, HiddenPaths, Limit, MountMode
+from mirage.utils.errors import CappedReadError
 from mirage.workspace.session import Session
 
 from .conftest import make_ops, run
@@ -807,6 +808,112 @@ class TestReadWithIdentity:
         assert identity == LiveFileIdentity(exists=True,
                                             revision="rev-1",
                                             fingerprint="fp-1")
+
+
+class _CapReadBytes(Policy):
+    """A post_ops policy that bounds every read to ``max_bytes``."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self._max_bytes = max_bytes
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "read":
+            return Limit(max_bytes=self._max_bytes)
+        return None
+
+
+async def _rendered_read(accessor, path, **kwargs) -> bytes:
+    """A rendered read: markers describe the stored bytes it read.
+
+    The record measures the source (9 bytes), the op answers with a
+    shorter rendering, and neither number is wrong -- which is why the
+    truncation test cannot be a length comparison.
+
+    Args:
+        accessor: the mount's accessor.
+        path: the path being read.
+        **kwargs: the op's other arguments, unused.
+    """
+    record("read",
+           path.virtual,
+           "ram",
+           len(b"raw-bytes"),
+           int(time.monotonic() * 1000),
+           fingerprint="fp-r",
+           revision="rev-r")
+    return b"tally"
+
+
+def _capped_workspace(max_bytes: int) -> Workspace:
+    """A workspace whose reads a post_ops policy bounds.
+
+    Args:
+        max_bytes (int): the bound every read is capped to.
+    """
+    resource = RAMResource()
+    resource.register_op(
+        RegisteredOp(name="read",
+                     resource="ram",
+                     filetype=None,
+                     fn=_stamped_read,
+                     write=False))
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws.policies.add(_CapReadBytes(max_bytes))
+    return ws
+
+
+class TestReadWithIdentityUnderAPolicyCap:
+    """A cap truncates after the backend answered, so the delivered
+    bytes are a prefix while the markers still describe the whole file.
+    The pair is refused rather than degraded: bypassing the cap is a
+    policy bypass, and a None identity loses the same data one step
+    later, once the caller hashes the prefix and writes it back."""
+
+    def test_the_plain_read_still_serves_the_capped_prefix(self):
+        ws = _capped_workspace(4)
+        assert run(ws.ops.read("/data/a.txt")) == b"vers"
+
+    def test_the_identity_read_refuses_a_truncated_pairing(self):
+        ws = _capped_workspace(4)
+        with pytest.raises(CappedReadError) as excinfo:
+            run(ws.ops.read_with_identity("/data/a.txt"))
+        assert excinfo.value.errno == errno.EINVAL
+        assert "policy cap truncated" in str(excinfo.value)
+
+    def test_the_workspace_facade_refuses_it_too(self):
+        ws = _capped_workspace(4)
+        with pytest.raises(CappedReadError):
+            run(ws.read_with_identity("/data/a.txt"))
+
+    def test_a_cap_that_truncates_nothing_still_answers(self):
+        # The refusal is truncation, not the presence of a bound: a cap
+        # wider than the file leaves the delivered bytes whole.
+        ws = _capped_workspace(64)
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"versioned"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-1",
+                                            fingerprint="fp-1")
+
+    def test_a_rendered_read_is_not_mistaken_for_a_truncated_one(self):
+        # A rendered read's marker record measures the bytes the backend
+        # moved (9), and the op answers with a 5-byte rendering; only the
+        # door knows no cap ran, which is why the report is what is read
+        # back rather than the two lengths.
+        resource = RAMResource()
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=".tally",
+                         fn=_rendered_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(ws.ops.write("/data/hits.tally", b"raw-bytes"))
+        data, identity = run(ws.ops.read_with_identity("/data/hits.tally"))
+        assert data == b"tally"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-r",
+                                            fingerprint="fp-r")
 
 
 class TestProbesAndConveniences:

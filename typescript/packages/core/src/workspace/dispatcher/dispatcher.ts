@@ -46,6 +46,7 @@ import {
   ConsistencyPolicy,
   FileStat,
   FileType,
+  type Limit,
   MountMode,
   PathSpec,
   ResourceName,
@@ -127,6 +128,36 @@ export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode
  */
 function memoryAnswered(report: OpReport | undefined, moved: number | null = null): void {
   report?.served(ResourceName.RAM, moved)
+}
+
+/**
+ * Apply an op's postOps output cap, stamping what it truncated.
+ *
+ * The transfer already happened, so the cap changes what the caller
+ * receives, not what the backend moved; the report already carries the
+ * moved count. What it cannot carry is that the two now disagree: a
+ * warm hit stamps a moved count too, and a rendered read returns a
+ * different count from the one its backend moved, so a caller cannot
+ * tell a truncation from either by comparing lengths. The one place
+ * that knows is here, where the cap runs. Mirrors Python's `_bounded`.
+ */
+async function bounded(
+  result: unknown,
+  bound: Limit | null,
+  report: OpReport | undefined,
+): Promise<unknown> {
+  if (bound === null) return result
+  const before = result instanceof Uint8Array ? result.byteLength : null
+  const capped = await applyOpLimit(result, bound)
+  if (
+    report !== undefined &&
+    before !== null &&
+    capped instanceof Uint8Array &&
+    capped.byteLength < before
+  ) {
+    report.capped = true
+  }
+  return capped
 }
 
 export class Dispatcher {
@@ -312,8 +343,7 @@ export class Dispatcher {
       // gate and the cap, so whatever they throw cannot erase it.
       memoryAnswered(report)
       const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
-      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
-      return [gated, new IOResult()]
+      return [await bounded(fallback, fallbackBound, report), new IOResult()]
     }
     const [resource, scope, mode] = resolved
     // resolve() above already threw for a path outside every mount, so
@@ -358,9 +388,7 @@ export class Dispatcher {
         // as traffic that never happened.
         memoryAnswered(report, window.byteLength)
         const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
-        const served = (
-          warmBound !== null ? await applyOpLimit(window, warmBound) : window
-        ) as Uint8Array
+        const served = (await bounded(window, warmBound, report)) as Uint8Array
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
@@ -477,12 +505,7 @@ export class Dispatcher {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
     }
     const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
-    if (bound !== null) {
-      // The transfer already happened, so the limit changes what the
-      // caller receives, not what the backend moved; the report above
-      // already carries the moved count.
-      result = await applyOpLimit(result, bound)
-    }
+    result = await bounded(result, bound, report)
     return [result, new IOResult()]
   }
 
@@ -769,8 +792,7 @@ export class Dispatcher {
     )
     memoryAnswered(report)
     const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
-    if (bound !== null) return (await applyOpLimit(result, bound)) as string | null
-    return result
+    return (await bounded(result, bound, report)) as string | FileStat | null
   }
 
   /**

@@ -26,7 +26,7 @@ import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
-import { enoent, enotdir } from '../utils/errors.ts'
+import { enoent, enotdir, isCappedRead, type FsError } from '../utils/errors.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 
 // Exposes the protected `_index` slot so a test can swap in a custom
@@ -1015,5 +1015,100 @@ describe('Ops.readFileWithIdentity', () => {
     const [data, identity] = await ws.fs.readFileWithIdentity('/data/link.txt')
     expect(DEC.decode(data)).toBe('versioned')
     expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+})
+
+// A cap truncates after the backend answered, so the delivered bytes
+// are a prefix while the markers still describe the whole file. The
+// pair is refused rather than degraded: bypassing the cap is a policy
+// bypass, and a null identity loses the same data one step later, once
+// the caller hashes the prefix and writes it back.
+describe('Ops.readFileWithIdentity under a policy cap', () => {
+  class CapReadBytes implements Policy {
+    constructor(private readonly maxBytes: number) {}
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return new Limit({ maxBytes: this.maxBytes })
+      return null
+    }
+  }
+
+  function cappedWorkspace(maxBytes: number): Workspace {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace(
+      { '/data': resource },
+      { mode: MountMode.WRITE, ops, policies: [new CapReadBytes(maxBytes)] },
+    )
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    return ws
+  }
+
+  it('leaves the plain read serving the capped prefix', async () => {
+    const ws = cappedWorkspace(4)
+    expect(DEC.decode(await ws.fs.readFile('/data/a.txt'))).toBe('vers')
+  })
+
+  it('refuses a truncated pairing', async () => {
+    const ws = cappedWorkspace(4)
+    const err = await ws.fs.readFileWithIdentity('/data/a.txt').catch((e: unknown) => e)
+    expect(isCappedRead(err)).toBe(true)
+    expect((err as FsError).code).toBe('EINVAL')
+    expect((err as Error).message).toContain('policy cap truncated')
+  })
+
+  it('refuses through the workspace facade too', async () => {
+    const ws = cappedWorkspace(4)
+    const err = await ws.readFileWithIdentity('/data/a.txt').catch((e: unknown) => e)
+    expect(isCappedRead(err)).toBe(true)
+  })
+
+  it('still answers when the cap truncates nothing', async () => {
+    // The refusal is truncation, not the presence of a bound.
+    const ws = cappedWorkspace(64)
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('does not mistake a rendered read for a truncated one', async () => {
+    // A rendered read's marker record measures the bytes the backend
+    // moved (9), and the op answers with a 5-byte rendering; only the
+    // door knows no cap ran, which is why the report is what is read
+    // back rather than the two lengths.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/data/hits.tally', 'raw-bytes')
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: '.tally',
+      fn: (_accessor, path) => {
+        record('read', path.virtual, resource.kind, 'raw-bytes'.length, performance.now(), {
+          fingerprint: 'fp-r',
+          revision: 'rev-r',
+        })
+        return new TextEncoder().encode('tally')
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/hits.tally')
+    expect(DEC.decode(data)).toBe('tally')
+    expect(identity).toEqual({ exists: true, revision: 'rev-r', fingerprint: 'fp-r' })
   })
 })

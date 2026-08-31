@@ -20,7 +20,7 @@ import type { OpKwargs } from './registry.ts'
 import type { LiveFileIdentity } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { exdev, isMissingOp, isMissingPath } from '../utils/errors.ts'
+import { cappedRead, exdev, isMissingOp, isMissingPath } from '../utils/errors.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
@@ -63,6 +63,20 @@ export function readIdentity(records: readonly OpRecord[], path: string): LiveFi
     }
   }
   return null
+}
+
+/**
+ * The op kwargs one read dispatches with.
+ *
+ * Shared by `readFile` and `readFileWithIdentity` so the second cannot
+ * drift from the first: an identity read that stopped asking for the
+ * stored bytes, or stopped asking for a fresh one, would stamp the
+ * wrong answer without failing anything. Mirrors Python's `read_kwargs`.
+ */
+export function readOpKwargs(raw: boolean, fresh: boolean): OpKwargs {
+  const kwargs: OpKwargs = raw ? { filetype: null } : {}
+  if (fresh) kwargs.fresh = true
+  return kwargs
 }
 
 // The op's byte count for recording: the result first, else the input
@@ -164,12 +178,18 @@ export class Ops {
    * path is link-followed here first so the record carries the resolved
    * path; the door's second follow of an already-resolved path is a
    * no-op. Mirrors Python's Ops._through_door.
+   *
+   * The report is the caller's when one is handed in, so a caller that
+   * has to read the door's account back (the identity read asks whether
+   * a cap truncated its bytes) sees the same object the record is
+   * stamped from.
    */
   private async through(
     op: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    caller: OpReport | null = null,
   ): Promise<unknown> {
     const start = Date.now()
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
@@ -178,7 +198,7 @@ export class Ops {
     const skipFollow = NO_FOLLOW_OPS.has(op) || kwargs.nofollow === true
     const followed = this.links !== null && !skipFollow ? this.links.follow(path) : path
     const owner = this.ownerOf(followed)
-    const report = new OpReport()
+    const report = caller ?? new OpReport()
     let result: unknown
     try {
       const [value] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs, report)
@@ -242,8 +262,7 @@ export class Ops {
     path: string,
     options: { raw?: boolean; fresh?: boolean; offset?: number; size?: number | null } = {},
   ): Promise<Uint8Array> {
-    const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
-    if (options.fresh === true) kwargs.fresh = true
+    const kwargs = readOpKwargs(options.raw === true, options.fresh === true)
     const offset = options.offset ?? 0
     const size = options.size ?? null
     if (offset !== 0 || size !== null) {
@@ -347,6 +366,17 @@ export class Ops {
    * A failed read propagates as it is; no identity is synthesized for
    * it.
    *
+   * A policy-capped read refuses rather than pairing a prefix with a
+   * whole-file identity. A `postOps` policy may bound a read
+   * (`new Limit({maxBytes})`), and the door applies that bound after
+   * the backend already answered, so the delivered bytes are a prefix
+   * while the markers still describe the whole file — the pair a
+   * read-check-write caller would stamp and then write the prefix back
+   * under. `cappedRead` is the answer; bypassing the cap would make
+   * this door a policy bypass, and `identity: null` would only move the
+   * same loss one step later. Plain `readFile` is untouched and still
+   * serves the capped prefix.
+   *
    * `raw` is `readFile`'s own option, passed straight through: a caller
    * that stamps stored bytes has to read stored bytes, or the stamp
    * describes a rendering the write path never stores. `offset`/`size`
@@ -362,10 +392,18 @@ export class Ops {
     // follows before it dispatches; the filter has to compare against
     // that same spelling.
     const target = this.links !== null ? this.links.follow(path) : path
+    // The door's account is read back rather than measured: the length
+    // the backend moved and the length delivered differ for a rendered
+    // read too, so only the door can say which gap a cap made.
+    // Dispatched through `through` rather than `readFile` because the
+    // report has to be this caller's.
+    const report = new OpReport()
     const { records: inner, done } = runRecorded(() =>
-      this.readFile(path, { ...options, fresh: true }),
+      this.through('read', path, [], readOpKwargs(options.raw === true, true), report),
     )
-    return [await done, readIdentity(inner, target)]
+    const data = (await done) as Uint8Array
+    if (report.capped) throw cappedRead(target)
+    return [data, readIdentity(inner, target)]
   }
 
   // The three probes below answer "is this path there?", so only a genuine

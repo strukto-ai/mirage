@@ -60,11 +60,19 @@ class OpReport:
         bytes (int | None): bytes the answering store moved, when the
             delivered result no longer measures them. None means "the
             result is the measure".
+        capped (bool): a post_ops output cap shortened the delivered
+            bytes. ``bytes`` alone cannot say so, because it is also
+            what a warm hit and a suppressed result stamp; a caller
+            that has to know the delivered bytes are the whole answer
+            (``Ops.read_with_identity``) reads this instead of
+            comparing lengths, since a rendered read legitimately
+            returns a different count from the one its backend moved.
     """
 
     completed: bool = False
     source: str | None = None
     bytes: int | None = None
+    capped: bool = False
 
     def served(self,
                source: str | None = None,

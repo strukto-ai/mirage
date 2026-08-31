@@ -35,8 +35,8 @@ from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
                                        namespace_stat)
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.types import (ConsistencyPolicy, FileStat, FileType, PathSpec,
-                          ResourceName)
+from mirage.types import (ConsistencyPolicy, FileStat, FileType, Limit,
+                          PathSpec, ResourceName)
 from mirage.utils.errors import MISS_ERRORS, no_mount
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
@@ -74,6 +74,35 @@ def _memory_answered(report: OpReport | None,
     """
     if report is not None:
         report.served(ResourceName.RAM.value, moved)
+
+
+async def _bounded(result: Any, bound: Limit | None,
+                   report: OpReport | None) -> Any:
+    """Apply an op's post_ops output cap, stamping what it truncated.
+
+    The transfer already happened, so the cap changes what the caller
+    receives, not what the backend moved; the report already carries
+    the moved count. What it cannot carry is that the two now disagree:
+    a warm hit stamps a moved count too, and a rendered read returns a
+    different count from the one its backend moved, so a caller cannot
+    tell a truncation from either by comparing lengths. The one place
+    that knows is here, where the cap runs.
+
+    Args:
+        result (Any): the op's result; only bytes and byte streams cap.
+        bound (Limit | None): the merged post_ops bound, None for none.
+        report (OpReport | None): the caller's report, stamped when the
+            cap shortened the delivered bytes.
+    """
+    if bound is None:
+        return result
+    before = len(result) if isinstance(result, (bytes, bytearray)) else None
+    capped = await apply_op_limit(result, bound)
+    if (report is not None and before is not None
+            and isinstance(capped,
+                           (bytes, bytearray)) and len(capped) < before):
+        report.capped = True
+    return capped
 
 
 def _hidden_refusal(op: str, virtual: str) -> OSError:
@@ -257,9 +286,7 @@ class Dispatcher:
         if op == "readdir" and isinstance(fallback, list):
             fallback = _visible_entries(fallback, path.virtual)
         bound = await post_ops_gate(policies, op, path, write, "", fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
-        return fallback
+        return await _bounded(fallback, bound, report)
 
     async def dispatch(self,
                        op: str,
@@ -404,8 +431,7 @@ class Dispatcher:
                 _memory_answered(report, len(served))
                 bound = await post_ops_gate(policies, op, path, write,
                                             mount.prefix, served)
-                if bound is not None:
-                    served = await apply_op_limit(served, bound)
+                served = await _bounded(served, bound, report)
                 return served, IOResult(reads={path.virtual: served})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -473,11 +499,7 @@ class Dispatcher:
                 await self._namespace.unlink(kwargs["dst"].virtual)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
-        if bound is not None:
-            # The transfer already happened, so the limit changes what
-            # the caller receives, not what the backend moved; the
-            # report above already carries the moved count.
-            result = await apply_op_limit(result, bound)
+        result = await _bounded(result, bound, report)
         return result, IOResult()
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
@@ -704,9 +726,7 @@ class Dispatcher:
         _memory_answered(report)
         bound = await post_ops_gate(policies, op, path, write, owner or "",
                                     result)
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await _bounded(result, bound, report)
 
     async def _readlink_miss(self, path: PathSpec) -> OSError:
         """The error a readlink of something that is not a link answers.

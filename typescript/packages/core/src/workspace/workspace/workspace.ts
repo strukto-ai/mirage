@@ -865,6 +865,12 @@ export class Workspace {
    * Delegated to the ops facade for the same reason as
    * {@link liveIdentity}; the markers come from the read's own backend
    * response.
+   *
+   * A policy-capped read refuses (`cappedRead`) rather than pairing a
+   * prefix with a whole-file identity: a `postOps` bound applies after
+   * the backend answered, so the bytes would be a fragment under an
+   * identity that still verifies. Plain `fs.readFile` still serves the
+   * capped prefix.
    */
   async readFileWithIdentity(
     path: string,

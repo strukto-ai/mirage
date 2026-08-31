@@ -903,9 +903,18 @@ class Workspace:
         :meth:`live_identity`; the markers come from the read's own
         backend response.
 
+        A policy-capped read refuses rather than pairing a prefix with
+        a whole-file identity: a ``post_ops`` bound applies after the
+        backend answered, so the bytes would be a fragment under an
+        identity that still verifies. Plain ``ops.read`` still serves
+        the capped prefix.
+
         Args:
             path (str): Virtual path.
             raw (bool): Read stored bytes rather than a rendered form.
+
+        Raises:
+            CappedReadError: a post_ops policy cap truncated the read.
         """
         return await self.ops.read_with_identity(path, raw=raw)
 

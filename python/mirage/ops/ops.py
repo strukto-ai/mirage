@@ -24,8 +24,27 @@ from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.ops.types import LiveFileIdentity
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import NoMountError, OperationNotSupportedError
+from mirage.utils.errors import (NoMountError, OperationNotSupportedError,
+                                 capped_read)
 from mirage.utils.path import owner_prefix
+
+
+def read_kwargs(raw: bool, fresh: bool) -> dict[str, Any]:
+    """The op kwargs one read dispatches with.
+
+    Shared by ``read`` and ``read_with_identity`` so the second cannot
+    drift from the first: an identity read that stopped asking for the
+    stored bytes, or stopped asking for a fresh one, would stamp the
+    wrong answer without failing anything.
+
+    Args:
+        raw (bool): read stored bytes rather than a rendered form.
+        fresh (bool): refuse every cached answer.
+    """
+    kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+    if fresh:
+        kwargs["fresh"] = True
+    return kwargs
 
 
 def read_identity(records: list[OpRecord],
@@ -211,7 +230,11 @@ class Ops:
             (len(v)
              for v in kwargs.values() if isinstance(v, (bytes, bytearray))), 0)
 
-    async def _call(self, op: str, path: str, **kwargs) -> Any:
+    async def _call(self,
+                    op: str,
+                    path: str,
+                    report: OpReport | None = None,
+                    **kwargs) -> Any:
         """Run one op through the workspace dispatcher and record it.
 
         The door owns the whole pipeline (follow, grants, gates, cache,
@@ -227,9 +250,16 @@ class Ops:
         off the op name, so there is nothing for a caller here to
         declare.
 
+        The report is the caller's when one is handed in, so a caller
+        that has to read the door's account back (the identity read
+        asks whether a cap truncated its bytes) sees the same object
+        the record is stamped from.
+
         Args:
             op (str): the op name.
             path (str): the virtual path.
+            report (OpReport | None): the caller's report to fill, or
+                None for one this call keeps to itself.
             **kwargs: op arguments, by the op function's names.
         """
         start = int(time.monotonic() * 1000)
@@ -237,7 +267,7 @@ class Ops:
                 and not kwargs.get("nofollow")):
             path = self._links.follow(path)
         owner = self._owner(path)
-        report = OpReport()
+        report = report if report is not None else OpReport()
         try:
             result, _ = await self._dispatch(op,
                                              PathSpec.from_str_path(path),
@@ -324,9 +354,7 @@ class Ops:
         Returns:
             bytes: File content.
         """
-        kwargs: dict[str, Any] = {"filetype": None} if raw else {}
-        if fresh:
-            kwargs["fresh"] = True
+        kwargs = read_kwargs(raw, fresh)
         if offset or size is not None:
             return await self._call("read",
                                     path,
@@ -433,6 +461,18 @@ class Ops:
         A failed read propagates as it is; no identity is synthesized
         for it.
 
+        A policy-capped read refuses rather than pairing a prefix with
+        a whole-file identity. A ``post_ops`` policy may bound a read
+        (``Limit(max_bytes=...)``), and the door applies that bound
+        after the backend already answered, so the delivered bytes are
+        a prefix while the markers still describe the whole file --
+        the pair a read-check-write caller would stamp and then write
+        the prefix back under. ``CappedReadError`` is the answer;
+        bypassing the cap would make this door a policy bypass, and
+        ``identity=None`` would only move the same loss one step
+        later. Plain ``read`` is untouched and still serves the
+        capped prefix.
+
         ``raw`` is ``read``'s own flag, passed straight through: a
         caller that stamps stored bytes has to read stored bytes, or
         the stamp describes a rendering the write path never stores.
@@ -446,6 +486,9 @@ class Ops:
         Returns:
             tuple[bytes, LiveFileIdentity | None]: the content, and its
             identity or None when the backend recorded no marker.
+
+        Raises:
+            CappedReadError: a post_ops policy cap truncated the read.
         """
         # The record names the link-followed path, because ``_call``
         # follows before it dispatches; the filter has to compare
@@ -453,12 +496,23 @@ class Ops:
         target = path if self._links is None else self._links.follow(path)
         outer = active_recorder()
         scope = RecordingScope()
+        # The door's account is read back rather than measured: the
+        # length the backend moved and the length delivered differ for
+        # a rendered read too, so only the door can say which gap a cap
+        # made. Dispatched through ``_call`` rather than ``read``
+        # because the report has to be this caller's.
+        report = OpReport()
         try:
-            data = await self.read(path, raw=raw, fresh=True)
+            data = await self._call("read",
+                                    path,
+                                    report=report,
+                                    **read_kwargs(raw, True))
         finally:
             scope.close()
             if outer is not None:
                 outer.sink.extend(scope.records)
+        if report.capped:
+            raise capped_read(target)
         return data, read_identity(scope.records, target)
 
     async def readdir(self, path: str) -> list[str]:
