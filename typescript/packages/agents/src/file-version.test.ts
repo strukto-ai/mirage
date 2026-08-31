@@ -186,6 +186,69 @@ describe('FileVersionTracker', () => {
   })
 })
 
+// A versioned mount whose read renders: markers ride liveIdentity but
+// never the read itself, which is drive's gdoc shape (a registered
+// filetype read on a mount with an identity op).
+class RenderingVersionedFs {
+  identityCalls = 0
+  private readonly marks = new Map<string, number>()
+
+  constructor(private readonly inner: Workspace) {}
+
+  private async identity(path: string): Promise<LiveFileIdentity> {
+    if (!(await this.inner.fs.exists(path))) {
+      return { exists: false, revision: null, fingerprint: null }
+    }
+    return { exists: true, revision: `r${this.marks.get(path) ?? 0}`, fingerprint: null }
+  }
+
+  async readFile(path: string): Promise<Uint8Array> {
+    const raw = await this.inner.fs.readFile(path, { raw: true })
+    return Buffer.concat([Buffer.from('rendered:'), Buffer.from(raw)])
+  }
+
+  async readFileWithIdentity(path: string): Promise<[Uint8Array, null]> {
+    return [await this.readFile(path), null]
+  }
+
+  async liveIdentity(path: string): Promise<LiveFileIdentity> {
+    this.identityCalls += 1
+    return this.identity(path)
+  }
+
+  async writeFile(path: string, content: string | Uint8Array): Promise<void> {
+    await this.inner.fs.writeFile(path, content)
+    this.marks.set(path, (this.marks.get(path) ?? 0) + 1)
+  }
+
+  exists(path: string): Promise<boolean> {
+    return this.inner.fs.exists(path)
+  }
+}
+
+describe('FileVersionTracker on a rendering versioned mount', () => {
+  it('an edit after its own write survives a marker-only restamp', async () => {
+    // The restamp keeps the marker and no hash; the rendering read
+    // hands back no marker. Without the corner's liveIdentity call the
+    // hash rung had nothing to compare and refused a file nobody
+    // touched.
+    const fs = new RenderingVersionedFs(ws)
+    const tracker = new FileVersionTracker(versionedWs(ws, fs as unknown as VersionedFs))
+    await tracker.write('/a.txt', 'one')
+    const calls = fs.identityCalls
+    expect((await tracker.readForEdit('/a.txt')).toString()).toBe('rendered:one')
+    expect(fs.identityCalls).toBe(calls + 1)
+  })
+
+  it('a marker-only restamp still refuses an outside change', async () => {
+    const fs = new RenderingVersionedFs(ws)
+    const tracker = new FileVersionTracker(versionedWs(ws, fs as unknown as VersionedFs))
+    await tracker.write('/a.txt', 'one')
+    await fs.writeFile('/a.txt', 'moved underneath')
+    await expect(tracker.readForEdit('/a.txt')).rejects.toThrow(StaleMirageFileError)
+  })
+})
+
 describe('compareMarkers', () => {
   const both: LiveFileIdentity = { exists: true, revision: 'r1', fingerprint: 'f1' }
 

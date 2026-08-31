@@ -7,7 +7,6 @@ from mirage import MountMode, Workspace
 from mirage.agents.file_version import FileVersionTracker, StaleMirageFileError
 from mirage.resource.s3 import S3Config, S3Resource
 
-
 KEY = "mirage-pr-demo/file.txt"
 PATH = f"/s3/{KEY}"
 

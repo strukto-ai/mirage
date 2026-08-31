@@ -426,3 +426,70 @@ async def test_disabled_tracker_never_asks_for_identity(workspace):
     await tracker.write("/a.txt", "two")
     assert versioned.ops.read_with_identity_calls == 0
     assert versioned.ops.identity_calls == 0
+
+
+class _RenderingVersionedOps:
+    """A versioned mount whose read renders: markers ride live_identity
+    but never the read itself, which is drive's gdoc shape (a registered
+    filetype read on a mount with an identity op)."""
+
+    def __init__(self, ops):
+        self._ops = ops
+        self._marks: dict[str, int] = {}
+        self.identity_calls = 0
+
+    async def _identity(self, path):
+        if not await self._ops.exists(path):
+            return LiveFileIdentity(exists=False,
+                                    revision=None,
+                                    fingerprint=None)
+        return LiveFileIdentity(exists=True,
+                                revision=f"r{self._marks.get(path, 0)}",
+                                fingerprint=None)
+
+    async def read(self, path):
+        return b"rendered:" + await self._ops.read(path)
+
+    async def read_with_identity(self, path, raw=False):
+        return await self.read(path), None
+
+    async def live_identity(self, path):
+        self.identity_calls += 1
+        return await self._identity(path)
+
+    async def write(self, path, data):
+        await self._ops.write(path, data)
+        self._marks[path] = self._marks.get(path, 0) + 1
+
+    async def exists(self, path):
+        return await self._ops.exists(path)
+
+
+class _RenderingVersionedWorkspace:
+
+    def __init__(self, ws):
+        self.ops = _RenderingVersionedOps(ws.ops)
+        self.namespace = ws.namespace
+
+
+@pytest.mark.asyncio
+async def test_edit_after_own_write_survives_a_marker_only_restamp(workspace):
+    # The restamp keeps the marker and no hash; the rendering read hands
+    # back no marker. Without the corner's live_identity call the hash
+    # rung had nothing to compare and refused a file nobody touched.
+    versioned = _RenderingVersionedWorkspace(workspace)
+    tracker = FileVersionTracker(versioned)
+    await tracker.write("/a.txt", "one")
+    calls = versioned.ops.identity_calls
+    assert await tracker.read_for_edit("/a.txt") == b"rendered:one"
+    assert versioned.ops.identity_calls == calls + 1
+
+
+@pytest.mark.asyncio
+async def test_marker_only_restamp_still_refuses_an_outside_change(workspace):
+    versioned = _RenderingVersionedWorkspace(workspace)
+    tracker = FileVersionTracker(versioned)
+    await tracker.write("/a.txt", "one")
+    await versioned.ops.write("/a.txt", b"moved underneath")
+    with pytest.raises(StaleMirageFileError):
+        await tracker.read_for_edit("/a.txt")

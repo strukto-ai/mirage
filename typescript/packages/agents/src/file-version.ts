@@ -161,8 +161,24 @@ export class FileVersionTracker {
     const key = this.key(path)
     const stamp: Stamp = { identity, contentHash: fingerprint(content) }
     const readStamp = this.readVersions.get(key)
-    if (readStamp !== undefined && moved(readStamp, stamp)) {
-      throw new StaleMirageFileError(path)
+    if (readStamp !== undefined) {
+      let changed = moved(readStamp, stamp)
+      if (
+        changed &&
+        identity === null &&
+        readStamp.contentHash === null &&
+        hasMarker(readStamp.identity)
+      ) {
+        // A marker-only restamp holds no hash and a rendering read
+        // attaches no markers (a versioned mount with a registered
+        // filetype read, drive's gdoc rendering), so the ladder above
+        // had nothing to compare and refused a file nobody touched.
+        // One liveIdentity call restores the marker rung for exactly
+        // this corner; every other shape stays zero extra calls.
+        const current = await this.ws.fs.liveIdentity(path)
+        changed = compareMarkers(readStamp.identity, current) !== 'same'
+      }
+      if (changed) throw new StaleMirageFileError(path)
     }
     this.editVersions.set(key, stamp)
     return content

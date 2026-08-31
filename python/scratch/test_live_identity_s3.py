@@ -4,7 +4,6 @@ import os
 from mirage import MountMode, Workspace
 from mirage.resource.s3 import S3Config, S3Resource
 
-
 PATH = "/s3/mirage-pr-demo/file.txt"
 
 

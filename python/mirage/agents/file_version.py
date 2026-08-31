@@ -282,8 +282,23 @@ class FileVersionTracker:
         key = self._key(path)
         stamp = Stamp(identity=identity, content_hash=fingerprint(content))
         read_stamp = self._read_versions.get(key)
-        if read_stamp is not None and moved(read_stamp, stamp):
-            raise StaleMirageFileError(path)
+        if read_stamp is not None:
+            changed = moved(read_stamp, stamp)
+            if (changed and identity is None
+                    and read_stamp.content_hash is None
+                    and has_marker(read_stamp.identity)):
+                # A marker-only restamp holds no hash and a rendering
+                # read attaches no markers (a versioned mount with a
+                # registered filetype read, drive's gdoc rendering),
+                # so the ladder above had nothing to compare and
+                # refused a file nobody touched. One live_identity
+                # call restores the marker rung for exactly this
+                # corner; every other shape stays zero extra calls.
+                current = await self._ws.ops.live_identity(path)
+                changed = compare_markers(read_stamp.identity,
+                                          current) is not MarkerMatch.SAME
+            if changed:
+                raise StaleMirageFileError(path)
         self._edit_versions[key] = stamp
         return content
 
