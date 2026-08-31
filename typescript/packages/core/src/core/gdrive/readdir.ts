@@ -17,8 +17,8 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
-import { duplicateRank, ranksAbove, rootContext } from './resolve.ts'
+import { listFiles, listSharedDrives } from '../google/drive.ts'
+import { duplicateRank, ranksAbove, renderedName, rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { enotdir } from '../../utils/errors.ts'
@@ -44,12 +44,16 @@ interface DirRow {
  *
  * Drive allows two siblings to share a name; a vfs path names exactly
  * one file, so the listing has to choose, and it chooses by
- * {@link duplicateRank} — the same rule `resolveKey` applies. It used to
- * choose by accident and in the opposite direction: the index stores one
- * entry per path, so writing every row left whichever the server listed
- * *last* (its oldest, under `modifiedTime desc`) while the resolver
- * answered with the first. Listing both also printed a row no path could
- * reach. Mirrors python's `collapse_duplicates`.
+ * {@link duplicateRank} — the same rule `resolveKey` applies to the same
+ * set. Both halves of that matter. The key is the
+ * {@link renderedName}, so a binary file named `Report.gdoc.json` and a
+ * Google Doc named `Report` are one contest and not two, which is why
+ * the resolver merges its name queries before ranking them. And the
+ * rank used to be an accident here, in the opposite direction: the index
+ * stores one entry per path, so writing every row left whichever the
+ * server listed *last* (its oldest, under `modifiedTime desc`) while the
+ * resolver answered with the first. Listing both also printed a row no
+ * path could reach. Mirrors python's `collapse_duplicates`.
  */
 export function collapseDuplicates(rows: readonly DirRow[]): DirRow[] {
   const best = new Map<string, DirRow>()
@@ -146,8 +150,7 @@ export async function readdir(
   const listed: DirRow[] = []
   for (const f of files) {
     const mime = f.mimeType ?? ''
-    const ext = MIME_TO_EXT[mime] ?? ''
-    const filename = ext !== '' ? `${f.name}${ext}` : f.name
+    const filename = renderedName(f.name, mime)
     const isDir = mime === FOLDER_MIME
     const sizeRaw = f.size ?? f.quotaBytesUsed ?? '0'
     const sizeNum = Number.parseInt(sizeRaw, 10)

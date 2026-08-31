@@ -56,8 +56,8 @@ export interface RecordedRun<T> {
 let recordedTail: Promise<void> | null = null
 
 /**
- * How long a queued frame waits for the one ahead of it before binding
- * anyway.
+ * How long a queued frame waits for the one ahead of it before giving
+ * up on having a frame at all.
  *
  * The queue below cannot tell a genuinely concurrent caller from a
  * caller that re-entered from inside the frame it is queued behind, and
@@ -65,9 +65,9 @@ let recordedTail: Promise<void> | null = null
  * store is the live frame either way, so a discriminator that let the
  * re-entrant one through would let a concurrent one through with it and
  * un-fix the interleaving the queue exists for. So the wait is bounded
- * instead of decided. A re-entrant caller costs this long and then runs
- * exactly as it did before the queue existed; a concurrent one is
- * unaffected, because it was always going to be released by the frame
+ * instead of decided. A caller that waits this long runs anyway, at the
+ * cost described in {@link runRecorded}; a concurrent one never reaches
+ * the bound, because it was always going to be released by the frame
  * ahead settling long before this.
  *
  * Two seconds is chosen to sit far above any backend read a frame ahead
@@ -77,26 +77,34 @@ let recordedTail: Promise<void> | null = null
 export const RECORDED_BIND_TIMEOUT_MS = 2000
 
 /**
- * Wait for `tail`, but not forever, then bind.
+ * Wait for `tail`, but not forever, then run — bound if the tail
+ * released this frame, frameless if the bound lapsed first.
  *
- * The timer is cleared as soon as the tail wins, so a queue that is
- * merely busy holds nothing open beyond the wait its caller is already
- * doing. It is deliberately not `unref`'d: the whole point is that this
- * frame still binds when the tail never settles, and an unreferenced
- * timer would let the runtime exit that window instead of serving it.
+ * The race is decided by the winner's own tag rather than by a flag the
+ * loser could also have set, so a tail settling in the same tick as the
+ * timer is still an ordinary release. The timer is cleared as soon as
+ * the tail wins, so a queue that is merely busy holds nothing open
+ * beyond the wait its caller is already doing. It is deliberately not
+ * `unref`'d: the whole point is that this frame still runs when the
+ * tail never settles, and an unreferenced timer would let the runtime
+ * exit that window instead of serving it.
+ *
+ * On a lapse `fn` runs with no frame of its own — no `storage.run`, no
+ * outer capture, no forward, and `state` left as the empty array its
+ * caller already holds. See {@link runRecorded} for why not binding is
+ * the whole point.
  */
-function bindAfter<T>(
-  tail: Promise<void>,
-  state: RecordingState,
-  fn: () => Promise<T>,
-): Promise<T> {
+function runAfter<T>(tail: Promise<void>, state: RecordingState, fn: () => Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const lapsed = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, RECORDED_BIND_TIMEOUT_MS)
+  const lapsed = new Promise<'lapsed'>((resolve) => {
+    timer = setTimeout(() => {
+      resolve('lapsed')
+    }, RECORDED_BIND_TIMEOUT_MS)
   })
-  return Promise.race([tail, lapsed]).then(() => {
+  const released = tail.then((): 'released' => 'released')
+  return Promise.race([released, lapsed]).then((winner) => {
     if (timer !== undefined) clearTimeout(timer)
-    return bindFrame(state, fn)
+    return winner === 'released' ? bindFrame(state, fn) : fn()
   })
 }
 
@@ -145,15 +153,45 @@ function bindAfter<T>(
  * ({@link Ops.readFileWithIdentity}) does not nest, but an embedder's
  * custom read op or an ops policy closing over the workspace can reach
  * it, so the wait is bounded ({@link RECORDED_BIND_TIMEOUT_MS}) rather
- * than trusted: the re-entrant frame binds once the bound lapses and
- * runs exactly as it did before this queue existed. A hang becomes a
- * bounded degradation — at most the timeout, plus the same residual
- * window an ordinary frame already opens below, where a read answers a
- * null identity rather than a wrong one because {@link readIdentity}
- * filters by path. A re-entry that names the *same* path is the one
- * shape that filter cannot separate, which is why the rule is stated as
- * "do not re-enter" rather than "re-entry is free"; such a call is
- * unbounded recursion on its own terms anyway.
+ * than trusted.
+ *
+ * **A lapse runs the queued frame frameless; it does not bind it.**
+ * That is the whole of the bound's design, because binding is not free
+ * on this storage: the newest frame is what `getStore()` answers, so a
+ * frame bound over a read that is merely *slow* takes every record that
+ * read emits after its next await, and the slow read — the one that was
+ * already running, and has already paid for its backend call — comes
+ * back with no identity at all. The frame that waited is the one whose
+ * wait ran out, so the frame that waited is what a lapse costs: `fn`
+ * runs with no frame, its records array stays empty, and it answers a
+ * null identity, which is the marker-less shape every consumer already
+ * hashes through. The in-flight read keeps every record and its
+ * identity. The re-entrant case is the same trade with a better ending
+ * than the deadlock it replaces: the nested call completes, and the
+ * frame it re-entered from keeps its own records instead of losing them
+ * to its own nested call. The tail still settles either way, so the
+ * frames behind it are released on schedule.
+ *
+ * A frameless run's own records land in whatever frame is ambient,
+ * which here is that in-flight read's array. {@link readIdentity}
+ * filters by path, so all it can contribute is a foreign-path record
+ * the read discards — except for a record naming the *same* path, and
+ * there the scan order is load-bearing: newest-first answers with the
+ * marked record the frame emitted **last**, and a frameless run only
+ * gets to interleave while the read ahead is still waiting on its
+ * backend, which is strictly before that read stamps its own markers.
+ * Reverse that scan and the slow read starts answering with the
+ * late-comer's marker instead of its own. This is also why the rule
+ * above is "do not re-enter" rather than "re-entry is free": a
+ * re-entrant call naming the same path is the one shape neither the
+ * filter nor the ordering separates, and it is unbounded recursion on
+ * its own terms anyway.
+ *
+ * The frameless run's mount prefix rides along the same way — a
+ * {@link runWithMountPrefix} inside it derives from the ambient frame,
+ * so a record the read in flight emits during that scope is named
+ * against the wrong mount. That costs the read its own filter match, so
+ * it lands on the same safe side: missing, not someone else's.
  *
  * Ordinary {@link runWithRecording} frames deliberately do NOT join
  * this queue: an identity read runs *inside* an executing command's
@@ -173,16 +211,25 @@ export function runRecorded<T>(fn: () => Promise<T>): RecordedRun<T> {
   // An idle queue still binds synchronously: no other serialized frame
   // is live, so there is nothing to wait behind, and `fn` starts where
   // it always did. A live one is waited out first.
-  const done: Promise<T> =
-    recordedTail === null ? bindFrame(state, fn) : bindAfter(recordedTail, state, fn)
+  const ahead = recordedTail
+  const done: Promise<T> = ahead === null ? bindFrame(state, fn) : runAfter(ahead, state, fn)
   // The queue only sequences; `done` is what carries the outcome to the
   // caller, so the tail settles on either path rather than rejecting
   // with nobody left to hear it. It is cleared when this frame is the
   // last one out, so the next caller binds synchronously again.
-  const tail = done.then(
+  //
+  // The tail waits for the frame ahead as well as for this one. On a
+  // normal release that costs nothing -- this frame could not have
+  // started before that one settled -- and after a lapse it is the
+  // whole point: a frameless run finishing says nothing about the read
+  // it ran alongside, so publishing its settle alone would tell the
+  // next caller the queue is idle and let it bind over a read still in
+  // flight, which is exactly the theft the lapse declined to commit.
+  const own = done.then(
     () => undefined,
     () => undefined,
   )
+  const tail = ahead === null ? own : Promise.all([own, ahead]).then(() => undefined)
   recordedTail = tail
   void tail.then(() => {
     if (recordedTail === tail) recordedTail = null

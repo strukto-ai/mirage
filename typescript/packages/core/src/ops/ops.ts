@@ -41,6 +41,14 @@ export type OwnerOf = (path: string) => MountOwner | null
  * rendered file reads its parts), and only a content read ever carries a
  * marker.
  *
+ * That direction is not a formality on the fallback storage. A frame
+ * the identity queue could not release in time runs frameless
+ * (`runRecorded`), and its records land in the frame still in flight;
+ * they are emitted while that frame is waiting on its backend, so they
+ * precede the record it stamps its own markers on. Newest-first is
+ * therefore what keeps the slow read's own answer; scanning the other
+ * way would hand it the late-comer's.
+ *
  * `path` is the filter, and it is what removes cross-path contamination:
  * `OpRecord.path` is the resolved virtual path, so a marker stamped for
  * some other file cannot be read as this one's. It still earns its keep

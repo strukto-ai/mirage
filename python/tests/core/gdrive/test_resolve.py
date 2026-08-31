@@ -21,13 +21,15 @@ import mirage.core.gdrive.resolve as resolve_mod
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
                                         duplicate_rank, eacces_on_denied,
                                         pick_duplicate, query_candidates,
-                                        resolve_dir, resolve_key,
-                                        resolve_parent)
+                                        rendered_name, resolve_dir,
+                                        resolve_key, resolve_parent)
 from mirage.types import PathSpec
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 DOC_MIME = "application/vnd.google-apps.document"
+
+OLD = "2026-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -64,13 +66,56 @@ async def test_resolve_key_native_suffix(fake_drive, gdrive_accessor):
     assert node.is_native
 
 
+@pytest.mark.parametrize("literal_first", [True, False])
+@pytest.mark.parametrize("newer", ["literal", "native"])
 @pytest.mark.asyncio
-async def test_resolve_key_prefers_literal_name(fake_drive, gdrive_accessor):
-    literal = fake_drive.add("x.gdoc.json", content=b"raw")
-    fake_drive.add("x", mime=DOC_MIME)
+async def test_resolve_key_ranks_across_the_rendered_name_boundary(
+        colliding_pair, gdrive_accessor, literal_first, newer):
+    # A binary file literally named `x.gdoc.json` and a Google Doc named
+    # `x` render as one vfs name and are found by two different queries.
+    # Answering with the first query that matched made the resolver pick
+    # by query order while readdir picked by time, so live_identity
+    # could name one item and the read the other.
+    literal, doc = colliding_pair(literal_first, newer)
     node = await resolve_key(gdrive_accessor, "x.gdoc.json")
     assert node is not None
-    assert node.id == literal
+    assert node.id == (literal if newer == "literal" else doc)
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_ties_between_the_two_shapes_break_by_id(
+        fake_drive, gdrive_accessor):
+    # Kind is not part of the rank, so equal stamps fall through to the
+    # id -- the same tiebreak collapse_duplicates applies, which is the
+    # only reason the two agree here at all.
+    literal = fake_drive.add("x.gdoc.json", content=b"raw", modified=OLD)
+    doc = fake_drive.add("x", mime=DOC_MIME, modified=OLD)
+    node = await resolve_key(gdrive_accessor, "x.gdoc.json")
+    assert node is not None
+    assert node.id == max(literal, doc)
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_skips_an_item_that_renders_under_another_name(
+        fake_drive, gdrive_accessor):
+    # The literal query matches a Drive *name*, and a Google Doc named
+    # `x.gdoc.json` renders as `x.gdoc.json.gdoc.json`: it is another
+    # path's item, and answering with it named a file no listing puts
+    # here.
+    doc = fake_drive.add("x.gdoc.json", mime=DOC_MIME)
+    assert await resolve_key(gdrive_accessor, "x.gdoc.json") is None
+    node = await resolve_key(gdrive_accessor, "x.gdoc.json.gdoc.json")
+    assert node is not None
+    assert node.id == doc
+
+
+def test_rendered_name():
+    assert rendered_name("Report", DOC_MIME) == "Report.gdoc.json"
+    assert rendered_name("a.txt", "text/plain") == "a.txt"
+    assert rendered_name("d", FOLDER_MIME) == "d"
+    # The rule composes, which is why the resolver has to filter on it:
+    # a native doc named like a rendered one is not that rendered one.
+    assert rendered_name("x.gdoc.json", DOC_MIME) == "x.gdoc.json.gdoc.json"
 
 
 @pytest.mark.asyncio

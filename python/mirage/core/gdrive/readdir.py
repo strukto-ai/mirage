@@ -17,9 +17,9 @@ import logging
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
-from mirage.core.gdrive.resolve import duplicate_rank, root_context
-from mirage.core.google.drive import (MIME_TO_EXT, list_files,
-                                      list_shared_drives)
+from mirage.core.gdrive.resolve import (duplicate_rank, rendered_name,
+                                        root_context)
+from mirage.core.google.drive import list_files, list_shared_drives
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -34,12 +34,16 @@ def collapse_duplicates(
 
     Drive allows two siblings to share a name; a vfs path names exactly
     one file, so the listing has to choose, and it chooses by
-    :func:`duplicate_rank` — the same rule ``resolve_key`` applies. It
-    used to choose by accident and in the opposite direction: the index
-    stores one entry per path, so writing every row left whichever the
-    server listed *last* (its oldest, under ``modifiedTime desc``) while
-    the resolver answered with the first. Listing both also printed a
-    row no path could reach.
+    :func:`duplicate_rank` — the same rule ``resolve_key`` applies to
+    the same set. Both halves of that matter. The key is the
+    :func:`rendered_name`, so a binary file named ``Report.gdoc.json``
+    and a Google Doc named ``Report`` are one contest and not two, which
+    is why the resolver merges its name queries before ranking them.
+    And the rank used to be an accident here, in the opposite direction:
+    the index stores one entry per path, so writing every row left
+    whichever the server listed *last* (its oldest, under
+    ``modifiedTime desc``) while the resolver answered with the first.
+    Listing both also printed a row no path could reach.
 
     Args:
         entries (list[tuple[str, IndexEntry, bool]]): (vfs name, entry,
@@ -115,11 +119,7 @@ async def readdir(
     for f in files:
         mime = f.get("mimeType", "")
         name = f["name"]
-        ext = MIME_TO_EXT.get(mime)
-        if ext:
-            filename = f"{name}{ext}"
-        else:
-            filename = name
+        filename = rendered_name(name, mime)
         is_dir = mime == "application/vnd.google-apps.folder"
         if is_dir:
             rt = "gdrive/folder"

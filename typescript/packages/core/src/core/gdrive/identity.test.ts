@@ -30,7 +30,12 @@ vi.mock('../google/drive.ts', async () => {
 import { googleGet } from '../google/client.ts'
 import { PathSpec } from '../../types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { type FakeDrive, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
+import {
+  type FakeDrive,
+  addCollidingPair,
+  makeGDriveAccessor,
+  resetFakeDrive,
+} from './_test_util.ts'
 import { liveIdentity } from './identity.ts'
 import { read } from './read.ts'
 import { resolveKey } from './resolve.ts'
@@ -129,5 +134,40 @@ describe('identity and a warmed read on a duplicate name', () => {
       // for its same-named sibling.
       expect(vi.mocked(googleGet).mock.calls[0]?.[1]).toContain(newest)
     })
+  }
+})
+
+describe('identity and a warmed read across the rendered-name boundary', () => {
+  // The round-7 disagreement one level up. A binary file literally named
+  // `x.gdoc.json` and a Google Doc named `x` render as one vfs name, and
+  // the two routes reach them differently: the resolver ran a query per
+  // name shape and answered from the first that matched, while the
+  // listing ranked every item sharing the rendered name. So the resolver
+  // could name the binary and the read the doc -- a permanent conflict
+  // with no writer, on a path a read-check-write caller never gets past.
+  for (const literalFirst of [true, false]) {
+    for (const newer of ['literal', 'native'] as const) {
+      it(`name the same file (${newer} newer, literal listed ${
+        literalFirst ? 'first' : 'second'
+      })`, async () => {
+        const [literal, doc] = addCollidingPair(fake, literalFirst, newer)
+        const expected = newer === 'literal' ? literal : doc
+        const collided = path('x.gdoc.json')
+
+        expect((await resolveKey(accessor, 'x.gdoc.json'))?.id).toBe(expected)
+
+        // Serves readDoc when the native doc is the one that wins; the
+        // binary read never reaches googleGet at all.
+        vi.mocked(googleGet).mockResolvedValue({ title: 'x' })
+        const index = new RAMIndexCacheStore()
+        await read(accessor, collided, index)
+        expect((await index.get('/x.gdoc.json')).entry?.id).toBe(expected)
+
+        vi.mocked(googleGet).mockResolvedValueOnce({ headRevisionId: 'r1', md5Checksum: 'abc' })
+        const result = await liveIdentity(accessor, collided)
+        expect(result.exists).toBe(true)
+        expect(vi.mocked(googleGet).mock.calls.at(-1)?.[1]).toContain(expected)
+      })
+    }
   }
 })

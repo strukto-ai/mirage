@@ -55,7 +55,11 @@ def read_identity(records: list[OpRecord],
     record for the response it just read, so the markers and the bytes
     come from the same answer. Scanned newest first: a read may emit
     more than one record (a rendered file reads its parts), and only a
-    content read ever carries a marker.
+    content read ever carries a marker. TypeScript needs that direction
+    for a second reason its storage creates -- a frame its identity
+    queue could not release in time runs frameless and emits into the
+    frame still in flight, always before that frame's own marked
+    record -- so the two must not drift apart.
 
     ``path`` is the filter, and it is what removes cross-path
     contamination: ``OpRecord.path`` is the resolved virtual path, so a

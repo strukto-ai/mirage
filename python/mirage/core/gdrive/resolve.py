@@ -106,24 +106,48 @@ class DriveNode:
 # check-then-act semantics (EEXIST, replace-on-rename) need the server's
 # current state, not a possibly stale cache.
 def query_candidates(segment: str) -> list[tuple[str, str | None]]:
-    """Drive-name candidates for one vfs path segment.
+    """Drive-name queries that can answer one vfs path segment.
 
     A google-native file renders as ``<name><suffix>`` (e.g.
-    ``Report.gdoc.json``), so a suffixed segment is looked up both as a
-    literal name and as the stripped native document.
+    ``Report.gdoc.json``), so a suffixed segment has to be looked up
+    both as a literal Drive name and as the stripped native document.
+    They are two **queries**, not two priorities: an item from either
+    can render as this segment, and which one the path names is decided
+    afterwards by :func:`duplicate_rank`, over the merged set. Only a
+    segment that ends in a rendered suffix costs the second query.
+
+    The queries cannot answer with the same item twice: the literal one
+    matches a Drive name equal to the segment, and every other one
+    matches a strictly shorter name.
 
     Args:
         segment (str): vfs path segment.
 
     Returns:
-        list[tuple[str, str | None]]: (drive name, mime filter) candidates,
-            tried in order.
+        list[tuple[str, str | None]]: (drive name, mime filter) queries.
     """
     candidates: list[tuple[str, str | None]] = [(segment, None)]
     for ext, mime in SUFFIX_TO_MIME.items():
         if segment.endswith(ext) and len(segment) > len(ext):
             candidates.append((segment[:-len(ext)], mime))
     return candidates
+
+
+def rendered_name(name: str, mime_type: str) -> str:
+    """The vfs name a Drive item is listed and resolved under.
+
+    A google-apps file has no bytes of its own, so the mount renders it
+    as JSON and names it with the matching suffix; everything else keeps
+    its Drive name. Written once and read by both sides, because the two
+    reach a file by different routes -- ``readdir`` renders every listed
+    item and ``resolve_segment`` filters query results -- and a name
+    built one way in one of them is a path only one of them can reach.
+
+    Args:
+        name (str): the item's Drive name.
+        mime_type (str): the item's MIME type.
+    """
+    return f"{name}{MIME_TO_EXT.get(mime_type, '')}"
 
 
 def drive_target_name(basename: str, node: DriveNode) -> str:
@@ -162,6 +186,14 @@ def duplicate_rank(modified_time: str, item_id: str) -> tuple[str, str]:
     order, and the id is a deterministic tiebreak rather than a
     server-order accident.
 
+    The rank has no notion of *kind*, deliberately. Two items sharing a
+    vfs name need not be the same kind of thing -- a binary file named
+    ``Report.gdoc.json`` collides with a Google Doc named ``Report``
+    (see :func:`rendered_name`) -- and a rule that preferred one kind
+    would have to be spelled identically on both sides to stay
+    agreeable. Recency is the one fact both sides already read off the
+    item.
+
     Args:
         modified_time (str): the item's ``modifiedTime``.
         item_id (str): the item's Drive id.
@@ -173,8 +205,8 @@ def pick_duplicate(items: list[dict[str, Any]]) -> dict[str, Any]:
     """The one Drive item a name resolves to, by :func:`duplicate_rank`.
 
     Args:
-        items (list[dict[str, Any]]): candidates sharing one name; must
-            not be empty.
+        items (list[dict[str, Any]]): every item that renders under the
+            one vfs name, whichever query found it; must not be empty.
     """
     return max(
         items,
@@ -207,17 +239,31 @@ async def resolve_segment(
         at_root (bool): whether the segment sits at the mount root, where a
             shared drive name is also a valid directory.
     """
+    # Every query first, one rank after: a binary file literally named
+    # `Report.gdoc.json` and a Google Doc named `Report` render as the
+    # same vfs name and are found by different queries, so answering
+    # with the first query that matched let the resolver name an item
+    # the listing had already ranked below the other one -- the same
+    # false conflict duplicate_rank exists to close, one level up.
+    matches: list[dict[str, Any]] = []
     for name, mime in query_candidates(segment):
-        matches = await list_files(token_manager,
-                                   folder_id=parent_id,
-                                   drive_id=drive_id,
-                                   name=name,
-                                   mime_type=mime)
-        if matches:
-            # Not matches[0]: the server's own order is only a proxy for
-            # the rule, and the listing that warms the index cannot read
-            # it at all. See duplicate_rank.
-            return node_from_item(pick_duplicate(matches), drive_id)
+        for item in await list_files(token_manager,
+                                     folder_id=parent_id,
+                                     drive_id=drive_id,
+                                     name=name,
+                                     mime_type=mime):
+            # A query on the literal name also finds items that render
+            # under a longer one (a Google Doc actually named
+            # `Report.gdoc.json` is `Report.gdoc.json.gdoc.json` in the
+            # vfs), and those are a different path's business.
+            mime_type = str(item.get("mimeType", ""))
+            if rendered_name(item["name"], mime_type) == segment:
+                matches.append(item)
+    if matches:
+        # Not matches[0]: the server's own order is only a proxy for
+        # the rule, and the listing that warms the index cannot read
+        # it at all. See duplicate_rank.
+        return node_from_item(pick_duplicate(matches), drive_id)
     if at_root:
         # Shared Drive enumeration is best-effort, mirroring readdir: a
         # missing scope must not break resolution of My Drive paths.

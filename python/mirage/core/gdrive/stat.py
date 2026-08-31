@@ -19,8 +19,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.warm import entry_or_warm
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir as _readdir
-from mirage.core.gdrive.resolve import resolve_key
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, get_file
+from mirage.core.gdrive.resolve import rendered_name, resolve_key
+from mirage.core.google.drive import FOLDER_MIME, get_file
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -55,10 +55,9 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
                         type=FileType.DIRECTORY,
                         modified=modified,
                         extra={"file_id": node.id})
-    ext = MIME_TO_EXT.get(node.mime_type)
-    vfs_name = f"{node.name}{ext}" if ext else node.name
+    vfs_name = rendered_name(node.name, node.mime_type)
     # Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-    size = None if ext else int(item.get("size") or 0)
+    size = None if node.is_native else int(item.get("size") or 0)
     return FileStat(
         name=vfs_name,
         size=size,

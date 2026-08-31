@@ -35,6 +35,12 @@ from mirage.core.google.drive import FOLDER_MIME
 
 FILE_MIME = "application/octet-stream"
 
+DOC_MIME = "application/vnd.google-apps.document"
+
+OLD_TIME = "2026-01-01T00:00:00Z"
+
+NEW_TIME = "2026-06-01T00:00:00Z"
+
 
 class FakeDrive:
     """In-memory Drive: id-addressed items with parent links."""
@@ -196,6 +202,42 @@ def fake_drive(monkeypatch):
         for fn_name in names:
             monkeypatch.setattr(mod, fn_name, getattr(fake, fn_name))
     return fake
+
+
+@pytest.fixture
+def colliding_pair(fake_drive):
+    """Add a binary named ``x.gdoc.json`` beside a Doc named ``x``.
+
+    Both render as the vfs name ``x.gdoc.json`` -- the collision that
+    reaches the resolver as two separate name queries and the listing as
+    two rows of one contest. The caller says which listing order and
+    which winner it wants and gets back both ids.
+
+    Args:
+        fake_drive (FakeDrive): the in-memory Drive.
+
+    Returns:
+        Callable[[bool, str], tuple[str, str]]: (literal_first, newer)
+            -> (binary file id, native doc id), where ``newer`` is
+            ``literal`` or ``native``.
+    """
+
+    def add(literal_first: bool, newer: str) -> tuple[str, str]:
+        literal_time = NEW_TIME if newer == "literal" else OLD_TIME
+        doc_time = NEW_TIME if newer == "native" else OLD_TIME
+        if literal_first:
+            literal = fake_drive.add("x.gdoc.json",
+                                     content=b"raw",
+                                     modified=literal_time)
+            doc = fake_drive.add("x", mime=DOC_MIME, modified=doc_time)
+        else:
+            doc = fake_drive.add("x", mime=DOC_MIME, modified=doc_time)
+            literal = fake_drive.add("x.gdoc.json",
+                                     content=b"raw",
+                                     modified=literal_time)
+        return literal, doc
+
+    return add
 
 
 @pytest.fixture

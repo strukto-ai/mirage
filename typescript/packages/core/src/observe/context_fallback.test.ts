@@ -292,8 +292,47 @@ describe('recording on the fallback storage', () => {
   })
 })
 
-describe('the queue is bounded, so re-entry degrades instead of hanging', () => {
-  it('a frame opened from inside the one ahead binds once the bound lapses', async () => {
+describe('the queue is bounded, so a lapse degrades the late-comer instead of hanging', () => {
+  it('the frame in flight keeps its records and its identity; the late-comer pays', async () => {
+    // The trade the bound exists to make. Binding the queued frame over
+    // a read that is merely slow hands `getStore()` to the newcomer, so
+    // the slow read's own record lands in the newcomer's array and the
+    // read that already paid for its backend call answers null. The
+    // lapse therefore runs frameless: the late-comer keeps no records
+    // and answers null, and the read in flight is untouched.
+    vi.useFakeTimers()
+    try {
+      const [holdSlow, releaseSlow] = gate()
+      const slow = runRecorded(async () => {
+        await holdSlow
+        record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-slow' })
+        return 'slow'
+      })
+      const late = runRecorded(() => {
+        record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-late' })
+        return Promise.resolve('late')
+      })
+      await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
+      expect(await late.done).toBe('late')
+      // Frameless: nothing was bound, so the pre-allocated array stays
+      // empty and the late read reads as marker-less, which is the
+      // shape every consumer already hashes through.
+      expect(late.records).toEqual([])
+      expect(readIdentity(late.records, '/same')).toBeNull()
+      releaseSlow()
+      expect(await slow.done).toBe('slow')
+      // The frameless record landed in the live frame, before the slow
+      // read stamped its own -- which is what makes readIdentity's
+      // newest-first scan the ordering that keeps this answer the slow
+      // read's own. Reversed, it would answer 'rev-late'.
+      expect(slow.records.map((r) => r.revision)).toEqual(['rev-late', 'rev-slow'])
+      expect(readIdentity(slow.records, '/same')?.revision).toBe('rev-slow')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a frame opened from inside the one ahead completes frameless', async () => {
     // Reentrancy and concurrency are indistinguishable at call time on
     // this storage, so the queue does not try to tell them apart: it
     // waits, and gives up waiting. Without the bound this is a promise
@@ -318,17 +357,21 @@ describe('the queue is bounded, so re-entry degrades instead of hanging', () => 
       })
       await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
       expect(await outer.done).toBe('inner')
-      // Both reads completed, and each still reads its own marker off
-      // its own path: the bound costs the wait, not the identity.
-      expect(readIdentity(nested.records, '/nested')?.revision).toBe('rev-n')
+      // The nested read completes and answers null; the frame it
+      // re-entered from keeps both records and still reads its own
+      // marker off its own path. Binding the nested frame instead would
+      // have taken '/nested' from the outer frame and, had the outer
+      // read recorded anything after that point, that too.
+      expect(nested.records).toEqual([])
+      expect(readIdentity(nested.records, '/nested')).toBeNull()
+      expect(outer.records.map((r) => r.revision)).toEqual(['rev-n', 'rev-o'])
       expect(readIdentity(outer.records, '/outer')?.revision).toBe('rev-o')
-      expect(readIdentity(nested.records, '/outer')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('a frame opened from inside a queued frame binds too', async () => {
+  it('a frame opened from inside a queued frame completes too', async () => {
     // The other reentrant shape, and the worse one: the frame ahead has
     // already settled, so the re-entrant call waits on the tail of the
     // frame it is running inside. Unbounded, this wedged every later
@@ -340,14 +383,79 @@ describe('the queue is bounded, so re-entry degrades instead of hanging', () => 
         release = resolve
       })
       const ahead = runRecorded(() => held)
+      let nested!: RecordedRun<string>
       const behind = runRecorded(async () => {
-        const nested = runRecorded(() => Promise.resolve('inner'))
+        nested = runRecorded(() => {
+          record('read', '/nested', 'test', 1, performance.now(), { revision: 'rev-n' })
+          return Promise.resolve('inner')
+        })
         return await nested.done
       })
       release()
       await ahead.done
       await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
       expect(await behind.done).toBe('inner')
+      expect(nested.records).toEqual([])
+      expect(behind.records.map((r) => r.revision)).toEqual(['rev-n'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a lapsed frame does not report the queue idle while the read ahead is live', async () => {
+    // The frameless run settles early by construction, and its settle
+    // is no evidence about the read it ran alongside. Publishing it as
+    // the queue's tail would let the next caller bind over that read
+    // and take the records the lapse just declined to take.
+    vi.useFakeTimers()
+    try {
+      const [holdSlow, releaseSlow] = gate()
+      const slow = runRecorded(async () => {
+        await holdSlow
+        record('read', '/slow', 'test', 1, performance.now(), { revision: 'rev-slow' })
+        return 'slow'
+      })
+      const lapsed = runRecorded(() => Promise.resolve('lapsed'))
+      await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
+      expect(await lapsed.done).toBe('lapsed')
+      const after = runRecorded(() => {
+        record('read', '/after', 'test', 1, performance.now(), { revision: 'rev-after' })
+        return Promise.resolve('after')
+      })
+      // Still queued behind the live read rather than bound over it, so
+      // releasing that read is what lets this one bind.
+      releaseSlow()
+      expect(await slow.done).toBe('slow')
+      expect(await after.done).toBe('after')
+      expect(slow.records.map((r) => r.revision)).toEqual(['rev-slow'])
+      expect(after.records.map((r) => r.revision)).toEqual(['rev-after'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the tail still chains after a lapse, so later frames serialize normally', async () => {
+    // recordedTail bookkeeping is unchanged by the frameless path: the
+    // run still settles the tail, so once nothing is live the queue
+    // drains and the next caller binds and keeps its own records --
+    // with the timers frozen, so nothing here is waiting out a second
+    // bound.
+    vi.useFakeTimers()
+    try {
+      const [hold, release] = gate()
+      const first = runRecorded(() => hold)
+      const lapsed = runRecorded(() => Promise.resolve('lapsed'))
+      await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
+      expect(await lapsed.done).toBe('lapsed')
+      release()
+      await first.done
+      const later = runRecorded(() => {
+        record('read', '/later', 'test', 1, performance.now(), { revision: 'rev-later' })
+        return Promise.resolve('later')
+      })
+      expect(await later.done).toBe('later')
+      expect(later.records.map((r) => r.path)).toEqual(['/later'])
+      expect(readIdentity(later.records, '/later')?.revision).toBe('rev-later')
     } finally {
       vi.useRealTimers()
     }

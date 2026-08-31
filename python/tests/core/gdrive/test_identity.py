@@ -140,3 +140,52 @@ async def test_identity_and_a_warmed_read_name_the_same_duplicate(
     # The identity was captured for the file the read delivered, not
     # for its same-named sibling.
     assert newest in metadata.call_args.args[1]
+
+
+@pytest.mark.parametrize("literal_first", [True, False])
+@pytest.mark.parametrize("newer", ["literal", "native"])
+@pytest.mark.asyncio
+async def test_identity_and_a_warmed_read_agree_across_rendered_names(
+        fake_drive, colliding_pair, gdrive_accessor, monkeypatch,
+        literal_first, newer):
+    # The round-7 disagreement one level up. A binary file literally
+    # named `x.gdoc.json` and a Google Doc named `x` render as one vfs
+    # name, and the two routes reach them differently: the resolver ran
+    # a query per name shape and answered from the first that matched,
+    # while the listing ranked every item sharing the rendered name. So
+    # the resolver could name the binary and the read the doc -- a
+    # permanent conflict with no writer, on a path a read-check-write
+    # caller can never get past.
+    literal, doc = colliding_pair(literal_first, newer)
+    expected = literal if newer == "literal" else doc
+
+    async def download(token_manager, file_id, window=None):
+        return await fake_drive.download_file(token_manager, file_id)
+
+    async def render_doc(token_manager, file_id):
+        return f"doc:{file_id}".encode()
+
+    monkeypatch.setattr(read_mod, "download_file", download)
+    monkeypatch.setattr(read_mod, "read_doc", render_doc)
+    path = PathSpec(virtual="/x.gdoc.json",
+                    directory="/",
+                    resource_path="x.gdoc.json")
+
+    node = await resolve_key(gdrive_accessor, "x.gdoc.json")
+    assert node is not None and node.id == expected
+
+    store = RAMIndexCacheStore()
+    await read(gdrive_accessor, path, index=store)
+    assert (await store.get("/x.gdoc.json")).entry.id == expected
+
+    with patch(
+            "mirage.core.gdrive.versions.google_get",
+            new_callable=AsyncMock,
+            return_value={
+                "headRevisionId": "r1",
+                "md5Checksum": "abc"
+            },
+    ) as metadata:
+        result = await live_identity(gdrive_accessor, path)
+    assert result.exists is True
+    assert expected in metadata.call_args.args[1]

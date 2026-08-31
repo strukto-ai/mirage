@@ -29,6 +29,8 @@ import { readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
+const DOC_MIME = 'application/vnd.google-apps.document'
+
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
 } as TokenManager
@@ -339,4 +341,35 @@ describe('readdir duplicate sibling names', () => {
     const index = new RAMIndexCacheStore()
     expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/a.txt', '/b.txt'])
   })
+
+  // The collapse keys on the rendered vfs name, so a binary file named
+  // `x.gdoc.json` and a Google Doc named `x` are one contest: one row,
+  // decided by time. The resolver merges its two name queries before
+  // ranking for exactly this reason.
+  for (const literalFirst of [true, false]) {
+    for (const newer of ['literal', 'native'] as const) {
+      it(`collapses a literal name against a rendered one (${newer} newer, literal listed ${
+        literalFirst ? 'first' : 'second'
+      })`, async () => {
+        const literal: DriveModule.DriveFile = {
+          id: 'literal-id',
+          name: 'x.gdoc.json',
+          mimeType: 'application/octet-stream',
+          modifiedTime: newer === 'literal' ? '2026-06-01T00:00:00Z' : '2026-01-01T00:00:00Z',
+        }
+        const doc: DriveModule.DriveFile = {
+          id: 'doc-id',
+          name: 'x',
+          mimeType: DOC_MIME,
+          modifiedTime: newer === 'native' ? '2026-06-01T00:00:00Z' : '2026-01-01T00:00:00Z',
+        }
+        vi.mocked(drive.listFiles).mockResolvedValue(literalFirst ? [literal, doc] : [doc, literal])
+        const index = new RAMIndexCacheStore()
+        expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/x.gdoc.json'])
+        expect((await index.get('/x.gdoc.json')).entry?.id).toBe(
+          newer === 'literal' ? 'literal-id' : 'doc-id',
+        )
+      })
+    }
+  }
 })

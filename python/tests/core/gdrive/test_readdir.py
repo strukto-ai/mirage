@@ -508,3 +508,24 @@ async def test_readdir_duplicate_collapse_leaves_distinct_names_alone(
         index=NULL_INDEX,
     )
     assert entries == ["/a.txt", "/b.txt"]
+
+
+@pytest.mark.parametrize("literal_first", [True, False])
+@pytest.mark.parametrize("newer", ["literal", "native"])
+@pytest.mark.asyncio
+async def test_readdir_collapses_a_literal_name_against_a_rendered_one(
+        colliding_pair, gdrive_accessor, literal_first, newer):
+    # The collapse keys on the rendered vfs name, so a binary file named
+    # `x.gdoc.json` and a Google Doc named `x` are one contest: one row,
+    # decided by time. The resolver merges its two name queries before
+    # ranking for exactly this reason.
+    literal, doc = colliding_pair(literal_first, newer)
+    store = RAMIndexCacheStore()
+    entries = await readdir(
+        gdrive_accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=store,
+    )
+    assert entries == ["/x.gdoc.json"]
+    expected = literal if newer == "literal" else doc
+    assert (await store.get("/x.gdoc.json")).entry.id == expected
