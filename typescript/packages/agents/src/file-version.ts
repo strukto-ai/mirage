@@ -14,6 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import type { LiveFileIdentity } from '@struktoai/mirage-core/ops/types'
+import type { MarkerMatch, Stamp } from './types.ts'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 export class StaleMirageFileError extends Error {
@@ -34,33 +35,6 @@ async function readBuffer(ws: Workspace, path: string): Promise<Buffer> {
   const bytes = await ws.fs.readFile(path, { raw: true })
   return Buffer.from(bytes)
 }
-
-// What one file looked like the last time the agent saw it.
-//
-// Both fields, never one. `identity` is what the backend itself said,
-// lifted off the read's own response, so it describes the bytes the
-// agent was handed and not a concurrent writer's. `contentHash` is the
-// hash of those same bytes, which costs nothing on a path that already
-// holds them and is the only comparator a mount without native markers
-// has. An identity-only stamp would have nothing to say on such a
-// mount, and one taken from a separate call after the read could stamp
-// somebody else's version.
-//
-// `contentHash` is null in exactly one case: a post-write restamp whose
-// backend answered with a marker. Hashing there would mean re-reading
-// the file just written, which is the download this design exists to
-// remove. The ladder reaches the hash rung from such a stamp only if the
-// backend stopped reporting markers between that write and the next
-// check; it then refuses the write rather than guessing, so a missing
-// baseline costs a spurious refusal in a case that should not happen and
-// never an accepted stale write. Mirrors python's `Stamp`.
-export interface Stamp {
-  identity: LiveFileIdentity | null
-  contentHash: string | null
-}
-
-// How two identities compared on the strongest marker they share.
-export type MarkerMatch = 'same' | 'changed' | 'uncomparable'
 
 // Compare a stamped identity against the live one, strongest first.
 //

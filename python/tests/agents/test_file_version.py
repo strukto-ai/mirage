@@ -1,10 +1,11 @@
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
-from mirage.agents.file_version import (FileVersionTracker, MarkerMatch,
-                                        StaleMirageFileError, Stamp,
-                                        compare_markers, fingerprint)
+from mirage.agents.file_version import (FileVersionTracker,
+                                        StaleMirageFileError, compare_markers,
+                                        fingerprint)
 from mirage.agents.tool_operations import MirageToolOperations
+from mirage.agents.types import MarkerMatch, Stamp
 from mirage.ops.types import LiveFileIdentity
 
 
