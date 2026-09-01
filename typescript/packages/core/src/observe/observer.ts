@@ -93,6 +93,7 @@ export class Observer {
     agent: string,
     session: string,
     cwd?: string,
+    lineId?: string,
   ): Promise<void> {
     // TODO: batch the op lines and the command line into a single
     // store.append so one typed line costs one roundtrip and lands
@@ -112,6 +113,7 @@ export class Observer {
       stdout: text,
     }
     if (cwd !== undefined) init.cwd = cwd
+    if (lineId !== undefined && lineId !== '') init.lineId = lineId
     await this.log(new LogEntry(init))
   }
 
@@ -153,6 +155,25 @@ export class Observer {
   /** Command events across all sessions, in append order. */
   async commandEvents(): Promise<EventDict[]> {
     return (await this.events()).filter((e) => e.type === EVENT_COMMAND)
+  }
+
+  /**
+   * Op events across all sessions, in timestamp order. The recorder
+   * writes one per byte transfer a line caused; they share their
+   * `line_id` with the command event that produced them, so
+   * {@link lineEvents} joins the two.
+   */
+  async opEvents(): Promise<EventDict[]> {
+    return (await this.events()).filter((e) => e.type === EVENT_OP)
+  }
+
+  /**
+   * Every event one typed line produced, in append order: the line's
+   * ops first and its command entry last.
+   */
+  async lineEvents(lineId: string): Promise<EventDict[]> {
+    if (lineId === '') return []
+    return (await this.events()).filter((e) => e.line_id === lineId)
   }
 
   /**

@@ -306,6 +306,17 @@ class Workspace:
         return await explain_line(parse(line), session, self._registry,
                                   self._namespace)
 
+    async def op_history(self) -> list[dict[str, Any]]:
+        """Op events recorded by the hidden recorder.
+
+        One entry per byte transfer a command caused, carrying the
+        ``line_id`` of the line that caused it.
+
+        Returns:
+            list[dict]: All sessions' op events, timestamp order.
+        """
+        return await self.observer.op_events()
+
     @property
     def _has_managed_env(self) -> bool:
         """True once any session may hold a managed variable.

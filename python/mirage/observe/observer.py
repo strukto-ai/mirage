@@ -90,6 +90,7 @@ class Observer:
         agent: str,
         session: str,
         cwd: str | None = None,
+        line_id: str | None = None,
     ) -> None:
         """Record one finished typed line: its ops, then its command.
 
@@ -103,6 +104,8 @@ class Observer:
             agent (str): Agent that issued the line.
             session (str): Session the line ran in.
             cwd (str | None): Session cwd at completion.
+            line_id (str | None): Identifier the line's op records
+                carry, stamped on the command entry so the two join.
         """
         # TODO: batch the op lines and the command line into a single
         # store.append so one typed line costs one roundtrip and lands
@@ -120,6 +123,7 @@ class Observer:
                 command=command,
                 exit_code=io.exit_code,
                 stdout=stdout.decode(errors="replace")[:STDOUT_TRUNCATE],
+                line_id=line_id,
             ))
 
     async def log_command_text(self,
@@ -207,6 +211,34 @@ class Observer:
         return [
             e for e in await self.events() if e.get("type") == EVENT_COMMAND
         ]
+
+    async def op_events(self) -> list[dict[str, Any]]:
+        """Op events across all sessions, in timestamp order.
+
+        The recorder writes one of these per byte transfer a line
+        caused. They share their ``line_id`` with the command event
+        that produced them, so :meth:`line_events` joins the two.
+
+        Returns:
+            list[dict]: Events with type == EVENT_OP.
+        """
+        return [e for e in await self.events() if e.get("type") == EVENT_OP]
+
+    async def line_events(self, line_id: str) -> list[dict[str, Any]]:
+        """Every event one typed line produced, in append order.
+
+        The line's ops come first and its command entry last, which is
+        the order they were recorded in.
+
+        Args:
+            line_id (str): The line identifier to select on.
+
+        Returns:
+            list[dict]: Events carrying that ``line_id``.
+        """
+        if not line_id:
+            return []
+        return [e for e in await self.events() if e.get("line_id") == line_id]
 
     async def session_command_events(self,
                                      session: str) -> list[dict[str, Any]]:

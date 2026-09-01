@@ -420,6 +420,15 @@ export class Workspace {
     return this.observer.commandEvents()
   }
 
+  /**
+   * Op events recorded by the hidden recorder, across all sessions in
+   * timestamp order. One entry per byte transfer a command caused,
+   * carrying the `line_id` of the line that caused it.
+   */
+  opHistory(): Promise<EventDict[]> {
+    return this.observer.opEvents()
+  }
+
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
   // Routes through the private dispatch continuation, not the raw Ops facade,
   // so runtime journal replay stays open during close and sandbox I/O takes

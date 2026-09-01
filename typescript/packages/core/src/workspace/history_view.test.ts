@@ -406,3 +406,51 @@ describe('history snapshot rewind', () => {
     await dst.close()
   })
 })
+
+describe('op events and their line id', () => {
+  it('opHistory returns the ops a command caused, history stays commands only', async () => {
+    const ws = makeWs()
+    await ws.execute('echo hi > /data/x.txt')
+    await ws.execute('cat /data/x.txt')
+    const ops = await ws.opHistory()
+    expect(ops.map((e) => e.op)).toEqual(['write', 'read'])
+    expect(await ws.opHistory()).toEqual(await ws.observer.opEvents())
+    expect(new Set((await ws.history()).map((e) => e.type))).toEqual(new Set(['command']))
+    await ws.close()
+  })
+
+  it('line_id joins each op to the command that caused it', async () => {
+    const ws = makeWs()
+    await ws.execute('echo hi > /data/x.txt')
+    await ws.execute('cat /data/x.txt')
+    const cmds = await ws.observer.commandEvents()
+    const [first, second] = [cmds[0]?.line_id, cmds[1]?.line_id]
+    expect(first).toBeTruthy()
+    expect(first).not.toBe(second)
+    expect((await ws.opHistory()).map((e) => e.line_id)).toEqual([first, second])
+    const line = await ws.observer.lineEvents(second as string)
+    expect(line.map((e) => e.type)).toEqual(['op', 'command'])
+    expect(line[1]?.command).toBe('cat /data/x.txt')
+    await ws.close()
+  })
+
+  it("a nested eval's ops carry the top-level line's id", async () => {
+    const ws = makeWs()
+    await ws.execute('echo hi > /data/x.txt')
+    await ws.execute('echo $(cat /data/x.txt)')
+    const cmds = await ws.observer.commandEvents()
+    expect(cmds.map((c) => c.command)).toEqual(['echo hi > /data/x.txt', 'echo $(cat /data/x.txt)'])
+    const ops = await ws.opHistory()
+    expect(ops.map((o) => o.op)).toEqual(['write', 'read'])
+    expect(ops[1]?.line_id).toBe(cmds[1]?.line_id)
+    await ws.close()
+  })
+
+  it('the in-memory ledger carries the same id', async () => {
+    const ws = makeWs()
+    await ws.execute('echo hi > /data/x.txt')
+    const cmds = await ws.observer.commandEvents()
+    expect(ws.records.map((r) => r.lineId)).toEqual([cmds[0]?.line_id])
+    await ws.close()
+  })
+})

@@ -15,6 +15,7 @@
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { runWithRecording } from '../../observe/context.ts'
+import { uuid7 } from '../../utils/ids.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
@@ -120,6 +121,7 @@ async function deniedResult(
       options.agentId ?? env.agentId ?? '',
       session.sessionId,
       options.cwd ?? session.cwd,
+      uuid7(),
     )
   }
   await env.sessions.flush()
@@ -449,6 +451,7 @@ async function runParsedLine(
         callAgentId,
         targetSession.sessionId,
         effectiveSession.cwd,
+        uuid7(),
       )
     }
     return new ExecuteResult(result.stdout, result.stderr ?? new Uint8Array(), result.exitCode)
@@ -489,9 +492,9 @@ async function runParsedLine(
       () => runCommandTree(deps, rootNode, effectiveSession, stdin),
       env.sessions,
     )
-  let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
+  let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[], string]
   try {
-    execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
+    execResult = isLine ? await runWithRecording(runBody) : [await runBody(), [], '']
   } catch (err) {
     // Abort (cancellation) and content drift are control-flow signals
     // that must propagate, mirroring the Python workspace. Any other
@@ -503,7 +506,7 @@ async function runParsedLine(
     targetSession.lastExitCode = failed.exitCode
     return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
   }
-  const [[materialized, io], opRecords] = execResult
+  const [[materialized, io], opRecords, lineId] = execResult
   targetSession.lastExitCode = io.exitCode
   let stdoutBytes: Uint8Array
   try {
@@ -543,6 +546,7 @@ async function runParsedLine(
       callAgentId,
       targetSession.sessionId,
       effectiveSession.cwd,
+      lineId,
     )
   }
 

@@ -18,6 +18,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mirage.observe.record import OpRecord
+from mirage.utils.ids import uuid7
 
 
 @dataclass(frozen=True)
@@ -35,10 +36,14 @@ class Recorder:
         sink (list[OpRecord]): Where new records are appended.
         mount_prefix (str): Current frame's mount prefix (e.g. "/s3").
             Empty when no mount is active.
+        line_id (str): Identifier of the typed line being recorded,
+            stamped onto every record so the ops and the command event
+            share a key. Empty when no line owns the frame.
     """
 
     sink: list[OpRecord] = field(default_factory=list)
     mount_prefix: str = ""
+    line_id: str = ""
 
 
 _recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
@@ -54,6 +59,11 @@ class RecordingScope:
     eval, xargs, ...) construct one so their ops flow into the
     enclosing typed line's scope instead of opening their own.
 
+    ``line_id`` identifies the line for the whole of its run and is
+    stamped on every record the scope collects. An inactive scope
+    reports the enclosing line's id rather than one of its own, so a
+    nested eval's ops are attributed to the top-level line that ran it.
+
     Args:
         active (bool): False joins the enclosing scope instead of
             opening a new one.
@@ -63,9 +73,13 @@ class RecordingScope:
         self.records: list[OpRecord] = []
         self._token = None
         if active:
-            rec = Recorder()
+            rec = Recorder(line_id=uuid7())
             self.records = rec.sink
             self._token = _recorder.set(rec)
+            self.line_id = rec.line_id
+            return
+        enclosing = _recorder.get()
+        self.line_id = "" if enclosing is None else enclosing.line_id
 
     def close(self) -> None:
         """Restore the previous recorder. Idempotent."""
@@ -124,7 +138,8 @@ def push_mount_prefix(prefix: str) -> str:
     rec = _recorder.get()
     if rec is None:
         return ""
-    _recorder.set(Recorder(sink=rec.sink, mount_prefix=prefix))
+    _recorder.set(
+        Recorder(sink=rec.sink, mount_prefix=prefix, line_id=rec.line_id))
     return rec.mount_prefix
 
 
@@ -213,6 +228,7 @@ def record(op: str,
             duration_ms=elapsed,
             fingerprint=fingerprint,
             revision=revision,
+            line_id=rec.line_id or None,
         ))
 
 
@@ -257,6 +273,7 @@ def record_stream(op: str,
         duration_ms=0,
         fingerprint=fingerprint,
         revision=revision,
+        line_id=rec.line_id or None,
     )
     rec.sink.append(op_rec)
     return op_rec

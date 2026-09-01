@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno
 import time
 from typing import Any
 
 from mirage.io import OpReport
 from mirage.observe import OpRecord
+from mirage.observe.context import active_recorder
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -127,9 +127,13 @@ class Ops:
         norm = ("/" + stripped + "/" if stripped else "/")
         self._mounts = [m for m in self._mounts if m.prefix != norm]
 
-    def _record(self, op: str, path: str, source: str, nbytes: int,
-                start_ms: int) -> None:
+    async def _record(self, op: str, path: str, source: str, nbytes: int,
+                      start_ms: int) -> None:
         elapsed = int(time.monotonic() * 1000) - start_ms
+        # A facade call raised by guest code inside a typed line (the
+        # runtime's patched open()) belongs to that line; one raised by
+        # a FUSE callback belongs to no line and carries none.
+        recorder = active_recorder()
         rec = OpRecord(
             op=op,
             path=path,
@@ -137,11 +141,16 @@ class Ops:
             bytes=nbytes,
             timestamp=int(time.time() * 1000),
             duration_ms=elapsed,
+            line_id=(recorder.line_id or None) if recorder else None,
         )
         self.records.append(rec)
         if self._observer is not None:
-            asyncio.ensure_future(
-                self._observer.log_op(rec, self._agent_id, self._session_id))
+            # Awaited, not fired and forgotten: an ensure_future here
+            # left the event unwritten when the caller read the log on
+            # the next line (the RAM store's read never yields, so the
+            # task had not run), and let close() race a pending append.
+            # TypeScript's sink is awaited for the same reason.
+            await self._observer.log_op(rec, self._agent_id, self._session_id)
 
     def _owner(self, path: str) -> OpsMount | None:
         """The mount owning ``path`` by longest prefix, or None."""
@@ -209,17 +218,17 @@ class Ops:
             # moment of completion, so even a foreign error the door
             # never defined leaves the transfer on the books.
             if report.completed and owner is not None:
-                self._record_op(op, path, owner, report.source, report.bytes,
-                                None, kwargs, start)
+                await self._record_op(op, path, owner, report.source,
+                                      report.bytes, None, kwargs, start)
             raise
         if owner is not None:
-            self._record_op(op, path, owner, report.source, report.bytes,
-                            result, kwargs, start)
+            await self._record_op(op, path, owner, report.source, report.bytes,
+                                  result, kwargs, start)
         return result
 
-    def _record_op(self, op: str, path: str, owner: OpsMount,
-                   source: str | None, moved: int | None, result: Any,
-                   kwargs: dict[str, Any], start: int) -> None:
+    async def _record_op(self, op: str, path: str, owner: OpsMount,
+                         source: str | None, moved: int | None, result: Any,
+                         kwargs: dict[str, Any], start: int) -> None:
         """Record one op from the door's report of who served it.
 
         The door names the server when it was not the owning mount (a
@@ -242,7 +251,8 @@ class Ops:
         """
         nbytes = (moved if moved is not None else self._payload_bytes(
             result, kwargs))
-        self._record(op, path, source or owner.resource_type, nbytes, start)
+        await self._record(op, path, source or owner.resource_type, nbytes,
+                           start)
 
     async def read(self,
                    path: str,

@@ -44,6 +44,9 @@ class LogEntry:
         stdout (str | None): Truncated stdout (for type="command").
         offset (int | None): 1-based listing position (for
             type="delete"); negative counts back from the end.
+        line_id (str | None): The typed line this event belongs to. An
+            op event and the command event it ran under carry the same
+            value, which is what joins them.
     """
 
     type: str
@@ -60,6 +63,7 @@ class LogEntry:
     exit_code: int | None = None
     stdout: str | None = None
     offset: int | None = None
+    line_id: str | None = None
 
     @staticmethod
     def from_op_record(
@@ -90,6 +94,7 @@ class LogEntry:
             source=rec.source,
             bytes=rec.bytes,
             duration_ms=rec.duration_ms,
+            line_id=rec.line_id,
         )
 
     def to_json_line(self) -> str:

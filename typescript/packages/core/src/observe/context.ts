@@ -14,11 +14,17 @@
 
 import { createAsyncContext } from '../utils/async_context.ts'
 import { OpRecord } from './record.ts'
+import { uuid7 } from '../utils/ids.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
 interface RecordingState {
   records: OpRecord[]
   mountPrefix: string
+  /**
+   * Identifier of the typed line being recorded, stamped onto every
+   * record so the ops and the command event share a key.
+   */
+  lineId: string
 }
 
 const storage = createAsyncContext<RecordingState>()
@@ -34,10 +40,20 @@ interface RevisionsState {
 
 const revisionsStorage = createAsyncContext<RevisionsState>()
 
-export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], mountPrefix: '' }
+export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[], string]> {
+  const state: RecordingState = { records: [], mountPrefix: '', lineId: uuid7() }
   const value = await storage.run(state, fn)
-  return [value, state.records]
+  return [value, state.records, state.lineId]
+}
+
+/**
+ * The line id of the active recording scope, or null outside one.
+ * The ops facade reads it so a call raised by guest code inside a typed
+ * line (the runtime's patched open()) is attributed to that line, while
+ * one raised by a FUSE callback belongs to no line and carries none.
+ */
+export function activeLineId(): string | null {
+  return storage.getStore()?.lineId ?? null
 }
 
 /**
@@ -53,7 +69,9 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
 export function runWithMountPrefix<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
   const state = storage.getStore()
   if (state === undefined) return fn()
-  return Promise.resolve(storage.run({ records: state.records, mountPrefix: prefix }, fn))
+  return Promise.resolve(
+    storage.run({ records: state.records, mountPrefix: prefix, lineId: state.lineId }, fn),
+  )
 }
 
 /**
@@ -112,6 +130,7 @@ export function record(
       durationMs: elapsed,
       fingerprint: options.fingerprint ?? null,
       revision: options.revision ?? null,
+      lineId: state.lineId === '' ? null : state.lineId,
     }),
   )
 }
@@ -133,6 +152,7 @@ export function recordStream(
     durationMs: 0,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
+    lineId: state.lineId === '' ? null : state.lineId,
   })
   state.records.push(rec)
   return rec

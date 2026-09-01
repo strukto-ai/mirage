@@ -351,6 +351,10 @@ async def execute_line(
         await ws._session_mgr.flush()
         ws._ops.records.extend(scope.records)
         if is_line:
-            await ws.observer.log_execution(command, io, scope.records, agent
-                                            or "", session_id,
-                                            session_cwd(ws, session_id))
+            await ws.observer.log_execution(command,
+                                            io,
+                                            scope.records,
+                                            agent or "",
+                                            session_id,
+                                            session_cwd(ws, session_id),
+                                            line_id=scope.line_id)

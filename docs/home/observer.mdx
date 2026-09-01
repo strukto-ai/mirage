@@ -68,6 +68,46 @@ const wsRedis = new Workspace(
 
 </CodeGroup>
 
+## Reading the events
+
+Every event the recorder writes is reachable programmatically. Command events and
+op events are separate views over the same log, and a `line_id` joins them: an op
+carries the id of the typed line that caused it, and that line's command event
+carries the same id.
+
+<CodeGroup>
+
+```python Python
+await ws.history()      # command events, all sessions, timestamp order
+await ws.op_history()   # op events, all sessions, timestamp order
+
+# Every op one line caused, then the line itself
+line_id = (await ws.observer.command_events())[-1]["line_id"]
+await ws.observer.line_events(line_id)
+```
+
+```typescript TypeScript
+await ws.history() // command events, all sessions, timestamp order
+await ws.opHistory() // op events, all sessions, timestamp order
+
+// Every op one line caused, then the line itself
+const commands = await ws.observer.commandEvents()
+await ws.observer.lineEvents(commands.at(-1).line_id)
+```
+
+</CodeGroup>
+
+An op event carries `op`, `path` (virtual, mount prefix included), `source`,
+`bytes`, `duration_ms` and `line_id`. Ops raised outside a typed line (a FUSE
+callback, a direct `ws.ops` / `ws.fs` call) carry no `line_id`, because no line
+caused them.
+
+<Note>
+Op events cover byte transfers — reads, writes, and the create/truncate/unlink
+family. Metadata ops (`stat`, `readdir`) are recorded on the ops facade and FUSE
+paths, not for shell commands, so an `ls` leaves a command event and no op event.
+</Note>
+
 ## Supported: command history
 
 The Observer powers a GNU-bash-compatible history, exposed two ways over the same
@@ -93,5 +133,8 @@ The format is GNU bash (`#<epoch>`), not zsh (`: <ts>:<dur>;<cmd>`).
 
 History is part of the workspace state: the Observer's command, clear, and delete
 events are captured into a [snapshot](/home/snapshot) and restored on load, so a
-restored workspace replays with the same history. The `/.bash_history` view mount
+restored workspace replays with the same history. Op events are deliberately left
+out: a snapshot pins what was read through fingerprints and revisions, and
+carrying the whole transfer log would grow the snapshot without adding a fact it
+restores from. The `/.bash_history` view mount
 itself is not stored, it is a live projection rebuilt from the events.

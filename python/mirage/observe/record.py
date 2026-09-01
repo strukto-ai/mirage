@@ -39,6 +39,10 @@ class OpRecord:
             bytes can be re-fetched even if the live object has moved on.
             Strictly stronger than ``fingerprint`` — populated only by
             backends that can guarantee revision durability.
+        line_id (str | None): The typed line this op was emitted under,
+            shared with that line's command event so the two can be
+            joined. None for an op raised outside a recording scope
+            (a FUSE callback, a direct ``ws.ops`` call).
     """
 
     op: str
@@ -49,6 +53,7 @@ class OpRecord:
     duration_ms: int
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
+    line_id: str | None = field(default=None)
 
     @property
     def is_cache(self) -> bool:

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { OpReport } from '../io/types.ts'
+import { activeLineId } from '../observe/context.ts'
 import { OpRecord } from '../observe/record.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
@@ -116,6 +117,7 @@ export class Ops {
       bytes,
       timestamp: Date.now(),
       durationMs: Date.now() - startMs,
+      lineId: activeLineId(),
     })
     this.records.push(rec)
     if (this.sink !== null) await this.sink(rec)

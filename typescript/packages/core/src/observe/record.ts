@@ -35,6 +35,12 @@ export interface OpRecordInit {
    * replay to pin reads to the exact recorded version.
    */
   revision?: string | null
+  /**
+   * The typed line this op was emitted under, shared with that line's
+   * command event so the two can be joined. Null for an op raised
+   * outside a recording scope (a FUSE callback, a direct ws.fs call).
+   */
+  lineId?: string | null
 }
 
 export class OpRecord {
@@ -46,6 +52,7 @@ export class OpRecord {
   durationMs: number
   fingerprint: string | null
   revision: string | null
+  lineId: string | null
 
   constructor(init: OpRecordInit) {
     this.op = init.op
@@ -56,6 +63,7 @@ export class OpRecord {
     this.durationMs = init.durationMs
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
+    this.lineId = init.lineId ?? null
   }
 
   get isCache(): boolean {
@@ -72,6 +80,7 @@ export class OpRecord {
       durationMs: this.durationMs,
       fingerprint: this.fingerprint,
       revision: this.revision,
+      lineId: this.lineId,
     }
   }
 }

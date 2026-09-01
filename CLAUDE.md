@@ -44,6 +44,18 @@ Packages split by role, one module per concern, the same way in both languages:
 Command history is a recording, not a command log. A hidden `Observer` records every top-level command as timestamp-ordered events (`COMMAND`, `CLEAR`, `DELETE`, op events); the user-facing surfaces are just views of those events.
 
 - **Observer + ObserverStore.** The `Observer` owns a storage-agnostic `ObserverStore` (`append`/`write`/`readAll`/`readMatching`/`clear`/`close`), not a mount. Stores: `RAMObserverStore` (core, default), `DiskObserverStore` and `RedisObserverStore` (node). RAM is just the default, history can persist to disk or Redis.
+- **Op events are readable, and joined to their line.** Every event the
+  recorder writes is reachable: `ws.history()` / `ws.op_history()`
+  (`history()` / `opHistory()`) are the two views, and `Observer.line_events`
+  / `lineEvents` returns one typed line's ops followed by its command entry.
+  What joins them is `line_id`, minted once per `RecordingScope` /
+  `runWithRecording` and stamped on every `OpRecord` and on the command
+  entry, so a nested eval's ops carry the *top-level* line's id. An op
+  raised outside a scope (a FUSE callback, a direct `ws.ops` / `ws.fs`
+  call) carries none, which is what "no line caused this" looks like.
+  Snapshots still capture COMMAND/CLEAR/DELETE only: a snapshot pins reads
+  through fingerprints and revisions, so the transfer log would add size
+  without adding a fact it restores from.
 - **Two views over the same events.** `/.bash_history` is a read-only view mount (`HistoryViewResource`) rendered in GNU bash histfile format (`#<epoch>` line then the command), so `cat`/`grep`/`tail`/`find` work on it for free. The `history` shell builtin (GNU `-c -d -a -n -r -w -s -p` + count) routes through the same mount, so file and builtin never disagree.
 - **Recording scope.** Top-level lines record; nested evals (`$()`, `eval`, `source`, `xargs`) run with `record: false`, so their inner ops bubble to the parent and no spurious command is logged (mirrors GNU's line reader).
 - **Snapshots.** History is captured as events into snapshot state and restored on load.

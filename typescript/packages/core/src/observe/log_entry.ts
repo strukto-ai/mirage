@@ -37,6 +37,11 @@ export interface LogEntryInit {
   exitCode?: number
   stdout?: string
   offset?: number
+  /**
+   * The typed line this event belongs to. An op event and the command
+   * event it ran under carry the same value, which is what joins them.
+   */
+  lineId?: string
 }
 
 export class LogEntry {
@@ -54,6 +59,7 @@ export class LogEntry {
   readonly exitCode: number | undefined
   readonly stdout: string | undefined
   readonly offset: number | undefined
+  readonly lineId: string | undefined
 
   constructor(init: LogEntryInit) {
     this.type = init.type
@@ -70,6 +76,7 @@ export class LogEntry {
     this.exitCode = init.exitCode
     this.stdout = init.stdout
     this.offset = init.offset
+    this.lineId = init.lineId
   }
 
   static fromOpRecord(rec: OpRecord, agent: string, session: string, cwd?: string): LogEntry {
@@ -85,6 +92,7 @@ export class LogEntry {
       durationMs: rec.durationMs,
     }
     if (cwd !== undefined) init.cwd = cwd
+    if (rec.lineId !== null) init.lineId = rec.lineId
     return new LogEntry(init)
   }
 
@@ -105,6 +113,7 @@ export class LogEntry {
     if (this.exitCode !== undefined) obj.exit_code = this.exitCode
     if (this.stdout !== undefined) obj.stdout = this.stdout
     if (this.offset !== undefined) obj.offset = this.offset
+    if (this.lineId !== undefined) obj.line_id = this.lineId
     return JSON.stringify(obj)
   }
 }
