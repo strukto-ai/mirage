@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-import time
 from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -28,7 +27,8 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.drive import download_file
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
-from mirage.observe.context import active_recorder, record, revision_for
+from mirage.observe.context import (active_recorder, record, revision_for,
+                                    start_op)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -64,7 +64,7 @@ async def read_file_versioned(token_manager: TokenManager,
     """
     pinned = revision_for(virtual)
     window = window_for(offset, size)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     fingerprint = None
     revision = pinned
     if pinned:
@@ -79,7 +79,7 @@ async def read_file_versioned(token_manager: TokenManager,
            label,
            "gdrive",
            len(data),
-           start_ms,
+           timer,
            fingerprint=fingerprint,
            revision=revision)
     return data

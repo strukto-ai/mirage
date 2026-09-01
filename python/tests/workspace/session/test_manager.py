@@ -22,10 +22,12 @@ from mirage.policy.types import (AdmissionRules, CommandRule, Decision,
                                  HideReason, ProfileScript, Scope)
 from mirage.resource.ram import RAMResource
 from mirage.runtime.types import ScriptSource
+from mirage.shell.variable import ShellVar
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
                           ShownPaths)
 from mirage.workspace import Workspace
 from mirage.workspace.session import RAMSessionStore, SessionManager
+from mirage.workspace.session.session import vars_from_entries
 from mirage.workspace.session.state import seed_var
 
 
@@ -624,3 +626,71 @@ async def test_manager_default_session_hydrates_its_decisions():
     await again.flush()
     assert (await
             store.load())["default"]["decisions"][0]["scope"] == ("session")
+
+
+def test_restore_seed_templates_later_sessions():
+    mgr = SessionManager("default")
+    assert not mgr.has_managed_env
+    seed = vars_from_entries({
+        "TOKEN": {
+            "from": "aws-sm",
+            "ref": "prod"
+        },
+        "MODE": "x",
+    })
+    mgr.restore_seed(seed)
+    assert mgr.has_managed_env
+    created = mgr.create("later")
+    assert created.vars["MODE"].value == "x"
+    assert created.vars["TOKEN"].managed is not None
+    assert mgr.seed_vars == seed
+
+
+def test_hydration_merges_env_entries_the_record_predates():
+    """A pointer added to the env block after a record was written must
+    reach the hydrated session; the record's own entries win per name."""
+    store = RAMSessionStore()
+
+    async def scenario():
+        old = SessionManager("default", store=store)
+        old.get("default").vars["KEPT"] = ShellVar(value="stored")
+        old.create("agent")
+        old.get("agent").vars["KEPT"] = ShellVar(value="agent")
+        await old.ensure_loaded()
+        await old.flush()
+        seeds = vars_from_entries({
+            "TOKEN": {
+                "from": "aws-sm",
+                "ref": "prod"
+            },
+            "KEPT": "seeded",
+        })
+        fresh = SessionManager("default", store=store, seed_vars=dict(seeds))
+        await fresh.ensure_loaded()
+        return fresh
+
+    fresh = _run(scenario())
+    assert fresh.get("default").vars["TOKEN"].managed is not None
+    assert fresh.get("default").vars["KEPT"].value == "stored"
+    assert fresh.get("agent").vars["TOKEN"].managed is not None
+    assert fresh.get("agent").vars["KEPT"].value == "agent"
+    assert fresh.has_managed_env
+
+
+def test_merged_seed_lands_durably_on_the_next_flush():
+    """Stamped after the baseline, like narrow: the store's record gains
+    the new entry rather than needing a re-merge every restart."""
+    store = RAMSessionStore()
+
+    async def scenario():
+        old = SessionManager("default", store=store)
+        await old.ensure_loaded()
+        await old.flush()
+        seeds = vars_from_entries({"TOKEN": {"from": "aws-sm", "ref": "p"}})
+        fresh = SessionManager("default", store=store, seed_vars=dict(seeds))
+        await fresh.ensure_loaded()
+        await fresh.flush()
+        return await store.load()
+
+    entries = _run(scenario())
+    assert entries["default"]["managed"]["TOKEN"]["ref"] == "p"

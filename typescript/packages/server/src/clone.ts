@@ -18,6 +18,7 @@ import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapsh
 import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Resource } from '@struktoai/mirage-core/resource/base'
+import type { SourceEntries } from '@struktoai/mirage-core/secrets/config'
 import { Workspace, buildResource } from '@struktoai/mirage-node'
 
 interface OverrideMountBlock {
@@ -27,6 +28,8 @@ interface OverrideMountBlock {
 
 export interface OverrideShape {
   mounts?: Record<string, OverrideMountBlock>
+  /** `secrets:` declarations for the restored env pointers. */
+  secrets?: SourceEntries
 }
 
 export async function buildOverrideResources(
@@ -70,5 +73,11 @@ export async function cloneWorkspaceWithOverride(
   const state = await toStateDict(src)
   const existing = existingRedactedResources(src, state, new Set(Object.keys(overrideResources)))
   const merged = { ...existing, ...overrideResources }
-  return Workspace.fromState(state, {}, merged)
+  // Same-process, so the declarations travel with the clone the way a
+  // reused remote resource does: the state carries the env pointers
+  // but never the `secrets:` block behind them. An override naming its
+  // own wins, the way a mount override does, so a staging clone does
+  // not keep reading production accounts.
+  const secrets = override?.secrets ?? src.declaredSources
+  return Workspace.fromState(state, { secrets }, merged)
 }

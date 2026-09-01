@@ -14,13 +14,12 @@
 
 import asyncio
 import threading
-import time
 
 import pytest
 
 from mirage.context import (get_current_session, reset_current_session,
                             set_current_session)
-from mirage.observe.context import RecordingScope, record
+from mirage.observe.context import RecordingScope, record, start_op
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
@@ -425,7 +424,7 @@ class LedgerDispatch(RecordingDispatch):
     """Emits an op event inside the dispatched op, like a backend core."""
 
     async def __call__(self, op, path, **kwargs):
-        record(op, path.virtual, "ram", 7, int(time.monotonic() * 1000))
+        record(op, path.virtual, "ram", 7, start_op())
         return await super().__call__(op, path, **kwargs)
 
 

@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -31,7 +29,7 @@ async def read_bytes(accessor: HfBucketsAccessor,
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     try:
         if offset or size is not None:
             async with await op.open(key, "rb") as f:
@@ -43,5 +41,5 @@ async def read_bytes(accessor: HfBucketsAccessor,
             data = bytes(await op.read(key))
     except NotFound as exc:
         raise enoent(path) from exc
-    record("read", raw, accessor.RESOURCE_NAME, len(data), start_ms)
+    record("read", raw, accessor.RESOURCE_NAME, len(data), timer)
     return data

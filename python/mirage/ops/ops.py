@@ -14,12 +14,12 @@
 
 import asyncio
 import errno
-import time
 from typing import Any
 
 from mirage.io import OpReport
 from mirage.observe import OpRecord
-from mirage.observe.context import RecordingScope, active_recorder
+from mirage.observe.context import (OpTimer, RecordingScope, active_recorder,
+                                    finish_record, start_op)
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.ops.types import LiveFileIdentity
 from mirage.runtime.types import DispatchFn
@@ -193,15 +193,13 @@ class Ops:
         self._mounts = [m for m in self._mounts if m.prefix != norm]
 
     def _record(self, op: str, path: str, source: str, nbytes: int,
-                start_ms: int) -> None:
-        elapsed = int(time.monotonic() * 1000) - start_ms
-        rec = OpRecord(
-            op=op,
-            path=path,
-            source=source.value if hasattr(source, 'value') else str(source),
-            bytes=nbytes,
-            timestamp=int(time.time() * 1000),
-            duration_ms=elapsed,
+                timer: OpTimer) -> None:
+        rec = finish_record(
+            op,
+            path,
+            source.value if hasattr(source, 'value') else str(source),
+            nbytes,
+            timer,
         )
         self.records.append(rec)
         if self._observer is not None:
@@ -266,7 +264,7 @@ class Ops:
                 None for one this call keeps to itself.
             **kwargs: op arguments, by the op function's names.
         """
-        start = int(time.monotonic() * 1000)
+        timer = start_op()
         if (self._links is not None and op not in NO_FOLLOW_OPS
                 and not kwargs.get("nofollow")):
             path = self._links.follow(path)
@@ -286,16 +284,16 @@ class Ops:
             # never defined leaves the transfer on the books.
             if report.completed and owner is not None:
                 self._record_op(op, path, owner, report.source, report.bytes,
-                                None, kwargs, start)
+                                None, kwargs, timer)
             raise
         if owner is not None:
             self._record_op(op, path, owner, report.source, report.bytes,
-                            result, kwargs, start)
+                            result, kwargs, timer)
         return result
 
     def _record_op(self, op: str, path: str, owner: OpsMount,
                    source: str | None, moved: int | None, result: Any,
-                   kwargs: dict[str, Any], start: int) -> None:
+                   kwargs: dict[str, Any], timer: OpTimer) -> None:
         """Record one op from the door's report of who served it.
 
         The door names the server when it was not the owning mount (a
@@ -314,11 +312,11 @@ class Ops:
                 measure the result.
             result (Any): what the op returned, None when withheld.
             kwargs (dict[str, Any]): the op's arguments.
-            start (int): monotonic start stamp, in milliseconds.
+            timer (OpTimer): the stopwatch opened when the op started.
         """
         nbytes = (moved if moved is not None else self._payload_bytes(
             result, kwargs))
-        self._record(op, path, source or owner.resource_type, nbytes, start)
+        self._record(op, path, source or owner.resource_type, nbytes, timer)
 
     async def read(self,
                    path: str,

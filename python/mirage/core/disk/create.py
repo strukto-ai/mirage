@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from pathlib import Path
 
 import aiofiles
@@ -21,7 +20,7 @@ import aiofiles.os
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.disk.errors import disk_errors
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -34,10 +33,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def create(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     p = _resolve(accessor.root, path)
     with disk_errors(path_spec.virtual):
         async with aiofiles.open(p, "wb") as f:
             await f.write(b"")
-    record("create", path, "disk", 0, start_ms)
+    record("create", path, "disk", 0, timer)
     await invalidate_after_write(path_spec)

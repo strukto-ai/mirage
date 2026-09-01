@@ -15,7 +15,7 @@
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import { FileType, ResourceName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
@@ -34,13 +34,13 @@ export async function unlink(
     throw isADirectoryError(p.virtual)
   }
   const remotePath = backendPath(accessor.config, p)
-  const startMs = performance.now()
+  const timer = startOp()
   try {
     await dbxFetch(accessor, 'DELETE', 'files', remotePath)
   } catch (exc) {
     if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
-  record('unlink', p.virtual, ResourceName.DATABRICKS_VOLUME, 0, startMs)
+  record('unlink', p.virtual, ResourceName.DATABRICKS_VOLUME, 0, timer)
   await invalidateAfterUnlink(p)
 }

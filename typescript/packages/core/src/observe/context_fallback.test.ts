@@ -21,6 +21,7 @@ import {
   runRecorded,
   runWithRecording,
   runWithRevisions,
+  startOp,
   type RecordedRun,
 } from './context.ts'
 import { readIdentity } from '../ops/ops.ts'
@@ -86,7 +87,7 @@ describe('recording on the fallback storage', () => {
     const [, records] = await runWithRecording(async () => {
       release()
       await first
-      record('read', '/x', 'test', 3, performance.now())
+      record('read', '/x', 'test', 3, startOp())
     })
     expect(records).toHaveLength(1)
     expect(records[0]?.path).toBe('/x')
@@ -101,7 +102,7 @@ describe('recording on the fallback storage', () => {
     const [hold, release] = gate()
     let insideArray: OpRecord[] | null = null
     const { records: mine, done } = runRecorded(async () => {
-      record('read', '/mine', 'test', 1, performance.now())
+      record('read', '/mine', 'test', 1, startOp())
       await hold
       insideArray = activeRecords()
     })
@@ -126,11 +127,11 @@ describe('recording on the fallback storage', () => {
     const [holdB, releaseB] = gate()
     const runA = runRecorded(async () => {
       await holdA
-      record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+      record('read', '/a', 'test', 1, startOp(), { revision: 'rev-a' })
       return 'A'
     })
     const runB = runRecorded(async () => {
-      record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+      record('read', '/b', 'test', 1, startOp(), { revision: 'rev-b' })
       await holdB
       return 'B'
     })
@@ -155,12 +156,12 @@ describe('recording on the fallback storage', () => {
     const [holdA, releaseA] = gate()
     const runA = runRecorded(async () => {
       await holdA
-      record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+      record('read', '/a', 'test', 1, startOp(), { revision: 'rev-a' })
       return 'A'
     })
     const [holdLine, releaseLine] = gate()
     const line = runWithRecording(async () => {
-      record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+      record('read', '/b', 'test', 1, startOp(), { revision: 'rev-b' })
       await holdLine
     })
     releaseA()
@@ -183,10 +184,10 @@ describe('recording on the fallback storage', () => {
     const [holdSecond, releaseSecond] = gate()
     const first = runRecorded(async () => {
       await holdFirst
-      record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-1' })
+      record('read', '/same', 'test', 1, startOp(), { revision: 'rev-1' })
     })
     const second = runRecorded(async () => {
-      record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-2' })
+      record('read', '/same', 'test', 1, startOp(), { revision: 'rev-2' })
       await holdSecond
     })
     releaseFirst()
@@ -202,7 +203,7 @@ describe('recording on the fallback storage', () => {
     // frames behind it, and its own rejection still reaches its caller.
     const failing = runRecorded(() => Promise.reject(new Error('boom')))
     const next = runRecorded(() => {
-      record('read', '/after', 'test', 1, performance.now(), { revision: 'rev-after' })
+      record('read', '/after', 'test', 1, startOp(), { revision: 'rev-after' })
       return Promise.resolve('ok')
     })
     await expect(failing.done).rejects.toThrow('boom')
@@ -222,10 +223,10 @@ describe('recording on the fallback storage', () => {
     const [, outer] = await runWithRecording(async () => {
       runA = runRecorded(async () => {
         await holdA
-        record('read', '/a', 'test', 1, performance.now(), { revision: 'rev-a' })
+        record('read', '/a', 'test', 1, startOp(), { revision: 'rev-a' })
       })
       runB = runRecorded(() => {
-        record('read', '/b', 'test', 1, performance.now(), { revision: 'rev-b' })
+        record('read', '/b', 'test', 1, startOp(), { revision: 'rev-b' })
         return Promise.resolve()
       })
       releaseA()
@@ -262,7 +263,7 @@ describe('recording on the fallback storage', () => {
 
   it('a frame with no enclosing one forwards nowhere and still keeps its records', async () => {
     const { records, done } = runRecorded(() => {
-      record('read', '/loose', 'test', 1, performance.now())
+      record('read', '/loose', 'test', 1, startOp())
       return Promise.resolve('ok')
     })
     expect(await done).toBe('ok')
@@ -272,7 +273,7 @@ describe('recording on the fallback storage', () => {
   it('a failed frame still hands its records up', async () => {
     const [, outer] = await runWithRecording(async () => {
       const { done } = runRecorded(async () => {
-        record('read', '/partial', 'test', 1, performance.now())
+        record('read', '/partial', 'test', 1, startOp())
         await Promise.resolve()
         throw new Error('boom')
       })
@@ -283,7 +284,7 @@ describe('recording on the fallback storage', () => {
 
   it('runRecorded keeps the frame records when the run throws', async () => {
     const { records, done } = runRecorded(async () => {
-      record('read', '/partial', 'test', 1, performance.now())
+      record('read', '/partial', 'test', 1, startOp())
       await Promise.resolve()
       throw new Error('boom')
     })
@@ -305,11 +306,11 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
       const [holdSlow, releaseSlow] = gate()
       const slow = runRecorded(async () => {
         await holdSlow
-        record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-slow' })
+        record('read', '/same', 'test', 1, startOp(), { revision: 'rev-slow' })
         return 'slow'
       })
       const late = runRecorded(() => {
-        record('read', '/same', 'test', 1, performance.now(), { revision: 'rev-late' })
+        record('read', '/same', 'test', 1, startOp(), { revision: 'rev-late' })
         return Promise.resolve('late')
       })
       await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
@@ -348,11 +349,11 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
         // published this frame's tail.
         await Promise.resolve()
         nested = runRecorded(() => {
-          record('read', '/nested', 'test', 1, performance.now(), { revision: 'rev-n' })
+          record('read', '/nested', 'test', 1, startOp(), { revision: 'rev-n' })
           return Promise.resolve('inner')
         })
         const inner = await nested.done
-        record('read', '/outer', 'test', 1, performance.now(), { revision: 'rev-o' })
+        record('read', '/outer', 'test', 1, startOp(), { revision: 'rev-o' })
         return inner
       })
       await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
@@ -386,7 +387,7 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
       let nested!: RecordedRun<string>
       const behind = runRecorded(async () => {
         nested = runRecorded(() => {
-          record('read', '/nested', 'test', 1, performance.now(), { revision: 'rev-n' })
+          record('read', '/nested', 'test', 1, startOp(), { revision: 'rev-n' })
           return Promise.resolve('inner')
         })
         return await nested.done
@@ -412,14 +413,14 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
       const [holdSlow, releaseSlow] = gate()
       const slow = runRecorded(async () => {
         await holdSlow
-        record('read', '/slow', 'test', 1, performance.now(), { revision: 'rev-slow' })
+        record('read', '/slow', 'test', 1, startOp(), { revision: 'rev-slow' })
         return 'slow'
       })
       const lapsed = runRecorded(() => Promise.resolve('lapsed'))
       await vi.advanceTimersByTimeAsync(RECORDED_BIND_TIMEOUT_MS)
       expect(await lapsed.done).toBe('lapsed')
       const after = runRecorded(() => {
-        record('read', '/after', 'test', 1, performance.now(), { revision: 'rev-after' })
+        record('read', '/after', 'test', 1, startOp(), { revision: 'rev-after' })
         return Promise.resolve('after')
       })
       // Still queued behind the live read rather than bound over it, so
@@ -450,7 +451,7 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
       release()
       await first.done
       const later = runRecorded(() => {
-        record('read', '/later', 'test', 1, performance.now(), { revision: 'rev-later' })
+        record('read', '/later', 'test', 1, startOp(), { revision: 'rev-later' })
         return Promise.resolve('later')
       })
       expect(await later.done).toBe('later')
@@ -473,7 +474,7 @@ describe('the queue is bounded, so a lapse degrades the late-comer instead of ha
       })
       const first = runRecorded(() => held)
       const second = runRecorded(() => {
-        record('read', '/second', 'test', 1, performance.now(), { revision: 'rev-2' })
+        record('read', '/second', 'test', 1, startOp(), { revision: 'rev-2' })
         return Promise.resolve('B')
       })
       release()

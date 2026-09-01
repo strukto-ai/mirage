@@ -18,10 +18,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
-import { record, revisionFor, runWithRecording } from '../observe/context.ts'
+import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
 import { type OpKwargs, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
-import { createShellParser, type ShellParser } from '../shell/parse.ts'
+import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { writeSnapshotTar } from './snapshot/tar_io.ts'
 import { DriftPolicy, FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
@@ -128,14 +128,14 @@ const readOp: RegisteredOp = {
       const history = acc.versionedHistory.get(scope.virtual)
       const pinnedBytes = history?.get(pinned)
       if (pinnedBytes !== undefined) {
-        record('read', scope.virtual, 'fake-remote', pinnedBytes.byteLength, performance.now(), {
+        record('read', scope.virtual, 'fake-remote', pinnedBytes.byteLength, startOp(), {
           fingerprint: entry.fingerprint,
           revision: pinned,
         })
         return Promise.resolve(pinnedBytes)
       }
     }
-    record('read', scope.virtual, 'fake-remote', entry.bytes.byteLength, performance.now(), {
+    record('read', scope.virtual, 'fake-remote', entry.bytes.byteLength, startOp(), {
       fingerprint: entry.fingerprint,
       revision: entry.revision,
     })

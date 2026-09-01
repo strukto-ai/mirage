@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
@@ -23,7 +22,7 @@ from mirage.core.databricks_volume._helpers import (is_directory_metadata,
                                                     parent_path)
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -67,7 +66,7 @@ async def write_bytes(
     parent = parent_path(path)
     remote_parent = backend_path(accessor.config, parent)
     remote_path = backend_path(accessor.config, path)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     # TODO native async client calling HTTP API as databricks sdk is sync
     await asyncio.to_thread(
         _ensure_parent_directory_sync,
@@ -82,5 +81,5 @@ async def write_bytes(
         if is_not_found(exc):
             raise enoent(path) from exc
         raise
-    record("write", path.virtual, "databricks_volume", len(data), start_ms)
+    record("write", path.virtual, "databricks_volume", len(data), timer)
     await invalidate_after_write(path)

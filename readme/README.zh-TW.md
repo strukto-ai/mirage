@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="../assets/mirage-og-light@2x.png" alt="Mirage：面向 AI Agent 的統一虛擬檔案系統" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-og-dark@2x.png">
+    <img src="../assets/mirage-og-light@2x.png" alt="Mirage：面向 AI Agent 的虛擬終端機" width="900">
+  </picture>
 </p>
 
 <p align="center">
@@ -28,11 +31,12 @@
   <a href="./README.zh-CN.md"><img alt="简体中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
   <a href="./README.zh-TW.md"><img alt="繁體中文 README" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
   <a href="./README.fr.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
+  <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage 是 **面向 AI Agent 的統一虛擬檔案系統**：它把 S3、Google Drive、Slack、Gmail、Redis 等服務和資料來源並排掛載為同一個檔案系統。任何已經會用 bash 的 LLM 都可以開箱即用地對每個後端進行讀取、grep 和管線操作，不需要學習新的詞彙。
+Mirage 是 **面向 AI Agent 的虛擬終端機**。虛擬檔案系統提供廣泛的資料脈絡，虛擬化 CLI 讓 Agent 在工具使用上更靈活，動態執行環境降低底層基礎設施成本並且更節省 token，而對 Agent 行為乃至其可見範圍的細粒度控制帶來最好的安全性。這些部分共同構成一個虛擬化終端機，帶來最好的 Agent 效能、成本效率與安全性。
 
 ```python
 ws = Workspace(
@@ -49,9 +53,7 @@ ws = Workspace(
 await ws.execute("grep -rln session /redis /tmp")
 
 # 執行放在 Slack 裡的腳本，把報告寫入 Redis
-await ws.execute(
-    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
-)
+await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # 以頭部命令名安裝一個型別化 CLI：依名稱分派，而不是依路徑，
 # 並且像其他程式一樣可以透過 `man`、`type`、`which` 發現
@@ -61,18 +63,21 @@ await ws.execute('slack send-message --channel general --text "report is up"')
 
 ## 關於
 
-- **一個介面，而不是 N 個 SDK 和 M 個 MCP。** 每個服務都使用同一套檔案系統語意，管線可以像在本機磁碟上一樣跨服務組合。
-- **約 50 個內建後端：** RAM、Disk、Redis、S3 / R2 / OCI / Supabase / GCS、Gmail / GDrive / GDocs / GSheets / GSlides、GitHub / Linear / Notion / Trello、Slack / Discord / Email、MongoDB / GridFS / Postgres / LanceDB / Qdrant、SSH 等，並排掛載在同一個根目錄下。
-- **可攜的工作區：** 克隆、快照和版本化工作區；Agent 執行可以在機器之間遷移，而不必重啟或重新設定系統。
-- **可嵌入：** Python 和 TypeScript SDK 直接執行在 FastAPI、Express、瀏覽器應用或任何非同步執行環境的行程內，不需要獨立的行程。
-- **Agent 整合：** 透過 SDK 支援 OpenAI Agents SDK、Vercel AI SDK、LangChain、Pydantic AI、CAMEL 和 OpenHands；編碼 Agent 則透過原生轉接器、可安裝外掛、MCP 或 FUSE 接入。
+- **統一的虛擬終端機介面，而不是 N 個 SDK 和 M 個 MCP。** 每個後端都使用同一套檔案系統語意，管線可以跨服務組合。
+- **涵蓋所有資料來源的虛擬檔案系統。** S3、Google Drive、Slack、Gmail、Redis 等並排掛載在同一個根目錄下，Agent 透過統一介面，用它已經會的 unix 工具（如 `ls`、`grep`、`find` 和 `jq`）存取全部資料來源。
+- **虛擬命令列工具（CLI）。** `git`、`slack` 和 `ntn` 由 Mirage 自己回應，Agent 無需安裝任何東西即可驅動這些服務，並可跨不同執行環境和機器；同一個工具還能虛擬成兩個或更多，各自使用獨立的名稱和憑證。
+- **動態路由的執行環境。** Python、JavaScript 以及任何其他命令都可以被送到所設定的執行環境，行程內、沙箱或遠端，從而把運算與儲存解耦，任何一方都可以獨立更換。
+- **虛擬化的 Mirage Shell。** 它把檔案系統、CLI 和執行環境綁定到同一條命令列上，因此管線、重新導向、變數、工作和歷史記錄在三者之間都可用。
+- **為 Agent 設計的 Profile。** `allow`、`ask` 和 `deny` 管控命令和 CLI，`hide` 和 `show` 管控檔案和目錄，因此被隱藏的路徑不只是不可讀，而是在 Agent 看到的檔案系統中根本不存在。
+- **可腳本化的策略引擎。** 策略腳本可以在任何危險操作執行前將其阻擋，同一套策略堆疊還會攔截每一次 VFS 操作和工作階段寫入，因此檔案和環境變數都不會外洩。
+- **接入 VFS 與 Agent 的通知。** 外部變更會成為掛載上的事件串流，因此一則新的 Slack 回覆會表現為虛擬檔案系統中聊天檔案的變化，Agent 直接據此回應，而不必重新掃描整棵樹。
 
 ## 架構
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：AI Agent 和應用 → Mirage Bash 與 VFS → Dispatcher 與 Cache → 基礎設施和遠端服務" width="720">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 架構：Agent 與 Harness 連接 Profile 和 Mirage Shell，兩者把類 Unix 命令、虛擬 CLI 和程式語言解析到執行環境與虛擬檔案系統上，認證、策略引擎和通知在旁" width="100%">
   </picture>
 </p>
 

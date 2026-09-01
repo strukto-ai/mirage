@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
@@ -41,13 +41,13 @@ export function read(
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   const whole = accessor.store.files.get(p)
   if (whole === undefined) {
     throw enoent(path)
   }
   const data = offset === 0 && size === null ? whole : sliceWindow(whole, offset, size)
-  record('read', p, ResourceName.RAM, data.byteLength, start)
+  record('read', p, ResourceName.RAM, data.byteLength, timer)
   return Promise.resolve(data)
 }

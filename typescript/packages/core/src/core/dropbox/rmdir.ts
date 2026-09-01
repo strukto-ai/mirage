@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
@@ -37,9 +37,9 @@ export async function rmdir(accessor: DropboxAccessor, path: PathSpec): Promise<
   if (tag !== 'folder') throw enotdir(path.virtual)
   const children = await listFolder(accessor.tokenManager, apiPath, { limit: 1 })
   if (children.length > 0) throw enotempty(path.virtual)
-  const startMs = performance.now()
+  const timer = startOp()
   await deletePath(accessor.tokenManager, apiPath)
-  record('rmdir', path.virtual, 'dropbox', 0, startMs)
+  record('rmdir', path.virtual, 'dropbox', 0, timer)
   await invalidateAfterUnlink(path)
   await invalidateAncestors(path)
 }

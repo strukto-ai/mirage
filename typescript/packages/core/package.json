@@ -41,6 +41,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./shell/parse": {
+      "types": "./dist/shell/parse/index.d.ts",
+      "import": "./dist/shell/parse/index.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"

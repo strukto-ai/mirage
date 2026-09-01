@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
@@ -23,12 +23,12 @@ export async function create(accessor: RAMAccessor, path: PathSpec): Promise<voi
   // Not a delegation to writeBytes: that recorded the op as 'write',
   // so a guest creating a file and one writing one were the same row
   // in the ledger.
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
   accessor.store.files.set(p, new Uint8Array())
   accessor.store.modified.set(p, nowIso())
-  record('create', p, ResourceName.RAM, 0, start)
+  record('create', p, ResourceName.RAM, 0, timer)
   await invalidateAfterWrite(path)
   return Promise.resolve()
 }

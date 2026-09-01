@@ -197,7 +197,10 @@ export async function handleCli(
   const cmdStr = words.join(' ')
   const argv = words.slice(1)
 
-  const result = walk(install.name, install.spec, argv, session.cwd)
+  // The walk takes the same environment the leaf parse below does, so
+  // a group-level option declaring `Option.env` fills at its own
+  // level; without it the fetched credential never enters groupFlags.
+  const result = walk(install.name, install.spec, argv, session.cwd, envSnapshot(session))
   if (result.leaf === null) {
     const stderr = result.stream === 'stderr' ? result.output : new Uint8Array(0)
     const stdout = result.stream === 'stdout' ? result.output : null

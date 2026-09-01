@@ -121,6 +121,11 @@ redis    = ["redis[hiredis]>=5.0"]
 # --- mail ---
 email    = ["aioimaplib>=2.0.1", "aiosmtplib>=5.1.0"]
 
+# --- secrets sources ---
+dotenv   = ["python-dotenv>=1.2.2"]
+aws-sm   = ["aioboto3>=13.0"]
+1password = ["onepassword-sdk>=0.4.1"]
+
 # --- data ---
 
 # --- observability ---
@@ -193,6 +198,9 @@ all = [
     "mirage-ai[postgres]",
     "mirage-ai[redis]",
     "mirage-ai[email]",
+    "mirage-ai[dotenv]",
+    "mirage-ai[aws-sm]",
+    "mirage-ai[1password]",
     "mirage-ai[langfuse]",
     "mirage-ai[mem0]",
     "mirage-ai[chroma]",

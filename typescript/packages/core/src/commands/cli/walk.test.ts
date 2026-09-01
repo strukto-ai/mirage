@@ -16,7 +16,16 @@ import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../../runtime/routing/types.ts'
 import { Option, UsageStyle } from '../spec/types.ts'
 import { CLISpec, type CLIVerbFn } from './types.ts'
-import { findChild, findNode, nodeHelp, ownsArgv, walk } from './walk.ts'
+import {
+  envNames,
+  findChild,
+  findNode,
+  invokedEnvNames,
+  nodeHelp,
+  ownsArgv,
+  suppliedEnvNames,
+  walk,
+} from './walk.ts'
 
 const verb: CLIVerbFn = () => null
 
@@ -471,5 +480,151 @@ describe('walk path-typed group options', () => {
     })
     const result = walk('tool', spec, ['--dir', 'a', '--dir', '/b', 'run'], '/w')
     expect(result.groupFlags).toEqual({ '--dir': ['/w/a', '/b'] })
+  })
+})
+
+describe('envNames', () => {
+  it('unions Option.env over the whole tree', () => {
+    const tree = new CLISpec({
+      name: 'ntn',
+      options: [
+        new Option({ long: '--token', type: 'str', env: 'NOTION_TOKEN' }),
+        new Option({ long: '--plain', type: 'str' }),
+      ],
+      subcommands: [
+        new CLISpec({
+          name: 'api',
+          fn: verb,
+          options: [new Option({ long: '--notion-version', type: 'str', env: 'NOTION_VERSION' })],
+        }),
+      ],
+    })
+    expect(envNames(tree)).toEqual(new Set(['NOTION_TOKEN', 'NOTION_VERSION']))
+  })
+
+  it('a tree with no env options reads nothing', () => {
+    const tree = new CLISpec({ name: 'x', fn: verb })
+    expect(envNames(tree)).toEqual(new Set())
+  })
+})
+
+describe('invokedEnvNames', () => {
+  const tree = new CLISpec({
+    name: 'tool',
+    options: [new Option({ long: '--token', type: 'str', env: 'ROOT_T' })],
+    subcommands: [
+      new CLISpec({
+        name: 'alpha',
+        options: [new Option({ long: '--a', type: 'str', env: 'ALPHA_T' })],
+        subcommands: [
+          new CLISpec({
+            name: 'deep',
+            fn: verb,
+            options: [new Option({ long: '--d', type: 'str', env: 'DEEP_T' })],
+          }),
+        ],
+      }),
+      new CLISpec({
+        name: 'beta',
+        fn: verb,
+        aliases: ['b'],
+        options: [new Option({ long: '--b', type: 'str', env: 'BETA_T' })],
+      }),
+    ],
+  })
+
+  it('prunes to the selected path', () => {
+    expect(invokedEnvNames(tree, new Set())).toEqual(new Set(['ROOT_T']))
+    expect(invokedEnvNames(tree, new Set(['alpha']))).toEqual(new Set(['ROOT_T', 'ALPHA_T']))
+    expect(invokedEnvNames(tree, new Set(['alpha', 'deep']))).toEqual(
+      new Set(['ROOT_T', 'ALPHA_T', 'DEEP_T']),
+    )
+  })
+
+  it('an alias selects the same node its canonical name does', () => {
+    expect(invokedEnvNames(tree, new Set(['b']))).toEqual(new Set(['ROOT_T', 'BETA_T']))
+  })
+
+  it('null words mean a dynamic line: the whole tree', () => {
+    expect(invokedEnvNames(tree, null)).toEqual(envNames(tree))
+  })
+})
+
+function envFillTree(): CLISpec {
+  return new CLISpec({
+    name: 'tool',
+    options: [new Option({ long: '--token', type: 'str', env: 'ROOT_T' })],
+    subcommands: [
+      new CLISpec({
+        name: 'alpha',
+        options: [new Option({ long: '--a', type: 'str', env: 'ALPHA_T' })],
+        subcommands: [
+          new CLISpec({
+            name: 'deep',
+            fn: verb,
+            options: [new Option({ long: '--d', type: 'str', env: 'DEEP_T' })],
+          }),
+        ],
+      }),
+      new CLISpec({
+        name: 'beta',
+        fn: verb,
+        aliases: ['b'],
+        options: [new Option({ long: '--b', type: 'str', env: 'BETA_T' })],
+      }),
+    ],
+  })
+}
+
+function sharedEnvTree(): CLISpec {
+  return new CLISpec({
+    name: 'tool',
+    options: [new Option({ long: '--token', type: 'str', env: 'SHARED' })],
+    subcommands: [
+      new CLISpec({
+        name: 'alpha',
+        fn: verb,
+        options: [new Option({ long: '--a', type: 'str', env: 'SHARED' })],
+      }),
+    ],
+  })
+}
+
+describe('walk group env', () => {
+  it('fills at its own level', () => {
+    const result = walk('tool', envFillTree(), ['alpha', 'deep'], '/', {
+      ROOT_T: 'rv',
+      ALPHA_T: 'av',
+    })
+    expect(result.leaf).not.toBeNull()
+    expect(result.groupFlags).toEqual({ '--token': 'rv', '--a': 'av' })
+  })
+
+  it('yields to the typed value', () => {
+    const result = walk('tool', envFillTree(), ['--token', 'typed', 'alpha', 'deep'], '/', {
+      ROOT_T: 'rv',
+    })
+    expect(result.leaf).not.toBeNull()
+    expect(result.groupFlags).toEqual({ '--token': 'typed' })
+  })
+})
+
+describe('suppliedEnvNames', () => {
+  it('tracks destinations, not names', () => {
+    // One reader supplied: the unsupplied one still falls back to the
+    // variable, so it stays a read.
+    expect(suppliedEnvNames(sharedEnvTree(), ['--token', 'x', 'alpha'])).toEqual(new Set())
+    // Every reader on the path supplied: nothing consults it.
+    expect(suppliedEnvNames(sharedEnvTree(), ['--token', 'x', 'alpha', '--a', 'y'])).toEqual(
+      new Set(['SHARED']),
+    )
+  })
+
+  it('double dash keeps descendants readable', () => {
+    // The walk keeps descending after --, so a variable a subcommand
+    // can still read is never claimed ...
+    expect(suppliedEnvNames(sharedEnvTree(), ['--token', 'x', '--'])).toEqual(new Set())
+    // ... while one with no reader below the group stays claimed.
+    expect(suppliedEnvNames(envFillTree(), ['--token', 'x', '--'])).toEqual(new Set(['ROOT_T']))
   })
 })

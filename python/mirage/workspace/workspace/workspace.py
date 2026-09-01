@@ -39,6 +39,11 @@ from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
+from mirage.secrets.config import EnvVar, SourceBlock
+from mirage.secrets.errors import SecretsError
+from mirage.secrets.registry import source_for
+from mirage.secrets.sources import resolve_sources
+from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
@@ -54,6 +59,7 @@ from mirage.workspace.node.explain import explain_line
 from mirage.workspace.session import Session, SessionManager, SessionStore
 from mirage.workspace.session.resolve import (apply_profile, compile_profile,
                                               resolve_profile, with_inline)
+from mirage.workspace.session.session import vars_from_entries
 from mirage.workspace.session.validate import check_cli_verbs
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
                                        build_mount_args, install_fingerprints,
@@ -116,6 +122,8 @@ class Workspace:
         on_ask: AskHandler | None = None,
         clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]]
         | None = None,
+        env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
+        secrets: Mapping[str, SourceBlock | Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # The permission profiles: one per name, and the one a session
@@ -157,7 +165,46 @@ class Workspace:
         self._drift = DriftQueue()
         self.job_table = JobTable(console_factory)
         self._default_agent_id = agent_id
-        self._session_mgr = SessionManager(session_id, store=stores.sessions)
+        # The env block, translated once: a literal entry becomes an
+        # exported var, a managed one becomes a pointer the fill step
+        # resolves at command time. Each managed entry's source is
+        # resolved now, so a typo'd name or a missing optional
+        # dependency fails at construction, naming the known sources,
+        # rather than at the first fetch.
+        # The source table, kept as declarations: building one reads
+        # its bootstrap pointers, which is I/O, and this constructor is
+        # sync. `_secret_sources` builds them once, before the first
+        # fetch.
+        # Named for what it holds: the source *declarations*, never a
+        # secret. Spelling it `secret_blocks` made every reader (and
+        # CodeQL's name heuristic, which flagged the instance name in a
+        # log line as a credential) believe otherwise.
+        # Checked here, so every caller-supplied route is covered at
+        # once: a list arrives from an untyped REST override, and
+        # `Object.entries`/`.items()` on one yields nothing, so the
+        # declarations would silently vanish and every restored pointer
+        # would read as an unknown source.
+        if secrets is not None and not isinstance(secrets, Mapping):
+            raise SecretsError("config `secrets` must be a mapping, got "
+                               f"{type(secrets).__name__}")
+        self._source_blocks: dict[str, SourceBlock] = {
+            name: (block if isinstance(block, SourceBlock) else
+                   SourceBlock.model_validate(block))
+            for name, block in (secrets or {}).items()
+        }
+        self._secret_sources_built: dict[str, ResolvedSource] | None = None
+        self._secret_sources_task: asyncio.Task[dict[
+            str, ResolvedSource]] | None = None
+        for block in self._source_blocks.values():
+            source_for(block.source)
+        seed_vars = vars_from_entries(env) if env else None
+        for var in (seed_vars or {}).values():
+            if (var.managed is not None
+                    and var.managed.source not in self._source_blocks):
+                source_for(var.managed.source)
+        self._session_mgr = SessionManager(session_id,
+                                           store=stores.sessions,
+                                           seed_vars=seed_vars)
         # Admission policies, consulted in registration order after the
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
@@ -290,6 +337,69 @@ class Workspace:
         session = self.get_session(session_id or self.default_session_id)
         return await explain_line(parse(line), session, self._registry,
                                   self._namespace)
+
+    @property
+    def declared_sources(self) -> Mapping[str, SourceBlock]:
+        """The `secrets:` declarations this workspace was built with.
+
+        Read by the paths that rebuild a workspace from state: a
+        snapshot never carries the block, because it is the
+        deployment's credentials, so a same-process rebuild has to
+        carry it across or the restored pointers name instances the new
+        workspace never heard of.
+        """
+        return self._source_blocks
+
+    async def _secret_sources(self) -> Mapping[str, ResolvedSource]:
+        """The declared source instances, built once.
+
+        Deferred rather than done in the constructor because building
+        one reads its bootstrap pointers, and a dotenv file is I/O. The
+        first line that fills pays for it; every later line reads the
+        table. Resolution touches only the process env and dotenv
+        files, never a remote store, so a failure here is a bad
+        declaration and rightly fails every line, while an unreachable
+        store still fails only the names that want it.
+        """
+        if self._secret_sources_built is not None:
+            return self._secret_sources_built
+        # The in-flight resolution is cached, not just its result: two
+        # sessions filling concurrently would both find the memo empty
+        # across the await and read every bootstrap source twice, and a
+        # rotation between the two reads would leave the loser's config
+        # on one of the lines. Cleared either way, so a failed
+        # resolution is retried by the next line rather than pinned
+        # forever.
+        task = self._secret_sources_task
+        if task is None:
+            task = asyncio.ensure_future(resolve_sources(self._source_blocks))
+            self._secret_sources_task = task
+        try:
+            # Shielded: the task is shared, so a waiter whose own
+            # execute() is cancelled (a wait_for timeout) must not take
+            # the resolution down with it and cancel the other session
+            # too.
+            built = await asyncio.shield(task)
+        finally:
+            # Cleared only once the shared task itself is finished. A
+            # cancelled waiter dropping the handle would leave the next
+            # caller starting a second resolution beside the one still
+            # running.
+            if task.done():
+                self._secret_sources_task = None
+        self._secret_sources_built = built
+        return built
+
+    @property
+    def _has_managed_env(self) -> bool:
+        """True once any session may hold a managed variable.
+
+        The manager owns the fact because sessions are where pointers
+        live: the workspace's env block, a created session's own
+        entries, a hydrated record and a snapshot all land there. The
+        executor skips the fill pass entirely while this is False.
+        """
+        return self._session_mgr.has_managed_env
 
     @property
     def ops(self) -> Ops:
@@ -599,6 +709,8 @@ class Workspace:
             *,
             resources: dict[str, Any] | None = None,
             clis: CLIOverrides | None = None,
+            secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+        | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -627,6 +739,11 @@ class Workspace:
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly
                 installed programs).
+            secrets: {instance: declaration} for the restored env
+                pointers. A snapshot never carries the `secrets:` block
+                (it is the deployment's credentials), so a pointer at a
+                declared instance needs the block supplied here, the
+                way a redacted mount needs `resources`.
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
@@ -634,6 +751,7 @@ class Workspace:
         return await cls.from_state(read_tar(source),
                                     resources=resources,
                                     clis=clis,
+                                    secrets=secrets,
                                     drift_policy=drift_policy)
 
     @classmethod
@@ -643,6 +761,8 @@ class Workspace:
             *,
             resources: dict[str, Any] | None = None,
             clis: CLIOverrides | None = None,
+            secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+        | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -660,11 +780,16 @@ class Workspace:
                 redacted config secrets; a (spec, config) tuple also
                 carries a live spec (how copy() shares directly
                 installed programs).
+            secrets: {instance: declaration} for the restored env
+                pointers; a snapshot never carries the `secrets:` block.
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
         """
-        ws = await cls._from_state(state, resources=resources, clis=clis)
+        ws = await cls._from_state(state,
+                                   resources=resources,
+                                   clis=clis,
+                                   secrets=secrets)
         install_fingerprints(ws,
                              state.get(StateKey.FINGERPRINTS) or [],
                              drift_policy)
@@ -684,22 +809,32 @@ class Workspace:
         """
         state = await to_state_dict(self)
         resources = reusable_resources(self._registry.mounts(), state)
+        # The declarations travel with the copy the way a live CLI
+        # install does: an env pointer restores from state naming its
+        # instance, and without the block the copy would answer the
+        # first read with "unknown secrets source".
         return await type(self)._from_state(state,
                                             resources=resources,
-                                            clis=reusable_clis(self))
+                                            clis=reusable_clis(self),
+                                            secrets=self._source_blocks)
 
     @classmethod
-    async def _from_state(cls,
-                          state: dict[str, Any],
-                          *,
-                          resources: dict[str, Any] | None = None,
-                          clis: CLIOverrides | None = None) -> "Workspace":
+    async def _from_state(
+        cls,
+        state: dict[str, Any],
+        *,
+        resources: dict[str, Any] | None = None,
+        clis: CLIOverrides | None = None,
+        secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+        | None = None
+    ) -> "Workspace":
         args = build_mount_args(state, resources, clis)
         ws = cls(args.mount_args,
                  consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
-                 clis=args.clis)
+                 clis=args.clis,
+                 secrets=secrets)
         if resources:
             ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)

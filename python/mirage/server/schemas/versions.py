@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -44,6 +46,10 @@ class CloneRequest(BaseModel):
     source_id: str
     at: str | None = None
     id: str | None = None
+    # A version store holds no `secrets:` block, and the live source
+    # may be gone (a restart), so a historical clone that restores
+    # managed pointers names their declarations here.
+    secrets: dict[str, Any] | None = None
 
 
 class DiffResponse(BaseModel):

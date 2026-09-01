@@ -16,6 +16,7 @@ import type { EventDict } from '../../observe/observer.ts'
 import type { ResourceStateBase } from '../../resource/base.ts'
 import type { RAMResourceState } from '../../resource/ram/ram.ts'
 import type { MountMode } from '../../types.ts'
+import type { VarFields } from '../session/session.ts'
 
 export type ResourceState = RAMResourceState | (ResourceStateBase & Record<string, unknown>)
 
@@ -138,4 +139,11 @@ export interface WorkspaceStateDict {
    * secrets redacted). Optional for snapshots that predate the registry.
    */
   clis?: CLISnapshot[]
+  /**
+   * The workspace env template (`varsToFields` shape): the vars a
+   * created session starts from, constructor state a rebuilt workspace
+   * is never given. Managed entries carry pointers, never values.
+   * Optional for snapshots that predate the env plane.
+   */
+  env?: VarFields
 }

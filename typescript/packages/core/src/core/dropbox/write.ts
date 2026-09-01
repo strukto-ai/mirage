@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { dropboxUpload } from './client.ts'
 import { invalidateAncestors } from '../../cache/context.ts'
@@ -27,9 +27,9 @@ export async function write(
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const startMs = performance.now()
+  const timer = startOp()
   await dropboxUpload(accessor.tokenManager, dropboxPathOf(accessor, path), data)
-  record('write', path.virtual, 'dropbox', data.byteLength, startMs)
+  record('write', path.virtual, 'dropbox', data.byteLength, timer)
   await invalidateAfterWrite(path)
   await invalidateAncestors(path)
 }

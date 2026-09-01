@@ -18,7 +18,7 @@ import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/errors.ts'
-import { record, runWithRecording } from '../observe/context.ts'
+import { record, runWithRecording, startOp } from '../observe/context.ts'
 import { OpsRegistry } from './registry.ts'
 import type { LiveFileIdentity } from './types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -864,7 +864,7 @@ describe('Ops.readFileWithIdentity', () => {
       filetype: null,
       fn: (_accessor, path) => {
         const data = new TextEncoder().encode('versioned')
-        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
           fingerprint: 'fp-1',
           revision: 'rev-1',
         })
@@ -888,7 +888,7 @@ describe('Ops.readFileWithIdentity', () => {
       filetype: null,
       fn: (_accessor, path) => {
         const data = new TextEncoder().encode('data')
-        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
           fingerprint: 'fp-2',
           revision: 'rev-2',
         })
@@ -910,7 +910,7 @@ describe('Ops.readFileWithIdentity', () => {
       resource: resource.kind,
       filetype: null,
       fn: (_accessor, path) => {
-        record('read', path.virtual, resource.kind, 0, performance.now(), {
+        record('read', path.virtual, resource.kind, 0, startOp(), {
           fingerprint: 'fp-3',
           revision: 'rev-3',
         })
@@ -946,7 +946,7 @@ describe('Ops.readFileWithIdentity', () => {
       filetype: null,
       fn: (_accessor, path) => {
         const data = new TextEncoder().encode('versioned')
-        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
           fingerprint: 'fp-1',
           revision: 'rev-1',
         })
@@ -975,7 +975,7 @@ describe('Ops.readFileWithIdentity', () => {
       resource: resource.kind,
       filetype: null,
       fn: () => {
-        record('read', '/data/other.txt', resource.kind, 1, performance.now(), {
+        record('read', '/data/other.txt', resource.kind, 1, startOp(), {
           fingerprint: 'fp-other',
           revision: 'rev-other',
         })
@@ -1004,7 +1004,7 @@ describe('Ops.readFileWithIdentity', () => {
       filetype: null,
       fn: (_accessor, path) => {
         const data = new TextEncoder().encode('versioned')
-        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
           fingerprint: 'fp-1',
           revision: 'rev-1',
         })
@@ -1046,7 +1046,7 @@ describe('Ops.readFileWithIdentity under a policy cap', () => {
       filetype: null,
       fn: (_accessor, path) => {
         const data = new TextEncoder().encode('versioned')
-        record('read', path.virtual, resource.kind, data.byteLength, performance.now(), {
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
           fingerprint: 'fp-1',
           revision: 'rev-1',
         })
@@ -1099,7 +1099,7 @@ describe('Ops.readFileWithIdentity under a policy cap', () => {
       resource: resource.kind,
       filetype: '.tally',
       fn: (_accessor, path) => {
-        record('read', path.virtual, resource.kind, 'raw-bytes'.length, performance.now(), {
+        record('read', path.virtual, resource.kind, 'raw-bytes'.length, startOp(), {
           fingerprint: 'fp-r',
           revision: 'rev-r',
         })

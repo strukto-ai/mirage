@@ -15,7 +15,7 @@
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { setAttr } from '../../workspace/session/state.ts'
 import { ArithError } from '../../shell/errors.ts'
-import { VarAttr } from '../../shell/variable.ts'
+import { VarAttr, type ShellVar } from '../../shell/variable.ts'
 import { describe, expect, it } from 'vitest'
 import type { SessionView } from '../../ops/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -322,5 +322,41 @@ describe('sessionElements', () => {
     expect(ops.read('s5', '0')).toBe('5')
     expect(ops.read('s5', '1')).toBeNull()
     expect(ops.read('missing', '0')).toBeNull()
+  })
+})
+
+describe('managed variables through the session door', () => {
+  function managedVar(value: string | null): ShellVar {
+    return {
+      value,
+      attrs: new Set([VarAttr.Export]),
+      managed: { source: 'env', ref: '', key: 'TOKEN', eager: false },
+    }
+  }
+
+  it('set detaches a fetched managed var', async () => {
+    const [view, session] = makeView()
+    session.vars.TOKEN = managedVar('s3cr3t')
+    await view.set('TOKEN', 'mine')
+    const v = session.vars.TOKEN
+    expect(v.managed).toBeUndefined()
+    expect(v.value).toBe('mine')
+    expect(v.attrs).toEqual(new Set([VarAttr.Export]))
+  })
+
+  it('set detaches an unfetched managed var', async () => {
+    const [view, session] = makeView()
+    session.vars.TOKEN = managedVar(null)
+    await view.set('TOKEN', 'mine')
+    const v = session.vars.TOKEN
+    expect(v.managed).toBeUndefined()
+    expect(v.value).toBe('mine')
+  })
+
+  it('unset deletes a managed name quietly', async () => {
+    const [view, session] = makeView()
+    session.vars.TOKEN = managedVar('s3cr3t')
+    await view.unset('TOKEN')
+    expect('TOKEN' in session.vars).toBe(false)
   })
 })

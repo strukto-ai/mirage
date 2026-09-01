@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eexist, enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
@@ -60,7 +60,7 @@ export async function mkdir(
       throw enoent(path.virtual)
     }
   }
-  const startMs = performance.now()
+  const timer = startOp()
   try {
     await createFolder(accessor.tokenManager, apiPath)
   } catch (err) {
@@ -69,7 +69,7 @@ export async function mkdir(
     }
     throw err
   }
-  record('mkdir', path.virtual, 'dropbox', 0, startMs)
+  record('mkdir', path.virtual, 'dropbox', 0, timer)
   await invalidateAfterWrite(path)
   await invalidateAncestors(path)
 }

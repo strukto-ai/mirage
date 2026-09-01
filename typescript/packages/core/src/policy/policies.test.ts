@@ -18,7 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse.ts'
+import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'

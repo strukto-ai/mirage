@@ -18,6 +18,9 @@ from mirage.core.hf_hub.account import whoami
 from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import ByteSource, IOResult
 
+# The origin upstream treats as "not a private endpoint".
+PUBLIC_HUB = "https://huggingface.co"
+
 
 async def whoami_cmd(
         inv: CLIInvocation[HfConfig]) -> tuple[ByteSource | None, IOResult]:
@@ -27,9 +30,29 @@ async def whoami_cmd(
     name = account.get("name")
     orgs = account.get("orgs")
     lines = [str(name) if isinstance(name, str) else ""]
-    for org in orgs if isinstance(orgs, list) else []:
-        if isinstance(org, dict) and isinstance(org.get("name"), str):
-            lines.append(str(org["name"]))
+    # `orgs: ` and not a bare line each, which is upstream's shape --
+    # `print(ANSI.bold("orgs: "), ",".join(orgs))` in commands/user.py, whose
+    # two arguments put a second space after the colon. Unlabelled, the
+    # account and the organizations it belongs to are indistinguishable, and a
+    # reader that takes the last line pushes to the org instead of the user.
+    # Measured: an agent asked to create a repo under its own account read
+    # `integ-org` off the second line and created it there, which the Hub
+    # accepts and a grader looking under the account does not find.
+    #
+    # The escape codes upstream wraps the label in are NOT reproduced. They
+    # are a terminal's, not the command's, and NO_COLOR strips them there
+    # too; what has to match is the word.
+    members = [
+        str(org["name"]) for org in (orgs if isinstance(orgs, list) else [])
+        if isinstance(org, dict) and isinstance(org.get("name"), str)
+    ]
+    if members:
+        lines.append(f"orgs:  {','.join(members)}")
+    # Upstream prints this whenever the endpoint is not huggingface.co, which
+    # for every mirage install is always: the endpoint is the deployment's.
+    endpoint = inv.config.endpoint.rstrip("/")
+    if endpoint != PUBLIC_HUB:
+        lines.append(f"Authenticated through private endpoint: {endpoint}")
     return text_out("\n".join(lines) + "\n")
 
 

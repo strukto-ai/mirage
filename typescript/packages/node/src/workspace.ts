@@ -30,6 +30,7 @@ import { KernelMounts } from './workspace/workspace/kernel_mounts.ts'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import './compression_codecs.ts'
 import './runtime/sandbox/daytona/runtime.ts'
+import './secrets/constants.ts'
 
 const requireCjs = createRequire(import.meta.url)
 

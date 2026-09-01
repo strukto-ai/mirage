@@ -53,7 +53,7 @@ import {
 import { ConsistencyPolicy, MountMode } from '../../types.ts'
 import { VERSION } from '../../version.ts'
 import type { NodeMeta } from '../mount/namespace/namespace.ts'
-import { Session } from '../session/session.ts'
+import { Session, varsFromFields, varsToFields } from '../session/session.ts'
 import type { Workspace } from '../workspace/workspace.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
@@ -173,6 +173,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     default_agent_id: ws.agentId,
     current_agent_id: ws.agentId,
     sessions,
+    env: varsToFields(ws.sessionManager.seedVars),
     mounts: mountSnapshots,
     cache: {
       limit: ws.cache.cacheLimit,
@@ -303,6 +304,12 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
     await Promise.resolve(mount.resource.loadState(m.resource_state as RAMResourceState))
   }
   await restoreSessions(ws, state)
+  // The env template is constructor state the rebuilt workspace was
+  // never given: without it a session created after the load starts
+  // bare while restored ones carry every workspace env entry.
+  if (state.env !== undefined && Object.keys(state.env).length > 0) {
+    ws.sessionManager.restoreSeed(varsFromFields(state.env))
+  }
   // current_agent_id is not restored separately: TS models a single
   // readonly agentId, set to default_agent_id at construction (== current).
   restoreCache(ws, state)

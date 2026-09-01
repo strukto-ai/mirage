@@ -12,15 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_ancestors, invalidate_subtree
 from mirage.core.dropbox.api import (delete_path, get_metadata, list_folder,
                                      move_path)
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -41,7 +39,7 @@ async def rename(accessor: DropboxAccessor, src: PathSpec,
     """
     from_path = dropbox_path_of(accessor, src)
     to_path = dropbox_path_of(accessor, dst)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     try:
         await move_path(accessor.token_manager, from_path, to_path)
     except DropboxApiError as exc:
@@ -58,7 +56,7 @@ async def rename(accessor: DropboxAccessor, src: PathSpec,
                 raise
         await delete_path(accessor.token_manager, to_path)
         await move_path(accessor.token_manager, from_path, to_path)
-    record("rename", src.virtual, "dropbox", 0, start_ms)
+    record("rename", src.virtual, "dropbox", 0, timer)
     await invalidate_subtree(src)
     await invalidate_ancestors(src)
     await invalidate_subtree(dst)

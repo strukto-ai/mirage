@@ -30,7 +30,7 @@ jobs:
       # config hash is a sufficient key; a rev bump reinstalls only the hook it
       # touched, which is why the prefix restore-key is safe to reuse.
       - name: Cache pre-commit hook environments
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}

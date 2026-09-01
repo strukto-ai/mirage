@@ -2912,6 +2912,82 @@
           "runtime": "quickjs"
         }
       }
+    },
+    {
+      "id": "secrets-env",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "secrets": "healthy",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory",
+          "mode": "exec"
+        }
+      ]
+    },
+    {
+      "id": "secrets-dead",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "secrets": "dead",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "secrets-gated",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "secrets": "gated",
+      "profile": "gated",
+      "profiles": {
+        "gated": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "reading GATED is off here",
+                "commands": [
+                  "printenv GATED"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "secrets-implicit",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "secrets": "implicit",
+      "mounts": [
+        {
+          "path": "/data",
+          "resource": "ram",
+          "backend": "memory"
+        }
+      ]
     }
   ]
 }

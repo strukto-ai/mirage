@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh.client import _abs
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -26,9 +24,9 @@ async def write_bytes(accessor: SSHAccessor, path_spec: PathSpec,
     path = path_spec.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     remote_path = _abs(config, path)
     async with sftp.open(remote_path, "wb") as f:
         await f.write(data)
-    record("write", path, "ssh", len(data), start_ms)
+    record("write", path, "ssh", len(data), timer)
     await invalidate_after_write(path_spec)

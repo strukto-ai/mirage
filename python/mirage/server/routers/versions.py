@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from mirage import Workspace
+from mirage.secrets.errors import SecretsError
 from mirage.server.clone import clone_workspace_with_override
 from mirage.server.summary import make_detail
 from mirage.server.version.api import (branch, checkout, commit_state,
@@ -161,7 +162,23 @@ async def clone_workspace_version(req: CloneRequest,
         except KeyError:
             raise HTTPException(status_code=404,
                                 detail=f"version not found: {req.at}")
-        ws = await Workspace.from_state(to_state(entries, meta))
+        # A version store holds no `secrets:` block either. The
+        # request names the declarations when it has them, which is the
+        # only route open once the live source is gone (a restart);
+        # otherwise the live workspace supplies them.
+        live = registry.get(
+            req.source_id) if req.source_id in registry else None
+        secrets = (req.secrets if req.secrets is not None else
+                   (live.runner.ws.declared_sources if live else None))
+        try:
+            ws = await Workspace.from_state(to_state(entries, meta),
+                                            secrets=secrets)
+        except (SecretsError, ValueError) as e:
+            # A secrets override naming an unknown source, one whose
+            # optional dependency is absent, or a block the schema
+            # refuses (pydantic's ValidationError is a ValueError) is a
+            # bad request, not a 500.
+            raise HTTPException(status_code=400, detail=str(e))
     else:
         if req.source_id not in registry:
             raise HTTPException(status_code=404, detail="workspace not found")

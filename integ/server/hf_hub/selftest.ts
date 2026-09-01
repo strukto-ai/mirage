@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
+import { DEFAULT_TENANT } from '../kit/typescript/tenant.ts'
 import type { JsonValue } from '../kit/typescript/types.ts'
 import { loadToolDoc, startHfMcpServer } from './mcp.ts'
 
@@ -60,6 +61,11 @@ function eq(name: string, got: JsonValue, want: JsonValue): void {
   const b = JSON.stringify(want)
   check(name, a === b, a === b ? a : `got ${a} want ${b}`)
 }
+
+// A 1x1 PNG. Written out rather than generated so the bytes in the fixture
+// are the bytes an image decoder accepts, signature included.
+const PNG_1X1 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
 interface Fake {
   child: ChildProcessByStdio<null, Readable, Readable>
@@ -176,6 +182,26 @@ async function mcpChecks(): Promise<void> {
       const content = out.content as { type: string; text?: string }[]
       return content.map((one) => one.text ?? '').join('')
     }
+    // The whole tool result, not just its prose: `isError` lives beside the
+    // content and the per-operation error objects live inside
+    // structuredContent, and neither is visible in the rendered markdown.
+    const call = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<Record<string, JsonValue>> =>
+      (await client.callTool({ name, arguments: args })) as Record<string, JsonValue>
+    const errorOf = (out: Record<string, JsonValue>, i = 0): Record<string, JsonValue> => {
+      const structured = (out.structuredContent ?? {}) as Record<string, JsonValue>
+      const rows = (structured.results ?? []) as Record<string, JsonValue>[]
+      return ((rows[i] ?? {}).error ?? {}) as Record<string, JsonValue>
+    }
+    const ops = (...list: Record<string, unknown>[]): Record<string, unknown> => ({
+      operations: list,
+    })
+    const catOp = (uri: string, ...rest: string[]): Record<string, unknown> => ({
+      cmd: 'cat',
+      args: [uri, ...rest],
+    })
 
     const who = await text('hf_whoami', {})
     check(
@@ -262,11 +288,794 @@ async function mcpChecks(): Promise<void> {
     })
     check('cat reports the byte count', /Bytes: \d+/.test(cat), cat.slice(0, 200))
 
+    // A bare cat is bounded, and the two flags that move the bound are the
+    // ones the captured tool document advertises. Without this a caller has
+    // no way to read the head of a large file, and no way to learn that the
+    // bytes stopped early -- which on a repository holding one 20MB file is
+    // the difference between a tool result and a context window.
+    const bounded = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--max-bytes', '16'] },
+      ],
+    })
+    check('--max-bytes bounds the read', bounded.includes('Bytes: 16'), bounded.slice(0, 240))
+    check(
+      'and a bounded read says where it stopped',
+      bounded.includes('Content truncated. Resume with offset 16.'),
+      bounded.slice(0, 240),
+    )
+    const offset = await text('hf_fs', {
+      operations: [
+        {
+          cmd: 'cat',
+          args: ['hf://models/integ/card-model/README.md', '--offset', '8', '--max-bytes', '8'],
+        },
+      ],
+    })
+    check('--offset moves the window', offset.includes('Bytes: 8'), offset.slice(0, 240))
+    // Upstream prints no `Offset:` line even when one was asked for, and never
+    // names the file's total size. A caller learns that there is more and
+    // where to resume, and nothing else.
+    check('and the window is not announced', !offset.includes('Offset:'), offset.slice(0, 240))
+    check(
+      'and the resume point counts from the file, not the window',
+      offset.includes('Content truncated. Resume with offset 16.'),
+      offset.slice(0, 240),
+    )
+    const past = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--offset', '99999'] },
+      ],
+    })
+    check('an offset past the end reads nothing', past.includes('Bytes: 0'), past.slice(0, 240))
+
+    // Zero is the MAXIMUM upstream, not an empty read: the documented range is
+    // "between 0 and 80000", and `--max-bytes 0` against a 466KB file on the
+    // live server answers 80,000 bytes. On a README that fits, it is the whole
+    // file -- so a zero-bound read and a default read agree exactly.
+    const plain = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://models/integ/card-model/README.md'] }],
+    })
+    const zero = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--max-bytes', '0'] },
+      ],
+    })
+    check('a zero bound reads the maximum, not nothing', zero === plain, zero.slice(0, 200))
+    const over = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--max-bytes', '80001'] },
+      ],
+    })
+    check(
+      'a bound above the ceiling is refused rather than clamped',
+      over.includes('[HF_FS_INVALID_ARGUMENT]') &&
+        over.includes('max_bytes must be between 0 and 80000'),
+      over.slice(0, 200),
+    )
+    const negative = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--max-bytes', '-1'] },
+      ],
+    })
+    // A sign parses and then fails the RANGE test, which is the order upstream
+    // answers in: the caller learns which rule it broke, not merely that it
+    // typed something wrong.
+    check(
+      'a negative bound is out of range rather than unparsable',
+      negative.includes('max_bytes must be between 0 and 80000'),
+      negative.slice(0, 200),
+    )
+    const negOffset = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--offset', '-1'] },
+      ],
+    })
+    check(
+      'and a negative offset has its own sentence',
+      negOffset.includes('offset must be non-negative'),
+      negOffset.slice(0, 200),
+    )
+    const junk = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--max-bytes', 'lots'] },
+      ],
+    })
+    check(
+      'a non-numeric bound is refused rather than guessed at',
+      junk.includes('[HF_FS_INVALID_ARGUMENT]') && junk.includes('--max-bytes requires an integer'),
+      junk.slice(0, 200),
+    )
+    const unknown = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://models/integ/card-model/README.md', '--recursive'] }],
+    })
+    check(
+      'and a flag cat does not have is still refused',
+      unknown.includes('[HF_FS_INVALID_ARGUMENT]'),
+      unknown.slice(0, 200),
+    )
+
+    // A bound that lands INSIDE a multi-byte character. Cut there, both halves
+    // come back as U+FFFD and `next_offset` names a byte the caller never got
+    // whole, so no sequence of pages reassembles the file. Pushed through the
+    // REST arm of the same server the tool reads, under the tenant an
+    // unauthenticated MCP call resolves to.
+    //
+    // `a\u00e9bc` is 5 bytes -- 0x61, then 0xC3 0xA9, then 0x62 0x63 -- so a
+    // 2-byte bound falls between the two bytes of the second character.
+    const pushedUtf8 = await fetch(`${mcp.rest.endpoint}/api/models/integ/card-model/commit/main`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DEFAULT_TENANT}`,
+        'Content-Type': 'application/x-ndjson',
+      },
+      body: [
+        JSON.stringify({ key: 'header', value: { summary: 'add a multi-byte file' } }),
+        JSON.stringify({ key: 'file', value: { path: 'utf8.txt', content: 'a\u00e9bc' } }),
+        // 300 bytes that are all continuation bytes, which no UTF-8 sequence
+        // can be. Pushed twice under two names, because upstream decides by
+        // the NAME: `.bin` is refused unread, while the same bytes under a
+        // text extension are served and have to be bounded instead.
+        // A file inside a directory, so the repository HAS one: `cat` and
+        // `stat` both have to tell a directory from a missing path, and a
+        // flat repo cannot prove either.
+        JSON.stringify({ key: 'file', value: { path: 'nested/note.txt', content: 'in a dir\n' } }),
+        // A REAL 1x1 PNG, header and all, because attach returns the bytes
+        // untouched and a caller decodes them.
+        JSON.stringify({
+          key: 'file',
+          value: { path: 'figures/fig1.png', encoding: 'base64', content: PNG_1X1 },
+        }),
+        // A DIRECTORY whose name ends in an image extension. Nothing stops a
+        // repository holding one, and it is the one shape where classifying
+        // on the name alone gives the wrong answer.
+        JSON.stringify({ key: 'file', value: { path: 'assets.png/inside.txt', content: 'x\n' } }),
+        ...['binary.bin', 'invalid.txt'].map((path) =>
+          JSON.stringify({
+            key: 'file',
+            value: {
+              path,
+              encoding: 'base64',
+              content: Buffer.alloc(300, 0x80).toString('base64'),
+            },
+          }),
+        ),
+      ].join('\n'),
+    })
+    check(
+      'a multi-byte file and two non-text blobs are pushed',
+      pushedUtf8.status === 200,
+      String(pushedUtf8.status),
+    )
+    const cut = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/utf8.txt', '--max-bytes', '2'] },
+      ],
+    })
+    check(
+      'a bound inside a character does not split it',
+      !cut.includes('\ufffd'),
+      cut.slice(0, 240),
+    )
+    check(
+      'the read stops on the character boundary instead',
+      cut.includes('Bytes: 3') && cut.includes('Content truncated. Resume with offset 3.'),
+      cut.slice(0, 240),
+    )
+    const rest2 = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/utf8.txt', '--offset', '3'] },
+      ],
+    })
+    // The two pages concatenate back into the file, which is the whole point
+    // of reporting an offset to continue from. A rendered page is a header, a
+    // blank line, the file's own bytes, and -- only when there is more -- a
+    // blank line and the resume notice, so peel both ends.
+    const catBody = (rendered: string): string => {
+      const body = rendered.slice(rendered.indexOf('\n\n', rendered.indexOf('Bytes: ')) + 2)
+      const notice = body.lastIndexOf('\n\nContent truncated.')
+      return (notice === -1 ? body : body.slice(0, notice)).trimEnd()
+    }
+    check(
+      'and the next offset returns the remainder',
+      `${catBody(cut)}${catBody(rest2)}` === 'a\u00e9bc',
+      JSON.stringify(`${catBody(cut)}|${catBody(rest2)}`),
+    )
+
+    // An offset the CALLER picked, landing inside the second character. It
+    // retreats to that character's start rather than decoding half of it, so
+    // the page begins `\u00e9` and carries no U+FFFD.
+    const inside = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/utf8.txt', '--offset', '2'] },
+      ],
+    })
+    check(
+      'an offset inside a character retreats to its start',
+      catBody(inside) === '\u00e9bc' && !inside.includes('\ufffd'),
+      JSON.stringify(catBody(inside)),
+    )
+    check(
+      'and the page counts the whole character',
+      inside.includes('Bytes: 4'),
+      inside.slice(0, 240),
+    )
+
+    // `cat` is text-only upstream, and refuses on the extension without
+    // reading the blob. The task fixtures carry pytorch_model.bin, so a fake
+    // that served these bytes would hand an agent a page the live server
+    // never would.
+    const refused = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://models/integ/card-model/binary.bin'] }],
+    })
+    check(
+      'cat refuses a binary name outright',
+      refused.includes('[HF_FS_TEXT_ONLY]') &&
+        refused.includes('Refusing to cat non-text file: binary.bin'),
+      refused.slice(0, 240),
+    )
+    check(
+      'and says what to use instead',
+      refused.includes('Use stat for metadata or ls on the parent directory.'),
+      refused.slice(0, 300),
+    )
+
+    // The boundary walk is CAPPED, and the cap is what keeps the bound a
+    // bound. A text extension is not a promise of text: every byte of this
+    // file is a continuation byte, so an uncapped walk would run to the end
+    // and return all 300.
+    const blob = await text('hf_fs', {
+      operations: [
+        { cmd: 'cat', args: ['hf://models/integ/card-model/invalid.txt', '--max-bytes', '8'] },
+      ],
+    })
+    check(
+      'a run of continuation bytes does not carry the read past the bound',
+      blob.includes('Bytes: 11') && blob.includes('Content truncated. Resume with offset 11.'),
+      blob.slice(0, 260),
+    )
+
+    // ---- the error envelope
+    //
+    // Every line below was read off https://huggingface.co/mcp. None of it is
+    // visible in the rendered markdown, and an agent that branches on a code
+    // or on `isError` sees only this.
+    const noSuchFile = await call('hf_fs', ops(catOp('hf://models/integ/card-model/nope.txt')))
+    eq('a missing file is HF_FS_NOT_FOUND', errorOf(noSuchFile).code ?? null, 'HF_FS_NOT_FOUND')
+    // `stat` answers a missing path, a directory and a binary blob without
+    // erroring on any of them, so it is the command upstream names for all
+    // three -- and names for nothing else.
+    eq('and suggests stat', errorOf(noSuchFile).suggestedOperation ?? null, 'stat')
+    eq('and the whole result is an error', noSuchFile.isError ?? null, true)
+
+    const binary = await call('hf_fs', ops(catOp('hf://models/integ/card-model/binary.bin')))
+    eq('a binary name is HF_FS_TEXT_ONLY', errorOf(binary).code ?? null, 'HF_FS_TEXT_ONLY')
+    eq('and suggests stat too', errorOf(binary).suggestedOperation ?? null, 'stat')
+
+    // Three shapes of "that is not a file", each with its own sentence.
+    const atRepo = await call('hf_fs', ops(catOp('hf://models/integ/card-model')))
+    eq('a repo root is HF_FS_NOT_A_FILE', errorOf(atRepo).code ?? null, 'HF_FS_NOT_A_FILE')
+    eq(
+      'and says so in upstream words',
+      errorOf(atRepo).message ?? null,
+      'cat requires a URI that points to a file path.',
+    )
+    const atNamespace = await call('hf_fs', ops(catOp('hf://models/integ')))
+    eq(
+      'a namespace is HF_FS_NOT_A_FILE as well',
+      errorOf(atNamespace).message ?? null,
+      'cat requires a URI that points to a file path, not a namespace.',
+    )
+    const atDir = await call('hf_fs', ops(catOp('hf://models/integ/card-model/nested')))
+    eq(
+      'and a directory names itself',
+      errorOf(atDir).message ?? null,
+      'cat requires a file path, got dir: nested',
+    )
+    eq('all three suggest stat', errorOf(atDir).suggestedOperation ?? null, 'stat')
+
+    // A malformed argument is the caller's to fix, so upstream suggests
+    // nothing -- the key is absent rather than null.
+    const flag = await call('hf_fs', ops(catOp('hf://models/integ/card-model/README.md', '--nope')))
+    eq('a bad flag is HF_FS_INVALID_ARGUMENT', errorOf(flag).code ?? null, 'HF_FS_INVALID_ARGUMENT')
+    check(
+      'and suggests nothing at all',
+      !('suggestedOperation' in errorOf(flag)),
+      JSON.stringify(errorOf(flag)),
+    )
+    const scheme = await call('hf_fs', ops(catOp('/not/a/uri')))
+    eq(
+      'a URI without the scheme says so upstream way',
+      errorOf(scheme).message ?? null,
+      'EINVAL: URI must start with hf://',
+    )
+    const bogus = await call('hf_fs', ops(catOp('hf://bogus/x/y')))
+    eq(
+      'and a type upstream does not have is named against upstream list',
+      errorOf(bogus).message ?? null,
+      "EINVAL: Invalid URI type 'bogus'. Must be one of models, datasets, spaces, buckets, collections, papers.",
+    )
+    // `papers` IS one of upstream's roots; this fake simply holds no rows for
+    // it, and saying that is more use than calling the name invalid.
+    const unserved = await call('hf_fs', ops(catOp('hf://papers/2502.16161/metadata.json')))
+    check(
+      'a real root the fake does not serve says which it serves',
+      String(errorOf(unserved).message ?? '').includes('the mirage hf_hub fake serves'),
+      JSON.stringify(errorOf(unserved).message ?? null),
+    )
+
+    // `isError` is the whole batch's, and one success clears it.
+    const bothBad = await call(
+      'hf_fs',
+      ops(catOp('hf://models/integ/card-model/nope.txt'), catOp('/not/a/uri')),
+    )
+    eq('a batch where everything failed is an error', bothBad.isError ?? null, true)
+    const mixed = await call(
+      'hf_fs',
+      ops(
+        catOp('hf://models/integ/card-model/README.md'),
+        catOp('hf://models/integ/card-model/nope.txt'),
+      ),
+    )
+    check('but one success clears it', !('isError' in mixed), JSON.stringify(mixed.isError ?? null))
+
+    // ---- attach
+    //
+    // The live server returns a COMPLETE image and cannot truncate one, so
+    // every refusal below is a refusal rather than a cut. All four codes and
+    // all four sentences were read off https://huggingface.co/mcp.
+    const attach = (uri: string, ...rest: string[]): Record<string, unknown> => ({
+      cmd: 'attach',
+      args: [uri, ...rest],
+    })
+    const png = await call('hf_fs', ops(attach('hf://models/integ/card-model/figures/fig1.png')))
+    const blocks = (png.content ?? []) as Record<string, JsonValue>[]
+    check(
+      'attach returns the image beside the prose',
+      blocks.some((one) => one.type === 'image' && one.mimeType === 'image/png'),
+      JSON.stringify(blocks.map((one) => one.type)),
+    )
+    check(
+      'and the bytes are the file, decodable',
+      Buffer.from(String((blocks.find((one) => one.type === 'image') ?? {}).data ?? ''), 'base64')
+        .subarray(0, 8)
+        .toString('hex') === '89504e470d0a1a0a',
+      String((blocks.find((one) => one.type === 'image') ?? {}).data ?? '').slice(0, 24),
+    )
+    const attachText = blocks.map((one) => String(one.text ?? '')).join('')
+    check(
+      'and the prose names the MIME type',
+      attachText.includes('- MIME type: `image/png`'),
+      attachText.slice(0, 240),
+    )
+    check('and a whole-file byte count', attachText.includes('- Bytes: '), attachText.slice(0, 240))
+
+    // A text file is the wrong KIND of thing, and upstream names `cat` for it
+    // rather than the diagnostic `stat` it names everywhere else.
+    const asText = await call('hf_fs', ops(attach('hf://models/integ/card-model/README.md')))
+    eq('attaching text is HF_FS_IMAGE_ONLY', errorOf(asText).code ?? null, 'HF_FS_IMAGE_ONLY')
+    eq(
+      'and says so upstream way',
+      errorOf(asText).message ?? null,
+      'Refusing to attach known text file: README.md. Attach returns supported image files only.',
+    )
+    eq('and points at cat, not stat', errorOf(asText).suggestedOperation ?? null, 'cat')
+
+    const asBinary = await call('hf_fs', ops(attach('hf://models/integ/card-model/binary.bin')))
+    eq(
+      'a non-image binary is unsupported media',
+      errorOf(asBinary).code ?? null,
+      'HF_FS_UNSUPPORTED_MEDIA',
+    )
+    const asDir = await call('hf_fs', ops(attach('hf://models/integ/card-model/nested')))
+    eq('and so is a directory', errorOf(asDir).code ?? null, 'HF_FS_UNSUPPORTED_MEDIA')
+
+    const tooSmall = await call(
+      'hf_fs',
+      ops(attach('hf://models/integ/card-model/figures/fig1.png', '--max-bytes', '1')),
+    )
+    eq(
+      'a bound under the file size refuses rather than truncating',
+      errorOf(tooSmall).code ?? null,
+      'HF_FS_IMAGE_TOO_LARGE',
+    )
+    const overCeiling = await call(
+      'hf_fs',
+      ops(attach('hf://models/integ/card-model/figures/fig1.png', '--max-bytes', '25000000')),
+    )
+    // The bound an agent reached for when it tried to pull a 21MB file past
+    // cat's limit. Upstream names its ceiling; this fake used to answer that
+    // attach did not exist.
+    eq(
+      'and a bound over the ceiling names the ceiling',
+      errorOf(overCeiling).message ?? null,
+      'EINVAL: attach max_bytes must be between 1 and 8388608',
+    )
+    const zeroBound = await call(
+      'hf_fs',
+      ops(attach('hf://models/integ/card-model/figures/fig1.png', '--max-bytes', '0')),
+    )
+    // Zero is INVALID for attach where `cat --max-bytes 0` means the maximum.
+    // The two commands genuinely differ; each was read off the live server.
+    eq(
+      'zero is invalid here, unlike cat',
+      errorOf(zeroBound).message ?? null,
+      'EINVAL: attach max_bytes must be between 1 and 8388608',
+    )
+    const withOffset = await call(
+      'hf_fs',
+      ops(attach('hf://models/integ/card-model/figures/fig1.png', '--offset', '5')),
+    )
+    eq(
+      'and --offset is meaningless for a whole file',
+      errorOf(withOffset).message ?? null,
+      'EINVAL: unexpected argument for attach: --offset',
+    )
+    const goneImage = await call('hf_fs', ops(attach('hf://models/integ/card-model/nope.png')))
+    eq('a missing image is HF_FS_NOT_FOUND', errorOf(goneImage).code ?? null, 'HF_FS_NOT_FOUND')
+
+    // A directory that ends in `.png` is still a directory. Classified on the
+    // name alone it reads as an image, resolves to nothing, and would be
+    // reported as a file that does not exist -- of a path that does.
+    const dirNamedPng = await call('hf_fs', ops(attach('hf://models/integ/card-model/assets.png')))
+    eq(
+      'a directory named like an image is still unsupported media',
+      errorOf(dirNamedPng).code ?? null,
+      'HF_FS_UNSUPPORTED_MEDIA',
+    )
+    // `cat` answers TEXT_ONLY for the same path, and that is not an
+    // oversight: upstream refuses binary on the NAME, before it resolves
+    // anything -- "the file extension or MIME type is known to be binary" --
+    // so a directory called `assets.png` never reaches a directory check
+    // there either. attach differs because its name check is what SELECTS
+    // the image branch, so the mistake is only recoverable after the resolve.
+    const catDirPng = await call('hf_fs', ops(catOp('hf://models/integ/card-model/assets.png')))
+    eq(
+      'cat refuses it on the name, as upstream does',
+      errorOf(catDirPng).code ?? null,
+      'HF_FS_TEXT_ONLY',
+    )
+    const statDirPng = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/assets.png'] }],
+    })
+    check('and stat calls it a dir', statDirPng.includes('- Type: `dir`'), statDirPng.slice(0, 200))
+
+    // ---- roots the fake does not hold are not bad NAMES
+    //
+    // `docs` is addressable upstream, so calling it an invalid TYPE was wrong;
+    // it is a root this fake does not hold, which is a different sentence.
+    // `README.md` was in here too until the fake started serving it, and the
+    // pair is worth keeping side by side: one of these is a gap and the other
+    // was, and only the served one stops charging the agent for our name.
+    const docs = await call('hf_fs', ops(catOp('hf://docs/transformers/index')))
+    check(
+      'an unserved root says which roots are served',
+      String(errorOf(docs).message ?? '').includes('the mirage hf_hub fake serves'),
+      JSON.stringify(errorOf(docs).message ?? null),
+    )
+
+    // ---- a repository past one page
+    //
+    // The REST arm pages at DEFAULT_LIMIT and puts the cursor in a `Link`
+    // header. Reading only page one made this fake disagree with itself on
+    // any repository bigger than that: `ls` showed a prefix in silence, and
+    // `stat` called a file that exists `missing`, because the recursive tree
+    // it searched stopped before reaching it. 60 files is one page and a
+    // remainder.
+    const PAGED = 60
+    await fetch(`${mcp.rest.endpoint}/api/repos/create`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DEFAULT_TENANT}`,
+        'Content-Type': 'application/json',
+      },
+      // The namespace is the repo's OWNER, which the create route takes from
+      // `organization` and otherwise from the bearer -- and the bearer here
+      // is the default tenant, not `integ`.
+      body: JSON.stringify({ name: 'paged-model', type: 'model', organization: 'integ' }),
+    })
+    const pushedMany = await fetch(
+      `${mcp.rest.endpoint}/api/models/integ/paged-model/commit/main`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${DEFAULT_TENANT}`,
+          'Content-Type': 'application/x-ndjson',
+        },
+        body: [
+          JSON.stringify({ key: 'header', value: { summary: 'more than one page' } }),
+          ...Array.from({ length: PAGED }, (_unused, i) =>
+            JSON.stringify({
+              key: 'file',
+              value: { path: `f${String(i).padStart(3, '0')}.txt`, content: `row ${String(i)}\n` },
+            }),
+          ),
+        ].join('\n'),
+      },
+    )
+    check(
+      'a repository of 60 files is pushed',
+      pushedMany.status === 200,
+      String(pushedMany.status),
+    )
+    const lastFile = `f${String(PAGED - 1).padStart(3, '0')}.txt`
+    const paged = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models/integ/paged-model'] }))
+    const pagedRows = (
+      (
+        (((paged.structuredContent ?? {}) as Record<string, JsonValue>).results ?? []) as Record<
+          string,
+          JsonValue
+        >[]
+      )[0] ?? {}
+    ).result as Record<string, JsonValue>
+    check(
+      'ls returns every page, not the first',
+      ((pagedRows.entries ?? []) as JsonValue[]).length === PAGED,
+      String(((pagedRows.entries ?? []) as JsonValue[]).length),
+    )
+    // ---- and the listing is bounded, by upstream's number
+    //
+    // 1,000 entries by default and 10,000 at most. The bound matters twice:
+    // it is what upstream answers, and it is what stops an arbitrarily large
+    // repository being aggregated whole in order to throw most of it away.
+    const capped = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ/paged-model', '--limit', '10'] }),
+    )
+    const cappedRow = (
+      (((capped.structuredContent ?? {}) as Record<string, JsonValue>).results ?? []) as Record<
+        string,
+        JsonValue
+      >[]
+    )[0]
+    const cappedResult = (cappedRow ?? {}).result as Record<string, JsonValue>
+    eq('--limit bounds the listing', ((cappedResult.entries ?? []) as JsonValue[]).length, 10)
+    eq('and says it was cut', cappedResult.truncated ?? null, true)
+    eq('in the schema own vocabulary', cappedResult.truncation_reason ?? null, 'entry_limit')
+    const cappedText = ((capped.content ?? []) as Record<string, JsonValue>[])
+      .map((one) => String(one.text ?? ''))
+      .join('')
+    check(
+      'and after the table, the way upstream places it',
+      cappedText.includes(
+        'Result truncated after reaching the entry limit. Rerun with a larger --limit, up to 10000.',
+      ),
+      cappedText.slice(-200),
+    )
+    // A listing that FITS is not cut, and says nothing about limits.
+    const uncut = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ/paged-model', '--limit', '60'] }),
+    )
+    const uncutResult = (
+      (
+        (((uncut.structuredContent ?? {}) as Record<string, JsonValue>).results ?? []) as Record<
+          string,
+          JsonValue
+        >[]
+      )[0] ?? {}
+    ).result as Record<string, JsonValue>
+    check(
+      'a listing that fits is not marked truncated',
+      !('truncated' in uncutResult),
+      JSON.stringify(Object.keys(uncutResult)),
+    )
+    const badLimit = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ/paged-model', '--limit', '20000'] }),
+    )
+    eq(
+      'a limit past the ceiling names the ceiling',
+      errorOf(badLimit).message ?? null,
+      'EINVAL: limit must be between 1 and 10000 for this command',
+    )
+    const otherFlag = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ/paged-model', '--sort', 'downloads'] }),
+    )
+    eq(
+      'and a flag the fake has nothing behind is still an honest EINVAL',
+      errorOf(otherFlag).message ?? null,
+      'EINVAL: unexpected argument for ls: --sort',
+    )
+
+    const statLate = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: [`hf://models/integ/paged-model/${lastFile}`] }],
+    })
+    check(
+      'and stat finds a file past the first page',
+      statLate.includes('- Type: `file`') && statLate.includes('- Exists: yes'),
+      statLate.slice(0, 220),
+    )
+
+    // ---- the shared attachment budget
+    //
+    // 8MiB across ONE call, whatever the per-file bound allows. The captured
+    // schema permits 30 operations, so without this a valid request could ask
+    // for 30 x 8MiB. Two 5MiB images are one over.
+    const FIVE_MIB = 5 * 1024 * 1024
+    const bigPng = Buffer.concat([
+      Buffer.from(PNG_1X1, 'base64'),
+      Buffer.alloc(FIVE_MIB, 0),
+    ]).toString('base64')
+    const pushedBig = await fetch(`${mcp.rest.endpoint}/api/models/integ/card-model/commit/main`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DEFAULT_TENANT}`,
+        'Content-Type': 'application/x-ndjson',
+      },
+      body: [
+        JSON.stringify({ key: 'header', value: { summary: 'two large images' } }),
+        JSON.stringify({
+          key: 'file',
+          value: { path: 'figures/big1.png', encoding: 'base64', content: bigPng },
+        }),
+        JSON.stringify({
+          key: 'file',
+          value: { path: 'figures/big2.png', encoding: 'base64', content: bigPng },
+        }),
+      ].join('\n'),
+    })
+    check('two 5MiB images are pushed', pushedBig.status === 200, String(pushedBig.status))
+    const twoBig = await call(
+      'hf_fs',
+      ops(
+        attach('hf://models/integ/card-model/figures/big1.png'),
+        attach('hf://models/integ/card-model/figures/big2.png'),
+      ),
+    )
+    const rowsOf = (out: Record<string, JsonValue>): Record<string, JsonValue>[] =>
+      (((out.structuredContent ?? {}) as Record<string, JsonValue>).results ?? []) as Record<
+        string,
+        JsonValue
+      >[]
+    eq('the first attachment is admitted', (rowsOf(twoBig)[0] ?? {}).status ?? null, 'success')
+    eq(
+      'and the second is dropped on the shared budget',
+      errorOf(twoBig, 1).code ?? null,
+      'HF_FS_ATTACHMENT_BUDGET_EXCEEDED',
+    )
+    eq(
+      'with upstream sentence',
+      errorOf(twoBig, 1).message ?? null,
+      'Attachment omitted because the batch exceeds the cumulative response limit of 8388608 bytes.',
+    )
+    eq('and told to retry it alone', errorOf(twoBig, 1).suggestedOperation ?? null, 'attach')
+    check(
+      'only the admitted image rides along',
+      ((twoBig.content ?? []) as Record<string, JsonValue>[]).filter((one) => one.type === 'image')
+        .length === 1,
+      JSON.stringify(((twoBig.content ?? []) as Record<string, JsonValue>[]).map((o) => o.type)),
+    )
+
+    // ---- stat tells four things apart, which is why upstream recommends it
+    // for "an uncertain target type". A repository is `repo` and not `dir`,
+    // and a path that is not there is `missing` and not a directory -- the
+    // fake reported both wrongly until the tree's ROWS became the test.
+    const statRepo = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model'] }],
+    })
+    check(
+      'stat calls a repository a repo',
+      statRepo.includes('- Type: `repo`'),
+      statRepo.slice(0, 200),
+    )
+    const statDir = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/nested'] }],
+    })
+    check('and a directory a dir', statDir.includes('- Type: `dir`'), statDir.slice(0, 200))
+    const statGone = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/nope.txt'] }],
+    })
+    check(
+      'and a path that is not there missing',
+      statGone.includes('- Exists: no') && statGone.includes('- Type: `missing`'),
+      statGone.slice(0, 200),
+    )
+    check(
+      'and prints the path even then',
+      statGone.includes('- Path: `nope.txt`'),
+      statGone.slice(0, 200),
+    )
+
     const stat = await text('hf_fs', {
       operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/README.md'] }],
     })
     check('stat reports existence', stat.includes('- Exists: yes'), stat.slice(0, 200))
     check('stat reports a size', stat.includes('- Size: '), stat.slice(0, 200))
+
+    // A file one level down, which is the case stat reads a PARENT listing
+    // for rather than the repository root. It used to walk the whole recursive
+    // tree to find this row, and paid the repository to keep one entry.
+    const statNested = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/nested/note.txt'] }],
+    })
+    check(
+      'stat finds a file inside a directory, with its size',
+      statNested.includes('- Type: `file`') &&
+        statNested.includes('- Path: `nested/note.txt`') &&
+        /- Size: \d/.test(statNested),
+      statNested.slice(0, 220),
+    )
+    // Absent from a directory that IS there -- the listing consulted has to be
+    // the parent's, and a row missing from it is what `missing` means.
+    const statNestedGone = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/nested/nope.txt'] }],
+    })
+    check(
+      'and calls a name absent from an existing directory missing',
+      statNestedGone.includes('- Type: `missing`') && statNestedGone.includes('- Exists: no'),
+      statNestedGone.slice(0, 220),
+    )
+    // A directory below the root is a `dir` too, which only the parent's
+    // synthesized row can say: git commits no directory object of its own.
+    const statNestedDir = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://models/integ/card-model/assets.png'] }],
+    })
+    check(
+      'and a directory whose name looks like a file is still a dir',
+      statNestedDir.includes('- Type: `dir`'),
+      statNestedDir.slice(0, 220),
+    )
+
+    // ---- hf://README.md, the limits page the tool document points at
+    //
+    // Every expectation below was read off the live server, including which
+    // of the two "wrong kind of thing" codes each command answers with. The
+    // fake used to refuse the path outright, in a sentence naming itself.
+    const readmeStat = await text('hf_fs', {
+      operations: [{ cmd: 'stat', args: ['hf://README.md'] }],
+    })
+    check(
+      'stat hf://README.md is a file with a Content-Type',
+      readmeStat.includes('- Type: `file`') &&
+        readmeStat.includes('- Path: `README.md`') &&
+        readmeStat.includes('- Content-Type: `text/markdown`'),
+      readmeStat.slice(0, 260),
+    )
+    const readmeCat = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://README.md'] }],
+    })
+    check(
+      'cat hf://README.md serves the captured page',
+      readmeCat.includes('# Hugging Face virtual filesystem') &&
+        readmeCat.includes('Content-Type: `text/markdown`'),
+      readmeCat.slice(0, 260),
+    )
+    // The page documents the bounds this fake implements, so a fake that
+    // served a DIFFERENT page would be telling the agent the wrong numbers.
+    check(
+      'and the page still documents the bounds the fake enforces',
+      readmeCat.includes('hf_fs_write') && readmeCat.includes('30 operations'),
+      readmeCat.slice(0, 200),
+    )
+    const readmeCut = await text('hf_fs', {
+      operations: [{ cmd: 'cat', args: ['hf://README.md', '--max-bytes', '120'] }],
+    })
+    check(
+      'a bounded read of it stops where asked, and says where to resume',
+      readmeCut.includes('Bytes: 120') &&
+        readmeCut.includes('Content truncated. Resume with offset 120.'),
+      readmeCut.slice(0, 200),
+    )
+    const readmeLs = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://README.md'] }))
+    eq(
+      'ls on it is ENOTDIR, not the fake naming itself',
+      errorOf(readmeLs).code ?? null,
+      'HF_FS_NOT_A_DIRECTORY',
+    )
+    eq(
+      'and find answers the same code',
+      errorOf(await call('hf_fs', ops({ cmd: 'find', args: ['hf://README.md'] }))).code ?? null,
+      'HF_FS_NOT_A_DIRECTORY',
+    )
+    // A DIFFERENT code from ls: it is a file, just not an attachable one.
+    eq(
+      'attach on it is NOT_A_FILE, which is a different refusal',
+      errorOf(await call('hf_fs', ops({ cmd: 'attach', args: ['hf://README.md'] }))).message ??
+        null,
+      'attach requires a direct repository or bucket file URI.',
+    )
 
     // Both error codes are the live server's own, captured rather than coined,
     // because an agent may branch on the bracketed code.
@@ -977,6 +1786,117 @@ async function main(): Promise<void> {
         String((r as Record<string, JsonValue>).path ?? ''),
       ),
       ['c.txt'],
+    )
+
+    // ---- card validation
+    //
+    // upload_folder posts every README.md it is about to send here first, and
+    // a 404 aborts the upload rather than skipping the check, so the endpoint
+    // is exercised for each of the three answers the client tells apart.
+    const validate = async (content: string): Promise<Response> =>
+      await fetch(`${fake.endpoint}/api/validate-yaml`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TENANT}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, repoType: 'model' }),
+      })
+
+    const fenced = await validate('---\nlicense: mit\n---\n\n# Card\n')
+    const fencedBody = (await fenced.json()) as Record<string, JsonValue>
+    check('a fenced card validates', fenced.status === 200, String(fenced.status))
+    eq('a fenced card raises nothing', fencedBody.errors ?? null, [])
+    eq('and warns about nothing either', fencedBody.warnings ?? null, [])
+
+    // A card with no frontmatter is legal and uploads; the client surfaces the
+    // warning and carries on.
+    const bareCard = await validate('# Card\n')
+    const bareCardBody = (await bareCard.json()) as Record<string, JsonValue>
+    check(
+      'a card without metadata still validates',
+      bareCard.status === 200,
+      String(bareCard.status),
+    )
+    check(
+      'and warns that the metadata is missing',
+      JSON.stringify(bareCardBody.warnings ?? []).includes('empty or missing yaml metadata'),
+      JSON.stringify(bareCardBody.warnings ?? []),
+    )
+
+    // A block that never closes is NOT an error upstream, and neither is one
+    // whose closing line merely starts with three hyphens. Both are simply not
+    // metadata, and a card without metadata uploads with a warning. This file
+    // asserted 400 for both until the live endpoint was asked.
+    const unclosed = await validate('---\nlicense: mit\n')
+    check(
+      'an unclosed metadata block is not an error',
+      unclosed.status === 200,
+      String(unclosed.status),
+    )
+    const ragged = await validate('---\nlicense: mit\n---oops\n')
+    const raggedBody = (await ragged.json()) as Record<string, JsonValue>
+    check('nor is a ragged closing fence', ragged.status === 200, String(ragged.status))
+    check(
+      'and both warn rather than refuse',
+      JSON.stringify(raggedBody.warnings ?? []).includes('empty or missing yaml metadata'),
+      JSON.stringify(raggedBody.warnings ?? []),
+    )
+
+    // What IS an error is a block that closes and does not parse. This is the
+    // failure the route exists to reproduce: upload_folder turns the 400 into
+    // `ValueError: Invalid metadata in README.md` and never uploads.
+    const malformed = await validate('---\nlicense: [\n---\n')
+    const malformedBody = (await malformed.json()) as Record<string, JsonValue>
+    check('malformed metadata is refused', malformed.status === 400, String(malformed.status))
+    // Read off the error itself rather than a stringified blob: the help link
+    // is compared whole, because half a URL is not the assertion -- upstream
+    // hands back this sentence and nothing near it.
+    const malformedError = ((malformedBody.errors ?? []) as Record<string, JsonValue>[])[0] ?? {}
+    check(
+      'and names README.md the way upstream does',
+      String(malformedError.message ?? '').startsWith('Invalid YAML in README.md: '),
+      JSON.stringify(malformedError),
+    )
+    eq(
+      'and hands back the help link upstream sends',
+      malformedError.help ?? null,
+      'You can use a tool like http://www.yamllint.com/ to check it',
+    )
+    eq('and marks it an error', malformedError.type ?? null, 'error')
+
+    // Parses, but is not a mapping. Upstream separates the two shapes.
+    const nullBody = await validate('---\n\n---\n')
+    const nullBodyJson = (await nullBody.json()) as Record<string, JsonValue>
+    check('an empty block is refused', nullBody.status === 400, String(nullBody.status))
+    check(
+      'as metadata that is invalid rather than unparseable',
+      JSON.stringify(nullBodyJson.errors ?? []).includes(
+        'The YAML metadata of your README.md is invalid.',
+      ),
+      JSON.stringify(nullBodyJson.errors ?? []),
+    )
+    const listBody = await validate('---\n- a\n- b\n---\n')
+    const listBodyJson = (await listBody.json()) as Record<string, JsonValue>
+    check('a list is refused', listBody.status === 400, String(listBody.status))
+    check(
+      'with the schema error upstream answers',
+      JSON.stringify(listBodyJson.errors ?? []).includes('must be of type object'),
+      JSON.stringify(listBodyJson.errors ?? []),
+    )
+
+    // Unknown keys are ACCEPTED upstream, so nothing here may reject them.
+    const unknownKey = await validate('---\nbogus_key: 1\n---\n')
+    const unknownKeyBody = (await unknownKey.json()) as Record<string, JsonValue>
+    check('an unknown key is accepted', unknownKey.status === 200, String(unknownKey.status))
+    eq('and raises nothing', unknownKeyBody.errors ?? null, [])
+
+    const anonCard = await fetch(`${fake.endpoint}/api/validate-yaml`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '# Card\n', repoType: 'model' }),
+    })
+    check(
+      'an unauthenticated validation is refused',
+      anonCard.status === 401,
+      String(anonCard.status),
     )
 
     const unauth = await fetch(`${fake.endpoint}/api/models`)

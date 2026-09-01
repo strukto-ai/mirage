@@ -23,8 +23,11 @@ import {
   type Pending,
 } from '../../policy/types.ts'
 import { getParts, getText, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
+import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
+import type { PathSpec } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
+import { makeAbortError } from '../abort.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { Session } from '../session/session.ts'
@@ -405,6 +408,190 @@ export async function prejudgeLine(
     }
   }
   return null
+}
+
+/**
+ * Whether a verdict's answer refuses the command, putting an
+ * unanswered ask's question to the host.
+ *
+ * The chain is asked again rather than the explanation re-read,
+ * because `Explanation.outcome` is the document's answer: a coded
+ * policy's ask arrives with whatever the document said, so only the
+ * chain's own answer separates a deny from an ask. A deny refuses
+ * outright. An ask's settled record is read without being spent
+ * (`Decisions.held`), so the gate that then runs the line consumes the
+ * same answer, in its own voice and behind the line's redirections; an
+ * unanswered rule is raised through the same ledger the gate reads, so
+ * the answer lands exactly once and the gate does not ask again.
+ */
+async function verdictRefuses(
+  expl: Explanation,
+  redirects: readonly PathSpec[],
+  walked: Session,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  agentId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const args = [...expl.argv]
+  const classified = classifiedWords(expl.command, args, walked, registry)
+  const gated = await gate(
+    expl.command,
+    args,
+    classified.slice(1),
+    walked,
+    registry,
+    namespace,
+    agentId,
+    null,
+    redirects,
+  )
+  if (!Array.isArray(gated)) return true
+  const [ctx, asked] = gated
+  if (asked?.kind !== 'ask') return asked !== null
+  const standing = await registry.decisions.held(ctx, asked)
+  if (standing === null) return false
+  if (standing.kind === 'deny') return true
+  const action = await registry.decisions.resolve(ctx, asked, signal)
+  if (action !== null && action.kind === 'abandoned') throw makeAbortError()
+  return action !== null
+}
+
+/**
+ * Whether the node defines a function anywhere in its tree.
+ *
+ * A definition's body is walked by `walkedLine` like any other scope,
+ * but it runs at invocation, not here, so a command inside one must
+ * not be read as the node's own: judging it would refuse a line that
+ * only stores text, and the read walks already charge nothing for it.
+ */
+function definesFunction(node: TSNodeLike): boolean {
+  const stack = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.type === 'function_definition') return true
+    stack.push(...current.namedChildren)
+  }
+  return false
+}
+
+/**
+ * The node's one fully-literal command, when nothing else in the node
+ * can read a name.
+ *
+ * A walked node's reads can be discounted only when the whole node is
+ * one command, every word and redirect of it is literal, it defines
+ * nothing, and its tree reads no name any other way: such a node reads
+ * only what that one command's own grammar reads, so a refusal of the
+ * command is a refusal of every read the node contributes. Anything
+ * less provable -- a second command, a word only the runtime can
+ * expand, a `$NAME` anywhere -- returns null, and the caller keeps the
+ * node, because some part of it may still run and read.
+ */
+function soleLiteralCommand(node: TSNodeLike, session: Session): WalkItem | null {
+  const items = [...walkedLine(node, session)]
+  const item = items[0]
+  if (items.length !== 1 || item === undefined) return null
+  const [words, redirects] = item
+  if ([...words, ...redirects].some((word) => word.text === null)) return null
+  if (definesFunction(node)) return null
+  if (referencedNames(node).size > 0 || opaqueReads(node)) return null
+  return item
+}
+
+/**
+ * Whether one walked command is refused on its text, resolving an
+ * unanswered ask through the ledger the gate reads.
+ */
+async function commandRefused(
+  item: WalkItem,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  agentId: string,
+  reparse: (line: string) => TSNodeLike,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const [words, redirects, walked] = item
+  const explained = await explainWords(
+    words,
+    walked,
+    registry,
+    namespace,
+    agentId,
+    reparse,
+    redirects,
+  )
+  const targets = redirectPaths(redirects, registry, walked.cwd)
+  for (const [index, expl] of explained.entries()) {
+    if (!isVerdict(expl)) continue
+    // explainWords lists the statement's own command first and the
+    // lines it runs after it, so only the first explanation is the
+    // command the redirects belong to.
+    if (
+      await verdictRefuses(
+        expl,
+        index === 0 ? targets : [],
+        walked,
+        registry,
+        namespace,
+        agentId,
+        signal,
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * The walked nodes whose reads an env-plane fetch still serves.
+ *
+ * The fill derives its fetch set from this same list (`lineNodes`: the
+ * line's own tree first, then every stored body and alias expansion
+ * its words can invoke), and a fetch serves a command that is going to
+ * run, so refusals are judged over the same nodes reads are. One rule
+ * for every node: when it is one fully-literal command with no other
+ * read in it (`soleLiteralCommand`), the gate is asked here on exactly
+ * the words it will read at run time, and a refusal discounts every
+ * read the node contributes. The line's own refusal drops the whole
+ * list, because nothing runs at all; a refused body or alias drops
+ * just itself, because the invocation still runs and is refused in
+ * place. A node this pass cannot prove silent is kept, and over-keeping
+ * only ever over-fetches.
+ *
+ * An ASK is resolved rather than skipped, because the fetch is itself
+ * an effect: contacting a secret store for a line the host then
+ * refuses would do a piece of exactly what was refused. A settled
+ * answer is read without being spent; an unanswered rule is put to the
+ * host now, through the same ledger the gate reads, so the answer
+ * lands exactly once -- an approval keeps the node and the gate
+ * consumes the grant, while a denial or a question left waiting drops
+ * it, and the line still runs into the gate, which refuses in place
+ * with its wording and its redirections.
+ */
+export async function unrefusedNodes(
+  nodes: readonly TSNodeLike[],
+  session: Session,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  agentId: string,
+  reparse: (line: string) => TSNodeLike,
+  signal?: AbortSignal,
+): Promise<TSNodeLike[]> {
+  const out: TSNodeLike[] = []
+  for (const [position, node] of nodes.entries()) {
+    const item = soleLiteralCommand(node, session)
+    if (item === null) {
+      out.push(node)
+      continue
+    }
+    if (await commandRefused(item, registry, namespace, agentId, reparse, signal)) {
+      if (position === 0) return []
+      continue
+    }
+    out.push(node)
+  }
+  return out
 }
 
 /**

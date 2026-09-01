@@ -29,7 +29,7 @@ import {
   type FindEntry,
   type PredNode,
 } from '../../commands/builtin/find_eval.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
@@ -233,9 +233,9 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   const resolved = await resolvedItem(accessor, path)
-  const startMs = performance.now()
+  const timer = startOp()
   await writeItem(accessor.config, accessor.loc(resolved, path.resourcePath), data)
-  record('write', path.resourcePath, 'sharepoint', data.length, startMs)
+  record('write', path.resourcePath, 'sharepoint', data.length, timer)
   await invalidateAfterWrite(path)
 }
 

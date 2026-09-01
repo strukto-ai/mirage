@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -25,12 +25,12 @@ export async function writeBytes(
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   const store = accessor.store
   await checkDestParents(store, path, p)
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
-  record('write', p, ResourceName.REDIS, data.byteLength, start)
+  record('write', p, ResourceName.REDIS, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

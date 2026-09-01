@@ -1,15 +1,15 @@
 {
   "cases": [
     {
-      "id": "hf_auth_whoami_names_the_org",
+      "id": "hf_auth_whoami_labels_the_org",
       "seq": 960101,
       "targets": [
         "cli-hf"
       ],
-      "command": "hf auth whoami | tail -1",
+      "command": "hf auth whoami | sed -n 2p",
       "expect": {
         "exit": 0,
-        "stdout": "integ-org\n",
+        "stdout": "orgs:  integ-org\n",
         "stderr": ""
       }
     },
@@ -259,8 +259,7 @@
         "stdout": "x",
         "stderr": ""
       }
-    }
-,
+    },
     {
       "id": "hf_download_to_the_cache_writes_a_ref_for_a_symbolic_revision",
       "seq": 960121,
@@ -273,8 +272,7 @@
         "stdout": "00000000",
         "stderr": ""
       }
-    }
-,
+    },
     {
       "id": "hf_a_local_mount_is_the_writable_copy",
       "seq": 960122,
@@ -285,6 +283,19 @@
       "expect": {
         "exit": 0,
         "stdout": "xy",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "hf_auth_whoami_names_the_private_endpoint",
+      "seq": 960123,
+      "targets": [
+        "cli-hf"
+      ],
+      "command": "hf auth whoami | tail -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Authenticated through private endpoint: http://127.0.0.1:5086\n",
         "stderr": ""
       }
     }

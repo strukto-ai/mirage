@@ -29,6 +29,7 @@ import type * as RepoModule from '../../../../core/hf_hub/repo.ts'
 import type * as TreeModule from '../../../../core/hf_hub/tree.ts'
 import { HF } from './index.ts'
 import { createCmd, tagCreateCmd, tagDeleteCmd, tagListCmd } from './repo.ts'
+import { whoamiCmd } from './auth.ts'
 import { downloadCmd, refuseVariadic, selected } from './download.ts'
 import { inRepoBase, keep, uploadCmd } from './upload.ts'
 
@@ -39,6 +40,7 @@ const listTagsMock = vi.hoisted(() => vi.fn())
 const classifyAbsenceMock = vi.hoisted(() => vi.fn())
 const fetchTreeMock = vi.hoisted(() => vi.fn())
 const commitMock = vi.hoisted(() => vi.fn())
+const whoamiMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../../../core/hf_hub/repo.ts', async (orig) => ({
   ...(await orig<typeof RepoModule>()),
@@ -53,6 +55,10 @@ vi.mock('../../../../core/hf_hub/tree.ts', async (orig) => ({
 vi.mock('../../../../core/hf_hub/commit.ts', async (orig) => ({
   ...(await orig<typeof CommitModule>()),
   commit: commitMock,
+}))
+
+vi.mock('../../../../core/hf_hub/account.ts', () => ({
+  whoami: whoamiMock,
 }))
 
 vi.mock('../../../../core/hf_hub/admin.ts', () => ({
@@ -104,6 +110,44 @@ beforeEach(() => {
   listTagsMock.mockReset()
   classifyAbsenceMock.mockReset()
   fetchTreeMock.mockReset()
+})
+
+describe('hf auth whoami', () => {
+  it('labels the orgs the way upstream does', async () => {
+    // An unlabelled org is indistinguishable from the account itself.
+    // Upstream prints the label and the joined names as two print arguments,
+    // which puts a second space after the colon. Measured: printed bare, an
+    // agent asked to create a repo under its own account read the org off the
+    // second line and created it there instead.
+    whoamiMock.mockResolvedValue({
+      name: 'zoe',
+      orgs: [{ name: 'acme' }, { name: 'widgets' }],
+    })
+    expect(await text(await whoamiCmd(inv()))).toBe('zoe\norgs:  acme,widgets\n')
+  })
+
+  it('says nothing of orgs when there are none', async () => {
+    whoamiMock.mockResolvedValue({ name: 'zoe', orgs: [] })
+    expect(await text(await whoamiCmd(inv()))).toBe('zoe\n')
+  })
+
+  it('names a private endpoint, which every mirage install has', async () => {
+    whoamiMock.mockResolvedValue({ name: 'zoe' })
+    const config: HfConfig = { token: 'hf_test', endpoint: 'http://127.0.0.1:5199' }
+    expect(await text(await whoamiCmd(inv([], {}, config)))).toBe(
+      'zoe\nAuthenticated through private endpoint: http://127.0.0.1:5199\n',
+    )
+  })
+
+  it('reads the endpoint the way the request did', async () => {
+    // An empty endpoint IS the public Hub -- hfEndpoint substitutes API_BASE
+    // and that is where whoami authenticated. Compared raw, the line would
+    // announce a private endpoint with nothing after it for a request that
+    // went to huggingface.co.
+    whoamiMock.mockResolvedValue({ name: 'zoe' })
+    const config: HfConfig = { token: 'hf_test', endpoint: '' }
+    expect(await text(await whoamiCmd(inv([], {}, config)))).toBe('zoe\n')
+  })
 })
 
 describe('the hf program tree', () => {

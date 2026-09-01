@@ -32,6 +32,7 @@ from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
+from mirage.secrets.config import EnvVar, SourceBlock
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import ConsoleFactory
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
@@ -536,6 +537,15 @@ class WorkspaceConfig(BaseModel):
     # stream per job, so a reader in another process can follow a
     # running job; ram (the default) keeps consoles in memory.
     console: ConsoleBlock | None = None
+    # The environment plane: one map, name -> entry. A bare string is
+    # the literal short form; a mapping is an EnvVar, either a literal
+    # with attrs or a managed pointer (`from`/`ref`/`key`/`fetch`).
+    env: dict[str, str | EnvVar] | None = None
+    # The source table: one map, instance name -> declaration, spelled
+    # the way `mounts:` is. A managed env entry's `from` names an
+    # instance here, or a source directly when the deployment has one
+    # account of it and nothing to configure.
+    secrets: dict[str, SourceBlock] | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -613,6 +623,14 @@ class WorkspaceConfig(BaseModel):
             }
         if self.profile is not None:
             kwargs["profile"] = self.profile
+        # Passed through as-is: this door is sync, and env-plane
+        # resolution is async at command time, so no fetching here.
+        if self.env is not None:
+            kwargs["env"] = self.env
+        # Same reason: building a source reads its bootstrap pointers,
+        # which the workspace does once, before its first fetch.
+        if self.secrets is not None:
+            kwargs["secrets"] = self.secrets
 
         if self.clis is not None:
             kwargs["clis"] = {

@@ -126,6 +126,7 @@ export function commitFiles(paths: string[], status = 'added'): JsonValue {
 
 export interface CommitRow {
   sha: string
+  parentSha: string
   message: string
   authorLogin: string
   date: string
@@ -175,6 +176,7 @@ export function rootCommit(tree: Array<[string, string]>): CommitRow {
   const sorted = [...tree].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   return {
     sha: commitSha(`root\0${sorted.map(([p, b]) => `${p}:${b}`).join('\0')}`),
+    parentSha: '',
     message: 'Initial commit',
     authorLogin: 'mirage',
     date: ROOT_COMMIT_DATE,

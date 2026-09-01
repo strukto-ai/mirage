@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.dropbox.api import create_folder, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -63,13 +61,13 @@ async def mkdir(accessor: DropboxAccessor,
         if (parent != accessor.root_path
                 and await _metadata_tag(accessor, parent) != "folder"):
             raise enoent(path.virtual)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     try:
         await create_folder(accessor.token_manager, api_path)
     except DropboxApiError as exc:
         if exc.summary.startswith("path/conflict"):
             raise FileExistsError(path.virtual) from exc
         raise
-    record("mkdir", path.virtual, "dropbox", 0, start_ms)
+    record("mkdir", path.virtual, "dropbox", 0, timer)
     await invalidate_after_write(path)
     await invalidate_ancestors(path)

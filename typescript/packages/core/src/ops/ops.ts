@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { OpReport } from '../io/types.ts'
-import { runRecorded } from '../observe/context.ts'
-import { OpRecord } from '../observe/record.ts'
+import type { OpRecord } from '../observe/record.ts'
+import { finishRecord, type OpTimer, runRecorded, startOp } from '../observe/context.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
 import type { LiveFileIdentity } from './types.ts'
@@ -164,16 +164,9 @@ export class Ops {
     path: string,
     source: string,
     bytes: number,
-    startMs: number,
+    timer: OpTimer,
   ): Promise<void> {
-    const rec = new OpRecord({
-      op,
-      path,
-      source,
-      bytes,
-      timestamp: Date.now(),
-      durationMs: Date.now() - startMs,
-    })
+    const rec = finishRecord(op, path, source, bytes, timer)
     this.records.push(rec)
     if (this.sink !== null) await this.sink(rec)
   }
@@ -199,7 +192,7 @@ export class Ops {
     kwargs: OpKwargs = {},
     caller: OpReport | null = null,
   ): Promise<unknown> {
-    const start = Date.now()
+    const timer = startOp()
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
     // both follows, so an op meant for a link entry itself (chmod -h, a
     // guest's lchown) still records the link's own path.
@@ -219,12 +212,12 @@ export class Ops {
       // completion, so even a foreign error the door never defined
       // leaves the transfer on the books.
       if (report.completed && owner !== null) {
-        await this.recordOp(op, followed, owner, report.source, report.bytes, null, args, start)
+        await this.recordOp(op, followed, owner, report.source, report.bytes, null, args, timer)
       }
       throw err
     }
     if (owner !== null) {
-      await this.recordOp(op, followed, owner, report.source, report.bytes, result, args, start)
+      await this.recordOp(op, followed, owner, report.source, report.bytes, result, args, timer)
     }
     return result
   }
@@ -246,9 +239,9 @@ export class Ops {
     moved: number | null,
     result: unknown,
     args: readonly unknown[],
-    start: number,
+    timer: OpTimer,
   ): Promise<void> {
-    await this.record(op, path, source ?? owner.kind, moved ?? payloadBytes(result, args), start)
+    await this.record(op, path, source ?? owner.kind, moved ?? payloadBytes(result, args), timer)
   }
 
   // `raw` skips the filetype cascade: an explicit null filetype stops

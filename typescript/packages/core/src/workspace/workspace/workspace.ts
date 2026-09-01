@@ -32,7 +32,7 @@ import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
-import type { ShellParser } from '../../shell/parse.ts'
+import type { ShellParser } from '../../shell/parse/index.ts'
 import { buildFileCache } from './cache.ts'
 import { rejectConfigScript } from './guard.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
@@ -70,9 +70,14 @@ import { explainLine } from '../node/explain.ts'
 import { provisionNode } from '../node/provision_node.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
+import { SourceBlockSchema, type SourceBlock } from '../../secrets/config.ts'
+import { SecretsError } from '../../secrets/errors.ts'
+import { sourceFor } from '../../secrets/registry.ts'
+import { resolveSources } from '../../secrets/sources.ts'
+import type { ResolvedSource } from '../../secrets/types.ts'
 import { SessionManager } from '../session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
-import type { Session } from '../session/session.ts'
+import { varsFromEntries, type Session } from '../session/session.ts'
 import { parseProfileMounts, type SessionProfile } from '../../policy/profile.ts'
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
@@ -133,6 +138,10 @@ export class Workspace {
   }
   private readonly watchManager: WatchManager
   private readonly runtimes: Runtimes
+  // Named for what it holds: the source declarations, never a secret.
+  private readonly sourceBlocks: Readonly<Record<string, SourceBlock>>
+  private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
+  private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
   private readonly routePolicy: RoutePolicy | null
   private readonly scriptPolicy: ScriptPolicy
@@ -167,7 +176,51 @@ export class Workspace {
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
-    this.sessionManager = new SessionManager(options.sessionId ?? newSessionId(), stores.sessions)
+    // The env block, translated once: a literal entry becomes an
+    // exported var, a managed one becomes a pointer the fill step
+    // resolves at command time. Each managed entry's source is
+    // resolved now, so a typo'd name (or a source nothing registered)
+    // fails at construction, naming the known sources, rather than at
+    // the first fetch.
+    // The source table, kept as declarations: building one reads its
+    // bootstrap pointers, which is I/O, and this constructor is sync.
+    // `secretSources` builds them once, before the first fetch.
+    // Checked here, so every caller-supplied route is covered at once:
+    // an array arrives from an untyped REST override, and
+    // `Object.entries` on one yields nothing, so the declarations
+    // would silently vanish and every restored pointer would read as
+    // an unknown source.
+    // Read as `unknown` on purpose: the declared type says mapping,
+    // and the value comes from an untyped REST override that can say
+    // otherwise, which is exactly the case being caught.
+    const declared: unknown = options.secrets
+    if (
+      declared !== undefined &&
+      (typeof declared !== 'object' || declared === null || Array.isArray(declared))
+    ) {
+      throw new SecretsError('config `secrets` must be a mapping')
+    }
+    this.sourceBlocks = Object.fromEntries(
+      Object.entries(options.secrets ?? {}).map(([name, block]) => [
+        name,
+        SourceBlockSchema.parse(block),
+      ]),
+    )
+    for (const block of Object.values(this.sourceBlocks)) sourceFor(block.source)
+    const seedVars = options.env !== undefined ? varsFromEntries(options.env) : undefined
+    for (const seeded of Object.values(seedVars ?? {})) {
+      if (
+        seeded.managed !== undefined &&
+        !Object.hasOwn(this.sourceBlocks, seeded.managed.source)
+      ) {
+        sourceFor(seeded.managed.source)
+      }
+    }
+    this.sessionManager = new SessionManager(
+      options.sessionId ?? newSessionId(),
+      stores.sessions,
+      seedVars,
+    )
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,
@@ -991,6 +1044,50 @@ export class Workspace {
     )
   }
 
+  /**
+   * The declared source instances, built once.
+   *
+   * Deferred rather than done in the constructor because building one
+   * reads its bootstrap pointers, and a dotenv file is I/O. The first
+   * line that fills pays for it; every later line reads the table.
+   * Resolution touches only the process env and dotenv files, never a
+   * remote store, so a failure here is a bad declaration and rightly
+   * fails every line, while an unreachable store still fails only the
+   * names that want it.
+   */
+  /**
+   * The `secrets:` declarations this workspace was built with.
+   *
+   * Read by the paths that rebuild a workspace from state: a snapshot
+   * never carries the block, because it is the deployment's
+   * credentials, so a same-process rebuild has to carry it across or
+   * the restored pointers name instances the new workspace never heard
+   * of.
+   */
+  get declaredSources(): Readonly<Record<string, SourceBlock>> {
+    return this.sourceBlocks
+  }
+
+  private async secretSources(): Promise<Readonly<Record<string, ResolvedSource>>> {
+    if (this.secretSourcesBuilt !== null) return this.secretSourcesBuilt
+    // The in-flight resolution is cached, not just its result: two
+    // sessions filling concurrently would both find the memo empty
+    // across the await and read every bootstrap source twice, and a
+    // rotation between the two reads would leave the loser's config on
+    // one of the lines. Cleared either way, so a failed resolution is
+    // retried by the next line rather than pinned forever.
+    const pending = this.secretSourcesPending ?? resolveSources(this.sourceBlocks)
+    this.secretSourcesPending = pending
+    let built
+    try {
+      built = await pending
+    } finally {
+      this.secretSourcesPending = null
+    }
+    this.secretSourcesBuilt = built
+    return built
+  }
+
   /** Everything the module-level executor needs, assembled from this workspace. */
   private executeEnv(): ExecuteEnv {
     return {
@@ -1009,6 +1106,7 @@ export class Workspace {
       workspaceId: this.wsId,
       runtimes: this.runtimes,
       router: this.router,
+      secretSources: () => this.secretSources(),
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
@@ -1151,6 +1249,11 @@ export class Workspace {
     const state = await toStateDict(this)
     const opts: WorkspaceOptions = {
       mode: options.mode ?? MountMode.WRITE,
+      // The declarations travel with the copy the way a live CLI
+      // install does: an env pointer restores from state naming its
+      // instance, and without the block the copy would answer the
+      // first read with "unknown secrets source".
+      secrets: options.secrets ?? this.sourceBlocks,
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId

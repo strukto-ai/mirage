@@ -13,16 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import json
+
+import pytest
+from pydantic import ValidationError
 
 from mirage.policy.match import Outcome
 from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
-from mirage.shell.variable import ShellVar, VarAttr
+from mirage.secrets.config import EnvVar
+from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import Session
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
                                                 INHERITED_FIELDS,
                                                 TRANSIENT_FIELDS)
-from mirage.workspace.session.session import vars_from_env
+from mirage.workspace.session.session import (vars_from_entries, vars_from_env,
+                                              vars_from_fields, vars_to_fields)
 from mirage.workspace.session.state import seed_var, set_attr
 
 
@@ -385,3 +391,177 @@ def test_session_decisions_round_trip_through_the_record():
     # Nothing held writes nothing, and a fork carries what is held.
     assert "decisions" not in Session(session_id="s2").to_dict()
     assert s.fork().decisions == records
+
+
+def test_vars_from_entries_literal_short_form_exports():
+    out = vars_from_entries({"APP": "myapp"})
+    assert out == {"APP": ShellVar("myapp", frozenset({VarAttr.EXPORT}))}
+
+
+def test_vars_from_entries_literal_long_form_attrs():
+    out = vars_from_entries({
+        "EDITOR": EnvVar(value="vi", readonly=True),
+        "LOCAL": EnvVar(value="x", export=False),
+    })
+    assert out["EDITOR"] == ShellVar(
+        "vi", frozenset({VarAttr.EXPORT, VarAttr.READONLY}))
+    assert out["LOCAL"] == ShellVar("x", frozenset())
+
+
+def test_vars_from_entries_managed_is_exported_unset():
+    out = vars_from_entries({
+        "TOKEN":
+        EnvVar.model_validate({
+            "from": "aws-sm",
+            "ref": "prod/tokens",
+            "key": "api"
+        })
+    })
+    var = out["TOKEN"]
+    assert var.value is None
+    assert var.attrs == frozenset({VarAttr.EXPORT})
+    assert var.managed == ManagedRef("aws-sm", "prod/tokens", "api", False)
+
+
+def test_vars_from_entries_key_defaults_to_the_name():
+    out = vars_from_entries({"DB_URL": EnvVar.model_validate({"from": "env"})})
+    assert out["DB_URL"].managed == ManagedRef("env", "", "DB_URL", False)
+
+
+def test_vars_from_entries_eager_flag():
+    out = vars_from_entries(
+        {"T": EnvVar.model_validate({
+            "from": "env",
+            "fetch": "eager"
+        })})
+    assert out["T"].managed == ManagedRef("env", "", "T", True)
+
+
+def test_vars_from_entries_coerces_raw_mappings():
+    out = vars_from_entries({
+        "A": {
+            "value": "1"
+        },
+        "B": {
+            "from": "env"
+        },
+    })
+    assert out["A"] == ShellVar("1", frozenset({VarAttr.EXPORT}))
+    assert out["B"].managed == ManagedRef("env", "", "B", False)
+
+
+def test_vars_from_entries_refuses_readonly_on_managed():
+    with pytest.raises(ValidationError, match="readonly"):
+        vars_from_entries({"T": {"from": "env", "readonly": True}})
+
+
+def _managed_session() -> Session:
+    exported = frozenset({VarAttr.EXPORT})
+    return Session(session_id="s1",
+                   vars={
+                       "FETCHED":
+                       ShellVar("s3cr3t",
+                                exported,
+                                managed=ManagedRef("aws-sm", "prod", "api",
+                                                   False)),
+                       "PENDING":
+                       ShellVar(None,
+                                exported,
+                                managed=ManagedRef("env", "", "PENDING",
+                                                   True)),
+                       "PLAIN":
+                       ShellVar("hello", frozenset()),
+                   })
+
+
+def test_managed_vars_serialize_as_pointers_never_values():
+    d = _managed_session().to_dict()
+    # The fetched plaintext must not land anywhere in the record.
+    assert "FETCHED" not in d["env"]
+    assert "PENDING" not in d["env"]
+    assert "s3cr3t" not in json.dumps(d)
+    assert d["managed"] == {
+        "FETCHED": {
+            "from": "aws-sm",
+            "ref": "prod",
+            "key": "api"
+        },
+        "PENDING": {
+            "from": "env",
+            "ref": "",
+            "key": "PENDING",
+            "fetch": "eager"
+        },
+    }
+    # The letters still record, so a stripped payload keeps the name.
+    assert d["var_attrs"]["FETCHED"] == "x"
+    assert d["env"]["PLAIN"] == "hello"
+
+
+def test_managed_vars_restore_declared_but_unfetched():
+    restored = Session.from_dict(_managed_session().to_dict())
+    for name, eager in (("FETCHED", False), ("PENDING", True)):
+        var = restored.vars[name]
+        assert var.value is None, name
+        assert var.attrs == frozenset({VarAttr.EXPORT}), name
+        assert var.managed is not None and var.managed.eager is eager, name
+    assert restored.vars["FETCHED"].managed == ManagedRef(
+        "aws-sm", "prod", "api", False)
+    assert restored.vars["PLAIN"] == ShellVar("hello", frozenset())
+
+
+def test_a_smuggled_value_for_a_managed_name_is_discarded_on_load():
+    d = _managed_session().to_dict()
+    tampered = dict(d)
+    tampered["env"] = {**d["env"], "FETCHED": "planted"}
+    restored = Session.from_dict(tampered)
+    assert restored.vars["FETCHED"].value is None
+    assert restored.vars["FETCHED"].managed is not None
+
+
+def test_a_session_with_no_managed_vars_writes_no_managed_key():
+    s = Session(session_id="s2", vars=vars_from_env({"A": "1"}))
+    assert "managed" not in s.to_dict()
+
+
+def test_vars_fields_round_trip_keeps_the_pointer_never_a_value():
+    table = vars_from_entries({
+        "TOKEN": {
+            "from": "aws-sm",
+            "ref": "prod",
+            "key": "api"
+        },
+        "MODE": "prod",
+    })
+    fields = vars_to_fields(table)
+    assert "TOKEN" not in fields["env"]
+    assert fields["managed"]["TOKEN"] == {
+        "from": "aws-sm",
+        "ref": "prod",
+        "key": "api"
+    }
+    restored = vars_from_fields(fields)
+    assert restored["TOKEN"].value is None
+    assert restored["TOKEN"].managed == ManagedRef("aws-sm", "prod", "api",
+                                                   False)
+    assert restored["MODE"] == table["MODE"]
+
+
+def test_vars_fields_round_trip_keeps_eager():
+    table = vars_from_entries(
+        {"E": {
+            "from": "aws-sm",
+            "ref": "prod",
+            "fetch": "eager"
+        }})
+    restored = vars_from_fields(vars_to_fields(table))
+    managed = restored["E"].managed
+    assert managed is not None and managed.eager
+
+
+def test_vars_fields_never_writes_a_fetched_value():
+    table = vars_from_entries({"T": {"from": "aws-sm", "ref": "prod"}})
+    table["T"] = dataclasses.replace(table["T"], value="plain")
+    fields = vars_to_fields(table)
+    assert "T" not in fields["env"]
+    assert vars_from_fields(fields)["T"].value is None

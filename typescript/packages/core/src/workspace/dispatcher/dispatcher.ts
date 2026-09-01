@@ -34,7 +34,7 @@ import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/in
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
-import { record, runWithMountPrefix, runWithRevisions } from '../../observe/context.ts'
+import { record, runWithMountPrefix, runWithRevisions, startOp } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
@@ -738,7 +738,7 @@ export class Dispatcher {
     kwargs: OpKwargs,
     report: OpReport | undefined,
   ): Promise<string | FileStat | null> {
-    const start = performance.now()
+    const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
     const owner = mount?.prefix ?? null
     const write = POLICY_WRITE_OPS.has(opName)
@@ -788,7 +788,7 @@ export class Dispatcher {
       path.virtual,
       ResourceName.RAM,
       new TextEncoder().encode(target).byteLength,
-      start,
+      timer,
     )
     memoryAnswered(report)
     const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
@@ -979,14 +979,14 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    const start = performance.now()
+    const timer = startOp()
     const overlay: Record<string, number | string> = {}
     for (const key of SETATTR_KEYS) {
       const value = kwargs[key]
       if (value !== undefined && value !== null) overlay[key] = value as number | string
     }
     await this.writeOverlay(p.virtual, overlay)
-    record('setattr', p.virtual, ResourceName.RAM, 0, start)
+    record('setattr', p.virtual, ResourceName.RAM, 0, timer)
     return overlay
   }
 

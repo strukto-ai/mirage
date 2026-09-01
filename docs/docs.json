@@ -41,15 +41,15 @@
       "apple-mobile-web-app-status-bar-style": "black-translucent",
       "og:type": "website",
       "og:url": "https://docs.mirage.strukto.ai",
-      "og:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
-      "og:image:alt": "Mirage virtual filesystem for AI agents",
+      "og:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light@2x.png",
+      "og:image:alt": "Mirage: a virtual terminal for AI agents",
       "og:site_name": "Mirage",
       "og:locale": "en_US",
       "twitter:card": "summary_large_image",
       "twitter:site": "@struktoai",
       "twitter:creator": "@struktoai",
-      "twitter:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
-      "twitter:image:alt": "Mirage \u00b7 Unified Virtual Filesystem for AI Agents | Strukto"
+      "twitter:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light@2x.png",
+      "twitter:image:alt": "Mirage \u00b7 A Virtual Terminal for AI Agents | Strukto"
     }
   },
   "navigation": {

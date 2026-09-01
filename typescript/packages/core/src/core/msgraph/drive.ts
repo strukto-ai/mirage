@@ -16,7 +16,13 @@ import { invalidateAfterWrite } from '../../cache/context.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../../commands/builtin/find_eval.ts'
-import { record, recordingActive, recordStream, revisionFor } from '../../observe/context.ts'
+import {
+  record,
+  recordStream,
+  recordingActive,
+  revisionFor,
+  startOp,
+} from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import type { LiveFileIdentity } from '../../ops/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -371,7 +377,7 @@ export async function readItem(
 ): Promise<Uint8Array> {
   const pinned = revisionFor(virtual)
   const window = windowFor(offset, size)
-  const startMs = performance.now()
+  const timer = startOp()
   let fingerprint: string | null = null
   let revision: string | null = pinned
   try {
@@ -392,7 +398,7 @@ export async function readItem(
     } else {
       data = await graphGetBytes(config, loc.item('/content'), window)
     }
-    record('read', label, backend, data.length, startMs, { fingerprint, revision })
+    record('read', label, backend, data.length, timer, { fingerprint, revision })
     return data
   } catch (error) {
     if (error instanceof GraphError && error.status === 404) throw enoent(virtual)

@@ -18,6 +18,7 @@ import pytest
 
 from mirage.commands.cli.builtin.hf.auth import list_cmd, whoami_cmd
 from mirage.commands.errors import UsageError
+from mirage.core.hf_hub.config import HfConfig
 from mirage.io.types import materialize
 from tests.commands.cli.builtin.hf.conftest import ANON, inv
 
@@ -29,9 +30,42 @@ async def _text(result) -> str:
 
 @pytest.mark.asyncio
 @patch("mirage.commands.cli.builtin.hf.auth.whoami")
-async def test_whoami_prints_the_account_and_its_orgs(mock_whoami):
-    mock_whoami.return_value = {"name": "zoe", "orgs": [{"name": "acme"}]}
-    assert await _text(await whoami_cmd(inv())) == "zoe\nacme\n"
+async def test_whoami_labels_the_orgs_the_way_upstream_does(mock_whoami):
+    """An unlabelled org is indistinguishable from the account itself.
+
+    Upstream prints the label and the joined names as two print arguments,
+    which puts a second space after the colon. Measured: printed bare, an
+    agent asked to create a repo under its own account read the org off the
+    second line and created it there instead.
+    """
+    mock_whoami.return_value = {
+        "name": "zoe",
+        "orgs": [{
+            "name": "acme"
+        }, {
+            "name": "widgets"
+        }],
+    }
+    assert await _text(await whoami_cmd(inv())) == "zoe\norgs:  acme,widgets\n"
+
+
+@pytest.mark.asyncio
+@patch("mirage.commands.cli.builtin.hf.auth.whoami")
+async def test_whoami_says_nothing_of_orgs_when_there_are_none(mock_whoami):
+    mock_whoami.return_value = {"name": "zoe", "orgs": []}
+    assert await _text(await whoami_cmd(inv())) == "zoe\n"
+
+
+@pytest.mark.asyncio
+@patch("mirage.commands.cli.builtin.hf.auth.whoami")
+async def test_whoami_names_a_private_endpoint(mock_whoami):
+    """Upstream reports any origin that is not huggingface.co, and for a
+    mirage install that is every origin: the endpoint is the deployment's."""
+    mock_whoami.return_value = {"name": "zoe"}
+    config = HfConfig(token="hf_test", endpoint="http://127.0.0.1:5199")
+    text = await _text(await whoami_cmd(inv(config=config)))
+    assert text == ("zoe\nAuthenticated through private endpoint: "
+                    "http://127.0.0.1:5199\n")
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,7 @@ from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
 from mirage.shell.errors import ArithError
 from mirage.shell.types import ElementOps
 from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
-                                   with_attr, with_value)
+                                   detach, with_attr, with_value)
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import Session
@@ -524,6 +524,12 @@ async def set_var(session: Session,
                        session_id=session.session_id))
     stored = ShellVar(value) if existing is None else with_value(
         existing, value)
+    # An agent write to a managed name shadows session-locally: the
+    # pointer drops and the record becomes a plain variable for this
+    # session only. Only the host-tier fill step writes pointer-keeping
+    # records, and it goes directly into `session.vars`, not here.
+    if stored.managed is not None:
+        stored = detach(stored)
     # `set -a` marks every name assigned *while it is on*, which is why
     # it is read here at write time rather than applied to the session
     # in bulk when the option flips: `B=1; set -a; C=2; set +a; D=3`

@@ -26,6 +26,7 @@ from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import EnvVar, SecretRef
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.types import ConsistencyPolicy
@@ -956,3 +957,116 @@ profiles:
 """)
     with pytest.raises(ValueError, match="set runtime beside script"):
         load_config(cfg_file)
+
+
+def test_env_block_literal_and_managed_entries(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+env:
+  GREETING: hello ${WHO}
+  EDITOR:
+    value: vim
+    readonly: true
+    export: false
+  TOKEN:
+    from: aws-sm
+    ref: prod/tokens
+    key: api
+    fetch: eager
+  HOME_DIR:
+    from: env
+""")
+    cfg = load_config(cfg_file, env={"WHO": "world"})
+    assert cfg.env is not None
+    assert cfg.env["GREETING"] == "hello world"
+    editor = cfg.env["EDITOR"]
+    assert isinstance(editor, EnvVar)
+    assert editor.value == "vim"
+    assert editor.readonly is True
+    assert editor.export is False
+    token = cfg.env["TOKEN"]
+    assert isinstance(token, EnvVar)
+    assert token.provider == "aws-sm"
+    assert token.ref == "prod/tokens"
+    assert token.key == "api"
+    assert token.fetch == "eager"
+    home = cfg.env["HOME_DIR"]
+    assert isinstance(home, EnvVar)
+    assert home.provider == "env"
+    assert home.ref == ""
+    assert home.key is None
+    assert home.fetch == "lazy"
+    assert cfg.to_workspace_kwargs()["env"] is cfg.env
+
+
+def test_env_block_absent_by_default():
+    cfg = load_config({"mounts": {"/": {"resource": "ram"}}})
+    assert cfg.env is None
+    assert "env" not in cfg.to_workspace_kwargs()
+
+
+def test_env_entry_refusals_surface_as_config_errors():
+    base = {"mounts": {"/": {"resource": "ram"}}}
+    with pytest.raises(ValueError, match="not both"):
+        load_config({**base, "env": {"X": {"value": "v", "from": "env"}}})
+    with pytest.raises(ValueError, match="readonly"):
+        load_config({**base, "env": {"X": {"from": "env", "readonly": True}}})
+    with pytest.raises(ValueError, match="managed entries"):
+        load_config({**base, "env": {"X": {"value": "v", "key": "k"}}})
+
+
+def test_secrets_block_declares_instances():
+    cfg = load_config({
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+        "secrets": {
+            "sm": {
+                "source": "aws-sm",
+                "config": {
+                    "region": "us-east-2",
+                    "aws_access_key_id": {
+                        "from": "env",
+                        "key": "KEY_ID"
+                    },
+                },
+            }
+        },
+    })
+    block = cfg.secrets["sm"]
+    assert block.source == "aws-sm"
+    assert block.config["region"] == "us-east-2"
+    assert isinstance(block.config["aws_access_key_id"], SecretRef)
+    assert block.config["aws_access_key_id"].key == "KEY_ID"
+    assert cfg.to_workspace_kwargs()["secrets"] is cfg.secrets
+
+
+def test_secrets_block_absent_by_default():
+    cfg = load_config({"mounts": {"/": {"resource": "ram"}}})
+    assert cfg.secrets is None
+    assert "secrets" not in cfg.to_workspace_kwargs()
+
+
+def test_secrets_block_refusals_surface_as_config_errors():
+    base = {"mounts": {"/": {"resource": "ram"}}}
+    with pytest.raises(ValueError, match="needs no config of its own"):
+        load_config({
+            **base, "secrets": {
+                "sm": {
+                    "source": "aws-sm",
+                    "config": {
+                        "region": {
+                            "from": "aws-sm",
+                            "key": "r"
+                        }
+                    },
+                }
+            }
+        })
+    with pytest.raises(ValueError):
+        load_config({**base, "secrets": {"sm": {"kind": "aws-sm"}}})

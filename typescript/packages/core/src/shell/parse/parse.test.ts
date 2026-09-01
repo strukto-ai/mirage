@@ -11,19 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { getParts, getRedirects, getText } from './helpers.ts'
-import {
-  createShellParser,
-  findSyntaxError,
-  findUnterminatedBacktick,
-  stripLineContinuation,
-  type ShellParser,
-} from './parse.ts'
-import type { TSNodeLike } from './types.ts'
+import { getParts, getRedirects, getText } from '../helpers.ts'
+import { createShellParser, type ShellParser, stripLineContinuation } from './index.ts'
+import type { TSNodeLike } from '../types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -139,29 +132,6 @@ describe('createShellParser — realistic multi-statement command', () => {
   })
 })
 
-describe('findSyntaxError', () => {
-  it.each(['if then fi', 'echo (', 'for x do done', 'for', 'if', 'if; fi', 'echo "unterm'])(
-    'flags structural syntax error in %j',
-    (cmd) => {
-      const root = parser.parse(cmd)
-      expect(findSyntaxError(root)).not.toBeNull()
-    },
-  )
-
-  it.each([
-    'echo hi',
-    'for x in a b; do echo $x; done',
-    'if true; then echo y; fi',
-    'cat /tmp/x | sort',
-    "cat <<EN'D'\n$v\nEND",
-    'echo bg &; echo fg',
-    'for x in; do echo $x; done',
-  ])('returns null for valid / recoverable %j', (cmd) => {
-    const root = parser.parse(cmd)
-    expect(findSyntaxError(root)).toBeNull()
-  })
-})
-
 describe('(( reparse: subshell that immediately opens a subshell', () => {
   it('parses as nested subshells rather than an arithmetic command', () => {
     const root = parser.parse('((echo a); echo b)')
@@ -257,29 +227,5 @@ describe('stripLineContinuation', () => {
     ['echo a\\ b', 'echo a\\ b'],
   ])('%j -> %j', (command, expected) => {
     expect(stripLineContinuation(command)).toBe(expected)
-  })
-})
-
-describe('findUnterminatedBacktick', () => {
-  it.each(['echo `echo a', 'echo "`echo \'`\'`"', 'echo a`', '`'])(
-    'flags the open region in %j',
-    (command) => {
-      expect(findUnterminatedBacktick(command)).not.toBeNull()
-    },
-  )
-
-  it.each([
-    'echo `echo a`',
-    'echo `echo a` `echo b`',
-    // Single quotes protect a backtick, double quotes do not.
-    "echo '`'",
-    'echo "`echo a`"',
-    'echo "\\`"',
-    // Only a backslash escapes inside the region.
-    'echo `echo \\`nested\\``',
-    'echo a',
-    'cat <<EOF\nplain\nEOF',
-  ])('accepts balanced %j', (command) => {
-    expect(findUnterminatedBacktick(command)).toBeNull()
   })
 })

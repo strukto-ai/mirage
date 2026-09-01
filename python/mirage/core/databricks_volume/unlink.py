@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_unlink
@@ -21,7 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import enoent
 
@@ -42,12 +41,12 @@ async def unlink(
     if file_stat.type == FileType.DIRECTORY:
         raise IsADirectoryError(path.virtual)
     remote_path = backend_path(accessor.config, path)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     try:
         await asyncio.to_thread(_delete_file_sync, accessor, remote_path)
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
         raise
-    record("unlink", path.virtual, "databricks_volume", 0, start_ms)
+    record("unlink", path.virtual, "databricks_volume", 0, timer)
     await invalidate_after_unlink(path)

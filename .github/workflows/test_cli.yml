@@ -39,6 +39,7 @@ jobs:
               - 'integ/parity.sh'
               - 'integ/fuse/cli_fuse.sh'
               - 'integ/cli_config.sh'
+              - 'integ/cli_env.sh'
               - 'integ/cli_ref.sh'
               - 'integ/fixtures/cli/**'
               - '.github/workflows/test_cli.yml'
@@ -762,6 +763,12 @@ jobs:
       - name: Run CLI ref battery (a program tree installed from a file)
         run: |
           bash integ/cli_ref.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Run CLI env battery (env block presets and managed sources)
+        run: |
+          bash integ/cli_env.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 

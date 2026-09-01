@@ -21,6 +21,8 @@ import type { Resource } from '@struktoai/mirage-core/resource/base'
 import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { type WorkspaceRegistry } from '../registry.ts'
+import { z } from '@struktoai/mirage-core/resource/secrets'
+import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
 import {
   configToWorkspaceArgs,
@@ -172,7 +174,11 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       let ws: Workspace
       try {
-        ws = await Workspace.load(new Uint8Array(tarBuf), {}, overrides)
+        ws = await Workspace.load(
+          new Uint8Array(tarBuf),
+          override?.secrets !== undefined ? { secrets: override.secrets } : {},
+          overrides,
+        )
       } catch (e) {
         return reply.status(400).send({ detail: `load failed: ${(e as Error).message}` })
       }
@@ -213,7 +219,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         return reply.status(409).send({ detail: `workspace id already exists: ${body.id}` })
       }
       const src = deps.registry.get(id).runner.ws
-      const newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
+      let newWs
+      try {
+        newWs = await cloneWorkspaceWithOverride(src, body.override ?? null)
+      } catch (e) {
+        if (e instanceof SecretsError || e instanceof z.ZodError) {
+          // An override naming a source the host cannot resolve, or a
+          // block the schema refuses, is the caller's mistake -- the
+          // answer create, load and the historical clone already give.
+          return reply.status(400).send({ detail: e.message })
+        }
+        throw e
+      }
       let entry
       try {
         entry = deps.registry.add(newWs, body.id)

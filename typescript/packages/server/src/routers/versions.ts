@@ -16,6 +16,9 @@ import type { FastifyInstance } from 'fastify'
 import { Errors } from 'isomorphic-git'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { Workspace } from '@struktoai/mirage-node'
+import type { SourceEntries } from '@struktoai/mirage-core/secrets/config'
+import { z } from '@struktoai/mirage-core/resource/secrets'
+import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { cloneWorkspaceWithOverride } from '../clone.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { makeDetail } from '../summary.ts'
@@ -58,6 +61,12 @@ interface CloneBody {
   sourceId: string
   at?: string
   id?: string
+  /**
+   * A version store holds no `secrets:` block, and the live source may
+   * be gone (a restart), so a historical clone that restores managed
+   * pointers names their declarations here.
+   */
+  secrets?: SourceEntries
 }
 
 interface IdParams {
@@ -174,7 +183,7 @@ export function registerVersionsRoutes(app: FastifyInstance, deps: VersionRoutes
   )
 
   app.post<{ Body: CloneBody }>('/v1/workspaces/clone', async (req, reply) => {
-    const { sourceId, at, id } = req.body
+    const { sourceId, at, id, secrets } = req.body
     if (id !== undefined && deps.registry.has(id)) {
       return reply.status(409).send({ detail: `workspace id already exists: ${id}` })
     }
@@ -184,10 +193,26 @@ export function registerVersionsRoutes(app: FastifyInstance, deps: VersionRoutes
       try {
         const version = await resolveRef(store, at)
         const { entries, meta } = await readVersion(store, version)
-        ws = await Workspace.fromState(toState(entries, meta))
+        // A version store holds no `secrets:` block either. The
+        // request names the declarations when it has them, which is
+        // the only route open once the live source is gone (a
+        // restart); otherwise the live workspace supplies them.
+        const live = deps.registry.has(sourceId) ? deps.registry.get(sourceId).runner.ws : null
+        const declared = secrets ?? (live !== null ? live.declaredSources : undefined)
+        ws = await Workspace.fromState(
+          toState(entries, meta),
+          declared !== undefined ? { secrets: declared } : {},
+        )
       } catch (e) {
         if (e instanceof Errors.NotFoundError) {
           return reply.status(404).send({ detail: `version not found: ${at}` })
+        }
+        if (e instanceof SecretsError || e instanceof z.ZodError) {
+          // A declarations override the host cannot resolve, or a
+          // block the schema refuses, is a bad request, not a 500.
+          // The python twin catches ValueError for the same pair,
+          // pydantic's ValidationError being one.
+          return reply.status(400).send({ detail: e.message })
         }
         throw e
       }

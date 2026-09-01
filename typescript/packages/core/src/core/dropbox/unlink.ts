@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
@@ -32,9 +32,9 @@ export async function unlink(accessor: DropboxAccessor, path: PathSpec): Promise
     throw err
   }
   if (tag === 'folder') throw eisdir(path.virtual)
-  const startMs = performance.now()
+  const timer = startOp()
   await deletePath(accessor.tokenManager, apiPath)
-  record('unlink', path.virtual, 'dropbox', 0, startMs)
+  record('unlink', path.virtual, 'dropbox', 0, timer)
   await invalidateAfterUnlink(path)
   await invalidateAncestors(path)
 }

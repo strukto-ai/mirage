@@ -14,8 +14,9 @@
 
 import { SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
-import type { ShellVar } from '../../shell/variable.ts'
+import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, makeVar, storedAttrs, VarAttr, withValue } from '../../shell/variable.ts'
 import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../policy/types.ts'
 import {
@@ -209,6 +210,123 @@ export function varsFromDict(
   }
   for (const [name, letters] of Object.entries(attrs)) {
     if (!(name in out)) out[name] = makeVar(null, attrsFromLetters(letters))
+  }
+  return out
+}
+
+/**
+ * Variable records for a workspace env block.
+ *
+ * The declaration side of the env plane: a bare string is the literal
+ * short form (exported, like `varsFromEnv`), a mapping is coerced
+ * through `EnvVarSchema`, and a managed entry becomes bash's third
+ * state -- exported, unset -- carrying the pointer as `ManagedRef`.
+ * After this translation the session vars are the only truth the fill
+ * step reads.
+ */
+export function varsFromEntries(entries: EnvEntries): Record<string, ShellVar> {
+  const out = ownRecord<ShellVar>()
+  const exported: ReadonlySet<VarAttr> = new Set([VarAttr.Export])
+  for (const [name, rawEntry] of Object.entries(entries)) {
+    const entry = EnvVarSchema.parse(typeof rawEntry === 'string' ? { value: rawEntry } : rawEntry)
+    if (entry.from !== undefined) {
+      const managed: ManagedRef = {
+        source: entry.from,
+        ref: entry.ref,
+        key: entry.key ?? name,
+        eager: entry.fetch === 'eager',
+      }
+      out[name] = { value: null, attrs: exported, managed }
+      continue
+    }
+    const attrs = new Set<VarAttr>()
+    if (entry.export) attrs.add(VarAttr.Export)
+    if (entry.readonly) attrs.add(VarAttr.Readonly)
+    out[name] = makeVar(entry.value ?? null, attrs)
+  }
+  return out
+}
+
+/** The wire shape `varsToFields` writes and `varsFromFields` reads. */
+export interface VarFields {
+  env?: Record<string, string>
+  var_attrs?: Record<string, string>
+  managed?: Record<string, { from: string; ref: string; key: string; fetch?: string }>
+}
+
+/**
+ * The stored shape of a bare variable table.
+ *
+ * The three keys a stored session writes (`toJSON`): `env` holds the
+ * plain scalars, `var_attrs` the letter clusters, `managed` the
+ * pointers -- and a managed name serializes as its pointer, never its
+ * value, the same rule the session codec states. This exists for the
+ * workspace env template, a variable table with no session around it,
+ * so a snapshot or copy can carry the declaration.
+ */
+export function varsToFields(table: Record<string, ShellVar>): VarFields {
+  const managed = ownRecord<ManagedRef>()
+  const env = ownRecord<string>()
+  const letters = ownRecord<string>()
+  for (const [name, v] of Object.entries(table)) {
+    if (v.managed !== undefined) managed[name] = v.managed
+    if (v.attrs.size > 0) letters[name] = storedAttrs(v)
+  }
+  for (const [name, v] of Object.entries(table)) {
+    if (typeof v.value === 'string' && !Object.hasOwn(managed, name)) env[name] = v.value
+  }
+  const fields: VarFields = { env, var_attrs: letters }
+  if (Object.keys(managed).length > 0) {
+    const refs = ownRecord<{ from: string; ref: string; key: string; fetch?: string }>()
+    for (const [name, ref] of Object.entries(managed)) {
+      const entry: { from: string; ref: string; key: string; fetch?: string } = {
+        from: ref.source,
+        ref: ref.ref,
+        key: ref.key,
+      }
+      if (ref.eager) entry.fetch = 'eager'
+      refs[name] = entry
+    }
+    fields.managed = refs
+  }
+  return fields
+}
+
+/**
+ * The variable table a `varsToFields` payload restores.
+ *
+ * `varsFromDict` reads the two plain halves; each managed name then
+ * restores declared-but-unfetched, its value forced back to null so a
+ * payload that smuggles one in is discarded rather than trusted --
+ * exactly how `fromJSON` restores a stored session's vars.
+ */
+export function varsFromFields(data: VarFields): Record<string, ShellVar> {
+  return restoredVars(data.env ?? {}, data.var_attrs ?? {}, data.managed)
+}
+
+/**
+ * The restore side of `toJSON`'s three env keys. A managed name
+ * restores declared-but-unfetched: the value is forced back to null,
+ * because a stored session must never carry the plaintext, so one a
+ * tampered payload smuggles into `env` is discarded rather than
+ * trusted.
+ */
+function restoredVars(
+  env: Record<string, string>,
+  attrs: Record<string, string> | undefined,
+  managed:
+    | Record<string, { from: string; ref: string; key: string; fetch?: string }>
+    | null
+    | undefined,
+): Record<string, ShellVar> {
+  const out = attrs === undefined ? varsFromEnv(env) : varsFromDict(env, attrs)
+  for (const [name, m] of Object.entries(managed ?? {})) {
+    const base = sessionEntry(out, name) ?? makeVar(null, new Set([VarAttr.Export]))
+    setSessionEntry(out, name, {
+      value: null,
+      attrs: base.attrs,
+      managed: { source: m.from, ref: m.ref, key: m.key, eager: m.fetch === 'eager' },
+    })
   }
   return out
 }
@@ -547,6 +665,16 @@ export class Session {
    * session, a node kernel tier binds it).
    */
   toJSON(): Record<string, unknown> {
+    // A managed name serializes as its pointer, never its value: a
+    // stored session may leak only where a secret lives. `env` skips
+    // the name (the fetched plaintext must not land in the record)
+    // while `var_attrs` keeps its letters, so a payload with the
+    // `managed` key stripped still restores the name as
+    // attributed-unset rather than dropping it.
+    const managed = ownRecord<ManagedRef>()
+    for (const [name, v] of Object.entries(this.vars)) {
+      if (v.managed !== undefined) managed[name] = v.managed
+    }
     // `env` is every scalar and `var_attrs` the letters set on the names
     // that carry any, rather than one key holding both: `env` is the
     // shape an embedder writes and the other language reads, so it stays
@@ -554,10 +682,14 @@ export class Session {
     // the second key a reload could only guess, and guessing "exported"
     // turned every plain `X=hello` into an exported one on the first
     // round trip.
+    const scalars = ownRecord<string>()
+    for (const [name, value] of Object.entries(this.env)) {
+      if (!Object.hasOwn(managed, name)) scalars[name] = value
+    }
     const data: Record<string, unknown> = {
       session_id: this.sessionId,
       cwd: this.cwd,
-      env: { ...this.env },
+      env: scalars,
       created_at: this.createdAt,
       generation: this.generation,
     }
@@ -572,6 +704,15 @@ export class Session {
     // attribute was cleared) serialize as a process environment, so the
     // reload re-exported everything it held.
     data.var_attrs = letters
+    if (Object.keys(managed).length > 0) {
+      const refs = ownRecord<Record<string, string>>()
+      for (const [name, ref] of Object.entries(managed)) {
+        const entry: Record<string, string> = { from: ref.source, ref: ref.ref, key: ref.key }
+        if (ref.eager) entry.fetch = 'eager'
+        refs[name] = entry
+      }
+      data.managed = refs
+    }
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -611,6 +752,7 @@ export class Session {
     cwd?: string
     env?: Record<string, string>
     var_attrs?: Record<string, string>
+    managed?: Record<string, { from: string; ref: string; key: string; fetch?: string }> | null
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
     hidden_paths?: { paths?: string[]; patterns?: string[] } | null
@@ -630,13 +772,8 @@ export class Session {
       // hand-built -- so every name in it is exported, which is what a
       // process environment means. With the key present the attributes
       // were recorded and are restored as they were written.
-      ...(data.env !== undefined || data.var_attrs !== undefined
-        ? {
-            vars:
-              data.var_attrs === undefined
-                ? varsFromEnv(data.env ?? {})
-                : varsFromDict(data.env ?? {}, data.var_attrs),
-          }
+      ...(data.env !== undefined || data.var_attrs !== undefined || data.managed != null
+        ? { vars: restoredVars(data.env ?? {}, data.var_attrs, data.managed) }
         : {}),
       ...(data.created_at !== undefined ? { createdAt: data.created_at } : {}),
       ...(data.generation !== undefined ? { generation: data.generation } : {}),

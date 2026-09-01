@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from mirage import Workspace
 from mirage.resource.registry import build_resource
+from mirage.secrets.errors import SecretsError
 from mirage.server.clone import clone_workspace_with_override
 from mirage.server.paths import PathOutsideRootError, resolve_within_root
 from mirage.server.summary import make_brief, make_detail
@@ -61,9 +62,10 @@ async def create_workspace(req: CreateWorkspaceRequest,
         kwargs["owns_store"] = True
     try:
         ws = Workspace(**kwargs)
-    except (FileNotFoundError, ImportError, ValueError) as e:
+    except (FileNotFoundError, ImportError, SecretsError, ValueError) as e:
         # Construction failures (a wasi build dir that does not exist, a
-        # missing runtime extra) are the caller's to fix, not a 500.
+        # missing runtime extra, a `secrets:` block naming a source the
+        # host cannot resolve) are the caller's to fix, not a 500.
         raise HTTPException(status_code=400, detail=str(e))
     try:
         for prefix, (backend,
@@ -117,8 +119,14 @@ async def clone_workspace(workspace_id: str, req: CloneWorkspaceRequest,
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
     src_entry = registry.get(workspace_id)
-    new_ws = await src_entry.runner.call(
-        clone_workspace_with_override(src_entry.runner.ws, req.override))
+    try:
+        new_ws = await src_entry.runner.call(
+            clone_workspace_with_override(src_entry.runner.ws, req.override))
+    except (SecretsError, ValueError) as e:
+        # An override naming a source the host cannot resolve, or a
+        # block the schema refuses, is the caller's mistake -- the
+        # answer create, load and the historical clone already give.
+        raise HTTPException(status_code=400, detail=str(e))
     try:
         entry = registry.add(new_ws, workspace_id=req.id)
     except ValueError as e:
@@ -162,18 +170,41 @@ async def load_workspace(req: LoadWorkspaceRequest,
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
     resources = _build_load_resources(req.override)
+    secrets = _build_load_secrets(req.override)
     try:
-        ws = await Workspace.load(str(safe_path), resources=resources)
+        ws = await Workspace.load(str(safe_path),
+                                  resources=resources,
+                                  secrets=secrets)
     except FileNotFoundError:
         raise HTTPException(status_code=400,
                             detail=f"snapshot not found: {req.path}")
-    except ValueError as e:
+    except (SecretsError, ValueError) as e:
+        # A secrets override naming an unknown source, or one whose
+        # optional dependency is absent, is a bad request like any
+        # other override the deployment got wrong.
         raise HTTPException(status_code=400, detail=str(e))
     try:
         entry = registry.add(ws, workspace_id=req.id)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return await make_detail(entry)
+
+
+def _build_load_secrets(
+        override: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The `secrets:` declarations a load override supplies.
+
+    A snapshot never carries the block, because it is the deployment's
+    credentials, so a restored pointer at a declared instance needs it
+    named here -- the same reason a redacted mount needs `mounts`.
+    """
+    if not override:
+        return None
+    # Passed through as it arrived, even when it is not a mapping: the
+    # constructor is the one place that judges the container, and
+    # filtering here turned a bad override into a successful load whose
+    # every restored pointer was unresolvable.
+    return override.get("secrets")
 
 
 def _build_load_resources(

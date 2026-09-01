@@ -135,11 +135,15 @@ async def handle_env(
     # `env NAME=v cmd` runs the command with a replaced environment.
     # Only the scalars are replaced: arrays were never part of the env
     # the old two-container store swapped, and bash does not put one in
-    # a child's environment either.
+    # a child's environment either. A still-unfetched managed entry is
+    # a scalar in waiting, so it is replaced too: surviving the swap
+    # would let the inner line fetch and read a name `-i` or `-u` just
+    # cleared.
     saved = session.vars
     session.vars = {
         name: var
-        for name, var in saved.items() if not isinstance(var.value, str)
+        for name, var in saved.items()
+        if not isinstance(var.value, str) and var.managed is None
     } | vars_from_env(base)
     try:
         io = await execute_fn(shlex.join(command),

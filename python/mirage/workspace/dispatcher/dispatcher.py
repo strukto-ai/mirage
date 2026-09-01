@@ -28,7 +28,7 @@ from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.context import (get_current_session, hidden_paths_intersect,
                             path_allowed)
 from mirage.io import IOResult, OpReport
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
 from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
@@ -667,7 +667,7 @@ class Dispatcher:
             report (OpReport | None): the caller's report, stamped when
                 the answer is in hand.
         """
-        start = int(time.monotonic() * 1000)
+        timer = start_op()
         mount = self._namespace.try_mount_for(path.virtual)
         owner = mount.prefix if mount is not None else None
         policies = self._namespace.registry.policies
@@ -722,7 +722,7 @@ class Dispatcher:
             target = found
             result = found
         record(op, path.virtual, ResourceName.RAM.value,
-               len(target.encode("utf-8")), start)
+               len(target.encode("utf-8")), timer)
         _memory_answered(report)
         bound = await post_ops_gate(policies, op, path, write, owner or "",
                                     result)
@@ -880,13 +880,13 @@ class Dispatcher:
             path (PathSpec): target path.
             kwargs (dict[str, Any]): the requested attribute fields.
         """
-        start = int(time.monotonic() * 1000)
+        timer = start_op()
         overlay = {
             key: value
             for key in SETATTR_KEYS if (value := kwargs.get(key)) is not None
         }
         await self._write_overlay(path.virtual, overlay)
-        record("setattr", path.virtual, ResourceName.RAM.value, 0, start)
+        record("setattr", path.virtual, ResourceName.RAM.value, 0, timer)
         return overlay
 
     async def _write_overlay(self, virtual: str, fields: dict[str,

@@ -12,16 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Session, varsFromEnv } from './session.ts'
+import { ownRecord, Session, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMSessionStore } from './ram.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { CAS_MAX_RETRIES, generationOf, type SessionFields, type SessionStore } from './store.ts'
 import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../policy/types.ts'
+import type { EnvEntries } from '../../secrets/config.ts'
+import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 
 type StoredSession = Parameters<typeof Session.fromJSON>[0]
+
+/** Whether any of the session's variables carries a pointer. */
+function holdsManaged(session: Session): boolean {
+  return Object.values(session.vars).some((v) => v.managed !== undefined)
+}
+
+/**
+ * Fill in template names a stored record predates.
+ *
+ * A record written before the workspace's env block gained an entry
+ * holds no var for the new name, so a session hydrated from the record
+ * alone could never reach the credential the deployment just
+ * configured. The record's own entries win per name -- an overwrite, a
+ * re-export, a stored pointer all round-trip untouched -- and only an
+ * absent name gains the seed. The records are frozen, so sharing them
+ * across sessions is safe.
+ */
+function mergeSeedVars(session: Session, seedVars: Record<string, ShellVar>): void {
+  for (const [name, seeded] of Object.entries(seedVars)) {
+    if (!(name in session.vars)) session.vars[name] = seeded
+  }
+}
 
 /**
  * Owns the live session table over a storage-agnostic SessionStore.
@@ -47,10 +71,55 @@ export class SessionManager {
 
   private defaultProfileInternal: CompiledProfile | null = null
 
-  constructor(defaultSessionId: string, store?: SessionStore) {
+  // The workspace's env block, translated: seeded onto the default
+  // session now and copied into every created session as its template.
+  // The records are frozen, so sharing them across sessions is safe;
+  // each session gets its own record.
+  private seedVarsInternal: Record<string, ShellVar>
+  private hasManaged: boolean
+
+  constructor(defaultSessionId: string, store?: SessionStore, seedVars?: Record<string, ShellVar>) {
     this.defaultIdInternal = defaultSessionId
     this.sessionStore = store ?? new RAMSessionStore()
-    this.sessions.set(defaultSessionId, new Session({ sessionId: defaultSessionId }))
+    this.seedVarsInternal = ownRecord(seedVars)
+    this.hasManaged = Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
+    this.sessions.set(
+      defaultSessionId,
+      new Session({ sessionId: defaultSessionId, vars: ownRecord(this.seedVarsInternal) }),
+    )
+  }
+
+  /**
+   * True once any session may hold a managed variable.
+   *
+   * The fill step is skipped entirely while this is false, so it is
+   * sticky-true: set by the workspace's env block, a created session's
+   * own entries, a hydrated record, or a snapshot, and never cleared (a
+   * detached name costs nothing extra -- the fill pass finds nothing to
+   * fetch and returns).
+   */
+  get hasManagedEnv(): boolean {
+    return this.hasManaged
+  }
+
+  /** The env template a created session starts from, copied. */
+  get seedVars(): Record<string, ShellVar> {
+    return ownRecord(this.seedVarsInternal)
+  }
+
+  /**
+   * Install the env template a snapshot or copy carried over.
+   *
+   * The template is constructor state, so `fromState` rebuilds a
+   * workspace without it; existing sessions recover their own vars,
+   * but a session created afterward would start bare while its older
+   * siblings still carry every workspace env entry. Sticky on
+   * `hasManagedEnv`, like every other writer of it.
+   */
+  restoreSeed(seedVars: Record<string, ShellVar>): void {
+    this.seedVarsInternal = ownRecord(seedVars)
+    this.hasManaged =
+      this.hasManaged || Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
   }
 
   /** The document's default profile, as compiled for this workspace. */
@@ -225,11 +294,17 @@ export class SessionManager {
         // edit; stamped after the baseline so a stale record is
         // rewritten on the next flush.
         if (this.defaultProfileInternal !== null) narrow(dflt, this.defaultProfileInternal)
+        // Same order for the same reason: an env entry the record
+        // predates lands durably on the next flush.
+        mergeSeedVars(dflt, this.seedVarsInternal)
+        this.hasManaged = this.hasManaged || holdsManaged(dflt)
         continue
       }
       if (this.sessions.has(sid)) continue
       this.sessions.set(sid, stored)
       this.persisted.set(sid, JSON.stringify(stored.toJSON()))
+      mergeSeedVars(stored, this.seedVarsInternal)
+      this.hasManaged = this.hasManaged || holdsManaged(stored)
     }
     this.loaded = true
   }
@@ -275,23 +350,35 @@ export class SessionManager {
     this.loadPromise = Promise.resolve()
     const entries = new Map<string, SessionFields>()
     for (const s of this.sessions.values()) entries.set(s.sessionId, s.toJSON() as SessionFields)
-    for (const s of sessions) entries.set(s.sessionId, s.toJSON() as SessionFields)
+    for (const s of sessions) {
+      entries.set(s.sessionId, s.toJSON() as SessionFields)
+      this.hasManaged = this.hasManaged || holdsManaged(s)
+    }
     await this.sessionStore.replaceAll(entries)
     this.persisted.clear()
     for (const [sid, fields] of entries) this.persisted.set(sid, JSON.stringify(fields))
   }
 
+  /**
+   * Create a session, seeded with the workspace's env template.
+   * `options.env` is this session's own env entries, literal or
+   * managed, merged over the template (session entries win).
+   */
   create(
     sessionId: string,
-    options: { mountModes?: ReadonlyMap<string, MountMode> | null } = {},
+    options: { mountModes?: ReadonlyMap<string, MountMode> | null; env?: EnvEntries } = {},
   ): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }
+    const seeded = ownRecord(this.seedVarsInternal)
+    if (options.env !== undefined) Object.assign(seeded, varsFromEntries(options.env))
     const session = new Session({
       sessionId,
       mountModes: options.mountModes ?? null,
+      vars: seeded,
     })
+    this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)
     return session
   }

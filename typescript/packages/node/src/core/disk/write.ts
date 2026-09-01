@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { writeFile } from 'node:fs/promises'
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
@@ -26,7 +26,7 @@ export async function writeBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const virtual = p.mountPath
   const full = resolveSafe(accessor.root, virtual)
   // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent
@@ -37,6 +37,6 @@ export async function writeBytes(
   } catch (err) {
     throw diskError(err, p)
   }
-  record('write', virtual, ResourceName.DISK, data.byteLength, start)
+  record('write', virtual, ResourceName.DISK, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

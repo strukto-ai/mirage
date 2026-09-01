@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from functools import partial
@@ -35,7 +34,7 @@ from mirage.core.msgraph.client import (GraphError, graph_delete, graph_get,
                                         upload_chunk)
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.observe.context import (active_recorder, record, record_stream,
-                                    revision_for)
+                                    revision_for, start_op)
 from mirage.ops.types import LiveFileIdentity
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import eisdir, enoent, listing_error
@@ -379,7 +378,7 @@ async def read_item(config: MsGraphConfig,
                     session: SessionArg = None) -> bytes:
     pinned = revision_for(virtual)
     window = window_for(offset, size)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     fingerprint = None
     revision = pinned
     try:
@@ -416,7 +415,7 @@ async def read_item(config: MsGraphConfig,
            label,
            backend,
            len(data),
-           start_ms,
+           timer,
            fingerprint=fingerprint,
            revision=revision)
     return data

@@ -14,7 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { DropboxApiError } from './client.ts'
@@ -27,7 +27,7 @@ import { dropboxPathOf } from './paths.ts'
 export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const from = dropboxPathOf(accessor, src)
   const to = dropboxPathOf(accessor, dst)
-  const startMs = performance.now()
+  const timer = startOp()
   try {
     await copyPath(accessor.tokenManager, from, to)
   } catch (err) {
@@ -39,7 +39,7 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
     await deletePath(accessor.tokenManager, to)
     await copyPath(accessor.tokenManager, from, to)
   }
-  record('copy', src.virtual, 'dropbox', 0, startMs)
+  record('copy', src.virtual, 'dropbox', 0, timer)
   await invalidateAfterWrite(dst)
   await invalidateAncestors(dst)
 }

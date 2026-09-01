@@ -14,6 +14,8 @@
 
 import { Language, type Node, Parser } from 'web-tree-sitter'
 
+import { ARITH_OPEN_TOKEN, DIGIT, NAME_CONT, QUOTES } from './constants.ts'
+
 export interface ShellParserConfig {
   engineWasm: Uint8Array | ArrayBuffer
   grammarWasm: Uint8Array | ArrayBuffer
@@ -22,9 +24,6 @@ export interface ShellParserConfig {
 export interface ShellParser {
   parse(command: string): Node
 }
-
-const ARITH_OPEN_TOKEN = '(('
-const QUOTES = new Set(["'", '"'])
 
 /**
  * Index just past the `)` closing the `(` at `start`.
@@ -112,57 +111,6 @@ export function stripLineContinuation(command: string): string {
   for (let i = command.length - 1; i >= 0 && command[i] === '\\'; i -= 1) trailing += 1
   return trailing % 2 === 1 ? command.slice(0, -1) : command
 }
-
-// Locate a backtick substitution that is never closed. tree-sitter
-// happily parses "echo `echo a" as a complete command, so the region has
-// to be scanned directly. Quoting follows the shell reader: single quotes
-// protect a backtick, double quotes do not, and once inside a
-// substitution only a backslash escapes, which is why `"`echo '`'`"` is
-// an error in bash rather than a quoted backtick.
-export function findUnterminatedBacktick(command: string): string | null {
-  let quote: string | null = null
-  let dollarQuote = false
-  let opened: number | null = null
-  let lastDollar = -2
-  let i = 0
-  while (i < command.length) {
-    const ch = command[i]
-    if (quote === "'") {
-      // $'...' takes backslash escapes, so \' does not close it; a
-      // plain '...' treats every backslash literally.
-      if (dollarQuote && ch === '\\') {
-        i += 2
-        continue
-      }
-      if (ch === "'") {
-        quote = null
-        dollarQuote = false
-      }
-      i += 1
-      continue
-    }
-    if (ch === '\\') {
-      i += 2
-      continue
-    }
-    if (opened !== null) {
-      if (ch === '`') opened = null
-      i += 1
-      continue
-    }
-    if (ch === '`') opened = i
-    else if (ch === "'" && quote === null) {
-      quote = "'"
-      dollarQuote = lastDollar === i - 1
-    } else if (ch === '"') quote = quote === '"' ? null : '"'
-    else if (ch === '$') lastDollar = i
-    i += 1
-  }
-  return opened !== null ? command.slice(opened) : null
-}
-
-const NAME_CONT = /[A-Za-z0-9_]/
-const DIGIT = /[0-9]/
 
 /**
  * Offsets of literal `$` tokens cut off from their variable name.
@@ -318,102 +266,4 @@ function toArrayBuffer(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
 
 function toUint8(bytes: Uint8Array | ArrayBuffer): Uint8Array {
   return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-}
-
-const BASH_KEYWORDS: ReadonlySet<string> = new Set([
-  'if',
-  'then',
-  'else',
-  'elif',
-  'fi',
-  'for',
-  'while',
-  'until',
-  'do',
-  'done',
-  'case',
-  'esac',
-  'in',
-  'function',
-  'select',
-])
-
-const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
-  '(',
-  ')',
-  '{',
-  '}',
-  '[',
-  ']',
-  '"',
-  "'",
-  '`',
-])
-
-function isStructuralError(node: Node): boolean {
-  for (const child of node.children) {
-    if (child.isNamed) return true
-    if (BASH_KEYWORDS.has(child.type)) return true
-    if (STRUCTURAL_TOKENS.has(child.type)) return true
-  }
-  return false
-}
-
-function walkNamed(node: Node): Node[] {
-  const out: Node[] = [node]
-  for (const child of node.namedChildren) out.push(...walkNamed(child))
-  return out
-}
-
-function isRecoveredQuotedHeredocEnd(previous: Node | null, error: Node): boolean {
-  if (previous === null) return false
-  const errorText = error.text.trim()
-  if (errorText.length === 0) return false
-  for (const candidate of walkNamed(previous)) {
-    if (candidate.type !== 'heredoc_redirect') continue
-    let start: string | null = null
-    let end: string | null = null
-    for (const child of candidate.namedChildren) {
-      if (child.type === 'heredoc_start') start = child.text
-      else if (child.type === 'heredoc_end') end = child.text
-    }
-    if (
-      start !== null &&
-      (start.includes("'") || start.includes('"')) &&
-      (end === null || end.length === 0) &&
-      start.replaceAll("'", '').replaceAll('"', '') === errorText
-    ) {
-      return true
-    }
-  }
-  return false
-}
-
-/**
- * Locate a top-level structural syntax error in a parsed AST.
- *
- * Tree-sitter often recovers from minor anomalies (e.g. `for x in;`) by
- * producing a valid statement with an internal ERROR token. Bash accepts
- * those, so we only flag errors that surface as direct children of
- * `program` AND contain a bash keyword, a bracket / quote, or a recovered
- * named subtree. Stand-alone statement separators (`;`, `&`, `|`) inside an
- * ERROR are deliberately not flagged because bash itself accepts e.g. `& ;`.
- *
- * Returns the offending region's text, or `null` if the AST is clean.
- */
-export function findSyntaxError(node: Node): string | null {
-  if (!node.hasError) return null
-  let previous: Node | null = null
-  for (const child of node.children) {
-    if (child.isMissing) return child.text
-    if (child.type === 'ERROR' && isStructuralError(child)) {
-      if (isRecoveredQuotedHeredocEnd(previous, child)) {
-        previous = child
-        continue
-      }
-      return child.text
-    }
-    if (child.isNamed) previous = child
-  }
-  return null
 }

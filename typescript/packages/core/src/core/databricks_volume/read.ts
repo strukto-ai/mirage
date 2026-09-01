@@ -14,7 +14,7 @@
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { isNotFound, notFoundError } from './errors.ts'
@@ -34,11 +34,11 @@ export async function readBytes(
 ): Promise<Uint8Array> {
   const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
-  const startMs = performance.now()
+  const timer = startOp()
   const offset = options.offset ?? 0
   const size = options.size ?? null
   if (size === 0) {
-    record('read', virtual, ResourceName.DATABRICKS_VOLUME, 0, startMs)
+    record('read', virtual, ResourceName.DATABRICKS_VOLUME, 0, timer)
     return new Uint8Array(0)
   }
   const range = rangeHeader(offset, size)
@@ -52,6 +52,6 @@ export async function readBytes(
     throw exc
   }
   const data = windowIfUnranged(new Uint8Array(await r.arrayBuffer()), r.status, offset, size)
-  record('read', virtual, ResourceName.DATABRICKS_VOLUME, data.byteLength, startMs)
+  record('read', virtual, ResourceName.DATABRICKS_VOLUME, data.byteLength, timer)
   return data
 }

@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.core.dropbox.api import delete_path, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir, enoent
 
@@ -34,8 +32,8 @@ async def unlink(accessor: DropboxAccessor, path: PathSpec) -> None:
         raise
     if entry.get(".tag") == "folder":
         raise eisdir(path.virtual)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     await delete_path(accessor.token_manager, api_path)
-    record("unlink", path.virtual, "dropbox", 0, start_ms)
+    record("unlink", path.virtual, "dropbox", 0, timer)
     await invalidate_after_unlink(path)
     await invalidate_ancestors(path)

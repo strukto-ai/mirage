@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import upload_file_version, upload_new_file
 from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -29,7 +27,7 @@ async def write_bytes(accessor: BoxAccessor, path: PathSpec,
     if not parts:
         raise IsADirectoryError(path.virtual)
     tm = accessor.token_manager
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     existing = await resolve_item(accessor, parts)
     if existing is not None and existing.get("type") == "file":
         # Overwrite uploads a new version under the same id, keeping Box's
@@ -40,5 +38,5 @@ async def write_bytes(accessor: BoxAccessor, path: PathSpec,
         if parent_id is None:
             raise enoent(path.virtual)
         await upload_new_file(tm, parent_id, parts[-1], data)
-    record("write", path.resource_path, "box", len(data), start_ms)
+    record("write", path.resource_path, "box", len(data), timer)
     await invalidate_after_write(path)

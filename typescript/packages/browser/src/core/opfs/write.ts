@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -24,7 +24,7 @@ export async function writeBytes(
   data: Uint8Array,
 ): Promise<void> {
   const root = accessor.rootHandle
-  const start = performance.now()
+  const timer = startOp()
   const virtual = p.mountPath
   let handle: FileSystemFileHandle
   try {
@@ -35,5 +35,5 @@ export async function writeBytes(
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()
-  record('write', virtual, ResourceName.OPFS, data.byteLength, start)
+  record('write', virtual, ResourceName.OPFS, data.byteLength, timer)
 }

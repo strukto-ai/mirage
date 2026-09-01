@@ -144,7 +144,9 @@ export async function handleEnv(
   // `env NAME=v cmd` runs the command with a replaced environment. Only
   // the scalars are replaced: arrays were never part of the env the old
   // two-container store swapped, and bash does not put one in a child's
-  // environment either.
+  // environment either. A still-unfetched managed entry is a scalar in
+  // waiting, so it is replaced too: surviving the swap would let the
+  // inner line fetch and read a name `-i` or `-u` just cleared.
   //
   // Built through `varsFromEnv`, the one conversion from an embedder's
   // process environment to session records, so the export attribute is
@@ -154,7 +156,7 @@ export async function handleEnv(
   const saved = session.vars
   const swapped = ownRecord<ShellVar>()
   for (const [name, v] of Object.entries(saved)) {
-    if (typeof v.value !== 'string') swapped[name] = v
+    if (typeof v.value !== 'string' && v.managed === undefined) swapped[name] = v
   }
   Object.assign(swapped, varsFromEnv(base))
   session.vars = swapped

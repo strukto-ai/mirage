@@ -36,6 +36,12 @@ import { DEFAULT_FIXTURE_ROOT } from '../kit/typescript/index.ts'
 
 const URL_MCP = 'https://huggingface.co/mcp'
 const OUT = join(DEFAULT_FIXTURE_ROOT, 'hf-mcp', 'tools.json')
+// The limits page, captured for the same reason the schemas are: the tool
+// document's own closing line sends the model to `hf://README.md`, so it is
+// part of the surface being measured rather than reference material for us.
+// It is also where every bound in this fake came from -- cat's 20,000/80,000,
+// ls and find's 1,000/10,000 -- which were invented here until it was read.
+const OUT_README = join(DEFAULT_FIXTURE_ROOT, 'hf-mcp', 'README.md')
 
 interface Rpc {
   result?: Record<string, unknown>
@@ -90,13 +96,79 @@ async function listTools(token: string): Promise<{
   return { init, tools }
 }
 
+/** The bytes `cat hf://README.md` serves, without the cat rendering around them. */
+async function readmeOf(token: string): Promise<string> {
+  const opened = await rpc(
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'mirage-capture', version: '0' },
+      },
+    },
+    '',
+    token,
+  )
+  await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, opened.session, token)
+  const got = await rpc(
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'hf_fs',
+        // No --max-bytes: the default is 20,000 and the page is a third of
+        // that, so asking for it whole is asking for it once. A page that
+        // outgrows the default would arrive truncated and SAY so, which is
+        // the assertion below.
+        arguments: { operations: [{ cmd: 'cat', args: ['hf://README.md'] }] },
+      },
+    },
+    opened.session,
+    token,
+  )
+  // Taken from the structured result and not from the markdown: the rendered
+  // form wraps the file in a header this fake generates for itself, and
+  // capturing that too would nest one copy inside another.
+  const results = (got.reply.result as { structuredContent?: { results?: unknown[] } } | undefined)
+    ?.structuredContent?.results
+  const first = Array.isArray(results) ? (results[0] as Record<string, unknown>) : undefined
+  const result = first?.result as Record<string, unknown> | undefined
+  const content = result?.content
+  if (typeof content !== 'string') {
+    throw new Error(`cat hf://README.md failed: ${JSON.stringify(got.reply).slice(0, 400)}`)
+  }
+  if (result?.truncated === true) {
+    throw new Error(
+      'hf://README.md now exceeds the default cat bound, so this capture is a prefix; ' +
+        'raise --max-bytes here before refreshing the fixture',
+    )
+  }
+  return content
+}
+
 const token = process.env.HF_TOKEN ?? ''
 const anon = await listTools('')
+// Anonymously for BOTH, because the pair has to describe one server. The
+// document below is built from `anon`, so a README fetched with the token
+// would pin the authenticated page beside the anonymous schemas -- one
+// fixture from each of two snapshots, which is the thing this script exists
+// to prevent.
+const readme = await readmeOf('')
 if (token !== '') {
   const authed = await listTools(token)
   if (JSON.stringify(anon.tools) !== JSON.stringify(authed.tools)) {
     throw new Error(
       'the anonymous and authenticated tool lists differ; the fixture can only pin one, ' +
+        'so decide which the measurement uses before refreshing it',
+    )
+  }
+  if (readme !== (await readmeOf(token))) {
+    throw new Error(
+      'the anonymous and authenticated README pages differ; the fixture can only pin one, ' +
         'so decide which the measurement uses before refreshing it',
     )
   }
@@ -110,9 +182,19 @@ const doc = {
   instructions: anon.init.instructions,
   tools: anon.tools,
 }
+
+// Both writes LAST, after every fetch and every assertion above. Written as
+// they were reached -- tool document, then page -- a failed or truncated
+// README left tools.json already replaced and README.md still the previous
+// capture: two snapshots of a surface the fake presents as one, and the
+// script exiting non-zero would not have put it back.
+// The page is verbatim, with no trailing newline added: the fake serves it
+// byte for byte and `Bytes:` in the reply counts whatever is written here.
 writeFileSync(OUT, `${JSON.stringify(doc, null, 2)}\n`)
+writeFileSync(OUT_README, readme)
 const info = doc.serverInfo as { name?: string; version?: string }
 process.stdout.write(
-  `captured ${String(anon.tools.length)} tools from ${String(info.name)} ${String(info.version)}` +
+  `captured ${String(anon.tools.length)} tools and ${String(Buffer.byteLength(readme))} ` +
+    `README bytes from ${String(info.name)} ${String(info.version)}` +
     `${token === '' ? '' : ' (anonymous == authenticated)'}\n`,
 )

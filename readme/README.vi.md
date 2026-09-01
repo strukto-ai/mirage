@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="../assets/mirage-og-light@2x.png" alt="Mirage: hệ thống tệp ảo thống nhất cho AI Agent" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-og-dark@2x.png">
+    <img src="../assets/mirage-og-light@2x.png" alt="Mirage: terminal ảo cho AI Agent" width="900">
+  </picture>
 </p>
 
 <p align="center">
@@ -28,11 +31,12 @@
   <a href="./README.zh-CN.md"><img alt="简体中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
   <a href="./README.zh-TW.md"><img alt="繁體中文 README" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
   <a href="./README.fr.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
+  <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage là **hệ thống tệp ảo thống nhất cho AI Agent**: nó gắn các dịch vụ và nguồn dữ liệu như S3, Google Drive, Slack, Gmail và Redis cạnh nhau thành một hệ thống tệp duy nhất. Bất kỳ LLM nào đã biết bash đều có thể đọc, grep và nối pipe trên mọi backend ngay từ đầu, không cần từ vựng mới.
+Mirage là **terminal ảo cho AI Agent**. Hệ thống tệp ảo mang lại ngữ cảnh dữ liệu rộng, các CLI ảo hóa cho agent linh hoạt hơn khi dùng công cụ, runtime động giảm chi phí hạ tầng bên dưới và tiết kiệm token hơn, còn quyền kiểm soát chi tiết đối với hành động của agent và cả những gì nó nhìn thấy mang lại độ an toàn tốt nhất. Cùng nhau, các phần này tạo thành một terminal ảo hóa duy nhất, đem lại hiệu năng agent, hiệu quả chi phí và bảo mật tốt nhất.
 
 ```python
 ws = Workspace(
@@ -49,9 +53,7 @@ ws = Workspace(
 await ws.execute("grep -rln session /redis /tmp")
 
 # chạy script nằm trong Slack, ghi báo cáo vào Redis
-await ws.execute(
-    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
-)
+await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # cài một CLI có kiểu dưới một từ khóa: điều phối theo tên, không theo đường dẫn,
 # và có thể khám phá qua `man`, `type`, `which` như mọi chương trình khác
@@ -61,18 +63,21 @@ await ws.execute('slack send-message --channel general --text "report is up"')
 
 ## Giới thiệu
 
-- **Một giao diện thay vì N SDK và M MCP.** Mọi dịch vụ đều dùng cùng một ngữ nghĩa hệ thống tệp, và pipeline kết hợp giữa các dịch vụ tự nhiên như trên đĩa cục bộ.
-- **Khoảng 50 backend tích hợp sẵn:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH và nhiều hơn nữa, được gắn cạnh nhau dưới một gốc duy nhất.
-- **Workspace di động:** clone, snapshot và đánh phiên bản workspace; phiên chạy agent di chuyển giữa các máy mà không cần khởi động lại hay cấu hình lại hệ thống.
-- **Nhúng được:** SDK Python và TypeScript chạy ngay trong tiến trình của FastAPI, Express, ứng dụng trình duyệt hoặc bất kỳ runtime bất đồng bộ nào; không cần tiến trình riêng.
-- **Tích hợp agent:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL và OpenHands qua các SDK; các agent lập trình qua adapter gốc, plugin cài được, MCP hoặc FUSE.
+- **Một giao diện terminal ảo thống nhất, thay vì N SDK và M MCP.** Mọi backend đều dùng cùng một ngữ nghĩa hệ thống tệp, nên pipeline kết hợp được giữa các dịch vụ.
+- **Hệ thống tệp ảo trên mọi nguồn dữ liệu.** S3, Google Drive, Slack, Gmail, Redis và các nguồn khác được gắn cạnh nhau dưới một gốc duy nhất, nên agent tiếp cận tất cả qua một giao diện thống nhất bằng các công cụ unix nó đã biết như `ls`, `grep`, `find` và `jq`.
+- **Công cụ dòng lệnh ảo (CLI).** `git`, `slack` và `ntn` do chính Mirage đáp ứng, nên agent điều khiển dịch vụ mà không cần cài gì, xuyên qua các runtime và máy khác nhau; một công cụ còn có thể ảo hóa thành hai hoặc nhiều hơn, mỗi cái mang tên riêng với thông tin xác thực riêng.
+- **Runtime động, có định tuyến.** Python, JavaScript và bất kỳ lệnh nào khác đều có thể được gửi tới runtime đã cấu hình, trong tiến trình, trong sandbox hoặc từ xa, tách tính toán khỏi lưu trữ và cho phép đổi bên này mà không động tới bên kia.
+- **Mirage shell ảo hóa.** Nó gắn hệ thống tệp, các CLI và các runtime vào cùng một dòng lệnh, nên pipe, chuyển hướng, biến, job và lịch sử đều hoạt động xuyên cả ba.
+- **Profile thiết kế cho agent.** `allow`, `ask` và `deny` chi phối lệnh và CLI, còn `hide` và `show` chi phối tệp và thư mục, nên một đường dẫn bị ẩn không chỉ là không đọc được mà còn không tồn tại trong hệ thống tệp mà agent nhìn thấy.
+- **Công cụ chính sách viết được bằng script.** Một script chính sách có thể chặn mọi hành động nguy hiểm trước khi nó chạy, và cùng ngăn xếp đó kiểm soát mọi thao tác VFS và mọi lần ghi session, nên không tệp nào và không biến môi trường nào bị rò rỉ.
+- **Thông báo nối vào VFS và agent.** Thay đổi bên ngoài trở thành luồng sự kiện trên mount, nên một trả lời Slack mới hiện ra như một thay đổi của tệp hội thoại trong hệ thống tệp ảo, và agent phản ứng theo đó thay vì quét lại toàn bộ cây.
 
 ## Kiến trúc
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: AI Agent và ứng dụng → Mirage Bash và VFS → Dispatcher và cache → hạ tầng và dịch vụ từ xa" width="720">
+    <img src="../assets/mirage-arch-light.svg" alt="Kiến trúc Mirage: agent và harness tiếp cận profile và Mirage shell, hai thành phần này phân giải các lệnh kiểu Unix, CLI ảo và ngôn ngữ lập trình xuống runtime và hệ thống tệp ảo, cùng với xác thực, công cụ chính sách và thông báo bên cạnh" width="100%">
   </picture>
 </p>
 

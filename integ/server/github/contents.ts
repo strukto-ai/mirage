@@ -31,10 +31,12 @@ import {
   branchNames,
   commitList,
   directoriesOf,
+  stageTree,
   submodulesOf,
   treeItems,
   treeOf,
   treeOfBranch,
+  visibleHeadOf,
 } from './store.ts'
 import type { RepoRow, Tree } from './store.ts'
 import { authedRoute, everywhere, fail, jsonBodyOf, param, route, str, withRepo } from './http.ts'
@@ -85,14 +87,9 @@ function dirJson(files: Tree, at: string): JsonValue[] | null {
   return [...entries.keys()].sort().map((k) => entries.get(k) as JsonValue)
 }
 
-async function nextCommitSeq(
-  db: Client,
-  tenant: string,
-  repo: string,
-  branch: string,
-): Promise<number> {
+async function nextCommitSeq(db: Client, tenant: string, repo: string): Promise<number> {
   const rows = await db.githubCommit.findMany({
-    where: { tenant, repo, branch },
+    where: { tenant, repo },
     orderBy: { seq: 'desc' },
     take: 1,
   })
@@ -100,9 +97,17 @@ async function nextCommitSeq(
   return top === undefined ? 0 : top.seq + 1
 }
 
-// Append a commit for a write to one branch. Its sha is derived from the
-// position in the branch's history, which is what makes a replayed fixture
-// answer the same shas.
+// Record one commit. Its sha is content-addressed the way git's is: the
+// parent, the tree, the people and the message decide it, and nothing about
+// where it sits does. That is the whole reason a sha cannot be reproduced by a
+// later commit landing in a freed slot, which is what a position-derived sha
+// allowed every time a move or a reset released one. `seq` survives only as
+// insertion order for a stable listing; no identity or history reads it.
+//
+// `advance` moves the branch's ref onto the new commit, which is what a
+// /contents write does: the write IS the ref update. A plumbing commit passes
+// false and is born dangling, reachable by sha but on no branch until a ref
+// update points at it.
 export async function recordCommit(
   db: Client,
   tenant: string,
@@ -115,25 +120,53 @@ export async function recordCommit(
     author: null,
     committer: null,
   },
+  parent: string | null = null,
+  advance = true,
 ): Promise<{ sha: string; message: string }> {
-  const seq = await nextCommitSeq(db, tenant, repo.fullName, branch)
-  const sha = commitSha(`${repo.fullName}@${branch}:${String(seq)}:${message}`)
+  const seq = await nextCommitSeq(db, tenant, repo.fullName)
+  const authorJson = personJson(people.author)
+  const committerJson = personJson(people.committer)
+  const parentSha = parent ?? (await visibleHeadOf(db, tenant, repo, branch))
+  // EVERY commit names a tree, so every commit is a snapshot that can be read
+  // back on its own. A plumbing commit names the one its caller staged; a
+  // /contents commit stages the tree its own write just produced, which is why
+  // this reads the branch AFTER the write has landed. Without it a commit born
+  // here recorded no tree at all, and the only way to see its files was to read
+  // whatever its branch happened to hold later, which is a different answer the
+  // moment the branch moves.
+  //
+  // The tree is in the sha for the same reason git puts it there: two writes of
+  // different bytes under one message onto one parent are two commits, and
+  // addressing them by message and parent alone made them one.
+  const stored =
+    tree === ''
+      ? await stageTree(db, tenant, repo, await treeOfBranch(db, tenant, repo, branch))
+      : tree
+  const sha = commitSha(
+    [repo.fullName, parentSha, stored, authorJson, committerJson, message].join('\0'),
+  )
   await db.githubCommit.create({
     data: {
       tenant,
       repo: repo.fullName,
-      branch,
       sha,
+      parentSha,
       message,
       authorLogin: '',
       date: '',
       filesJson: JSON.stringify(paths),
-      treeSha: tree,
-      authorJson: personJson(people.author),
-      committerJson: personJson(people.committer),
+      treeSha: stored,
+      authorJson,
+      committerJson,
       seq,
     },
   })
+  if (advance) {
+    await db.githubBranch.updateMany({
+      where: { tenant, repo: repo.fullName, name: branch },
+      data: { headSha: sha },
+    })
+  }
   return { sha, message }
 }
 

@@ -31,7 +31,8 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.types import ConsistencyPolicy, JsonValue, MountMode, ResourceName
 from mirage.version import __version__
 from mirage.workspace.mount.namespace import NodeMeta
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import (Session, vars_from_fields,
+                                              vars_to_fields)
 from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
@@ -181,6 +182,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
         StateKey.MIRAGE_VERSION: __version__,
         StateKey.MOUNTS: mounts_state,
         StateKey.SESSIONS: [s.to_dict() for s in ws._session_mgr.list()],
+        StateKey.ENV: vars_to_fields(ws._session_mgr.seed_vars),
         StateKey.DEFAULT_SESSION_ID: ws._session_mgr.default_id,
         StateKey.DEFAULT_AGENT_ID: ws._default_agent_id,
         StateKey.CURRENT_AGENT_ID: ws._default_agent_id,
@@ -297,6 +299,12 @@ async def apply_state_dict(ws, state: dict[str, Any]) -> None:
         mount.resource.load_state(m[MountKey.RESOURCE_STATE])
 
     await _restore_sessions(ws, state)
+    # The env template is constructor state the rebuilt workspace was
+    # never given: without it a session created after the load starts
+    # bare while restored ones carry every workspace env entry.
+    seed = state.get(StateKey.ENV)
+    if seed:
+        ws._session_mgr.restore_seed(vars_from_fields(seed))
     # current_agent_id is not restored: the agent of a line is carried
     # per execution (the call's agent_id, else the default), never held
     # on the workspace, so the key only mirrors default_agent_id.

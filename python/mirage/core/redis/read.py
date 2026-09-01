@@ -12,11 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.path import norm
@@ -39,7 +37,7 @@ async def read_bytes(accessor: RedisAccessor,
     virtual = path_spec.virtual
     path = path_spec.mount_path
     store = accessor.store
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     key = norm(path)
     if offset or size is not None:
         data = await store.get_file_range(key, offset, size)
@@ -47,7 +45,7 @@ async def read_bytes(accessor: RedisAccessor,
         data = await store.get_file(key)
     if data is None:
         raise enoent(virtual)
-    record("read", path, "redis", len(data), start_ms)
+    record("read", path, "redis", len(data), timer)
     return data
 
 

@@ -17,7 +17,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec } from '../../types.ts'
-import { record, recordingActive, revisionFor } from '../../observe/context.ts'
+import { record, recordingActive, revisionFor, startOp } from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
 import { downloadFile } from '../google/drive.ts'
 import { captureFileMetadata, downloadRevision } from './versions.ts'
@@ -43,7 +43,7 @@ export async function readFileVersioned(
 ): Promise<Uint8Array> {
   const pinned = revisionFor(virtual)
   const window = windowFor(offset, size)
-  const startMs = performance.now()
+  const timer = startOp()
   let fingerprint: string | null = null
   let revision: string | null = pinned
   let data: Uint8Array
@@ -55,7 +55,7 @@ export async function readFileVersioned(
   } else {
     data = await downloadFile(tm, fileId, window)
   }
-  record('read', label, 'gdrive', data.length, startMs, { fingerprint, revision })
+  record('read', label, 'gdrive', data.length, timer, { fingerprint, revision })
   return data
 }
 

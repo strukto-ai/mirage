@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
@@ -43,7 +43,7 @@ export async function read(
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
   const root = accessor.rootHandle
-  const start = performance.now()
+  const timer = startOp()
   const virtual = path.mountPath
   let handle: FileSystemFileHandle
   try {
@@ -59,6 +59,6 @@ export async function read(
       ? file
       : file.slice(offset, size === null ? undefined : offset + size)
   const bytes = new Uint8Array(await window.arrayBuffer())
-  record('read', virtual, ResourceName.OPFS, bytes.byteLength, start)
+  record('read', virtual, ResourceName.OPFS, bytes.byteLength, timer)
   return bytes
 }

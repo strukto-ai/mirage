@@ -384,4 +384,12 @@ export interface TSNodeLike {
   endIndex?: number
   startPosition?: { row: number; column: number }
   endPosition?: { row: number; column: number }
+  /**
+   * Tree-node identity. Web-tree-sitter hands out a fresh wrapper per
+   * lookup, so `===` cannot tell one node from a re-read of it; the
+   * env-plane name walk uses this to skip an assignment's own target.
+   */
+  id?: number
+  /** Field lookup (`variable_assignment.name`), as web-tree-sitter spells it. */
+  childForFieldName?(fieldName: string): TSNodeLike | null
 }

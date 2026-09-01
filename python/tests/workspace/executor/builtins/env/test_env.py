@@ -4,7 +4,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.workspace.executor.builtins.env import handle_env
 from mirage.workspace.session.session import Session
 from mirage.workspace.session.state import seed_var, set_attr
@@ -80,6 +80,26 @@ async def test_env_run_form_forwards_stdin_and_restores_env():
     assert kwargs["stdin"] == b"piped\n"
     # The session environment is restored after the inner command runs.
     assert session.env == {"PWD": "/", "FOO": "original"}
+
+
+@pytest.mark.asyncio
+async def test_env_run_form_drops_a_pending_managed_entry():
+    # A still-unfetched managed entry is a scalar in waiting, so the
+    # swapped scope drops it like any replaced scalar: surviving would
+    # let the inner line fetch a name `-i` just cleared.
+    session = make_session()
+    session.vars["TOKEN"] = ShellVar(None,
+                                     frozenset({VarAttr.EXPORT}),
+                                     managed=ManagedRef("fake", "r", "TOKEN"))
+    inner: dict[str, ShellVar] = {}
+
+    async def execute_fn(command, session_id, stdin=None):
+        inner.update(session.vars)
+        return IOResult(exit_code=0)
+
+    await handle_env(execute_fn, ["-i", "printenv", "TOKEN"], session)
+    assert "TOKEN" not in inner
+    assert session.vars["TOKEN"].managed is not None
 
 
 @pytest.mark.asyncio

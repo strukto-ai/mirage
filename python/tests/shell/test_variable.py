@@ -14,9 +14,10 @@
 
 import pytest
 
-from mirage.shell.variable import (ShellVar, VarAttr, VarKind, attr_letters,
-                                   attrs_from_letters, stored_attrs, var_kind,
-                                   with_attr, with_value)
+from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr, VarKind,
+                                   attr_letters, attrs_from_letters, detach,
+                                   stored_attrs, var_kind, with_attr,
+                                   with_value)
 
 # The order `declare -p` prints a cluster in, pinned against bash 5.2.37
 # over all 72 ordered pairs of `a A i l n r t u x`. Stated here as a
@@ -100,3 +101,31 @@ def test_the_record_is_frozen():
     var = ShellVar("v")
     with pytest.raises(Exception):
         var.value = "other"  # type: ignore[misc]
+
+
+def test_managed_defaults_none():
+    assert ShellVar("x").managed is None
+
+
+def test_managed_ref_defaults_lazy_and_is_frozen():
+    ref = ManagedRef(source="aws-sm", ref="prod/agent", key="TOKEN")
+    assert ref.eager is False
+    with pytest.raises(Exception):
+        ref.key = "OTHER"  # type: ignore[misc]
+
+
+def test_with_value_keeps_managed():
+    # The fill step's write: fetching a value must not drop the pointer,
+    # or a second fill pass could not tell a filled var from a plain one.
+    ref = ManagedRef(source="aws-sm", ref="prod/agent", key="TOKEN")
+    var = ShellVar(None, frozenset({VarAttr.EXPORT}), managed=ref)
+    assert with_value(var, "tok").managed is ref
+
+
+def test_detach():
+    ref = ManagedRef(source="aws-sm", ref="prod/agent", key="TOKEN")
+    var = ShellVar("tok", frozenset({VarAttr.EXPORT}), managed=ref)
+    detached = detach(var)
+    assert detached.managed is None
+    assert detached.value == "tok"
+    assert detached.attrs == var.attrs

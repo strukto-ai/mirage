@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.timeutil import now_iso
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -25,12 +23,12 @@ from mirage.utils.path import norm
 async def truncate(accessor: RedisAccessor, path: PathSpec,
                    length: int) -> None:
     store = accessor.store
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     p = norm(path.mount_path)
     data = await store.get_file(p)
     if data is None:
         data = b""
     await store.set_file(p, data[:length].ljust(length, b"\0"))
     await store.set_modified(p, now_iso())
-    record("truncate", path.mount_path, "redis", 0, start_ms)
+    record("truncate", path.mount_path, "redis", 0, timer)
     await invalidate_after_write(path)

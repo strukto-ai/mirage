@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="../assets/mirage-og-light@2x.png" alt="Mirage: AI 에이전트를 위한 통합 가상 파일 시스템" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-og-dark@2x.png">
+    <img src="../assets/mirage-og-light@2x.png" alt="Mirage: AI 에이전트를 위한 가상 터미널" width="900">
+  </picture>
 </p>
 
 <p align="center">
@@ -28,11 +31,12 @@
   <a href="./README.zh-CN.md"><img alt="简体中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
   <a href="./README.zh-TW.md"><img alt="繁體中文 README" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
   <a href="./README.fr.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
+  <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage는 **AI 에이전트를 위한 통합 가상 파일 시스템**입니다. S3, Google Drive, Slack, Gmail, Redis 같은 서비스와 데이터 소스를 나란히 하나의 파일 시스템으로 마운트합니다. bash를 이미 아는 LLM이라면 새로운 어휘 없이 바로 모든 백엔드를 읽고, grep하고, 파이프로 연결할 수 있습니다.
+Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 가상 파일 시스템은 폭넓은 데이터 컨텍스트를 제공하고, 가상화된 CLI는 에이전트에게 더 유연한 도구 사용을 주며, 동적 런타임은 기반 인프라 비용을 줄이고 토큰을 더 아낍니다. 에이전트의 동작은 물론 무엇을 볼 수 있는지까지 세밀하게 제어하여 최고의 보안을 제공합니다. 이 요소들이 함께 하나의 가상화된 터미널을 이루어 최고의 에이전트 성능과 비용 효율, 보안을 제공합니다.
 
 ```python
 ws = Workspace(
@@ -49,9 +53,7 @@ ws = Workspace(
 await ws.execute("grep -rln session /redis /tmp")
 
 # Slack에 있는 스크립트를 실행하고 리포트를 Redis에 기록한다
-await ws.execute(
-    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
-)
+await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # 헤드 워드로 타입이 있는 CLI를 설치한다: 경로가 아니라 이름으로 디스패치되고,
 # 다른 프로그램처럼 `man`, `type`, `which`로 찾을 수 있다
@@ -61,18 +63,21 @@ await ws.execute('slack send-message --channel general --text "report is up"')
 
 ## 소개
 
-- **N개의 SDK와 M개의 MCP 대신 하나의 인터페이스.** 모든 서비스가 동일한 파일 시스템 의미론을 사용하며, 파이프라인은 로컬 디스크에서처럼 자연스럽게 서비스 간에 조합됩니다.
-- **약 50개의 내장 백엔드:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH 등을 하나의 루트 아래 나란히 마운트합니다.
-- **이식 가능한 워크스페이스:** 워크스페이스를 클론, 스냅샷, 버전 관리할 수 있습니다. 에이전트 실행을 재시작이나 재설정 없이 머신 간에 옮길 수 있습니다.
-- **임베딩 가능:** Python과 TypeScript SDK가 FastAPI, Express, 브라우저 앱 또는 모든 비동기 런타임의 프로세스 안에서 직접 실행됩니다. 별도 프로세스가 필요 없습니다.
-- **에이전트 통합:** SDK를 통해 OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, OpenHands를 지원하며, 코딩 에이전트는 네이티브 어댑터, 설치형 플러그인, MCP 또는 FUSE로 연결된다.
+- **N개의 SDK와 M개의 MCP 대신 통합된 가상 터미널 인터페이스.** 모든 백엔드가 동일한 파일 시스템 의미론을 사용하므로 파이프라인이 서비스 간에 조합됩니다.
+- **모든 소스를 아우르는 가상 파일 시스템.** S3, Google Drive, Slack, Gmail, Redis 등이 하나의 루트 아래 나란히 마운트되어, 에이전트는 이미 아는 unix 도구인 `ls`, `grep`, `find`, `jq`로 통합된 인터페이스를 통해 모두에 접근합니다.
+- **가상 명령줄 도구(CLI).** `git`, `slack`, `ntn`은 Mirage가 직접 응답하므로 에이전트는 아무것도 설치하지 않고 서로 다른 런타임과 머신에 걸쳐 서비스를 다룰 수 있고, 하나의 도구를 둘 이상으로 가상화해 각각 고유한 이름과 자격 증명을 줄 수 있습니다.
+- **라우팅되는 동적 런타임.** Python, JavaScript를 비롯한 모든 명령을 설정된 런타임으로, 프로세스 내부나 샌드박스 또는 원격으로 보낼 수 있어 연산과 저장소가 분리되고 한쪽을 건드리지 않고 다른 쪽을 바꿀 수 있습니다.
+- **가상화된 Mirage 셸.** 파일 시스템과 CLI, 런타임을 하나의 명령줄로 묶어 파이프, 리다이렉션, 변수, 잡, 히스토리가 셋 모두에서 동작합니다.
+- **에이전트를 위해 설계된 프로파일.** `allow`, `ask`, `deny`가 명령과 CLI를 통제하고 `hide`와 `show`가 파일과 폴더를 통제하므로, 숨겨진 경로는 단순히 읽을 수 없는 것이 아니라 에이전트가 보는 파일 시스템에 존재하지 않습니다.
+- **스크립트로 작성하는 정책 엔진.** 정책 스크립트는 위험한 동작을 실행 전에 금지할 수 있으며, 같은 스택이 모든 VFS 작업과 세션 쓰기를 통제하므로 파일도 환경 변수도 새어 나가지 않습니다.
+- **VFS와 에이전트에 연결된 알림.** 외부 변경이 마운트의 이벤트 스트림이 되므로 새로운 Slack 답장은 가상 파일 시스템의 대화 파일 변경으로 나타나고, 에이전트는 트리를 다시 훑는 대신 그에 반응합니다.
 
 ## 아키텍처
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Mirage 아키텍처: AI 에이전트와 애플리케이션 → Mirage Bash와 VFS → Dispatcher와 캐시 → 인프라와 원격 서비스" width="720">
+    <img src="../assets/mirage-arch-light.svg" alt="Mirage 아키텍처: 에이전트와 하네스가 프로파일과 Mirage 셸에 연결되고, 이들이 유닉스 계열 명령과 가상 CLI, 프로그래밍 언어를 런타임과 가상 파일 시스템으로 해석하며, 인증과 정책 엔진, 알림이 함께 있습니다" width="100%">
   </picture>
 </p>
 

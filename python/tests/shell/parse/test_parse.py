@@ -20,8 +20,7 @@ from mirage.shell.helpers import (get_command_name, get_for_parts,
                                   get_if_branches, get_list_parts, get_parts,
                                   get_pipeline_commands, get_redirects,
                                   get_text, get_while_parts)
-from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
-                                strip_line_continuation)
+from mirage.shell.parse import strip_line_continuation
 from mirage.shell.types import NodeType as NT
 
 
@@ -36,8 +35,7 @@ def test_parse_root_is_program():
 
 
 def test_simple_command():
-    root = parse("echo hello")
-    cmd = root.named_children[0]
+    cmd = parse("echo hello").named_children[0]
     assert cmd.type == NT.COMMAND
     assert get_command_name(cmd) == "echo"
 
@@ -216,11 +214,6 @@ def test_empty():
     assert len(root.named_children) == 0
 
 
-def test_partial_quoted_heredoc_end_is_not_syntax_error():
-    root = parse("cat <<EN'D'\n$v\nEND")
-    assert find_syntax_error(root) is None
-
-
 def test_preserves_expansions():
     cmd = parse("echo $VAR $(cmd) $((1+2))").named_children[0]
     types = {c.type for c in cmd.named_children}
@@ -323,34 +316,6 @@ def test_unrelated_syntax_error_still_reports():
     ])
 def test_strip_line_continuation(command, expected):
     assert strip_line_continuation(command) == expected
-
-
-@pytest.mark.parametrize("command", [
-    "echo `echo a",
-    "echo \"`echo '`'`\"",
-    "echo a`",
-    "`",
-])
-def test_find_unterminated_backtick_flags_open_region(command):
-    assert find_unterminated_backtick(command) is not None
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "echo `echo a`",
-        "echo `echo a` `echo b`",
-        # Single quotes protect a backtick, double quotes do not.
-        "echo '`'",
-        'echo "`echo a`"',
-        'echo "\\`"',
-        # Only a backslash escapes inside the region.
-        "echo `echo \\`nested\\``",
-        "echo a",
-        "cat <<EOF\nplain\nEOF",
-    ])
-def test_find_unterminated_backtick_accepts_balanced(command):
-    assert find_unterminated_backtick(command) is None
 
 
 # tree-sitter-bash 0.25.1 drops a later unbraced `$var` out of its word

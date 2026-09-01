@@ -62,6 +62,30 @@ export enum VarKind {
 }
 
 /**
+ * Where a managed variable's value comes from.
+ *
+ * A managed variable is an ordinary `ShellVar` carrying one of these:
+ * the pointer is host configuration (a YAML/in-app env entry), never
+ * something an agent line can spell, and it is what serializes -- the
+ * fetched value never does. All fill-step state rides here so a
+ * session can carry managed entries the workspace never declared.
+ *
+ * `source` is the registered source name (`env`, `dotenv`, `aws-sm`,
+ * or a user-registered one); `ref` the source's address for one secret
+ * (a secret id, a dotenv path; `''` where the source has no
+ * sub-address); `key` which field of the fetched secret this variable
+ * reads (the variable's own name at declaration by default); `eager`
+ * joins every line's fetch set instead of waiting for a line that
+ * references the name.
+ */
+export interface ManagedRef {
+  readonly source: string
+  readonly ref: string
+  readonly key: string
+  readonly eager: boolean
+}
+
+/**
  * One shell variable: a value plus the attributes set on it.
  *
  * Readonly on purpose. Every writer already computes its result on a
@@ -82,6 +106,14 @@ export enum VarKind {
 export interface ShellVar {
   readonly value: ShellValue | null
   readonly attrs: ReadonlySet<VarAttr>
+  /**
+   * Set when the value comes from a secrets source. Unfetched is
+   * exactly the third state above: value null with attributes, so
+   * `envSnapshot`'s existing value check already omits it. `withValue`
+   * deliberately carries this field (the fill step writes through it)
+   * and `detach` is the agent-write arm.
+   */
+  readonly managed?: ManagedRef
 }
 
 const NO_ATTRS: ReadonlySet<VarAttr> = new Set()
@@ -108,7 +140,19 @@ export function varKind(v: ShellVar): VarKind {
 
 /** The variable with a new value and the same attributes. */
 export function withValue(v: ShellVar, value: ShellValue | null): ShellVar {
-  return { value, attrs: v.attrs }
+  return { ...v, value }
+}
+
+/**
+ * The variable with its managed pointer dropped, value kept.
+ *
+ * An agent write to a managed name shadows session-locally: the record
+ * becomes a plain variable for this session only, so the fill step
+ * never clobbers it and the declaration (new sessions fetch fresh) and
+ * the remote store are untouched by construction.
+ */
+export function detach(v: ShellVar): ShellVar {
+  return { value: v.value, attrs: v.attrs }
 }
 
 /**
@@ -120,7 +164,7 @@ export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
   const attrs = new Set(v.attrs)
   if (on) attrs.add(attr)
   else attrs.delete(attr)
-  return { value: v.value, attrs }
+  return { ...v, attrs }
 }
 
 /**

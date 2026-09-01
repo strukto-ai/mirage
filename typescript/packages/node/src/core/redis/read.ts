@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
@@ -37,7 +37,7 @@ export async function read(
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   const data =
     offset !== 0 || size !== null
@@ -46,6 +46,6 @@ export async function read(
   if (data === null) {
     throw enoent(path)
   }
-  record('read', p, ResourceName.REDIS, data.byteLength, start)
+  record('read', p, ResourceName.REDIS, data.byteLength, timer)
   return data
 }

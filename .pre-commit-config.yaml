@@ -106,7 +106,8 @@ repos:
         exclude: |
           (?x)^(
               test/data/cursor\.md|
-              typescript/.*
+              typescript/.*|
+              integ/fixtures/.*
           )$
 
   - repo: https://github.com/sphinx-contrib/sphinx-lint

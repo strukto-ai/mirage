@@ -115,6 +115,8 @@ from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
 from mirage.types import ConsistencyPolicy
 
+from .secrets import build_secrets_env
+
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
@@ -354,7 +356,7 @@ async def start_kit_fake(
     Returns:
         tuple[str, asyncio.subprocess.Process]: the endpoint and the process.
     """
-    integ = Path(__file__).resolve().parents[2]
+    integ = Path(__file__).resolve().parents[3]
     process = await asyncio.create_subprocess_exec(
         str(integ / "node_modules" / ".bin" / "tsx"),
         str(integ / "server" / service / "main.ts"),
@@ -398,7 +400,7 @@ def _load_module(path: Path) -> ModuleType:
 
 def _load_ssh_server() -> ModuleType:
     return _load_module(
-        Path(__file__).resolve().parents[2] / "server" / "ssh_server.py")
+        Path(__file__).resolve().parents[3] / "server" / "ssh_server.py")
 
 
 async def _admin_exec(ws: Workspace, command: str) -> None:
@@ -601,7 +603,7 @@ class GwsService:
         if not name:
             return None
         path = Path(
-            __file__).resolve().parents[2] / "fixtures" / f"{name}.json"
+            __file__).resolve().parents[3] / "fixtures" / f"{name}.json"
         return json.loads(path.read_text())
 
     @staticmethod
@@ -1192,7 +1194,7 @@ class BoxService:
             folder_id = await self._folder(session, "0", mount["folder"])
             seed = mount.get("seed")
             if seed:
-                base = (Path(__file__).resolve().parents[2] / "fixtures" /
+                base = (Path(__file__).resolve().parents[3] / "fixtures" /
                         seed)
                 for src in sorted(base.rglob("*")):
                     if not src.is_file():
@@ -1906,7 +1908,7 @@ class ChromaService:
         host = os.environ.get("CHROMA_HOST", "localhost")
         port = int(os.environ.get("CHROMA_PORT", "8000"))
         collection_name = f"mirage-integ-{uuid.uuid4().hex[:8]}"
-        seed_path = (Path(__file__).resolve().parents[2] / "server" /
+        seed_path = (Path(__file__).resolve().parents[3] / "server" /
                      "chroma_seed.json")
         seed = json.loads(seed_path.read_text())
         encoded = base64.b64encode(
@@ -2602,7 +2604,8 @@ async def build_mounts(
                 pair = await pair
             resource, cleanup = pair
         built[mount["path"]] = resource
-        mode = MountMode.READ if mount.get("mode") == "read" else None
+        mode = (MountMode.READ if mount.get("mode") == "read" else
+                MountMode.EXEC if mount.get("mode") == "exec" else None)
         # A mount states infrastructure only: what it is, where it is,
         # how it is served. Its permissions live in the profile, under
         # `profiles.<name>.mounts.<prefix>`.
@@ -2700,6 +2703,10 @@ async def open_target(
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
     mounts, cleanups = await build_mounts(target, run_id, service)
+    env_block = None
+    if target.get("secrets") is not None:
+        env_block, secrets_cleanup = build_secrets_env(target["secrets"])
+        cleanups.append(secrets_cleanup)
     agent_id = target.get("agentId")
     factory = console_factory(target, run_id)
     # The target's profiles, and which one shapes a session that names
@@ -2715,14 +2722,16 @@ async def open_target(
                        agent_id=agent_id,
                        console_factory=factory,
                        profiles=profiles,
-                       profile=default_profile)
+                       profile=default_profile,
+                       env=env_block)
     else:
         ws = Workspace(mounts,
                        mode=MountMode.WRITE,
                        agent_id=agent_id,
                        console_factory=factory,
                        profiles=profiles,
-                       profile=default_profile)
+                       profile=default_profile,
+                       env=env_block)
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)
@@ -2733,8 +2742,12 @@ async def open_target(
     # Through the setter, not into the mapping: `ws.env` is a read-only
     # projection of the variable records, and a target's declared
     # environment is exported by definition -- a CLI reads it as a
-    # process environment, which carries exported names only.
-    ws.env = {**ws.env, **target.get("env", {})}
+    # process environment, which carries exported names only. Only when
+    # declared: the setter rebuilds the var table from the projection,
+    # which would drop a secrets target's managed pointers and preset
+    # attributes.
+    if target.get("env"):
+        ws.env = {**ws.env, **target["env"]}
     return ws, functools.partial(teardown_target, [ws], cleanups, service)
 
 

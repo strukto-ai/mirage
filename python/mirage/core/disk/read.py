@@ -12,14 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from pathlib import Path
 
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -36,14 +35,14 @@ async def read_bytes(accessor: DiskAccessor,
     virtual = path_spec.virtual
     path = path_spec.mount_path
     root = accessor.root
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     p = _resolve(root, path)
     try:
         async with aiofiles.open(p, "rb") as f:
             data = await f.read()
     except FileNotFoundError as exc:
         raise FileNotFoundError(virtual) from exc
-    record("read", path, "disk", len(data), start_ms)
+    record("read", path, "disk", len(data), timer)
     return data
 
 
@@ -64,7 +63,7 @@ async def read_range(accessor: DiskAccessor,
     virtual = path_spec.virtual
     path = path_spec.mount_path
     root = accessor.root
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     p = _resolve(root, path)
     try:
         async with aiofiles.open(p, "rb") as f:
@@ -72,5 +71,5 @@ async def read_range(accessor: DiskAccessor,
             data = await (f.read() if size is None else f.read(size))
     except FileNotFoundError as exc:
         raise FileNotFoundError(virtual) from exc
-    record("read", path, "disk", len(data), start_ms)
+    record("read", path, "disk", len(data), timer)
     return data

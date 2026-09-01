@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-import time
 
 import pytest
 
@@ -23,7 +22,8 @@ from mirage.cache.index.config import IndexEntry, LookupResult, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
 from mirage.io import IOResult
-from mirage.observe.context import RecordingScope, record, revision_for
+from mirage.observe.context import (RecordingScope, record, revision_for,
+                                    start_op)
 from mirage.ops import Ops
 from mirage.ops.registry import RegisteredOp
 from mirage.ops.types import LiveFileIdentity
@@ -607,7 +607,7 @@ async def _stamped_read(accessor, path, **kwargs) -> bytes:
            path.virtual,
            "ram",
            len(data),
-           int(time.monotonic() * 1000),
+           start_op(),
            fingerprint="fp-1",
            revision="rev-1")
     return data
@@ -633,7 +633,7 @@ class TestReadWithIdentity:
                    path.virtual,
                    "ram",
                    len(data),
-                   int(time.monotonic() * 1000),
+                   start_op(),
                    fingerprint="fp-1",
                    revision="rev-1")
             return data
@@ -659,7 +659,7 @@ class TestReadWithIdentity:
                    path.virtual,
                    "ram",
                    4,
-                   int(time.monotonic() * 1000),
+                   start_op(),
                    fingerprint="fp-2",
                    revision="rev-2")
             return b"data"
@@ -687,7 +687,7 @@ class TestReadWithIdentity:
                    path.virtual,
                    "ram",
                    0,
-                   int(time.monotonic() * 1000),
+                   start_op(),
                    fingerprint="fp-3",
                    revision="rev-3")
             raise RuntimeError("boom")
@@ -773,7 +773,7 @@ class TestReadWithIdentity:
                    "/data/other.txt",
                    "ram",
                    1,
-                   int(time.monotonic() * 1000),
+                   start_op(),
                    fingerprint="fp-other",
                    revision="rev-other")
             return b"mine"
@@ -838,7 +838,7 @@ async def _rendered_read(accessor, path, **kwargs) -> bytes:
            path.virtual,
            "ram",
            len(b"raw-bytes"),
-           int(time.monotonic() * 1000),
+           start_op(),
            fingerprint="fp-r",
            revision="rev-r")
     return b"tally"
@@ -970,9 +970,14 @@ class TestReadWithIdentityUnderARevisionPin:
         async def fake_read(accessor, path, **kwargs):
             pinned = revision_for(path.virtual)
             if pinned is not None:
-                record("read", path.virtual, "ram", 3, 0, revision=pinned)
+                record("read",
+                       path.virtual,
+                       "ram",
+                       3,
+                       start_op(),
+                       revision=pinned)
                 return b"old"
-            record("read", path.virtual, "ram", 3, 0, revision="r2")
+            record("read", path.virtual, "ram", 3, start_op(), revision="r2")
             return b"new"
 
         resource.register_op(

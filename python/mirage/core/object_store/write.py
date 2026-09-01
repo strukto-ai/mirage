@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.object_store.driver import (A, C, MkdirFn, ObjectStoreDriver,
                                              PathFn, TruncateFn, WriteFn)
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.errors import enoent
@@ -57,10 +55,10 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
                           data: bytes) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
-        start_ms = int(time.monotonic() * 1000)
+        timer = start_op()
         async with driver.connect(accessor) as conn:
             await _put(driver, conn, key, data, path_spec)
-        record("write", path, driver.resource, len(data), start_ms)
+        record("write", path, driver.resource, len(data), timer)
         await invalidate_after_write(path_spec)
         # A put materializes every missing level of the key at once, so
         # the listings above the immediate parent gained entries too.
@@ -79,10 +77,10 @@ def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
     async def create(accessor: A, path_spec: PathSpec) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
-        start_ms = int(time.monotonic() * 1000)
+        timer = start_op()
         async with driver.connect(accessor) as conn:
             await _put(driver, conn, key, b"", path_spec)
-        record("create", path, driver.resource, 0, start_ms)
+        record("create", path, driver.resource, 0, timer)
         await invalidate_after_write(path_spec)
         # An empty put materializes missing parents exactly like write.
         await invalidate_ancestors(path_spec)
@@ -100,14 +98,14 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
     async def truncate(accessor: A, path_spec: PathSpec, length: int) -> None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
-        start_ms = int(time.monotonic() * 1000)
+        timer = start_op()
         async with driver.connect(accessor) as conn:
             data = await driver.get(conn, key)
             if data is None:
                 data = b""
             result = data[:length].ljust(length, b"\0")
             await _put(driver, conn, key, result, path_spec)
-        record("truncate", path, driver.resource, 0, start_ms)
+        record("truncate", path, driver.resource, 0, timer)
         await invalidate_after_write(path_spec)
         # Truncating a missing key creates it, parents included.
         await invalidate_ancestors(path_spec)

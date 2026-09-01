@@ -188,11 +188,79 @@ def _virtual(path: str, prefix: str) -> str:
     return prefix + path if path.startswith("/") else prefix + "/" + path
 
 
+class OpTimer:
+    """A running stopwatch for one op, owned by the record path.
+
+    Opened where the backend work begins and read once when the op
+    finishes, so an op module hands this around instead of reading a
+    clock of its own. The wall-clock stamp the record carries is taken
+    at finish time, not here.
+    """
+
+    __slots__ = ("_start_ms", )
+
+    def __init__(self) -> None:
+        self._start_ms = int(time.monotonic() * 1000)
+
+    @property
+    def elapsed_ms(self) -> int:
+        """Milliseconds elapsed since the timer was opened."""
+        return int(time.monotonic() * 1000) - self._start_ms
+
+
+def start_op() -> OpTimer:
+    """Open the record path's stopwatch for one op.
+
+    Returns:
+        OpTimer: a running timer, to hand to :func:`record` or
+        :func:`finish_record` when the op completes.
+    """
+    return OpTimer()
+
+
+def finish_record(op: str,
+                  path: str,
+                  source: str,
+                  nbytes: int,
+                  timer: OpTimer,
+                  fingerprint: str | None = None,
+                  revision: str | None = None) -> OpRecord:
+    """Close ``timer`` and build the finished record.
+
+    The one place an op's duration and wall-clock stamp are read, shared
+    by the recorder sink (:func:`record`) and by the ``Ops`` facade's own
+    ledger, so the two cannot disagree about what a duration measures.
+
+    Args:
+        op (str): Operation name ("read", "write").
+        path (str): The path to name the record with, as it should be
+            stored (callers that need mount prefixing apply it first).
+        source (str): Resource name ("s3", "ram", "disk").
+        nbytes (int): Bytes transferred.
+        timer (OpTimer): the timer opened when the op started.
+        fingerprint (str | None): Content-derived identifier returned by
+            the backend (ETag, md5). Used for drift detection at replay.
+        revision (str | None): Stable revision handle returned by the
+            backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
+    """
+    elapsed = timer.elapsed_ms
+    return OpRecord(
+        op=op,
+        path=path,
+        source=source,
+        bytes=nbytes,
+        timestamp=int(time.time() * 1000),
+        duration_ms=elapsed,
+        fingerprint=fingerprint,
+        revision=revision,
+    )
+
+
 def record(op: str,
            path: str,
            source: str,
            nbytes: int,
-           start_ms: int,
+           timer: OpTimer,
            fingerprint: str | None = None,
            revision: str | None = None) -> None:
     """Record a byte transfer event. No-op if no recording context is active.
@@ -202,7 +270,8 @@ def record(op: str,
         path (str): Resource-relative path.
         source (str): Resource name ("s3", "ram", "disk").
         nbytes (int): Bytes transferred.
-        start_ms (int): Monotonic start time in milliseconds.
+        timer (OpTimer): the timer opened by :func:`start_op` when the
+            op started.
         fingerprint (str | None): Content-derived identifier returned by
             the backend (ETag, md5). Used for drift detection at replay.
         revision (str | None): Stable revision handle returned by the
@@ -212,19 +281,15 @@ def record(op: str,
     rec = _recorder.get()
     if rec is None:
         return
-    elapsed = int(time.monotonic() * 1000) - start_ms
     prefix = rec.mount_prefix
     rec.sink.append(
-        OpRecord(
-            op=op,
-            path=_virtual(path, prefix),
-            source=source,
-            bytes=nbytes,
-            timestamp=int(time.time() * 1000),
-            duration_ms=elapsed,
-            fingerprint=fingerprint,
-            revision=revision,
-        ))
+        finish_record(op,
+                      _virtual(path, prefix),
+                      source,
+                      nbytes,
+                      timer,
+                      fingerprint=fingerprint,
+                      revision=revision))
 
 
 def record_stream(op: str,

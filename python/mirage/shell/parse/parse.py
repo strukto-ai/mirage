@@ -15,13 +15,11 @@
 import tree_sitter
 import tree_sitter_bash
 
-from mirage.io import IOResult
+from mirage.shell.parse.constants import (ARITH_OPEN_TOKEN, DIGITS, NAME_CONT,
+                                          QUOTES)
 
 BASH_LANGUAGE = tree_sitter.Language(tree_sitter_bash.language())
 TS_PARSER = tree_sitter.Parser(BASH_LANGUAGE)
-
-ARITH_OPEN_TOKEN = "(("
-_QUOTES = (b"'", b'"')
 
 
 def _balanced_end(data: bytes, start: int) -> int | None:
@@ -53,7 +51,7 @@ def _balanced_end(data: bytes, start: int) -> int | None:
                 quote = None
             index += 1
             continue
-        if char in _QUOTES:
+        if char in QUOTES:
             quote = char
         elif char == b"\\":
             index += 2
@@ -129,65 +127,6 @@ def strip_line_continuation(command: str) -> str:
     return command
 
 
-def find_unterminated_backtick(command: str) -> str | None:
-    """Locate a backtick substitution that is never closed.
-
-    tree-sitter happily parses ``echo `echo a`` as a complete command,
-    so the region has to be scanned directly. Quoting follows the shell
-    reader: single quotes protect a backtick, double quotes do not, and
-    once inside a substitution only a backslash escapes, which is why
-    ``"`echo '`'`"`` is an error in bash rather than a quoted backtick.
-
-    Args:
-        command (str): the raw command line.
-
-    Returns:
-        str | None: text from the unmatched backtick on, or None.
-    """
-    quote: str | None = None
-    dollar_quote = False
-    opened: int | None = None
-    last_dollar = -2
-    i = 0
-    while i < len(command):
-        ch = command[i]
-        if quote == "'":
-            # $'...' takes backslash escapes, so \' does not close it;
-            # a plain '...' treats every backslash literally.
-            if dollar_quote and ch == "\\":
-                i += 2
-                continue
-            if ch == "'":
-                quote = None
-                dollar_quote = False
-            i += 1
-            continue
-        if ch == "\\":
-            i += 2
-            continue
-        if opened is not None:
-            if ch == "`":
-                opened = None
-            i += 1
-            continue
-        if ch == "`":
-            opened = i
-        elif ch == "'" and quote is None:
-            quote = "'"
-            dollar_quote = last_dollar == i - 1
-        elif ch == '"':
-            quote = None if quote == '"' else '"'
-        elif ch == "$":
-            last_dollar = i
-        i += 1
-    return command[opened:] if opened is not None else None
-
-
-_NAME_CONT = frozenset(
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
-_DIGITS = frozenset(b"0123456789")
-
-
 def _orphaned_dollar_offsets(root: tree_sitter.Node, data: bytes) -> list[int]:
     """Byte offsets of literal ``$`` tokens cut off from their name.
 
@@ -212,7 +151,7 @@ def _orphaned_dollar_offsets(root: tree_sitter.Node, data: bytes) -> list[int]:
             if (not child.is_named and child.type == "$"
                     and node.type != "simple_expansion"
                     and data[child.end_byte:child.end_byte + 1]
-                    and data[child.end_byte] in _NAME_CONT):
+                    and data[child.end_byte] in NAME_CONT):
                 offsets.append(child.start_byte)
             stack.append(child)
     return offsets
@@ -231,10 +170,10 @@ def _rebrace_dollar(data: bytes, offset: int) -> bytes:
         offset (int): byte offset of the ``$``.
     """
     end = offset + 1
-    if data[end] in _DIGITS:
+    if data[end] in DIGITS:
         end += 1
     else:
-        while end < len(data) and data[end] in _NAME_CONT:
+        while end < len(data) and data[end] in NAME_CONT:
             end += 1
     return data[:offset] + b"${" + data[offset + 1:end] + b"}" + data[end:]
 
@@ -316,121 +255,3 @@ def parse(command: str) -> tree_sitter.Node:
     if b"$" in data:
         root = _repair_orphaned_dollars(root, data)
     return root
-
-
-_BASH_KEYWORDS = frozenset({
-    "if",
-    "then",
-    "else",
-    "elif",
-    "fi",
-    "for",
-    "while",
-    "until",
-    "do",
-    "done",
-    "case",
-    "esac",
-    "in",
-    "function",
-    "select",
-})
-
-_STRUCTURAL_TOKENS = frozenset({
-    "(",
-    ")",
-    "{",
-    "}",
-    "[",
-    "]",
-    '"',
-    "'",
-    "`",
-})
-
-
-def _is_structural_error(node: tree_sitter.Node) -> bool:
-    """True if an ERROR node represents a real syntactic problem.
-
-    Tree-sitter occasionally emits ERROR nodes for stray statement
-    separators that bash itself accepts (notably ``& ;``). A real
-    syntax error contains a bash keyword, a bracket / quote token,
-    or a named subtree the parser tried to recover; stand-alone
-    statement separators (``;``, ``&``, ``|``) are not enough.
-    """
-    for child in node.children:
-        if child.is_named:
-            return True
-        if child.type in _BASH_KEYWORDS:
-            return True
-        if child.type in _STRUCTURAL_TOKENS:
-            return True
-    return False
-
-
-def _walk_named(node: tree_sitter.Node):
-    yield node
-    for child in node.named_children:
-        yield from _walk_named(child)
-
-
-def _is_recovered_quoted_heredoc_end(previous: tree_sitter.Node | None,
-                                     error: tree_sitter.Node) -> bool:
-    if previous is None:
-        return False
-    error_text = (error.text or b"").decode().strip()
-    if not error_text:
-        return False
-    for candidate in _walk_named(previous):
-        if candidate.type != "heredoc_redirect":
-            continue
-        start = None
-        end = None
-        for child in candidate.named_children:
-            if child.type == "heredoc_start":
-                start = (child.text or b"").decode()
-            elif child.type == "heredoc_end":
-                end = (child.text or b"").decode()
-        if (start is not None and ("'" in start or '"' in start) and not end
-                and start.replace("'", "").replace('"', "") == error_text):
-            return True
-    return False
-
-
-def find_syntax_error(node: tree_sitter.Node) -> str | None:
-    """Locate a top-level structural syntax error in a parsed AST.
-
-    Args:
-        node (tree_sitter.Node): root node from parse().
-
-    Returns:
-        str | None: text of the offending region, or None if the AST is clean.
-    """
-    if not node.has_error:
-        return None
-    previous = None
-    for child in node.children:
-        if child.is_missing:
-            text = child.text
-            return text.decode(errors="replace") if text else ""
-        if child.type == "ERROR" and _is_structural_error(child):
-            if _is_recovered_quoted_heredoc_end(previous, child):
-                previous = child
-                continue
-            text = child.text
-            return text.decode(errors="replace") if text else ""
-        if child.is_named:
-            previous = child
-    return None
-
-
-def syntax_error_result(offending: str) -> IOResult:
-    """Exit 2 with the bash-style diagnostic for an unparsable line.
-
-    Args:
-        offending (str): the span the parser flagged.
-    """
-    snippet = offending.strip()
-    err = (f"mirage: syntax error near {snippet!r}\n".encode()
-           if snippet else b"mirage: syntax error in command\n")
-    return IOResult(exit_code=2, stderr=err)

@@ -15,7 +15,7 @@
 import { writeFileSync } from 'node:fs'
 import { ConsistencyPolicy } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { ADAPTERS, openConsistency } from './adapters.ts'
+import { ADAPTERS, openConsistency } from './adapters/index.ts'
 import type { Case, Target } from './harness.ts'
 import {
   Report,
@@ -81,6 +81,12 @@ async function runTarget(
   if (target.console !== undefined && target.mounts[0].resource !== 'ram') {
     throw new Error(`target ${target.id}: console targets ride ram mounts`)
   }
+  // The secrets env block is wired into the ram opener alone, for the
+  // console block's reason: a target that declares one on an opener
+  // that drops it would run with no managed vars and read as covered.
+  if (target.secrets !== undefined && target.mounts[0].resource !== 'ram') {
+    throw new Error(`target ${target.id}: secrets targets ride ram mounts`)
+  }
   // Profiles reach the workspace only through the openers that pass them
   // on, for the same reason: a target that declares one on an opener
   // that drops it would run unbound and read as covered. Python needs no
@@ -99,8 +105,11 @@ async function runTarget(
     // Through the setter, not into the record: `ws.env` is a frozen
     // projection of the variable records, and a target's declared
     // environment is exported by definition -- a CLI reads it as a
-    // process environment, which carries exported names only.
-    ws.env = { ...ws.env, ...(target.env ?? {}) }
+    // process environment, which carries exported names only. Only when
+    // declared: the setter rebuilds the var table from the projection,
+    // which would drop a secrets target's managed pointers and preset
+    // attributes.
+    if (target.env !== undefined) ws.env = { ...ws.env, ...target.env }
     for (const mount of target.mounts) {
       await seedFixture(ws, mount.fixture, mount.path, root)
       if (mount.seed_root) await seedMountRoot(ws, mount.path)

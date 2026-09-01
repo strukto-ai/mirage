@@ -51,8 +51,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1121.0",
     "@napi-rs/lzma": "^1.4.5",
     "@struktoai/mirage-core": "workspace:*",
+    "dotenv": "^16.6.1",
     "fast-xml-parser": "^5.9.0",
     "fast-xml-validator": "^1.4.0",
     "fs-monkey": "^1.1.0",
@@ -64,6 +66,7 @@
     "yaml": "^2.6.0"
   },
   "peerDependencies": {
+    "@1password/sdk": "^0.5.0",
     "@daytonaio/sdk": "^0.207.0",
     "@lancedb/lancedb": "^0.30.0",
     "@zkochan/fuse-native": "^0.1.0",
@@ -78,6 +81,9 @@
     "ssh2": "^1.16.0"
   },
   "peerDependenciesMeta": {
+    "@1password/sdk": {
+      "optional": true
+    },
     "@daytonaio/sdk": {
       "optional": true
     },
@@ -116,6 +122,7 @@
     }
   },
   "devDependencies": {
+    "@1password/sdk": "^0.5.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@daytonaio/sdk": "^0.207.0",
     "@lancedb/lancedb": "^0.30.0",

@@ -22,7 +22,11 @@ import type { JobConsole } from '../../shell/console/job_console.ts'
 import type { Resource } from '../../resource/base.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { findSyntaxError, findUnterminatedBacktick, type ShellParser } from '../../shell/parse.ts'
+import {
+  findSyntaxError,
+  findUnterminatedBacktick,
+  type ShellParser,
+} from '../../shell/parse/index.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
@@ -34,13 +38,15 @@ import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { ExecuteNodeDeps } from '../node/execute_node.ts'
-import { prejudgeLine } from '../node/explain.ts'
+import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { Session } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
+import type { ResolvedSource } from '../../secrets/types.ts'
+import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
 import { admitLine } from '../node/admission.ts'
 import { runWholeLine } from './line.ts'
 import type { WorkspaceMeta } from './meta.ts'
@@ -71,6 +77,7 @@ export interface ExecuteEnv {
   workspaceId: string
   runtimes: Runtimes
   router: Router
+  secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
   registerCloser(fn: () => Promise<void>): void
   ensureOpen(resource: Resource): Promise<void>
   invalidateAllAfterRemote(): Promise<void>
@@ -327,6 +334,76 @@ async function runParsedLine(
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, effectiveSession.abortSignal)
   const lineRuntime = env.runtimes.wholeLineFor(rootNode, deps.routingDecision ?? null)
+  // Filled only after the applicable line-tier admission (a refused
+  // line must never reach a secret store) and before expansion or the
+  // runtime's env snapshot reads the vars. The prejudge pass leaves
+  // single-command lines to the per-command gate, so the tree branch
+  // asks the same text-tier question itself (`probeText`), over the
+  // same walked set the names came from: a node already denied on its
+  // literal words never reaches a source, and a rule that asks is
+  // answered before the fetch, with the approval left for the gate to
+  // spend. A deny only the value gate can see still follows the fetch,
+  // because expansion is what consumes the values. A SecretsError
+  // folds like any failed line: the line exits 1 and never runs.
+  const writesGated = env.registry.policies.wants('preSession')
+  const fillManaged = async (
+    nodes: TSNodeLike[],
+    whole: boolean,
+    lineCliEnvNames: ReadonlySet<string>,
+    probeText: boolean,
+  ): Promise<ExecuteResult | null> => {
+    try {
+      let planNodes = nodes
+      let planWhole = whole
+      let planCli = lineCliEnvNames
+      let names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+      if (names.size > 0 && probeText) {
+        const served = await unrefusedNodes(
+          nodes,
+          effectiveSession,
+          env.registry,
+          env.namespace,
+          callAgentId,
+          reparse,
+          killed,
+        )
+        if (served.length !== nodes.length) {
+          planNodes = served
+          planWhole = guestBound(served, deps.routingDecision ?? null, env.runtimes.bindings)
+          planCli = cliEnvNames(served, effectiveSession, env.registry)
+          names =
+            served.length === 0
+              ? new Set<string>()
+              : fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+        }
+      }
+      // A fetched value can name another managed variable (the
+      // arithmetic chase recurses through values), and what a value
+      // spells is unknowable before its fetch, so the plan reruns
+      // over the same admitted nodes until it reaches nothing new.
+      // fillNames returns pending names only, so every pass fetches
+      // names the last one could not see and the loop settles.
+      while (names.size > 0) {
+        // Built here, not above the plan: the declarations are read
+        // only once an admitted node actually wants a value, so a line
+        // the per-command gate refuses never reaches a bootstrap
+        // source either. An unknown source name already fails at
+        // construction; what is left for this to discover is an
+        // unreadable dotenv or a config the source refuses, which is
+        // the same treatment an unreachable store gets. Memoized, so
+        // the loop's later passes cost one await.
+        const sources = await env.secretSources()
+        await fillEnv(effectiveSession, names, sources)
+        names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
+      }
+      return null
+    } catch (err) {
+      if (isControlFlowError(err)) throw err
+      const failed = failureResult(err)
+      targetSession.lastExitCode = failed.exitCode
+      return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
+    }
+  }
   if (lineRuntime?.runLine !== undefined) {
     // A whole line is a command like any other: the same visibility and
     // admission gate as the tree, per parsed command, before the
@@ -353,6 +430,12 @@ async function runParsedLine(
         )
       }
       return new ExecuteResult(new Uint8Array(), refusal.stderr, refusal.exitCode)
+    }
+    if (env.sessions.hasManagedEnv) {
+      // A whole-line program may read any name, so the walk is not
+      // consulted, and admitLine above already ran the real gate.
+      const filled = await fillManaged([rootNode], true, new Set(), false)
+      if (filled !== null) return filled
     }
     const result = await runWholeLine(
       lineRuntime,
@@ -397,6 +480,19 @@ async function runParsedLine(
   if (prejudged !== null) {
     targetSession.lastExitCode = prejudged.exitCode
     return new ExecuteResult(new Uint8Array(), prejudged.stderr, prejudged.exitCode)
+  }
+  if (env.sessions.hasManagedEnv) {
+    // The walked set carries stored function bodies and alias
+    // expansions too, so a body invoked by bare name still fills what
+    // it reads.
+    const nodes = lineNodes(rootNode, effectiveSession, reparse)
+    const filled = await fillManaged(
+      nodes,
+      guestBound(nodes, deps.routingDecision ?? null, env.runtimes.bindings),
+      cliEnvNames(nodes, effectiveSession, env.registry),
+      true,
+    )
+    if (filled !== null) return filled
   }
   const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
     runWithSession(

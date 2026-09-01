@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { createShellParser } from '../shell/parse.ts'
+import { createShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { Workspace } from './workspace/workspace.ts'

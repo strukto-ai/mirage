@@ -23,7 +23,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { ReadonlyVariableError } from './errors.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
 import type { ShellValue } from '../../shell/variable.ts'
-import { coerceValue, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
+import { coerceValue, detach, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
 import type { Session } from './session.ts'
 
 /**
@@ -391,6 +391,11 @@ async function setVar(
     sessionId: session.sessionId,
   })
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
+  // An agent write to a managed name shadows session-locally: the
+  // pointer drops and the record becomes a plain variable for this
+  // session only. Only the host-tier fill step writes pointer-keeping
+  // records, and it goes directly into `session.vars`, not here.
+  if (stored.managed !== undefined) stored = detach(stored)
   // `set -a` marks every name assigned *while it is on*, which is why
   // it is read here at write time rather than applied to the session in
   // bulk when the option flips: `B=1; set -a; C=2; set +a; D=3` exports

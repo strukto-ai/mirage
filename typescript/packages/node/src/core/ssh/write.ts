@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -24,7 +24,7 @@ export async function writeBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const sftp = await accessor.sftp()
   const virtual = stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
@@ -34,6 +34,6 @@ export async function writeBytes(
       else resolveFn()
     })
   })
-  record('write', virtual, ResourceName.SSH, data.byteLength, start)
+  record('write', virtual, ResourceName.SSH, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

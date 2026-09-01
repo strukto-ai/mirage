@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="../assets/mirage-og-light@2x.png" alt="Mirage : un système de fichiers virtuel unifié pour les agents IA" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-og-dark@2x.png">
+    <img src="../assets/mirage-og-light@2x.png" alt="Mirage : un terminal virtuel pour les agents IA" width="900">
+  </picture>
 </p>
 
 <p align="center">
@@ -28,11 +31,12 @@
   <a href="./README.zh-CN.md"><img alt="简体中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
   <a href="./README.zh-TW.md"><img alt="繁體中文 README" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
   <a href="./README.fr.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
+  <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
-Mirage est **un système de fichiers virtuel unifié pour les agents IA** : il monte des services et des sources de données comme S3, Google Drive, Slack, Gmail et Redis côte à côte dans un même système de fichiers. Tout LLM qui connaît déjà bash peut lire, chercher avec grep et chaîner des pipes sur chaque backend dès le départ, sans vocabulaire nouveau.
+Mirage est **un terminal virtuel pour les agents IA**. Le système de fichiers virtuel apporte un large contexte de données, les CLI virtualisées donnent à l'agent plus de souplesse dans l'usage des outils, les runtimes dynamiques réduisent le coût de l'infrastructure sous-jacente et consomment moins de tokens, et un contrôle fin sur les actions de l'agent et jusque sur ce qu'il peut voir apporte la meilleure sécurité. Ensemble, ces éléments forment un seul terminal virtualisé, offrant les meilleures performances d'agent, la meilleure efficacité de coût et la meilleure sécurité.
 
 ```python
 ws = Workspace(
@@ -49,9 +53,7 @@ ws = Workspace(
 await ws.execute("grep -rln session /redis /tmp")
 
 # exécute un script hébergé dans Slack, écrit le rapport dans Redis
-await ws.execute(
-    "python3 /slack/channels/general__C0.../files/example__F0....py > /redis/report.txt"
-)
+await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # installe un CLI typé sous un mot-clé : dispatché par nom, pas par chemin,
 # et découvrable via `man`, `type` et `which` comme tout autre programme
@@ -61,18 +63,21 @@ await ws.execute('slack send-message --channel general --text "report is up"')
 
 ## À propos
 
-- **Une seule interface au lieu de N SDK et M MCP.** Chaque service parle la même sémantique de système de fichiers, et les pipelines se composent entre services aussi naturellement que sur un disque local.
-- **Une cinquantaine de backends intégrés :** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / GridFS / Postgres / LanceDB / Qdrant, SSH et plus encore, montés côte à côte sous une même racine.
-- **Espaces de travail portables :** cloner, snapshotter et versionner un espace de travail ; les exécutions d'agents se déplacent entre machines sans redémarrage ni reconfiguration du système.
-- **Embarquable :** les SDK Python et TypeScript s'exécutent dans le processus, au sein de FastAPI, Express, d'applications navigateur ou de tout runtime asynchrone ; aucun processus séparé n'est requis.
-- **Intégrations d'agents :** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL et OpenHands via les SDK ; les agents de code via des adaptateurs natifs, des plugins installables, MCP ou FUSE.
+- **Une interface de terminal virtuel unifiée, au lieu de N SDK et M MCP.** Chaque backend parle la même sémantique de système de fichiers, si bien que les pipelines se composent entre services.
+- **Un système de fichiers virtuel sur toutes les sources.** S3, Google Drive, Slack, Gmail, Redis et les autres se montent côte à côte sous une seule racine, si bien qu'un agent les atteint tous via une interface unifiée, avec les outils unix qu'il connaît déjà comme `ls`, `grep`, `find` et `jq`.
+- **Outils en ligne de commande virtuels (CLI).** `git`, `slack` et `ntn` sont servis par Mirage lui-même, si bien qu'un agent pilote le service sans rien installer, à travers différents runtimes et machines, et un même outil peut être virtualisé en deux ou plus, chacun sous son propre nom avec ses propres identifiants.
+- **Runtimes dynamiques et routés.** Python, JavaScript et n'importe quelle autre commande peuvent être envoyés au runtime configuré, en processus, en bac à sable ou à distance, ce qui découple le calcul du stockage et permet de changer l'un sans toucher à l'autre.
+- **Le shell Mirage virtualisé.** Il relie le système de fichiers, les CLI et les runtimes en une seule ligne de commande, si bien que tubes, redirections, variables, jobs et historique fonctionnent à travers les trois.
+- **Des profils conçus pour les agents.** `allow`, `ask` et `deny` régissent les commandes et les CLI, tandis que `hide` et `show` régissent fichiers et dossiers, si bien qu'un chemin masqué n'est pas seulement illisible mais absent du système de fichiers que voit l'agent.
+- **Un moteur de politiques scriptable.** Un script de politique peut interdire toute action dangereuse avant son exécution, et la même pile filtre chaque opération VFS et chaque écriture de session, si bien que ni un fichier ni une variable d'environnement ne fuit.
+- **Des notifications câblées au VFS et aux agents.** Les changements externes deviennent un flux d'événements sur le montage, si bien qu'une nouvelle réponse Slack apparaît comme une modification du fichier de conversation dans le système de fichiers virtuel, et l'agent y réagit au lieu de re-parcourir l'arborescence.
 
 ## Architecture
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/mirage-arch-dark.svg">
-    <img src="../assets/mirage-arch-light.svg" alt="Architecture de Mirage : agent IA et application → Mirage Bash et VFS → Dispatcher et cache → infrastructure et services distants" width="720">
+    <img src="../assets/mirage-arch-light.svg" alt="Architecture Mirage : les agents et le harnais atteignent les profils et le shell Mirage, qui résolvent les commandes de type Unix, les CLI virtuelles et les langages de programmation vers les runtimes et le système de fichiers virtuel, avec l'authentification, le moteur de politiques et les notifications à côté" width="100%">
   </picture>
 </p>
 

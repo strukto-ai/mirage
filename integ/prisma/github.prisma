@@ -81,6 +81,10 @@ model GithubBranch {
   tenant String
   repo   String
   name   String
+  // Where the ref points, as a commit sha, empty for a branch that carries
+  // only its synthesized root. A ref IS this pointer: which commits a branch
+  // has is the chain reachable from here, never a column on the commits.
+  headSha String @default("")
   seq    Int
 
   repository GithubRepo @relation(fields: [tenant, repo], references: [tenant, fullName])
@@ -117,14 +121,21 @@ model GithubSubmodule {
   @@index([tenant, repo])
 }
 
+// A commit is immutable and belongs to no branch: it is reached by walking
+// parents back from a ref's head, which is why one commit can sit on many
+// branches at once and why abandoning one costs nothing but the pointer.
 model GithubCommit {
   pk            Int    @id @default(autoincrement())
   tenant        String
   repo          String
-  branch        String
   // Derived from the content rather than stored by the fixture, so a mirror of
-  // a fixture answers the same sha twice.
+  // a fixture answers the same sha twice. Content-addressed in the git sense:
+  // the tree, the people, the message and the PARENT decide it, never a
+  // position, so a sha can never be reproduced by a later commit taking a
+  // freed slot.
   sha           String
+  // The first parent, empty at the start of a chain (the synthesized root).
+  parentSha     String @default("")
   message       String
   authorLogin   String
   date          String
@@ -146,7 +157,8 @@ model GithubCommit {
 
   repository GithubRepo @relation(fields: [tenant, repo], references: [tenant, fullName])
 
-  @@index([tenant, repo, branch])
+  @@index([tenant, repo])
+  @@index([tenant, repo, sha])
 }
 
 model GithubIssue {

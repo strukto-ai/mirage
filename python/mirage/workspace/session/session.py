@@ -14,7 +14,7 @@
 
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -22,11 +22,13 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource
 from mirage.policy.types import (AdmissionRules, Decision, HideReason,
                                  ProfileScript)
+from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.constants import SHELL_ARGV0
 from mirage.shell.types import FunctionBody
-from mirage.shell.variable import (ShellVar, VarAttr, attrs_from_letters,
-                                   stored_attrs, with_value)
+from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
+                                   attrs_from_letters, stored_attrs,
+                                   with_value)
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
                           ShownPaths)
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
@@ -101,6 +103,103 @@ def vars_from_dict(env: Mapping[str, str],
     for name, letters in attrs.items():
         if name not in out:
             out[name] = ShellVar(None, attrs_from_letters(letters))
+    return out
+
+
+def vars_from_entries(
+    entries: Mapping[str, str | EnvVar | Mapping[str, Any]]
+) -> dict[str, ShellVar]:
+    """Variable records for a workspace env block.
+
+    The declaration side of the env plane: a bare string is the literal
+    short form (exported, like `vars_from_env`), a mapping is coerced
+    through `EnvVar`, and a managed entry becomes bash's third state --
+    exported, unset -- carrying the pointer as `ManagedRef`. After this
+    translation the session vars are the only truth the fill step
+    reads.
+
+    Args:
+        entries (Mapping[str, str | EnvVar | Mapping[str, Any]]): the
+            env block, name -> entry.
+    """
+    out: dict[str, ShellVar] = {}
+    exported = frozenset({VarAttr.EXPORT})
+    for name, entry in entries.items():
+        if isinstance(entry, str):
+            entry = EnvVar(value=entry)
+        elif not isinstance(entry, EnvVar):
+            entry = EnvVar.model_validate(entry)
+        if entry.provider is not None:
+            ref = ManagedRef(entry.provider, entry.ref, entry.key or name,
+                             entry.fetch == "eager")
+            out[name] = ShellVar(None, exported, managed=ref)
+            continue
+        attrs = set()
+        if entry.export:
+            attrs.add(VarAttr.EXPORT)
+        if entry.readonly:
+            attrs.add(VarAttr.READONLY)
+        out[name] = ShellVar(entry.value, frozenset(attrs))
+    return out
+
+
+def vars_to_fields(table: Mapping[str, ShellVar]) -> dict[str, Any]:
+    """The stored shape of a bare variable table.
+
+    The three keys a stored session writes (`to_dict`): ``env`` holds
+    the plain scalars, ``var_attrs`` the letter clusters, ``managed``
+    the pointers -- and a managed name serializes as its pointer, never
+    its value, the same rule the session codec states. This exists for
+    the workspace env template, a variable table with no session around
+    it, so a snapshot or copy can carry the declaration.
+
+    Args:
+        table (Mapping[str, ShellVar]): the variable table.
+    """
+    managed = {
+        name: var.managed
+        for name, var in table.items() if var.managed is not None
+    }
+    fields: dict[str, Any] = {
+        "env": {
+            name: var.value
+            for name, var in table.items()
+            if isinstance(var.value, str) and name not in managed
+        },
+        "var_attrs": {
+            name: stored_attrs(var)
+            for name, var in table.items() if var.attrs
+        },
+    }
+    if managed:
+        refs: dict[str, dict[str, str]] = {}
+        for name, ref in managed.items():
+            entry = {"from": ref.source, "ref": ref.ref, "key": ref.key}
+            if ref.eager:
+                entry["fetch"] = "eager"
+            refs[name] = entry
+        fields["managed"] = refs
+    return fields
+
+
+def vars_from_fields(data: Mapping[str, Any]) -> dict[str, ShellVar]:
+    """The variable table a `vars_to_fields` payload restores.
+
+    `vars_from_dict` reads the two plain halves; each managed name then
+    restores declared-but-unfetched, its value forced back to None so a
+    payload that smuggles one in is discarded rather than trusted --
+    exactly how `from_dict` restores a stored session's vars.
+
+    Args:
+        data (Mapping[str, Any]): the stored fields.
+    """
+    out = vars_from_dict(data.get("env") or {}, data.get("var_attrs") or {})
+    for name, m in (data.get("managed") or {}).items():
+        var = out.get(name, ShellVar(None, frozenset({VarAttr.EXPORT})))
+        out[name] = replace(var,
+                            value=None,
+                            managed=ManagedRef(m["from"], m["ref"], m["key"],
+                                               m.get("fetch") == "eager"))
     return out
 
 
@@ -242,6 +341,16 @@ class Session:
     _alias_stack: list[str] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
+        # A managed name serializes as its pointer, never its value: a
+        # stored session may leak only where a secret lives. `env` skips
+        # the name (the fetched plaintext must not land in the record)
+        # while `var_attrs` keeps its letters, so a payload with the
+        # `managed` key stripped still restores the name as
+        # attributed-unset rather than dropping it.
+        managed = {
+            name: var.managed
+            for name, var in self.vars.items() if var.managed is not None
+        }
         # `env` is every scalar and `var_attrs` the letters set on the
         # names that carry any, rather than one key holding both: `env`
         # is the shape an embedder writes and another language reads, so
@@ -252,7 +361,10 @@ class Session:
         data = {
             "session_id": self.session_id,
             "cwd": self.cwd,
-            "env": dict(self.env),
+            "env": {
+                n: v
+                for n, v in self.env.items() if n not in managed
+            },
             "created_at": self.created_at,
             "generation": self.generation,
         }
@@ -266,6 +378,14 @@ class Session:
             name: stored_attrs(var)
             for name, var in self.vars.items() if var.attrs
         }
+        if managed:
+            refs: dict[str, dict[str, str]] = {}
+            for name, ref in managed.items():
+                entry = {"from": ref.source, "ref": ref.ref, "key": ref.key}
+                if ref.eager:
+                    entry["fetch"] = "eager"
+                refs[name] = entry
+            data["managed"] = refs
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value
@@ -305,18 +425,32 @@ class Session:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
-        if "env" in data or "var_attrs" in data:
+        if "env" in data or "var_attrs" in data or "managed" in data:
             data = dict(data)
             env = data.pop("env", {})
             attrs = data.pop("var_attrs", None)
+            managed = data.pop("managed", None)
             # No `var_attrs` at all means the payload is a bare process
             # environment -- an embedder's dict, or a record another
             # writer hand-built -- so every name in it is exported,
             # which is what a process environment means. With the key
             # present the attributes were recorded and are restored as
             # they were written.
-            data["vars"] = (vars_from_env(env)
-                            if attrs is None else vars_from_dict(env, attrs))
+            out_vars = (vars_from_env(env)
+                        if attrs is None else vars_from_dict(env, attrs))
+            # A managed name restores declared-but-unfetched. The value
+            # is forced back to None: a stored session must never carry
+            # the plaintext, so one a tampered payload smuggles into
+            # `env` is discarded rather than trusted.
+            for name, m in (managed or {}).items():
+                var = out_vars.get(name,
+                                   ShellVar(None, frozenset({VarAttr.EXPORT})))
+                out_vars[name] = replace(var,
+                                         value=None,
+                                         managed=ManagedRef(
+                                             m["from"], m["ref"], m["key"],
+                                             m.get("fetch") == "eager"))
+            data["vars"] = out_vars
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")

@@ -21,7 +21,7 @@ import {
 } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { startBasename } from '../../commands/builtin/find_eval.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
@@ -163,9 +163,9 @@ export async function write(
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const startMs = performance.now()
+  const timer = startOp()
   await writeItem(accessor.config, accessor.loc(path.resourcePath), data)
-  record('write', path.resourcePath, 'onedrive', data.length, startMs)
+  record('write', path.resourcePath, 'onedrive', data.length, timer)
   await invalidateAfterWrite(path)
 }
 

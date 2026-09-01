@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { NodeKind, nodeKind } from './node_kind.ts'
-import { createShellParser, type ShellParser } from './parse.ts'
+import { createShellParser, type ShellParser } from './parse/index.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))

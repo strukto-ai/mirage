@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
@@ -24,12 +24,12 @@ export async function writeBytes(
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
   accessor.store.files.set(p, data)
   accessor.store.modified.set(p, nowIso())
-  record('write', p, ResourceName.RAM, data.byteLength, start)
+  record('write', p, ResourceName.RAM, data.byteLength, timer)
   await invalidateAfterWrite(path)
   return Promise.resolve()
 }

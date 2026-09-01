@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { cachesReads } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { createShellParser } from '../shell/parse.ts'
+import { createShellParser } from '../shell/parse/index.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 

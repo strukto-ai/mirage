@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeVar, VarAttr } from '../../shell/variable.ts'
+import { makeVar, VarAttr, withValue } from '../../shell/variable.ts'
 import { seedVar, setAttr } from './state.ts'
-import { varsFromEnv } from './session.ts'
+import { varsFromEntries, varsFromEnv, varsFromFields, varsToFields } from './session.ts'
 import { describe, expect, it } from 'vitest'
 import { Session } from './session.ts'
 import { MountMode } from '../../types.ts'
@@ -346,5 +346,129 @@ describe('ledger records round-trip through the record', () => {
     // Nothing held writes nothing, and a fork carries what is held.
     expect('decisions' in new Session({ sessionId: 's2' }).toJSON()).toBe(false)
     expect(s.fork().decisions).toEqual(records)
+  })
+})
+
+describe('varsFromEntries', () => {
+  it('a bare string is the exported literal short form', () => {
+    const vars = varsFromEntries({ APP: 'integ' })
+    expect(vars.APP?.value).toBe('integ')
+    expect(vars.APP?.attrs).toEqual(new Set([VarAttr.Export]))
+    expect(vars.APP?.managed).toBeUndefined()
+  })
+
+  it('a literal entry compiles readonly and export attrs', () => {
+    const vars = varsFromEntries({ EDITOR: { value: 'vi', readonly: true, export: false } })
+    expect(vars.EDITOR?.value).toBe('vi')
+    expect(vars.EDITOR?.attrs).toEqual(new Set([VarAttr.Readonly]))
+  })
+
+  it('a managed entry is exported, unset, and carries the pointer', () => {
+    const vars = varsFromEntries({ TOKEN: { from: 'aws-sm', ref: 'prod/tokens', key: 'api' } })
+    const v = vars.TOKEN
+    expect(v?.value).toBeNull()
+    expect(v?.attrs).toEqual(new Set([VarAttr.Export]))
+    expect(v?.managed).toEqual({ source: 'aws-sm', ref: 'prod/tokens', key: 'api', eager: false })
+  })
+
+  it('key defaults to the variable name and eager parses', () => {
+    const vars = varsFromEntries({ TOKEN: { from: 'env', fetch: 'eager' } })
+    expect(vars.TOKEN?.managed).toEqual({ source: 'env', ref: '', key: 'TOKEN', eager: true })
+  })
+
+  it('an already-parsed entry passes back through', () => {
+    const entry = { from: 'env', ref: '', fetch: 'lazy' as const }
+    expect(varsFromEntries({ T: entry }).T?.managed?.source).toBe('env')
+  })
+
+  it('a bad entry throws naming the rule', () => {
+    expect(() => varsFromEntries({ X: { value: 'v', from: 'env' } })).toThrowError(/not both/)
+  })
+})
+
+describe('managed serialization', () => {
+  function managedSession(value: string | null): Session {
+    const session = new Session({ sessionId: 's', cwd: '/' })
+    session.vars.TOKEN = {
+      value,
+      attrs: new Set([VarAttr.Export]),
+      managed: { source: 'aws-sm', ref: 'prod/tokens', key: 'api', eager: false },
+    }
+    return session
+  }
+
+  it('serializes the pointer, never the value', () => {
+    const data = managedSession('s3cr3t').toJSON()
+    expect(JSON.stringify(data)).not.toContain('s3cr3t')
+    expect((data.env as Record<string, string>).TOKEN).toBeUndefined()
+    expect((data.var_attrs as Record<string, string>).TOKEN).toBe('x')
+    expect(data.managed).toEqual({
+      TOKEN: { from: 'aws-sm', ref: 'prod/tokens', key: 'api' },
+    })
+  })
+
+  it('writes fetch only when eager', () => {
+    const session = new Session({ sessionId: 's', cwd: '/' })
+    session.vars.E = {
+      value: null,
+      attrs: new Set([VarAttr.Export]),
+      managed: { source: 'env', ref: '', key: 'E', eager: true },
+    }
+    const data = session.toJSON()
+    expect(data.managed).toEqual({ E: { from: 'env', ref: '', key: 'E', fetch: 'eager' } })
+  })
+
+  it('round-trips as declared-but-unfetched', () => {
+    const data = managedSession('s3cr3t').toJSON()
+    const restored = Session.fromJSON(data as Parameters<typeof Session.fromJSON>[0])
+    const v = restored.vars.TOKEN
+    expect(v?.value).toBeNull()
+    expect(v?.attrs).toEqual(new Set([VarAttr.Export]))
+    expect(v?.managed).toEqual({ source: 'aws-sm', ref: 'prod/tokens', key: 'api', eager: false })
+  })
+
+  it('discards a value a tampered payload smuggles into env', () => {
+    const data = managedSession(null).toJSON()
+    ;(data.env as Record<string, string>).TOKEN = 'smuggled'
+    const restored = Session.fromJSON(data as Parameters<typeof Session.fromJSON>[0])
+    expect(restored.vars.TOKEN?.value).toBeNull()
+    expect(restored.vars.TOKEN?.managed).not.toBeUndefined()
+  })
+})
+
+describe('varsToFields / varsFromFields', () => {
+  it('round trips the pointer, never a value', () => {
+    const table = varsFromEntries({
+      TOKEN: { from: 'aws-sm', ref: 'prod', key: 'api' },
+      MODE: 'prod',
+    })
+    const fields = varsToFields(table)
+    expect(fields.env).toEqual({ MODE: 'prod' })
+    expect(fields.managed).toEqual({ TOKEN: { from: 'aws-sm', ref: 'prod', key: 'api' } })
+    const restored = varsFromFields(fields)
+    expect(restored.TOKEN?.value).toBeNull()
+    expect(restored.TOKEN?.managed).toEqual({
+      source: 'aws-sm',
+      ref: 'prod',
+      key: 'api',
+      eager: false,
+    })
+    expect(restored.MODE).toEqual(table.MODE)
+  })
+
+  it('round trips eager', () => {
+    const table = varsFromEntries({ E: { from: 'aws-sm', ref: 'prod', fetch: 'eager' } })
+    const restored = varsFromFields(varsToFields(table))
+    expect(restored.E?.managed?.eager).toBe(true)
+  })
+
+  it('never writes a fetched value', () => {
+    const table = varsFromEntries({ T: { from: 'aws-sm', ref: 'prod' } })
+    const seeded = table.T
+    if (seeded === undefined) throw new Error('seeded var missing')
+    table.T = withValue(seeded, 'plain')
+    const fields = varsToFields(table)
+    expect(fields.env).toEqual({})
+    expect(varsFromFields(fields).T?.value).toBeNull()
   })
 })

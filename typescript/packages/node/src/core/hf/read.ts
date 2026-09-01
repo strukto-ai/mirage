@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import type { HfAccessor } from '../../accessor/hf.ts'
@@ -43,7 +43,7 @@ export async function read(
     readOptions.offset ??= 0n
     readOptions.size = BigInt(options.size)
   }
-  const startMs = performance.now()
+  const timer = startOp()
   const windowed = readOptions.offset !== undefined || readOptions.size !== undefined
   let data: Buffer
   try {
@@ -59,6 +59,6 @@ export async function read(
     data = Buffer.from(sliceWindow(new Uint8Array(whole), 0, options.size ?? null))
   }
   const bytes = new Uint8Array(data)
-  record('read', virtual, accessor.resourceName, bytes.byteLength, startMs)
+  record('read', virtual, accessor.resourceName, bytes.byteLength, timer)
   return bytes
 }

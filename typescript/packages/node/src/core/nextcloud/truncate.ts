@@ -1,5 +1,5 @@
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
@@ -10,7 +10,7 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const op = await accessor.operator()
   const key = nextcloudKey(path)
   let current: Buffer
@@ -23,6 +23,6 @@ export async function truncate(
   const next = Buffer.alloc(length)
   current.copy(next, 0, 0, Math.min(current.byteLength, length))
   await op.write(key, next)
-  record('truncate', path.virtual, ResourceName.NEXTCLOUD, 0, start)
+  record('truncate', path.virtual, ResourceName.NEXTCLOUD, 0, timer)
   await invalidateAfterWrite(path)
 }

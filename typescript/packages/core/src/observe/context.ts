@@ -343,28 +343,77 @@ export interface RecordOptions {
   revision?: string | null
 }
 
+/**
+ * A running stopwatch for one op, owned by the record path.
+ *
+ * Opened where the backend work begins and read once when the op
+ * finishes, so an op module hands this around instead of reading a
+ * clock of its own. The wall-clock stamp the record carries is taken at
+ * finish time, not here. Mirrors python's `OpTimer`.
+ */
+export class OpTimer {
+  private readonly startMs: number
+
+  constructor() {
+    this.startMs = performance.now()
+  }
+
+  /** Milliseconds elapsed since the timer was opened. */
+  get elapsedMs(): number {
+    return Math.floor(performance.now() - this.startMs)
+  }
+}
+
+/**
+ * Open the record path's stopwatch for one op. Hand the timer to
+ * {@link record} or {@link finishRecord} when the op completes.
+ */
+export function startOp(): OpTimer {
+  return new OpTimer()
+}
+
+/**
+ * Close `timer` and build the finished record.
+ *
+ * The one place an op's duration and wall-clock stamp are read, shared
+ * by the recorder sink ({@link record}) and by the `Ops` facade's own
+ * ledger, so the two cannot disagree about what a duration measures.
+ * `path` is stored as given: a caller that needs mount prefixing
+ * applies it first.
+ */
+export function finishRecord(
+  op: string,
+  path: string,
+  source: string,
+  nbytes: number,
+  timer: OpTimer,
+  options: RecordOptions = {},
+): OpRecord {
+  const elapsed = timer.elapsedMs
+  return new OpRecord({
+    op,
+    path,
+    source,
+    bytes: nbytes,
+    timestamp: Date.now(),
+    durationMs: elapsed,
+    fingerprint: options.fingerprint ?? null,
+    revision: options.revision ?? null,
+  })
+}
+
 export function record(
   op: string,
   path: string,
   source: string,
   nbytes: number,
-  startMs: number,
+  timer: OpTimer,
   options: RecordOptions = {},
 ): void {
   const state = storage.getStore()
   if (state === undefined) return
-  const elapsed = Math.floor(performance.now() - startMs)
   state.records.push(
-    new OpRecord({
-      op,
-      path: applyPrefix(state.mountPrefix, path),
-      source,
-      bytes: nbytes,
-      timestamp: Date.now(),
-      durationMs: elapsed,
-      fingerprint: options.fingerprint ?? null,
-      revision: options.revision ?? null,
-    }),
+    finishRecord(op, applyPrefix(state.mountPrefix, path), source, nbytes, timer, options),
   )
 }
 

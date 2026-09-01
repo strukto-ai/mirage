@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import invalidate_ancestors, invalidate_subtree
 from mirage.core.dropbox.api import delete_path
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -27,13 +25,13 @@ from mirage.utils.errors import enoent
 async def rm_r(accessor: DropboxAccessor, path: PathSpec) -> None:
     # delete_v2 removes folders recursively, so rm -r maps to one call.
     api_path = dropbox_path_of(accessor, path)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     try:
         await delete_path(accessor.token_manager, api_path)
     except DropboxApiError as exc:
         if exc.status == 409:
             raise enoent(path.virtual) from exc
         raise
-    record("rm_r", path.virtual, "dropbox", 0, start_ms)
+    record("rm_r", path.virtual, "dropbox", 0, timer)
     await invalidate_subtree(path)
     await invalidate_ancestors(path)

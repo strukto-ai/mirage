@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh.client import _abs
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -25,8 +23,8 @@ async def truncate(accessor: SSHAccessor,
                    path: PathSpec,
                    length: int = 0) -> None:
     config = accessor.config
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     sftp = await accessor.sftp()
     await sftp.truncate(_abs(config, path.mount_path), length)
-    record("truncate", path.mount_path, "ssh", 0, start_ms)
+    record("truncate", path.mount_path, "ssh", 0, timer)
     await invalidate_after_write(path)

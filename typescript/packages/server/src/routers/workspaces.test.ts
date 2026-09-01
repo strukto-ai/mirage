@@ -155,6 +155,26 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it('POST /v1/workspaces/:id/clone 400s for a bad secrets override', async () => {
+    // The clone route was the last one answering 500 where create,
+    // load and the historical clone all answer 400.
+    const app = buildApp()
+    await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'src-s', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+    })
+    for (const bad of [{ prod: { source: 'nope' } }, { prod: { nosource: 1 } }, []]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/src-s/clone',
+        payload: { override: { secrets: bad } },
+      })
+      expect(res.statusCode).toBe(400)
+    }
+    await app.close()
+  })
+
   it('POST /v1/workspaces/:id/clone 404s for unknown source', async () => {
     const app = buildApp()
     const res = await app.inject({

@@ -220,6 +220,47 @@ async def test_clone_from_version_creates_new_workspace(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_clone_takes_a_secrets_override(tmp_path):
+    """A version store holds no `secrets:` block, so a historical clone
+    names the declarations itself; a bad one is a bad request, not a
+    500, whether the source is unknown or the block is malformed."""
+    async with _client(tmp_path) as client:
+        wid = await _create_ws(client)
+        r = await client.post(f"/v1/workspaces/{wid}/commit",
+                              json={"message": "base"})
+        version = r.json()["version"]
+
+        r = await client.post("/v1/workspaces/clone",
+                              json={
+                                  "source_id": wid,
+                                  "at": version,
+                                  "secrets": {
+                                      "prod": {
+                                          "source": "env"
+                                      }
+                                  },
+                              })
+        assert r.status_code == 201, r.text
+
+        for bad in ({
+                "prod": {
+                    "source": "nope"
+                }
+        }, {
+                "prod": {
+                    "nosource": True
+                }
+        }):
+            r = await client.post("/v1/workspaces/clone",
+                                  json={
+                                      "source_id": wid,
+                                      "at": version,
+                                      "secrets": bad,
+                                  })
+            assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
 async def test_clone_live_workspace(tmp_path):
     async with _client(tmp_path) as client:
         wid = await _create_ws(client)

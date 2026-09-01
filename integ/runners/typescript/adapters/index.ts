@@ -105,12 +105,13 @@ import pg from 'pg'
 import {
   installFakeNavigator,
   makeMockRoot,
-} from '../../../typescript/packages/browser/src/test-utils.ts'
-import { integRoot, walkFiles } from './harness.ts'
-import type { ExecWorkspace, Mount, Target } from './harness.ts'
-import { start as startKitFake } from '../../server/kit/typescript/index.ts'
-import { buildRfc822 } from '../../server/mail/rfc822.ts'
-import type { MailEntry } from '../../server/mail/rfc822.ts'
+} from '../../../../typescript/packages/browser/src/test-utils.ts'
+import { integRoot, walkFiles } from '../harness.ts'
+import type { ExecWorkspace, Mount, Target } from '../harness.ts'
+import { buildSecretsEnv } from './secrets.ts'
+import { start as startKitFake } from '../../../server/kit/typescript/index.ts'
+import { buildRfc822 } from '../../../server/mail/rfc822.ts'
+import type { MailEntry } from '../../../server/mail/rfc822.ts'
 
 export interface Open {
   ws: ExecWorkspace
@@ -266,17 +267,28 @@ async function openRam(target: Target): Promise<Open> {
     }
     const resource = existing ?? new RAMResource()
     built[m.path] = resource
-    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+    mounts[m.path] =
+      m.mode === 'read'
+        ? [resource, MountMode.READ]
+        : m.mode === 'exec'
+          ? [resource, MountMode.EXEC]
+          : resource
   }
+  const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
   const consoleFactory = consoleFactoryFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
     ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
     ...(consoleFactory !== undefined ? { consoleFactory } : {}),
+    ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
     ...permissionOptions(target),
   })
   installLocalClis(ws, target)
-  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+  const cleanup = async (): Promise<void> => {
+    await ws.close()
+    await secretsEnv?.cleanup()
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
 async function openDisk(target: Target): Promise<Open> {
@@ -359,7 +371,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
   // Imported here rather than at the top of the file, because this module is
   // loaded for every target and a kit fake's module reaches its generated
   // Prisma client at import time. See the eslint rule in integ/eslint.config.js.
-  const { databricksFake } = await import('../../server/databricks/fake.ts')
+  const { databricksFake } = await import('../../../server/databricks/fake.ts')
   const server = await startKitFake(databricksFake)
   const endpoint = server.endpoint
   const id = runId()
@@ -1326,7 +1338,7 @@ async function openMem0(target: Target): Promise<Open> {
   // Prisma client at import time. A static import would make `--target
   // nextcloud` fail on a job that has no reason to generate the mem0 client.
   // Any future in-process fake belongs behind the same lazy import.
-  const { mem0Fake } = await import('../../server/mem0/fake.ts')
+  const { mem0Fake } = await import('../../../server/mem0/fake.ts')
   const server = await startKitFake(mem0Fake)
   const mounts: Record<string, Mem0Resource> = {}
   for (const mount of target.mounts) {
@@ -1736,7 +1748,7 @@ async function openDify(target: Target): Promise<Open> {
   // Imported here rather than at the top of the file, because this module is
   // loaded for every target and a kit fake's module reaches its generated
   // Prisma client at import time. See the eslint rule in integ/eslint.config.js.
-  const { difyFake } = await import('../../server/dify/fake.ts')
+  const { difyFake } = await import('../../../server/dify/fake.ts')
   const server = await startKitFake(difyFake)
   const mounts: Record<string, DifyResource> = {}
   for (const m of target.mounts) {
@@ -1920,7 +1932,7 @@ async function openHttp(target: Target): Promise<Open> {
   // Imported here rather than at the top of the file, because this module is
   // loaded for every target and a kit fake's module reaches its generated
   // Prisma client at import time. See the eslint rule in integ/eslint.config.js.
-  const { httpFake } = await import('../../server/http/fake.ts')
+  const { httpFake } = await import('../../../server/http/fake.ts')
   const server = await startKitFake(httpFake)
   process.env.HTTP_ENDPOINT = server.endpoint
   const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}

@@ -13,14 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from urllib.parse import quote
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.ranges import range_header, slice_window
@@ -86,9 +85,9 @@ async def read_bytes(
 ) -> bytes:
     virtual = path.virtual
     remote_path = backend_path(accessor.config, path)
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     if size == 0:
-        record("read", virtual, "databricks_volume", 0, start_ms)
+        record("read", virtual, "databricks_volume", 0, timer)
         return b""
     try:
         data = await asyncio.to_thread(
@@ -111,5 +110,5 @@ async def read_bytes(
     # gave room for. A short answer is what EOF looks like and is kept.
     if size is not None and len(data) > size:
         data = slice_window(data, offset, size)
-    record("read", virtual, "databricks_volume", len(data), start_ms)
+    record("read", virtual, "databricks_volume", len(data), timer)
     return data

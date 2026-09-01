@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.hf_hub.client import hub_bytes, resolve_url
 from mirage.core.hf_hub.lookup import key_of, lookup
-from mirage.observe.context import record
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir, enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -84,7 +82,7 @@ async def read_bytes(accessor: HfHubAccessor,
                       accessor.revision, accessor.repo_path(raw))
     window = ByteWindow(offset=offset,
                         size=size) if offset or size is not None else None
-    start_ms = int(time.monotonic() * 1000)
+    timer = start_op()
     data = await hub_bytes(accessor.token, url, window, session=accessor.pool)
-    record("read", raw, accessor.RESOURCE_NAME, len(data), start_ms)
+    record("read", raw, accessor.RESOURCE_NAME, len(data), timer)
     return data

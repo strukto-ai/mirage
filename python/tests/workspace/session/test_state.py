@@ -20,7 +20,7 @@ from mirage.ops.types import SessionView
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars
 from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
@@ -354,3 +354,47 @@ def test_read_by_kind():
     assert ops.read("s5", "0") == "5"
     assert ops.read("s5", "1") is None
     assert ops.read("missing", "0") is None
+
+
+def _managed(value: str | None) -> ShellVar:
+    return ShellVar(value,
+                    frozenset({VarAttr.EXPORT}),
+                    managed=ManagedRef("env", "", "TOKEN", False))
+
+
+def test_set_var_detaches_a_fetched_managed_var():
+
+    async def run():
+        view, session = _view()
+        session.vars["TOKEN"] = _managed("s3cr3t")
+        await view.set("TOKEN", "mine")
+        var = session.vars["TOKEN"]
+        assert var.managed is None
+        assert var.value == "mine"
+        assert var.attrs == frozenset({VarAttr.EXPORT})
+
+    asyncio.run(run())
+
+
+def test_set_var_detaches_an_unfetched_managed_var():
+
+    async def run():
+        view, session = _view()
+        session.vars["TOKEN"] = _managed(None)
+        await view.set("TOKEN", "mine")
+        var = session.vars["TOKEN"]
+        assert var.managed is None
+        assert var.value == "mine"
+
+    asyncio.run(run())
+
+
+def test_unset_var_deletes_a_managed_name_quietly():
+
+    async def run():
+        view, session = _view()
+        session.vars["TOKEN"] = _managed("s3cr3t")
+        await view.unset("TOKEN")
+        assert "TOKEN" not in session.vars
+
+    asyncio.run(run())

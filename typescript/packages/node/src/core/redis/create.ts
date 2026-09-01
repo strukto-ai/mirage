@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -21,12 +21,12 @@ import { checkDestParents } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function create(accessor: RedisAccessor, path: PathSpec): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   const store = accessor.store
   await checkDestParents(store, path, p)
   await store.setFile(p, new Uint8Array(0))
   await store.setModified(p, nowIso())
-  record('create', p, ResourceName.REDIS, 0, start)
+  record('create', p, ResourceName.REDIS, 0, timer)
   await invalidateAfterWrite(path)
 }

@@ -14,23 +14,19 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import ConfigDict, SecretStr, field_validator
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import ClientFactory, LoopClientCache
+from mirage.secrets.config import AWSAuth
 from mirage.utils import key_prefix as kp
 
 
-class S3Config(BaseModel):
+class S3Config(AWSAuth):
     model_config = ConfigDict(frozen=True)
 
     bucket: str
-    region: str | None = None
     endpoint_url: str | None = None
-    aws_access_key_id: SecretStr | None = None
-    aws_secret_access_key: SecretStr | None = None
-    aws_session_token: SecretStr | None = None
-    aws_profile: str | None = None
     path_style: bool = False
     timeout: int = 30
     proxy: SecretStr | None = None

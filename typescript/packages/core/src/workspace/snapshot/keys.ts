@@ -17,6 +17,7 @@ export const StateKey = Object.freeze({
   MIRAGE_VERSION: 'mirage_version',
   MOUNTS: 'mounts',
   SESSIONS: 'sessions',
+  ENV: 'env',
   DEFAULT_SESSION_ID: 'default_session_id',
   DEFAULT_AGENT_ID: 'default_agent_id',
   CURRENT_AGENT_ID: 'current_agent_id',

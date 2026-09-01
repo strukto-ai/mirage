@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -43,14 +43,14 @@ async function put<A extends Accessor, C>(
 export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
   return async function writeBytes(accessor, path, data) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const start = performance.now()
+    const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     try {
       await put(driver, conn, key, data, path)
     } finally {
       await close()
     }
-    record('write', path.virtual, driver.resource, data.byteLength, start)
+    record('write', path.virtual, driver.resource, data.byteLength, timer)
     await invalidateAfterWrite(path)
     // A put materializes every missing level of the key at once, so the
     // listings above the immediate parent gained entries too.
@@ -62,14 +62,14 @@ export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<
 export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): PathFn<A> {
   return async function create(accessor, path) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const start = performance.now()
+    const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     try {
       await put(driver, conn, key, new Uint8Array(0), path)
     } finally {
       await close()
     }
-    record('create', path.virtual, driver.resource, 0, start)
+    record('create', path.virtual, driver.resource, 0, timer)
     await invalidateAfterWrite(path)
     // An empty put materializes missing parents exactly like write.
     await invalidateAncestors(path)
@@ -82,7 +82,7 @@ export function makeTruncate<A extends Accessor, C>(
 ): TruncateFn<A> {
   return async function truncate(accessor, path, length) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const start = performance.now()
+    const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
     try {
       const data = (await driver.get(conn, key)) ?? new Uint8Array(0)
@@ -93,7 +93,7 @@ export function makeTruncate<A extends Accessor, C>(
     } finally {
       await close()
     }
-    record('truncate', path.virtual, driver.resource, 0, start)
+    record('truncate', path.virtual, driver.resource, 0, timer)
     await invalidateAfterWrite(path)
     // Truncating a missing key creates it, parents included.
     await invalidateAncestors(path)

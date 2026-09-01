@@ -14,7 +14,7 @@
 
 import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -71,8 +71,8 @@ export async function read(
   const window: ByteWindow | undefined = hasWindow
     ? { offset: options.offset ?? 0, size: options.size ?? null }
     : undefined
-  const start = Date.now()
+  const timer = startOp()
   const data = await hubBytes(accessor.token, url, window)
-  record('read', raw, accessor.resourceName, data.length, start)
+  record('read', raw, accessor.resourceName, data.length, timer)
   return data
 }

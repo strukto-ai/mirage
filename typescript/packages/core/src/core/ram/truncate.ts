@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
@@ -23,14 +23,14 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
-  const start = performance.now()
+  const timer = startOp()
   const p = norm(path.mountPath)
   const existing = accessor.store.files.get(p) ?? new Uint8Array()
   const out = new Uint8Array(length)
   out.set(existing.subarray(0, Math.min(existing.byteLength, length)))
   accessor.store.files.set(p, out)
   accessor.store.modified.set(p, nowIso())
-  record('truncate', p, ResourceName.RAM, 0, start)
+  record('truncate', p, ResourceName.RAM, 0, timer)
   await invalidateAfterWrite(path)
   return Promise.resolve()
 }

@@ -244,7 +244,11 @@ async def handle_cli(
     argv = [word_text(p) for p in parts[1:]]
     stdout: ByteSource | None
 
-    result = walk(install.name, install.spec, argv, session.cwd)
+    # The walk takes the same environment the leaf parse below does, so
+    # a group-level option declaring ``Option.env`` fills at its own
+    # level; without it the fetched credential never enters group_flags.
+    result = walk(install.name, install.spec, argv, session.cwd,
+                  env_snapshot(session))
     if result.leaf is None:
         stderr = result.output if result.stream == "stderr" else b""
         stdout = result.output if result.stream == "stdout" else None

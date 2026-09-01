@@ -1,6 +1,6 @@
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { record } from '@struktoai/mirage-core/observe/context'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { ResourceName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
@@ -13,7 +13,7 @@ export async function write(
   data: Uint8Array,
   _index?: IndexCacheStore,
 ): Promise<void> {
-  const startMs = performance.now()
+  const timer = startOp()
   try {
     const op = await accessor.operator()
     await op.write(nextcloudKey(path), Buffer.from(data))
@@ -21,6 +21,6 @@ export async function write(
     if (isNotFound(error)) throw enoent(path)
     throw error
   }
-  record('write', path.virtual, ResourceName.NEXTCLOUD, data.byteLength, startMs)
+  record('write', path.virtual, ResourceName.NEXTCLOUD, data.byteLength, timer)
   await invalidateAfterWrite(path)
 }

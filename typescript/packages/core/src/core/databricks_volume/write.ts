@@ -15,7 +15,7 @@
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record } from '../../observe/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
@@ -51,7 +51,7 @@ export async function writeBytes(
   const p = ensurePathSpec(path)
   const remoteParent = backendPath(accessor.config, parentPath(p))
   const remotePath = backendPath(accessor.config, p)
-  const startMs = performance.now()
+  const timer = startOp()
   await ensureParentDirectory(accessor, remoteParent, p.virtual)
   try {
     await dbxFetch(accessor, 'PUT', 'files', remotePath, {
@@ -63,6 +63,6 @@ export async function writeBytes(
     if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
-  record('write', p.virtual, ResourceName.DATABRICKS_VOLUME, data.byteLength, startMs)
+  record('write', p.virtual, ResourceName.DATABRICKS_VOLUME, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

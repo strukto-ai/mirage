@@ -16,8 +16,21 @@ import type { Ctx, JsonValue, KitRoute } from '../kit/typescript/index.ts'
 import { API_PREFIXES } from './config.ts'
 import type { C } from './config.ts'
 import { INVALID_PERSON, blobSha, bodyPerson, commitPeople, personJson, treeSha } from './wire.ts'
-import { addBranch, branchFor, branchNames, commitList, treeOfBranch } from './store.ts'
-import type { RepoRow, Tree } from './store.ts'
+import type { CommitRow } from './wire.ts'
+import {
+  addBranch,
+  branchFor,
+  branchNames,
+  commitList,
+  commitsBySha,
+  headOf,
+  reaches,
+  stageTree,
+  stagedTree,
+  treeOfBranch,
+  visibleHeadOf,
+} from './store.ts'
+import type { RepoRow } from './store.ts'
 import { authedRoute, everywhere, fail, jsonBodyOf, param, route, str, withRepo } from './http.ts'
 import { recordCommit, writeFile } from './contents.ts'
 
@@ -32,25 +45,6 @@ async function blobBySha(
     for (const data of files.values()) if (blobSha(data) === sha) return data
   }
   return null
-}
-
-// Scoped to the repository, not just the tenant. A staged sha is unique per
-// tenant, so a bare lookup accepted a tree staged in repository A while the
-// caller was operating on repository B, and committing it copied A's files
-// into B. The fake this replaces held `repo.trees` per repository, so a foreign
-// sha was simply not found there.
-async function stagedTree(db: C, tenant: string, repo: RepoRow, sha: string): Promise<Tree | null> {
-  const tree = await db.githubStagedTree.findFirst({
-    where: { tenant, repo: repo.fullName, sha },
-  })
-  if (tree === null) return null
-  const rows = await db.githubStagedEntry.findMany({
-    where: { tenant, treeSha: sha },
-    orderBy: { seq: 'asc' },
-  })
-  const out: Tree = new Map()
-  for (const r of rows) out.set(r.path, Buffer.from(r.data))
-  return out
 }
 
 // Build a tree from a base plus the caller's entries. A null sha is git's
@@ -91,26 +85,22 @@ const createTree = withRepo(async (ctx, repo) => {
       files.set(path, blob)
     }
   }
-  const count = await ctx.db.githubStagedTree.count({
-    where: { tenant: ctx.tenant, repo: repo.fullName },
-  })
-  const sha = treeSha(`${repo.fullName}:${String(count)}`)
-  await ctx.db.githubStagedTree.create({
-    data: { tenant: ctx.tenant, repo: repo.fullName, sha, seq: count },
-  })
-  let seq = 0
-  for (const [path, data] of files) {
-    await ctx.db.githubStagedEntry.create({
-      data: { tenant: ctx.tenant, treeSha: sha, path, data: new Uint8Array(data), seq },
-    })
-    seq += 1
+  return {
+    status: 201,
+    body: { sha: await stageTree(ctx.db, ctx.tenant, repo, files), tree: [] },
   }
-  return { status: 201, body: { sha, tree: [] } }
 })
 
 // The touched set is computed against the DEFAULT branch, which is what the
 // python fake did and what a golden records, even when the commit is later
 // pointed at another branch.
+//
+// The commit is born dangling: it advances no ref, because in git creating a
+// commit and moving a branch onto it are two steps, and a client that stages
+// several before touching any ref depends on that. `parents` is read from the
+// body as the API states it (first parent only, which is all a linear fake
+// needs); absent, the default branch's head stands in, which is the base the
+// touched set above is computed against.
 const createCommit = withRepo(async (ctx, repo) => {
   const body = jsonBodyOf(ctx)
   const tree = str(body, 'tree')
@@ -129,6 +119,16 @@ const createCommit = withRepo(async (ctx, repo) => {
   if (author === INVALID_PERSON) return fail(422, 'Invalid request.\n\n"author" is invalid.')
   const committer = bodyPerson(body, 'committer')
   if (committer === INVALID_PERSON) return fail(422, 'Invalid request.\n\n"committer" is invalid.')
+  // A present `parents` is the caller's answer even when it is empty: `[]` is
+  // how the API spells a root commit, and re-parenting one onto the branch
+  // head would change both its sha and its ancestry. Only an ABSENT field
+  // falls back to where the default branch currently points.
+  const parents = body.parents
+  const parent = Array.isArray(parents)
+    ? typeof parents[0] === 'string'
+      ? parents[0]
+      : ''
+    : await visibleHeadOf(ctx.db, ctx.tenant, repo, repo.defaultBranch)
   const commit = await recordCommit(
     ctx.db,
     ctx.tenant,
@@ -138,6 +138,8 @@ const createCommit = withRepo(async (ctx, repo) => {
     repo.defaultBranch,
     tree,
     { author, committer },
+    parent,
+    false,
   )
   const people = commitPeople({
     authorJson: personJson(author),
@@ -149,9 +151,17 @@ const createCommit = withRepo(async (ctx, repo) => {
   }
 })
 
-// A branch starts as a copy of whatever the base sha resolves to, which is what
-// a branch is: another name for one commit and every file reachable from it.
-// Its own history starts there, so the two do not share future commits.
+// A branch starts as another name for whatever the base resolves to, which is
+// what a branch is: one pointer and every file reachable from it. It takes
+// that point as its head, so it SHARES the history behind it and diverges only
+// in what each ref is pointed at next.
+//
+// The base is resolved as a COMMIT OBJECT first and only then as a ref,
+// because those are two different questions and only the second one needs a
+// branch to already contain the commit. A client that commits and then creates
+// the branch at that sha is naming an object no ref has reached yet, and
+// asking which existing branch holds it answers "none" for a commit that is
+// perfectly real.
 const createRef = withRepo(async (ctx, repo) => {
   const body = jsonBodyOf(ctx)
   const ref = str(body, 'ref').replace(/^\/+|\/+$/g, '')
@@ -160,12 +170,35 @@ const createRef = withRepo(async (ctx, repo) => {
   if (name === '') return fail(422, 'Invalid request.\n\n"ref" is invalid.')
   const names = await branchNames(ctx.db, ctx.tenant, repo)
   if (names.includes(name)) return fail(422, 'Reference already exists')
-  const base = await branchFor(ctx.db, ctx.tenant, repo, str(body, 'sha'))
-  if (base === null) return fail(422, 'Object does not exist')
+  const asked = str(body, 'sha')
+  const object =
+    asked === ''
+      ? null
+      : ((await ctx.db.githubCommit.findFirst({
+          where: { tenant: ctx.tenant, repo: repo.fullName, sha: asked },
+        })) as CommitRow | null)
+  // A commit carries its own tree, so the branch is populated from the commit
+  // that was named rather than from a branch that happens to hold it. Those are
+  // different answers whenever that branch has moved on since, and reading the
+  // branch reported the newer files under the older sha.
+  const staged = object === null ? null : await stagedTree(ctx.db, ctx.tenant, repo, object.treeSha)
+  if (object !== null && staged === null) return fail(422, 'Object does not exist')
+  // Only a sha no commit row answers for is resolved as a ref, which is how a
+  // branch name, HEAD, the empty string and the synthesized root all arrive.
+  const base = object !== null ? null : await branchFor(ctx.db, ctx.tenant, repo, asked)
+  if (object === null && base === null) return fail(422, 'Object does not exist')
   // Recorded before the files are copied, because a branch off an empty
   // repository copies none and would otherwise not exist at all.
   await addBranch(ctx.db, ctx.tenant, repo.fullName, name)
-  const files = await treeOfBranch(ctx.db, ctx.tenant, repo, base)
+  const startAt =
+    object !== null ? object.sha : base === null ? '' : await headOf(ctx.db, ctx.tenant, repo, base)
+  if (startAt !== '') {
+    await ctx.db.githubBranch.updateMany({
+      where: { tenant: ctx.tenant, repo: repo.fullName, name },
+      data: { headSha: startAt },
+    })
+  }
+  const files = staged ?? (await treeOfBranch(ctx.db, ctx.tenant, repo, base ?? repo.defaultBranch))
   let seq = 0
   for (const [path, data] of files) {
     await ctx.db.githubFile.create({
@@ -187,7 +220,15 @@ const createRef = withRepo(async (ctx, repo) => {
   }
 })
 
-// Moving a branch is what makes a staged tree visible.
+// Moving a branch is a pointer write, which is all a ref has ever been. The
+// commits a branch has are the ones reachable from that pointer, so this
+// function neither owns nor rewrites any commit row: pointing a second ref at
+// one commit shares it, pointing a ref backwards abandons the commits above
+// (they stay resolvable by sha, dangling, exactly as the vendor keeps them),
+// and neither case needs a rule of its own. A move that would abandon
+// anything is refused unless the body says `force`, and the test is exact:
+// a fast forward is one where the branch's current head is still reachable by
+// walking first parents back from the requested commit.
 const updateRef = withRepo(async (ctx, repo) => {
   const ref = param(ctx, 'ref').replace(/^\/+|\/+$/g, '')
   const name = ref.startsWith('heads/') ? ref.slice('heads/'.length) : ''
@@ -198,11 +239,22 @@ const updateRef = withRepo(async (ctx, repo) => {
   const commit = await ctx.db.githubCommit.findFirst({
     where: { tenant: ctx.tenant, repo: repo.fullName, sha },
   })
-  if (commit === null || commit.treeSha === '') {
-    return fail(422, 'Invalid request.\n\n"sha" is invalid.')
-  }
+  if (commit === null) return fail(422, 'Invalid request.\n\n"sha" is invalid.')
+  // Every commit records a tree, so the ref is restored to the snapshot the
+  // named commit took. A commit written through /contents used to record none,
+  // and was refused here as though it were not a commit at all.
   const staged = await stagedTree(ctx.db, ctx.tenant, repo, commit.treeSha)
   if (staged === null) return fail(422, 'Invalid request.\n\n"sha" is invalid.')
+  // Refused before anything is written, so a refused update changes nothing.
+  const head = await visibleHeadOf(ctx.db, ctx.tenant, repo, name)
+  const byId = await commitsBySha(ctx.db, ctx.tenant, repo)
+  if (!reaches(sha, head, byId) && body.force !== true) {
+    return fail(422, 'Update is not a fast forward')
+  }
+  await ctx.db.githubBranch.updateMany({
+    where: { tenant: ctx.tenant, repo: repo.fullName, name },
+    data: { headSha: sha },
+  })
   await ctx.db.githubFile.deleteMany({
     where: { tenant: ctx.tenant, repo: repo.fullName, branch: name },
   })
@@ -212,16 +264,30 @@ const updateRef = withRepo(async (ctx, repo) => {
   return { status: 200, body: { ref: `refs/${ref}`, object: { sha, type: 'commit' } } }
 })
 
-// Looked up in the default branch's history rather than in the commit table,
-// because the root commit is synthesized from the tree and never stored: a
-// caller resolving a ref and then asking for that commit would 404 on the one
-// commit every repository has. A commit that named no tree of its own points
-// at the whole-tree sha, which is what a write through /contents produces.
+// An object is resolved by sha, not by finding a branch that still lists it:
+// a commit created but not yet pointed at, and a commit a reset abandoned,
+// are both real objects the vendor still answers for. Only the synthesized
+// root has to be searched for, because it is derived from a branch's content
+// rather than stored, and a caller resolving a ref on a fresh repository asks
+// for exactly that one. It is also the only row that names no tree, which is
+// why the whole-tree sha still stands in for one here.
 const gitCommit = withRepo(async (ctx, repo) => {
   const sha = param(ctx, 'sha')
-  const history = await commitList(ctx.db, ctx.tenant, repo, repo.defaultBranch)
-  const row = history.find((c) => c.sha === sha)
-  if (row === undefined) return fail(404, 'Not Found')
+  const stored = (await ctx.db.githubCommit.findFirst({
+    where: { tenant: ctx.tenant, repo: repo.fullName, sha },
+  })) as CommitRow | null
+  let row = stored
+  if (row === null) {
+    for (const branch of await branchNames(ctx.db, ctx.tenant, repo)) {
+      const history = await commitList(ctx.db, ctx.tenant, repo, branch)
+      const hit = history.find((c) => c.sha === sha)
+      if (hit !== undefined) {
+        row = hit
+        break
+      }
+    }
+  }
+  if (row === null) return fail(404, 'Not Found')
   return {
     status: 200,
     body: {

@@ -14,8 +14,11 @@
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any
+
+import tree_sitter
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.errors import CommandTimeoutError
@@ -30,12 +33,15 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import admit_line
-from mirage.workspace.node.explain import prejudge_line
+from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
 from mirage.workspace.session import (get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.workspace.failure import failure_result
+from mirage.workspace.workspace.fill import (cli_env_names, fill_env,
+                                             fill_names, guest_bound,
+                                             line_nodes)
 from mirage.workspace.workspace.line import run_whole_line
 from mirage.workspace.workspace.utils import command_name, fork_for_call
 
@@ -219,6 +225,26 @@ async def execute_line(
                               stderr=refusal.stderr)
                 session.last_exit_code = io.exit_code
                 return io
+            if ws._has_managed_env:
+                # Filled only after the line is admitted (a refused
+                # line must never reach a secret store) and before the
+                # runtime snapshots the env; a whole-line program may
+                # read any name, so the walk is not consulted. A dry
+                # run (provision) returned above and never fetches. A
+                # SecretsError raises through to the generic fold
+                # below: the line exits 1 and never runs.
+                whole_names = fill_names(effective_session, [ast],
+                                         whole=True,
+                                         cli_env_names=frozenset())
+                # Names first, and the declarations only if there are
+                # any: both arguments would otherwise be evaluated, so
+                # a session with nothing pending (a profile hiding
+                # every managed name) still read a bootstrap source.
+                # The TypeScript twin shares one helper with the
+                # per-command path and skipped this by construction.
+                if whole_names:
+                    await fill_env(effective_session, whole_names, await
+                                   ws._secret_sources())
             io = await run_whole_line(
                 line_runtime, command, stdin, effective_session,
                 ws._registry.mounts(), ws._registry.policies,
@@ -236,6 +262,64 @@ async def execute_line(
             io = IOResult(exit_code=refusal.exit_code, stderr=refusal.stderr)
             session.last_exit_code = io.exit_code
             return io
+        if ws._has_managed_env:
+            # Filled only after the line-tier admission and before the
+            # tree's expansion reads the vars. The walked set carries
+            # stored function bodies too, so a function invoked by bare
+            # name still fills what its body reads. The prejudge pass
+            # leaves single-command lines to the per-command gate, so
+            # the fetch asks the same text-tier question itself, over
+            # the same walked set the names came from: a node already
+            # denied on its literal words never reaches a source, and a
+            # rule that asks is answered before the fetch, with the
+            # approval left for the gate to spend. A deny only the
+            # value gate can see still follows the fetch, because
+            # expansion is what consumes the values.
+            nodes = line_nodes(ast, effective_session)
+            policies = ws._registry.policies
+            writes_gated = (policies is not None
+                            and policies.wants("pre_session"))
+
+            def plan_names(
+                    subset: Sequence[tree_sitter.Node]) -> frozenset[str]:
+                return fill_names(
+                    effective_session,
+                    subset,
+                    whole=guest_bound(subset, decision,
+                                      ws._registry.runtime_bindings),
+                    cli_env_names=cli_env_names(subset, effective_session,
+                                                ws._registry),
+                    writes_gated=writes_gated)
+
+            names = plan_names(nodes)
+            if names:
+                served = await unrefused_nodes(nodes, effective_session,
+                                               ws._registry, ws._namespace,
+                                               agent or "", cancel)
+                if len(served) != len(nodes):
+                    nodes = served
+                    names = plan_names(served) if served else frozenset()
+                # A fetched value can name another managed variable
+                # (the arithmetic chase recurses through values), and
+                # what a value spells is unknowable before its fetch,
+                # so the plan reruns over the same admitted nodes until
+                # it reaches nothing new. fill_names returns pending
+                # names only, so every pass fetches names the last one
+                # could not see and the loop settles.
+                while names:
+                    # Built here, not above the plan: the declarations
+                    # are read only once an admitted node actually
+                    # wants a value, so a line the per-command gate
+                    # refuses never reaches a bootstrap source either.
+                    # An unknown source name already fails at
+                    # construction; what is left for this to discover
+                    # is an unreadable dotenv or a config the source
+                    # refuses, which is the same treatment an
+                    # unreachable store gets. Memoized, so the loop's
+                    # later passes cost one await.
+                    sources = await ws._secret_sources()
+                    await fill_env(effective_session, names, sources)
+                    names = plan_names(nodes)
         io, _ = await run_command_tree(
             ws.dispatch,
             ws._registry,
@@ -269,7 +353,10 @@ async def execute_line(
         # drift it must reconcile, a policy it misconfigured.
         raise
     except Exception as exc:
+        # The fold is a failed command like any other (a SecretsError
+        # folds here), so $? must report it, mirroring the TS catch.
         io = failure_result(exc, command)
+        session.last_exit_code = io.exit_code
         return io
     finally:
         # One rule on every path: an op that happened is always

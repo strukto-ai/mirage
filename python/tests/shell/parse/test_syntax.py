@@ -17,8 +17,42 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.shell.parse import find_syntax_error, parse
+from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
+                                parse)
 from mirage.workspace import Workspace
+
+
+def test_partial_quoted_heredoc_end_is_not_syntax_error():
+    root = parse("cat <<EN'D'\n$v\nEND")
+    assert find_syntax_error(root) is None
+
+
+@pytest.mark.parametrize("command", [
+    "echo `echo a",
+    "echo \"`echo '`'`\"",
+    "echo a`",
+    "`",
+])
+def test_find_unterminated_backtick_flags_open_region(command):
+    assert find_unterminated_backtick(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo `echo a`",
+        "echo `echo a` `echo b`",
+        # Single quotes protect a backtick, double quotes do not.
+        "echo '`'",
+        'echo "`echo a`"',
+        'echo "\\`"',
+        # Only a backslash escapes inside the region.
+        "echo `echo \\`nested\\``",
+        "echo a",
+        "cat <<EOF\nplain\nEOF",
+    ])
+def test_find_unterminated_backtick_accepts_balanced(command):
+    assert find_unterminated_backtick(command) is None
 
 
 @pytest.mark.parametrize("bad_cmd", [

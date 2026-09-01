@@ -240,13 +240,25 @@ export interface FsEntry {
  * a value only for the entry kinds this fake has none of, so they are rendered
  * empty rather than dropped -- the column count is part of what was captured.
  */
-export function listingMarkdown(cmd: string, uri: string, rows: FsEntry[]): string {
+// What upstream says when a listing stopped at the entry limit, and it says
+// it after the table rather than in the header -- the same placement as
+// cat's resume notice.
+export const LIST_TRUNCATED =
+  'Result truncated after reaching the entry limit. Rerun with a larger --limit, up to 10000.'
+
+export function listingMarkdown(
+  cmd: string,
+  uri: string,
+  rows: FsEntry[],
+  truncated = false,
+): string {
   const out = [`# hf_fs ${cmd}`, '', `URI: \`${uri}\``, '']
   out.push('| Type | Path | URI | Target | Details |', '|---|---|---|---|---|')
   for (const row of rows) {
     const details = row.type === 'dir' ? '' : `${row.lfs ? 'lfs, ' : ''}size=${humanSize(row.size)}`
     out.push(`| ${row.type} | ${escapeCell(row.path)} |  |  | ${details} |`)
   }
+  if (truncated) out.push('', LIST_TRUNCATED)
   return out.join('\n')
 }
 
@@ -261,16 +273,57 @@ export function listingMarkdown(cmd: string, uri: string, rows: FsEntry[]): stri
  *   - Path: `config.json`
  *   - Size: 570 bytes
  */
-export function statMarkdown(uri: string, entry: FsEntry | null, path: string): string {
-  const out = [`# hf_fs stat`, '', `- URI: \`${uri}\``]
-  if (entry === null) {
-    out.push('- Exists: no')
-    return out.join('\n')
-  }
-  out.push('- Exists: yes', `- Type: \`${entry.type === 'dir' ? 'dir' : 'file'}\``)
-  out.push(`- Path: \`${path}\``)
-  if (entry.type !== 'dir') out.push(`- Size: ${humanSize(entry.size)}`)
-  return out.join('\n')
+// The four things a URI can be, which is one more than this renderer used to
+// admit and one more than the fake used to compute. A repository is not a
+// directory upstream, and a path that is not there is `missing` rather than an
+// absent Type line -- both are printed, and both are printed for every
+// outcome, so a reader never has to infer a field from its absence.
+export type StatKind = 'file' | 'dir' | 'repo' | 'missing'
+
+/**
+ * Captured:
+ *
+ *   # hf_fs attach
+ *
+ *   - URI: `hf://datasets/OWNER/NAME/fig.png`
+ *   - Path: `fig.png`
+ *   - MIME type: `image/png`
+ *   - Bytes: 2104615
+ *
+ * The bytes themselves ride beside this as an MCP image block, not in it.
+ */
+export function attachMarkdown(uri: string, path: string, mime: string, bytes: number): string {
+  return [
+    `# hf_fs attach`,
+    '',
+    `- URI: \`${uri}\``,
+    `- Path: \`${path}\``,
+    `- MIME type: \`${mime}\``,
+    `- Bytes: ${String(bytes)}`,
+  ].join('\n')
+}
+
+export function statMarkdown(
+  uri: string,
+  kind: StatKind,
+  path: string,
+  size?: number,
+  contentType?: string,
+): string {
+  return [
+    `# hf_fs stat`,
+    '',
+    `- URI: \`${uri}\``,
+    `- Exists: ${kind === 'missing' ? 'no' : 'yes'}`,
+    `- Type: \`${kind}\``,
+    `- Path: \`${path}\``,
+    ...(kind === 'file' && size !== undefined ? [`- Size: ${humanSize(size)}`] : []),
+    // AFTER the size here, and BEFORE the byte count in `catMarkdown`. The
+    // two orders are upstream's, captured separately, and neither is a typo:
+    // a repository file carries no Content-Type at all, and only the virtual
+    // documentation files declare one.
+    ...(contentType === undefined ? [] : [`- Content-Type: \`${contentType}\``]),
+  ].join('\n')
 }
 
 /**
@@ -284,16 +337,41 @@ export function statMarkdown(uri: string, entry: FsEntry | null, path: string): 
  *
  *   {content}
  */
-export function catMarkdown(uri: string, path: string, content: Uint8Array): string {
+// What a bounded read has to say about its own bounds. A reader who cannot see
+// that the bytes stopped early has no way to ask for the rest, and the captured
+// output schema carries `truncated`, `truncation_reason` and `next_offset`
+// precisely because the live server tells them.
+export interface CatBounds {
+  offset: number
+  total: number
+  next: number
+}
+
+export function catMarkdown(
+  uri: string,
+  path: string,
+  content: Uint8Array,
+  bounds: CatBounds,
+  contentType?: string,
+): string {
   const text = Buffer.from(content).toString('utf8')
+  const more = bounds.next < bounds.total
+  // Captured from the live server, down to the placement. The notice follows
+  // the CONTENT rather than joining the header, there is no `Offset:` line
+  // even when one was asked for, and the file's total size is never named --
+  // a caller learns only that there is more and where to resume. Each of
+  // those was ours to get wrong, and each is bytes the model is charged for
+  // on every cat, so the wording is upstream's rather than clearer.
   return [
     `# hf_fs cat`,
     '',
     `URI: \`${uri}\``,
     `Path: \`${path}\``,
+    ...(contentType === undefined ? [] : [`Content-Type: \`${contentType}\``]),
     `Bytes: ${String(content.length)}`,
     '',
     text,
+    ...(more ? ['', `Content truncated. Resume with offset ${String(bounds.next)}.`] : []),
   ].join('\n')
 }
 
@@ -302,12 +380,68 @@ export function catMarkdown(uri: string, path: string, content: Uint8Array): str
 // matters because an agent may branch on the code.
 export const FS_NOT_FOUND = 'HF_FS_NOT_FOUND'
 export const FS_INVALID = 'HF_FS_INVALID_ARGUMENT'
+export const FS_TEXT_ONLY = 'HF_FS_TEXT_ONLY'
+export const FS_NOT_A_FILE = 'HF_FS_NOT_A_FILE'
+// The mirror of NOT_A_FILE, for the commands that need a directory and were
+// handed a file. Only reachable on `hf://README.md` today -- inside a
+// repository the tree route answers a file path with no rows, which `ls` has
+// always reported as an empty listing rather than an error.
+export const FS_NOT_A_DIRECTORY = 'HF_FS_NOT_A_DIRECTORY'
+// `attach`'s own three. It refuses more precisely than `cat` does, because it
+// returns a whole file and cannot truncate: a text file is the wrong KIND of
+// thing (use cat), a non-image binary is unsupported media, and an image over
+// the limit is simply too large.
+export const FS_IMAGE_ONLY = 'HF_FS_IMAGE_ONLY'
+export const FS_UNSUPPORTED_MEDIA = 'HF_FS_UNSUPPORTED_MEDIA'
+export const FS_IMAGE_TOO_LARGE = 'HF_FS_IMAGE_TOO_LARGE'
+export const FS_BUDGET = 'HF_FS_ATTACHMENT_BUDGET_EXCEEDED'
 
 const RECOVERY: Record<string, string> = {
   [FS_NOT_FOUND]:
     'Use stat to verify the target or ls/find to discover a returned URI before retrying.',
   [FS_INVALID]:
     'Correct the URI or flags using the operation grammar and route-specific option guidance.',
+  [FS_TEXT_ONLY]:
+    'Use stat for metadata or ls on the parent directory. Do not use cat for binary or non-UTF-8 content.',
+  [FS_NOT_A_FILE]:
+    'Use stat to confirm the target is a file, or ls/find to discover a returned file URI.',
+  [FS_NOT_A_DIRECTORY]:
+    'Use stat to inspect the target, then run ls or find only on a directory-like scope.',
+  [FS_IMAGE_ONLY]: 'Use cat to read this text file, or stat for metadata.',
+  [FS_UNSUPPORTED_MEDIA]:
+    'Attach supports only files ending in .jpg, .jpeg, .png, or .webp. Use stat for metadata.',
+  [FS_IMAGE_TOO_LARGE]:
+    'Use stat for metadata. Attach cannot truncate images or exceed its configured complete-file limit.',
+  // Upstream's own sentence, curly apostrophe included -- it is bytes the
+  // model is charged for, so it is copied rather than tidied.
+  [FS_BUDGET]:
+    'This attachment was omitted because other attachments already reserved the call\u2019s shared 8 MiB payload budget. Retry it in a separate hf_fs call.',
+}
+
+// The live server names a DIFFERENT command in the error object when one
+// would help, and names none when nothing would: `stat` answers all three of
+// the codes below -- it reports a missing path, a directory and a binary blob
+// without erroring on any of them -- while a malformed flag or a bad URI is
+// the caller's to fix and gets no suggestion at all. Read off the live
+// server for each code rather than assigned by taste.
+const SUGGESTED: Record<string, string> = {
+  [FS_NOT_FOUND]: 'stat',
+  [FS_TEXT_ONLY]: 'stat',
+  [FS_NOT_A_FILE]: 'stat',
+  [FS_NOT_A_DIRECTORY]: 'stat',
+  [FS_UNSUPPORTED_MEDIA]: 'stat',
+  [FS_IMAGE_TOO_LARGE]: 'stat',
+  // The one that is not `stat`. A text file asked for as an image is not an
+  // uncertain target -- it is a known one, reached with the wrong command,
+  // and upstream names the right command instead of the diagnostic one.
+  [FS_IMAGE_ONLY]: 'cat',
+  // `attach` again: the operation was not wrong, only unlucky in its batch,
+  // so the thing to do is the same thing in a call of its own.
+  [FS_BUDGET]: 'attach',
+}
+
+export function fsSuggested(code: string): string | undefined {
+  return SUGGESTED[code]
 }
 
 export function fsRecovery(code: string): string {
