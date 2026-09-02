@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Mock } from 'vitest'
+import { vi } from 'vitest'
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { DriveFile } from '../google/drive.ts'
+import type { DriveApi, ListFilesOptions, PatchFileOptions } from './api.ts'
+import type { DriveRevision } from './versions.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const FILE_MIME = 'application/octet-stream'
@@ -30,9 +34,10 @@ export interface FakeItem {
   driveId?: string
 }
 
-// In-memory Drive: id-addressed items with parent links. Test files mock
-// ../google/drive.ts and delegate its functions to the current instance.
-export class FakeDrive {
+// In-memory Drive: id-addressed items with parent links. It implements the
+// one seam every gdrive module reaches the API through, so a test installs
+// it by handing it to the accessor rather than by mocking modules.
+export class FakeDrive implements DriveApi {
   items = new Map<string, FakeItem>()
   // Every `limit` a caller asked for, so a test can pin that an emptiness
   // probe is bounded. `pageSize` cannot express that: it caps the page, not
@@ -85,15 +90,7 @@ export class FakeDrive {
     }
   }
 
-  listFiles(
-    _tm: TokenManager,
-    opts: {
-      folderId?: string
-      mimeType?: string | null
-      name?: string | null
-      limit?: number | null
-    } = {},
-  ): Promise<DriveFile[]> {
+  listFiles(opts: ListFilesOptions = {}): Promise<DriveFile[]> {
     this.listLimits.push(opts.limit)
     const folderId = opts.folderId ?? 'root'
     const out: DriveFile[] = []
@@ -111,12 +108,11 @@ export class FakeDrive {
     return Promise.resolve([])
   }
 
-  createFolder(_tm: TokenManager, name: string, parentId: string): Promise<DriveFile> {
+  createFolder(name: string, parentId: string): Promise<DriveFile> {
     return Promise.resolve(this.public(this.folder(name, parentId)))
   }
 
   uploadFile(
-    _tm: TokenManager,
     name: string,
     parentId: string,
     data: Uint8Array,
@@ -125,14 +121,14 @@ export class FakeDrive {
     return Promise.resolve(this.public(this.add(name, parentId, mimeType, data)))
   }
 
-  updateFileContent(_tm: TokenManager, fileId: string, data: Uint8Array): Promise<DriveFile> {
+  updateFileContent(fileId: string, data: Uint8Array): Promise<DriveFile> {
     const item = this.items.get(fileId)
     if (item === undefined) throw new Error(`no item ${fileId}`)
     item.content = data
     return Promise.resolve(this.public(fileId))
   }
 
-  deleteFile(_tm: TokenManager, fileId: string): Promise<void> {
+  deleteFile(fileId: string): Promise<void> {
     const stack = [fileId]
     for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
       for (const item of this.items.values()) {
@@ -143,11 +139,7 @@ export class FakeDrive {
     return Promise.resolve()
   }
 
-  patchFile(
-    _tm: TokenManager,
-    fileId: string,
-    opts: { body?: Record<string, unknown>; addParents?: string; removeParents?: string } = {},
-  ): Promise<DriveFile> {
+  patchFile(fileId: string, opts: PatchFileOptions = {}): Promise<DriveFile> {
     const item = this.items.get(fileId)
     if (item === undefined) throw new Error(`no item ${fileId}`)
     if (opts.body?.name !== undefined) item.name = opts.body.name as string
@@ -158,82 +150,91 @@ export class FakeDrive {
     return Promise.resolve(this.public(fileId))
   }
 
-  copyFile(_tm: TokenManager, fileId: string, name: string, parentId: string): Promise<DriveFile> {
+  copyFile(fileId: string, name: string, parentId: string): Promise<DriveFile> {
     const src = this.items.get(fileId)
     if (src === undefined) throw new Error(`no item ${fileId}`)
     return Promise.resolve(this.public(this.add(name, parentId, src.mimeType, src.content)))
   }
 
-  downloadFile(_tm: TokenManager, fileId: string): Promise<Uint8Array> {
+  downloadFile(fileId: string): Promise<Uint8Array> {
     const item = this.items.get(fileId)
     if (item === undefined) throw new Error(`no item ${fileId}`)
     return Promise.resolve(item.content)
   }
 
-  getFile(_tm: TokenManager, fileId: string): Promise<DriveFile> {
+  getFile(fileId: string): Promise<DriveFile> {
     if (!this.items.has(fileId)) throw new Error(`no item ${fileId}`)
     return Promise.resolve(this.public(fileId))
   }
-}
 
-// Mutable singleton the module mock delegates to; reset per test.
-let currentFakeDrive = new FakeDrive()
+  // The fake keeps no revision history: an item has only its current
+  // content. The three revision calls are here so it satisfies the whole
+  // seam, and answer from that one version.
+  listRevisions(): Promise<DriveRevision[]> {
+    return Promise.resolve([])
+  }
 
-export function resetFakeDrive(): FakeDrive {
-  currentFakeDrive = new FakeDrive()
-  return currentFakeDrive
-}
+  downloadRevision(fileId: string): Promise<Uint8Array> {
+    return this.downloadFile(fileId)
+  }
 
-// vi.mock factory body for ../google/drive.ts: keeps real constants and
-// pure helpers, routes API calls to the current FakeDrive.
-export function driveModuleMock(actual: object): object {
-  return {
-    ...actual,
-    listFiles: (...args: unknown[]) =>
-      currentFakeDrive.listFiles(args[0] as TokenManager, args[1] as never),
-    listSharedDrives: () => currentFakeDrive.listSharedDrives(),
-    createFolder: (...args: unknown[]) =>
-      currentFakeDrive.createFolder(args[0] as TokenManager, args[1] as string, args[2] as string),
-    uploadFile: (...args: unknown[]) =>
-      currentFakeDrive.uploadFile(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as string,
-        args[3] as Uint8Array,
-        args[4] as string | undefined,
-      ),
-    updateFileContent: (...args: unknown[]) =>
-      currentFakeDrive.updateFileContent(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as Uint8Array,
-      ),
-    deleteFile: (...args: unknown[]) =>
-      currentFakeDrive.deleteFile(args[0] as TokenManager, args[1] as string),
-    patchFile: (...args: unknown[]) =>
-      currentFakeDrive.patchFile(args[0] as TokenManager, args[1] as string, args[2] as never),
-    copyFile: (...args: unknown[]) =>
-      currentFakeDrive.copyFile(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as string,
-        args[3] as string,
-      ),
-    downloadFile: (...args: unknown[]) =>
-      currentFakeDrive.downloadFile(args[0] as TokenManager, args[1] as string),
-    getFile: (...args: unknown[]) =>
-      currentFakeDrive.getFile(args[0] as TokenManager, args[1] as string),
+  captureFileMetadata(fileId: string): Promise<[string | null, string | null]> {
+    const item = this.items.get(fileId)
+    if (item === undefined) throw new Error(`no item ${fileId}`)
+    return Promise.resolve([item.modifiedTime, null])
   }
 }
 
-export function makeGDriveAccessor(): GDriveAccessor {
-  return new GDriveAccessor({
-    tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-  })
+// The seam with every method a spy. A test that wants to assert on the
+// requests themselves (or to fail one) uses this instead of FakeDrive, and
+// still covers the whole surface, so a call it did not stub answers
+// undefined rather than reaching the network.
+export type StubDrive = { [K in keyof DriveApi]: Mock<DriveApi[K]> }
+
+export function stubDrive(): StubDrive {
+  return {
+    listFiles: vi.fn<DriveApi['listFiles']>(),
+    listSharedDrives: vi.fn<DriveApi['listSharedDrives']>(),
+    getFile: vi.fn<DriveApi['getFile']>(),
+    deleteFile: vi.fn<DriveApi['deleteFile']>(),
+    downloadFile: vi.fn<DriveApi['downloadFile']>(),
+    createFolder: vi.fn<DriveApi['createFolder']>(),
+    uploadFile: vi.fn<DriveApi['uploadFile']>(),
+    updateFileContent: vi.fn<DriveApi['updateFileContent']>(),
+    patchFile: vi.fn<DriveApi['patchFile']>(),
+    copyFile: vi.fn<DriveApi['copyFile']>(),
+    listRevisions: vi.fn<DriveApi['listRevisions']>(),
+    downloadRevision: vi.fn<DriveApi['downloadRevision']>(),
+    captureFileMetadata: vi.fn<DriveApi['captureFileMetadata']>(),
+  }
 }
 
-export function makeScopedGDriveAccessor(folderId: string): GDriveAccessor {
-  return new GDriveAccessor({
-    tokenManager: { config: { clientId: 'cid', refreshToken: 'rt', folderId } } as TokenManager,
-  })
+// A GDriveAccessor whose seam is the given fake. The base builds a live
+// client per access, so overriding the getter is what installs the fake for
+// every module that reaches the API through it.
+class FakeDriveAccessor extends GDriveAccessor {
+  private readonly fake: DriveApi
+
+  constructor(tokenManager: TokenManager, fake: DriveApi) {
+    super({ tokenManager })
+    this.fake = fake
+  }
+
+  override get drive(): DriveApi {
+    return this.fake
+  }
+}
+
+export function makeGDriveAccessor(drive: DriveApi): GDriveAccessor {
+  return new FakeDriveAccessor(
+    { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
+    drive,
+  )
+}
+
+export function makeScopedGDriveAccessor(folderId: string, drive: DriveApi): GDriveAccessor {
+  return new FakeDriveAccessor(
+    { config: { clientId: 'cid', refreshToken: 'rt', folderId } } as TokenManager,
+    drive,
+  )
 }

@@ -16,9 +16,10 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, enoent, enotdir } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { GoogleApiError, type TokenManager } from '../google/client.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile, listFiles, listSharedDrives } from '../google/drive.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
+import type { DriveApi } from './api.ts'
 
 const SUFFIX_TO_MIME: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries(Object.entries(MIME_TO_EXT).map(([mime, ext]) => [ext, mime])),
@@ -43,7 +44,7 @@ export async function rootContext(accessor: GDriveAccessor): Promise<[string, st
   const folderId = accessor.tokenManager.config.folderId
   if (folderId === undefined || folderId === '') return ['root', null]
   if (!ROOT_DRIVE_IDS.has(accessor)) {
-    const item = await getFile(accessor.tokenManager, folderId)
+    const item = await accessor.drive.getFile(folderId)
     ROOT_DRIVE_IDS.set(accessor, item.driveId ?? null)
   }
   return [folderId, ROOT_DRIVE_IDS.get(accessor) ?? null]
@@ -118,14 +119,14 @@ export function nodeFromItem(item: DriveFile, driveId: string | null): DriveNode
 }
 
 export async function resolveSegment(
-  tm: TokenManager,
+  drive: DriveApi,
   parentId: string,
   segment: string,
   driveId: string | null,
   atRoot: boolean,
 ): Promise<DriveNode | null> {
   for (const [name, mime] of queryCandidates(segment)) {
-    const matches = await listFiles(tm, {
+    const matches = await drive.listFiles({
       folderId: parentId,
       driveId,
       name,
@@ -137,9 +138,9 @@ export async function resolveSegment(
   if (atRoot) {
     // Shared Drive enumeration is best-effort, mirroring readdir: a missing
     // scope must not break resolution of My Drive paths.
-    let shared: Awaited<ReturnType<typeof listSharedDrives>>
+    let shared: Awaited<ReturnType<DriveApi['listSharedDrives']>>
     try {
-      shared = await listSharedDrives(tm)
+      shared = await drive.listSharedDrives()
     } catch {
       shared = []
     }
@@ -155,14 +156,14 @@ export async function resolveSegment(
 // Resolve a mount-relative key ("a/b/c"; "" is the mount root) to its Drive
 // item, or null.
 export async function resolveKey(accessor: GDriveAccessor, key: string): Promise<DriveNode | null> {
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   let [parentId, driveId] = await rootContext(accessor)
   let node: DriveNode | null = null
   const segments = key.split('/').filter((s) => s !== '')
   for (const [i, segment] of segments.entries()) {
     // Shared drive names are only directories at the real Drive root,
     // never inside a folder-scoped mount.
-    node = await resolveSegment(tm, parentId, segment, driveId, i === 0 && parentId === 'root')
+    node = await resolveSegment(drive, parentId, segment, driveId, i === 0 && parentId === 'root')
     if (node === null) return null
     if (i < segments.length - 1) {
       if (!isFolder(node)) throw enotdir('/' + segments.slice(0, i + 1).join('/'))

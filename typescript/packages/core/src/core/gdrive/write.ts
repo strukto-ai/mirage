@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, eisdir } from '../../utils/errors.ts'
-import { updateFileContent, uploadFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
 
 async function writeImpl(
@@ -26,17 +25,17 @@ async function writeImpl(
 ): Promise<void> {
   const key = path.resourcePath
   if (key === '') throw eisdir(path)
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const node = await resolveKey(accessor, key)
   if (node !== null && isFolder(node)) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
   if (node !== null && isNative(node)) throw eacces(path)
   if (node !== null) {
-    await updateFileContent(tm, node.id, data)
+    await drive.updateFileContent(node.id, data)
   } else {
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    await uploadFile(tm, basename, parentId, data)
+    await drive.uploadFile(basename, parentId, data)
   }
   await invalidateAfterWrite(path)
 }

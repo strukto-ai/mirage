@@ -20,11 +20,8 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.warm import entry_or_warm
 from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import readdir
-from mirage.core.gdrive.versions import (capture_file_metadata,
-                                         download_revision)
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import download_file
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
 from mirage.observe.context import (active_recorder, record, revision_for,
@@ -36,13 +33,13 @@ from mirage.utils.ranges import slice_window, window_for
 
 
 async def read_bytes(
-    token_manager: TokenManager,
+    drive: DriveApi,
     file_id: str,
 ) -> bytes:
-    return await download_file(token_manager, file_id)
+    return await drive.download_file(file_id)
 
 
-async def read_file_versioned(token_manager: TokenManager,
+async def read_file_versioned(drive: DriveApi,
                               file_id: str,
                               virtual: str,
                               label: str,
@@ -55,7 +52,7 @@ async def read_file_versioned(token_manager: TokenManager,
     mirroring the msgraph read_item.
 
     Args:
-        token_manager (TokenManager): OAuth2 token manager.
+        drive (DriveApi): the accessor's Drive door.
         file_id (str): file ID.
         virtual (str): full virtual path (pin lookup key).
         label (str): mount-relative path recorded with the read.
@@ -68,13 +65,12 @@ async def read_file_versioned(token_manager: TokenManager,
     fingerprint = None
     revision = pinned
     if pinned:
-        data = await download_revision(token_manager, file_id, pinned, window)
+        data = await drive.download_revision(file_id, pinned, window)
     elif active_recorder() is not None:
-        fingerprint, revision = await capture_file_metadata(
-            token_manager, file_id)
-        data = await download_file(token_manager, file_id, window)
+        fingerprint, revision = await drive.capture_file_metadata(file_id)
+        data = await drive.download_file(file_id, window)
     else:
-        data = await download_file(token_manager, file_id, window)
+        data = await drive.download_file(file_id, window)
     record("read",
            label,
            "gdrive",
@@ -126,6 +122,6 @@ async def read(
     elif entry.resource_type == "gdrive/gslide":
         rendered = await read_presentation(accessor.token_manager, entry.id)
     else:
-        return await read_file_versioned(accessor.token_manager, entry.id,
-                                         virtual, key, offset, size)
+        return await read_file_versioned(accessor.drive, entry.id, virtual,
+                                         key, offset, size)
     return slice_window(rendered, offset, size)

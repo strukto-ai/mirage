@@ -13,5 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GoogleApiAccessor } from './google_api.ts'
+import type { DriveApi } from '../core/gdrive/api.ts'
+import { driveApi } from '../core/gdrive/api.ts'
 
-export class GDriveAccessor extends GoogleApiAccessor {}
+export class GDriveAccessor extends GoogleApiAccessor {
+  // Built per access rather than memoized in the constructor: a resource
+  // constructs its accessor long before a test installs a fake, so a cached
+  // client would pin the live wire calls for the whole run.
+  get drive(): DriveApi {
+    return driveApi(this.tokenManager)
+  }
+}

@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { deleteFile } from '../google/drive.ts'
 import { eaccesOnDenied, resolveKey } from './resolve.ts'
 
 // A Drive folder delete removes its subtree in one call.
@@ -25,7 +24,7 @@ async function rmRImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> 
   if (key === '') return
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)
-  await deleteFile(accessor.tokenManager, node.id)
+  await accessor.drive.deleteFile(node.id)
   await invalidateSubtree(path)
 }
 

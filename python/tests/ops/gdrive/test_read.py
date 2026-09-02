@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,6 +22,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops.gdrive import OPS
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
 def _op(name: str):
@@ -48,7 +49,7 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_downloads_plain_file(accessor, index):
+async def test_read_downloads_plain_file(accessor, index, monkeypatch):
     await index.put(
         "/docs/readme.txt",
         IndexEntry(
@@ -58,14 +59,11 @@ async def test_read_downloads_plain_file(accessor, index):
             remote_time="2026-04-01T00:00:00Z",
             vfs_name="readme.txt",
         ))
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=b"file content",
-    ) as mock:
-        result = await read(accessor, _scope("/docs/readme.txt"), index=index)
-        mock.assert_called_once_with(accessor.token_manager, "file123", None)
-        assert result == b"file content"
+    mock = AsyncMock(return_value=b"file content")
+    install_drive(monkeypatch, StubDrive(download_file=mock))
+    result = await read(accessor, _scope("/docs/readme.txt"), index=index)
+    mock.assert_called_once_with("file123", None)
+    assert result == b"file content"
 
 
 @pytest.mark.asyncio

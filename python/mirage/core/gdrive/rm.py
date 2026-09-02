@@ -15,7 +15,6 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
-from mirage.core.google.drive import delete_file
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -30,5 +29,5 @@ async def rm_r(accessor: GDriveAccessor, path: PathSpec) -> None:
     node = await resolve_key(accessor, key)
     if node is None:
         raise enoent(virtual)
-    await delete_file(accessor.token_manager, node.id)
+    await accessor.drive.delete_file(node.id)
     await invalidate_subtree(path)

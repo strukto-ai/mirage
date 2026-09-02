@@ -15,7 +15,6 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.gdrive.write import write_bytes
-from mirage.core.google.drive import download_file
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir
 
@@ -29,7 +28,7 @@ async def truncate(accessor: GDriveAccessor, path: PathSpec,
     if node is None or node.is_native:
         data = b""
     else:
-        data = await download_file(accessor.token_manager, node.id)
+        data = await accessor.drive.download_file(node.id)
     if length <= len(data):
         new = data[:length]
     else:
