@@ -45,6 +45,12 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  * for a synthetic namespace answer; null means the owning mount).
  * `bytes` is what the answering store moved when the delivered result
  * no longer measures it; null means "the result is the measure".
+ * `capped` says a postOps output cap shortened the delivered bytes,
+ * which `bytes` alone cannot say (a warm hit and a suppressed result
+ * stamp one too): a caller that has to know the delivered bytes are the
+ * whole answer (`Ops.readFileWithIdentity`) reads this instead of
+ * comparing lengths, since a rendered read legitimately returns a
+ * different count from the one its backend moved.
  *
  * Mirrors Python's mirage.io.types.OpReport.
  */
@@ -52,6 +58,7 @@ export class OpReport {
   completed = false
   source: string | null = null
   bytes: number | null = null
+  capped = false
 
   /** Stamp the report at the moment an op completes. */
   served(source: string | null = null, moved: number | null = null): void {

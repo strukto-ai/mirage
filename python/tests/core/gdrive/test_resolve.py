@@ -19,14 +19,17 @@ from yarl import URL
 
 import mirage.core.gdrive.resolve as resolve_mod
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
-                                        eacces_on_denied, query_candidates,
-                                        resolve_dir, resolve_key,
-                                        resolve_parent)
+                                        duplicate_rank, eacces_on_denied,
+                                        pick_duplicate, query_candidates,
+                                        rendered_name, resolve_dir,
+                                        resolve_key, resolve_parent)
 from mirage.types import PathSpec
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 DOC_MIME = "application/vnd.google-apps.document"
+
+OLD = "2026-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -63,13 +66,56 @@ async def test_resolve_key_native_suffix(fake_drive, gdrive_accessor):
     assert node.is_native
 
 
+@pytest.mark.parametrize("literal_first", [True, False])
+@pytest.mark.parametrize("newer", ["literal", "native"])
 @pytest.mark.asyncio
-async def test_resolve_key_prefers_literal_name(fake_drive, gdrive_accessor):
-    literal = fake_drive.add("x.gdoc.json", content=b"raw")
-    fake_drive.add("x", mime=DOC_MIME)
+async def test_resolve_key_ranks_across_the_rendered_name_boundary(
+        colliding_pair, gdrive_accessor, literal_first, newer):
+    # A binary file literally named `x.gdoc.json` and a Google Doc named
+    # `x` render as one vfs name and are found by two different queries.
+    # Answering with the first query that matched made the resolver pick
+    # by query order while readdir picked by time, so live_identity
+    # could name one item and the read the other.
+    literal, doc = colliding_pair(literal_first, newer)
     node = await resolve_key(gdrive_accessor, "x.gdoc.json")
     assert node is not None
-    assert node.id == literal
+    assert node.id == (literal if newer == "literal" else doc)
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_ties_between_the_two_shapes_break_by_id(
+        fake_drive, gdrive_accessor):
+    # Kind is not part of the rank, so equal stamps fall through to the
+    # id -- the same tiebreak collapse_duplicates applies, which is the
+    # only reason the two agree here at all.
+    literal = fake_drive.add("x.gdoc.json", content=b"raw", modified=OLD)
+    doc = fake_drive.add("x", mime=DOC_MIME, modified=OLD)
+    node = await resolve_key(gdrive_accessor, "x.gdoc.json")
+    assert node is not None
+    assert node.id == max(literal, doc)
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_skips_an_item_that_renders_under_another_name(
+        fake_drive, gdrive_accessor):
+    # The literal query matches a Drive *name*, and a Google Doc named
+    # `x.gdoc.json` renders as `x.gdoc.json.gdoc.json`: it is another
+    # path's item, and answering with it named a file no listing puts
+    # here.
+    doc = fake_drive.add("x.gdoc.json", mime=DOC_MIME)
+    assert await resolve_key(gdrive_accessor, "x.gdoc.json") is None
+    node = await resolve_key(gdrive_accessor, "x.gdoc.json.gdoc.json")
+    assert node is not None
+    assert node.id == doc
+
+
+def test_rendered_name():
+    assert rendered_name("Report", DOC_MIME) == "Report.gdoc.json"
+    assert rendered_name("a.txt", "text/plain") == "a.txt"
+    assert rendered_name("d", FOLDER_MIME) == "d"
+    # The rule composes, which is why the resolver has to filter on it:
+    # a native doc named like a rendered one is not that rendered one.
+    assert rendered_name("x.gdoc.json", DOC_MIME) == "x.gdoc.json.gdoc.json"
 
 
 @pytest.mark.asyncio
@@ -172,3 +218,50 @@ async def test_eacces_on_denied_maps_403():
         await denied(None, spec)
     with pytest.raises(aiohttp.ClientResponseError):
         await server_error(None, spec)
+
+
+def test_duplicate_rank_orders_newest_first_then_by_id():
+    older = duplicate_rank("2026-01-01T00:00:00Z", "zzz")
+    newer = duplicate_rank("2026-06-01T00:00:00Z", "aaa")
+    assert newer > older
+    # The id is a tiebreak, never the primary key: a newer file with a
+    # low id still outranks an older one with a high id.
+    same_time_low = duplicate_rank("2026-06-01T00:00:00Z", "aaa")
+    same_time_high = duplicate_rank("2026-06-01T00:00:00Z", "bbb")
+    assert same_time_high > same_time_low
+
+
+def test_pick_duplicate_takes_the_newest_regardless_of_listing_order():
+    old = {"id": "id1", "modifiedTime": "2026-01-01T00:00:00Z"}
+    new = {"id": "id2", "modifiedTime": "2026-06-01T00:00:00Z"}
+    assert pick_duplicate([old, new])["id"] == "id2"
+    assert pick_duplicate([new, old])["id"] == "id2"
+
+
+def test_pick_duplicate_tolerates_a_missing_modified_time():
+    stamped = {"id": "id2", "modifiedTime": "2026-01-01T00:00:00Z"}
+    unstamped = {"id": "id1"}
+    assert pick_duplicate([unstamped, stamped])["id"] == "id2"
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_picks_the_newest_of_two_same_named_siblings(
+        fake_drive, gdrive_accessor):
+    # Drive allows duplicate sibling names. The fake answers in
+    # insertion order and honours no orderBy, which is the point: the
+    # rule has to hold without the server sorting for us.
+    fake_drive.add("dup.txt", modified="2026-01-01T00:00:00Z")
+    newest = fake_drive.add("dup.txt", modified="2026-06-01T00:00:00Z")
+    node = await resolve_key(gdrive_accessor, "dup.txt")
+    assert node is not None
+    assert node.id == newest
+
+
+@pytest.mark.asyncio
+async def test_resolve_key_picks_the_newest_when_it_is_listed_first(
+        fake_drive, gdrive_accessor):
+    newest = fake_drive.add("dup.txt", modified="2026-06-01T00:00:00Z")
+    fake_drive.add("dup.txt", modified="2026-01-01T00:00:00Z")
+    node = await resolve_key(gdrive_accessor, "dup.txt")
+    assert node is not None
+    assert node.id == newest

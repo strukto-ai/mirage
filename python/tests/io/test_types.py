@@ -46,6 +46,7 @@ def test_op_report_defaults_say_nothing_ran():
     assert report.completed is False
     assert report.source is None
     assert report.bytes is None
+    assert report.capped is False
 
 
 def test_op_report_served_stamps_the_completion():
@@ -54,6 +55,9 @@ def test_op_report_served_stamps_the_completion():
     assert report.completed is True
     assert report.source == "ram"
     assert report.bytes == 10
+    # An output cap is a separate fact, stamped by the door only when
+    # one shortened the delivered bytes.
+    assert report.capped is False
 
 
 def test_op_report_served_defaults_to_the_owning_mount():

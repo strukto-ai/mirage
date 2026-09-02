@@ -13,10 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { LookupStatus } from '../../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { runWithSession } from '../../context/session_context.ts'
+import { OpReport } from '../../io/types.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
+import type { Policy } from '../../policy/base.ts'
+import type { Action, OpsResultContext } from '../../policy/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Session } from '../session/session.ts'
@@ -50,6 +57,157 @@ describe('dispatch applies limits on the executing mount', () => {
       await ws.close()
     }
   }, 30_000)
+})
+
+describe('a fresh read refuses the warm file cache', () => {
+  // Ops.readFileWithIdentity needs the backend's own answer: a cached
+  // read stamps no fingerprint or revision, so serving one would report
+  // a versioned file as having no identity. Mirrors Python's
+  // tests/workspace/dispatcher/test_dispatcher.py.
+  function mkCaching(): Workspace {
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    return new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+  }
+
+  it('serves the backend bytes where a plain read serves the cache', async () => {
+    const ws = mkCaching()
+    await ws.fs.writeFile('/m/f.txt', 'STORED')
+    await ws.cache.set('/m/f.txt', ENC.encode('CACHED'))
+    expect(DEC.decode((await ws.dispatch('read', '/m/f.txt')) as Uint8Array)).toBe('CACHED')
+    const fresh = (await ws.dispatch('read', '/m/f.txt', [], { fresh: true })) as Uint8Array
+    expect(DEC.decode(fresh)).toBe('STORED')
+  })
+
+  it('is consumed at the door and never forwarded to the backend', async () => {
+    // No backend declares it, so a leaked flag would reach the op fn.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    let seen: string[] = []
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, _path, _args, kwargs) => {
+        seen = Object.keys(kwargs)
+        return ENC.encode('STORED')
+      },
+      write: false,
+    })
+    await ws.dispatch('read', '/m/f.txt', [], { fresh: true })
+    expect(seen).not.toContain('fresh')
+  })
+
+  it('hands the op an empty index of its own, not the resource one', async () => {
+    // The other half of "do not answer this from memory": an
+    // id-addressed backend resolves a path to an id through the index,
+    // and a remembered binding never expires, so the resource's index
+    // would serve the file that used to live at the path. The
+    // substitute is a real store rather than undefined, because the
+    // warm listing reaches the resolver through it. Mirrors Python's
+    // test_fresh_hands_the_op_an_empty_index_of_its_own.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/m': resource }, { mode: MountMode.WRITE, ops })
+    const seen: (IndexCacheStore | undefined)[] = []
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, _path, _args, kwargs) => {
+        seen.push(kwargs.index)
+        return ENC.encode('STORED')
+      },
+      write: false,
+    })
+    await ws.dispatch('read', '/m/f.txt')
+    await ws.dispatch('read', '/m/f.txt', [], { fresh: true })
+    const [plain, fresh] = seen
+    expect(plain).toBe(resource.index)
+    expect(fresh).toBeInstanceOf(RAMIndexCacheStore)
+    expect(fresh).not.toBe(resource.index)
+    expect(await fresh?.get('/m/f.txt')).toEqual({ status: LookupStatus.NOT_FOUND })
+  })
+})
+
+describe('a postOps cap stamps the report when it truncates', () => {
+  // The cap runs after the backend answered, so `bytes` keeps the moved
+  // count and the delivered result no longer measures it. Only the door
+  // can say the two disagree because a cap ran: a caller comparing
+  // lengths cannot tell this from a rendered read, which legitimately
+  // returns a different count from the one it moved. Mirrors Python's
+  // tests/workspace/dispatcher/test_dispatcher.py.
+  class CapReads implements Policy {
+    constructor(private readonly maxBytes: number) {}
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return new Limit({ maxBytes: this.maxBytes })
+      return null
+    }
+  }
+
+  function mkCapped(maxBytes: number): Workspace {
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    return new Workspace(
+      { '/m': resource },
+      { mode: MountMode.WRITE, ops, policies: [new CapReads(maxBytes)] },
+    )
+  }
+
+  function doorOf(ws: Workspace): DispatchFn {
+    return (ws as unknown as { dispatcher: { dispatch: DispatchFn } }).dispatcher.dispatch
+  }
+
+  it('stamps a cap that truncated the delivered bytes', async () => {
+    const ws = mkCapped(2)
+    await ws.fs.writeFile('/m/f.txt', 'STORED')
+    const report = new OpReport()
+    const [result] = await doorOf(ws)(
+      'read',
+      PathSpec.fromStrPath('/m/f.txt'),
+      [],
+      { fresh: true },
+      report,
+    )
+    expect(DEC.decode(result as Uint8Array)).toBe('ST')
+    expect(report.bytes).toBe(ENC.encode('STORED').byteLength)
+    expect(report.capped).toBe(true)
+  })
+
+  it('leaves a bound that truncated nothing unstamped', async () => {
+    const ws = mkCapped(64)
+    await ws.fs.writeFile('/m/f.txt', 'STORED')
+    const report = new OpReport()
+    const [result] = await doorOf(ws)(
+      'read',
+      PathSpec.fromStrPath('/m/f.txt'),
+      [],
+      { fresh: true },
+      report,
+    )
+    expect(DEC.decode(result as Uint8Array)).toBe('STORED')
+    expect(report.capped).toBe(false)
+  })
+
+  it('stamps a warm read the cap truncated too', async () => {
+    // The cache path applies the same bound and must report it the same
+    // way, or a caller would read a truncated cached answer as whole.
+    const ws = mkCapped(2)
+    await ws.fs.writeFile('/m/f.txt', 'STORED')
+    await ws.cache.set('/m/f.txt', ENC.encode('CACHED'))
+    const report = new OpReport()
+    const [result] = await doorOf(ws)('read', PathSpec.fromStrPath('/m/f.txt'), [], {}, report)
+    expect(DEC.decode(result as Uint8Array)).toBe('CA')
+    expect(report.capped).toBe(true)
+  })
 })
 
 describe('dispatch rename addresses dst against the source mount', () => {

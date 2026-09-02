@@ -19,9 +19,9 @@ import { entryOrWarm } from '../../cache/index/warm.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
+import { FOLDER_MIME, getFile } from '../google/drive.ts'
 import { guessType } from '../../utils/filetype.ts'
-import { resolveKey } from './resolve.ts'
+import { isNative, renderedName, resolveKey } from './resolve.ts'
 
 const MIME_TO_RT: Readonly<Record<string, string>> = {
   'application/vnd.google-apps.document': 'gdrive/gdoc',
@@ -49,10 +49,9 @@ async function statFromApi(
       extra: { file_id: node.id },
     })
   }
-  const ext = MIME_TO_EXT[node.mimeType]
-  const vfsName = ext !== undefined ? `${node.name}${ext}` : node.name
+  const vfsName = renderedName(node.name, node.mimeType)
   // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-  const size = ext !== undefined ? null : parseInt(item.size ?? '0', 10)
+  const size = isNative(node) ? null : parseInt(item.size ?? '0', 10)
   return new FileStat({
     name: vfsName,
     size,

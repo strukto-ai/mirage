@@ -16,8 +16,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import resolve_dir
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, list_files
+from mirage.core.gdrive.resolve import rendered_name, resolve_dir
+from mirage.core.google.drive import FOLDER_MIME, list_files
 from mirage.types import PathSpec
 
 
@@ -27,9 +27,7 @@ def vfs_name(item: dict[str, Any]) -> str:
     Args:
         item (dict): Drive file resource.
     """
-    ext = MIME_TO_EXT.get(item.get("mimeType", ""))
-    name = str(item["name"])
-    return f"{name}{ext}" if ext else name
+    return rendered_name(str(item["name"]), str(item.get("mimeType", "")))
 
 
 async def iter_tree(

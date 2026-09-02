@@ -15,6 +15,24 @@
 import type { IndexEntry, ListResult, LookupResult } from './config.ts'
 
 export abstract class IndexCacheStore {
+  /**
+   * Whether this store stands in for a `fresh` op.
+   *
+   * False on every store a mount owns and true only on the private,
+   * empty one the dispatcher substitutes for a `fresh` op. It is the
+   * signal a backend reads when the memory it has to silence does not
+   * live in this store: sharepoint remembers site and drive ids on its
+   * accessor, so an empty index alone would not stop a
+   * deleted-and-recreated drive from answering with the old id.
+   * Nothing consults it for entries; it says only "no memory answers
+   * this one". Mirrors Python `IndexCacheStore.fresh`.
+   */
+  readonly fresh: boolean
+
+  constructor(fresh = false) {
+    this.fresh = fresh
+  }
+
   abstract get(resourcePath: string): Promise<LookupResult>
   abstract put(resourcePath: string, entry: IndexEntry): Promise<void>
   abstract listDir(resourcePath: string): Promise<ListResult>

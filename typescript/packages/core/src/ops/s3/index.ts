@@ -16,5 +16,9 @@ import { S3_IO } from '../../commands/builtin/s3/io.ts'
 import { ResourceName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
+import { liveIdentityOp } from './identity.ts'
 
-export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.S3, S3_IO, {})
+export const S3_OPS: readonly RegisteredOp[] = [
+  ...makeGenericOps(ResourceName.S3, S3_IO, {}),
+  liveIdentityOp,
+]

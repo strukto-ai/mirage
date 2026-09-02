@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import apply_op_limit
 from mirage.context import (get_current_session, hidden_paths_intersect,
@@ -34,8 +35,8 @@ from mirage.ops.namespace_view import (merge_readdir, namespace_listing,
                                        namespace_stat)
 from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.types import (ConsistencyPolicy, FileStat, FileType, PathSpec,
-                          ResourceName)
+from mirage.types import (ConsistencyPolicy, FileStat, FileType, Limit,
+                          PathSpec, ResourceName)
 from mirage.utils.errors import MISS_ERRORS, no_mount
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
@@ -73,6 +74,35 @@ def _memory_answered(report: OpReport | None,
     """
     if report is not None:
         report.served(ResourceName.RAM.value, moved)
+
+
+async def _bounded(result: Any, bound: Limit | None,
+                   report: OpReport | None) -> Any:
+    """Apply an op's post_ops output cap, stamping what it truncated.
+
+    The transfer already happened, so the cap changes what the caller
+    receives, not what the backend moved; the report already carries
+    the moved count. What it cannot carry is that the two now disagree:
+    a warm hit stamps a moved count too, and a rendered read returns a
+    different count from the one its backend moved, so a caller cannot
+    tell a truncation from either by comparing lengths. The one place
+    that knows is here, where the cap runs.
+
+    Args:
+        result (Any): the op's result; only bytes and byte streams cap.
+        bound (Limit | None): the merged post_ops bound, None for none.
+        report (OpReport | None): the caller's report, stamped when the
+            cap shortened the delivered bytes.
+    """
+    if bound is None:
+        return result
+    before = len(result) if isinstance(result, (bytes, bytearray)) else None
+    capped = await apply_op_limit(result, bound)
+    if (report is not None and before is not None
+            and isinstance(capped,
+                           (bytes, bytearray)) and len(capped) < before):
+        report.capped = True
+    return capped
 
 
 def _hidden_refusal(op: str, virtual: str) -> OSError:
@@ -256,9 +286,7 @@ class Dispatcher:
         if op == "readdir" and isinstance(fallback, list):
             fallback = _visible_entries(fallback, path.virtual)
         bound = await post_ops_gate(policies, op, path, write, "", fallback)
-        if bound is not None:
-            return await apply_op_limit(fallback, bound)
-        return fallback
+        return await _bounded(fallback, bound, report)
 
     async def dispatch(self,
                        op: str,
@@ -275,6 +303,35 @@ class Dispatcher:
         # probes cannot recurse into it.
         if self._drift is not None and self._drift.pending:
             await self._drift.drain(self._namespace.registry.try_mount_for)
+        # `fresh` is the caller's "do not answer this from memory", and
+        # it silences both memories the op would otherwise reach. The
+        # warm-cache early return below is skipped, so the op reaches
+        # the backend and its own answer is what gets recorded; and the
+        # op runs against an empty index of its own instead of the
+        # mount's, so an id-addressed backend (drive, box, dropbox)
+        # resolves the path to an id from a live listing rather than
+        # from a remembered name->id binding. Ops.read_with_identity
+        # needs both: a read served from the cache stamps no fingerprint
+        # or revision, and a read that resolved a remembered id would
+        # stamp the file that used to live at the path.
+        # The index is *replaced*, not dropped, because it is also how a
+        # live listing reaches the resolver: drive's read warms the
+        # parent directory into the index and reads the id back out of
+        # it, so None raises AttributeError and NULL_INDEX (which
+        # discards the warm) answers ENOENT for a file that is there.
+        # Nothing else sees the substitute, so a fresh read leaves the
+        # mount's index exactly as it found it.
+        # The substitute is also *marked* fresh, because a backend can
+        # hold a name->id memory the index cannot reach: sharepoint
+        # remembers site and drive ids on its accessor, so an empty
+        # index alone would let a deleted-and-recreated drive answer
+        # with the old id. Marking the store rather than forwarding a
+        # kwarg keeps the signal on the one object every backend read
+        # already receives.
+        # `fresh` is consumed here, never forwarded: no backend takes it.
+        fresh = bool(kwargs.pop("fresh", False))
+        if fresh:
+            kwargs["index"] = RAMIndexCacheStore(fresh=True)
         # Hidden paths answer before anything else can: the typed path
         # is checked so a link inside hidden space cannot be followed
         # out of it, the followed path is re-checked so a visible link
@@ -355,7 +412,7 @@ class Dispatcher:
         # the probe is the whole fix.
         raw = "filetype" in kwargs and kwargs["filetype"] is None
 
-        if caches_reads and not raw and op in DISPATCH_READ_OPS:
+        if caches_reads and not raw and not fresh and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
             if cached is not None and await self._reconciler.may_serve_cached(
                     mount, path.virtual):
@@ -374,8 +431,7 @@ class Dispatcher:
                 _memory_answered(report, len(served))
                 bound = await post_ops_gate(policies, op, path, write,
                                             mount.prefix, served)
-                if bound is not None:
-                    served = await apply_op_limit(served, bound)
+                served = await _bounded(served, bound, report)
                 return served, IOResult(reads={path.virtual: served})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -443,11 +499,7 @@ class Dispatcher:
                 await self._namespace.unlink(kwargs["dst"].virtual)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
-        if bound is not None:
-            # The transfer already happened, so the limit changes what
-            # the caller receives, not what the backend moved; the
-            # report above already carries the moved count.
-            result = await apply_op_limit(result, bound)
+        result = await _bounded(result, bound, report)
         return result, IOResult()
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
@@ -674,9 +726,7 @@ class Dispatcher:
         _memory_answered(report)
         bound = await post_ops_gate(policies, op, path, write, owner or "",
                                     result)
-        if bound is not None:
-            return await apply_op_limit(result, bound)
-        return result
+        return await _bounded(result, bound, report)
 
     async def _readlink_miss(self, path: PathSpec) -> OSError:
         """The error a readlink of something that is not a link answers.

@@ -13,16 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { IndexEntry, LookupStatus, type LookupResult } from '../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../cache/index/ram.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import { runWithSession } from '../context/session_context.ts'
 import { LimitExceededError } from '../commands/errors.ts'
+import { record, runWithRecording, startOp } from '../observe/context.ts'
 import { OpsRegistry } from './registry.ts'
+import type { LiveFileIdentity } from './types.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, OpsContext, OpsResultContext } from '../policy/types.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { FileType, Limit, MountMode, OnExceed } from '../types.ts'
-import { enoent, enotdir } from '../utils/errors.ts'
+import { enoent, enotdir, isCappedRead, type FsError } from '../utils/errors.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
+
+// Exposes the protected `_index` slot so a test can swap in a custom
+// IndexCacheStore instance, the way BaseResource.setIndex only allows a
+// config, never an arbitrary store.
+class TestableRAMResource extends RAMResource {
+  setRawIndex(index: IndexCacheStore): void {
+    this._index = index
+  }
+}
 
 const DEC = new TextDecoder()
 
@@ -771,5 +785,330 @@ describe('Ops.readlink', () => {
       { mode: MountMode.WRITE, ops, policies: [noProbe] },
     )
     expect(await codeOf(ws, '/data/missing')).toBe('EINVAL')
+  })
+})
+
+describe('Ops.liveIdentity', () => {
+  it('reads back null when the mount has no identity op', async () => {
+    const ws = mkWorkspace()
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toBeNull()
+  })
+
+  it('answers with the backend struct on a wired mount', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const fresh: LiveFileIdentity = { exists: true, revision: 'r1', fingerprint: 'fp1' }
+    ops.register({
+      name: 'live_identity',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => fresh,
+      write: false,
+    })
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toEqual(fresh)
+  })
+
+  it('ignores a wrong entry and a lying negative cache', async () => {
+    // The index holds a stale positive entry for this exact path, and its
+    // own get() answers NOT_FOUND for everything regardless of what was
+    // put -- liveIdentity must still answer from the backend, proving the
+    // op never consults the index either way.
+    class LyingIndex extends RAMIndexCacheStore {
+      override get(_resourcePath: string): Promise<LookupResult> {
+        return Promise.resolve({ entry: null, status: LookupStatus.NOT_FOUND })
+      }
+    }
+    const resource = new TestableRAMResource()
+    const lying = new LyingIndex()
+    resource.setRawIndex(lying)
+    const wrongEntry = new IndexEntry({ id: 'wrong-id', name: 'a.txt', resourceType: 'ram/file' })
+    await lying.put('/a.txt', wrongEntry)
+
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const fresh: LiveFileIdentity = { exists: true, revision: 'fresh-rev', fingerprint: 'fresh-fp' }
+    ops.register({
+      name: 'live_identity',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => fresh,
+      write: false,
+    })
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    expect(await ws.fs.liveIdentity('/data/a.txt')).toEqual(fresh)
+  })
+})
+
+describe('Ops.readFileWithIdentity', () => {
+  it('returns bytes and null on RAM', async () => {
+    const ws = mkWorkspace()
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('hello')
+    expect(identity).toBeNull()
+  })
+
+  it('is populated when the read stamps markers', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    // The Workspace constructor re-registers each mount's ops, so the
+    // fake read has to land on the registry after the workspace is built.
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('forwards nested records to an enclosing scope on success', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('data')
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
+          fingerprint: 'fp-2',
+          revision: 'rev-2',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [, outerRecords] = await runWithRecording(() => ws.fs.readFileWithIdentity('/data/a.txt'))
+    expect(outerRecords.some((r) => r.revision === 'rev-2')).toBe(true)
+  })
+
+  it('forwards nested records to an enclosing scope on a raising read', async () => {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        record('read', path.virtual, resource.kind, 0, startOp(), {
+          fingerprint: 'fp-3',
+          revision: 'rev-3',
+        })
+        throw new Error('boom')
+      },
+      write: false,
+    })
+    let threw: unknown
+    const [, outerRecords] = await runWithRecording(async () => {
+      try {
+        await ws.fs.readFileWithIdentity('/data/a.txt')
+      } catch (err) {
+        threw = err
+      }
+    })
+    expect(threw).toBeInstanceOf(Error)
+    expect(outerRecords.some((r) => r.revision === 'rev-3')).toBe(true)
+  })
+
+  it('is not answered by the warm file cache', async () => {
+    // A cached read crosses no network and stamps no marker, so serving
+    // one here would hand back bytes with identity null for a file the
+    // backend versions. The plain read still takes the cache; only this
+    // one refuses it.
+    const resource = new RAMResource()
+    Object.assign(resource, { cachesReads: true })
+    const ops = new OpsRegistry()
+    ops.registerResource(resource)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    await ws.cache.set('/data/a.txt', new TextEncoder().encode('CACHED'))
+    expect(await ws.fs.readFileText('/data/a.txt')).toBe('CACHED')
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('does not read a marker stamped for another path as this one', async () => {
+    // FallbackStorage (the browser) hands the newest live frame to every
+    // reader, so a concurrent read's record can land in this frame.
+    // Filtering on the record's own path is what stops that record from
+    // being reported as this file's identity.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: () => {
+        record('read', '/data/other.txt', resource.kind, 1, startOp(), {
+          fingerprint: 'fp-other',
+          revision: 'rev-other',
+        })
+        return new TextEncoder().encode('mine')
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('mine')
+    expect(identity).toBeNull()
+  })
+
+  it('still finds the marker of a read reached through a symlink', async () => {
+    // The record names the followed path, so the filter has to follow
+    // too: comparing against the link's own name would drop the marker
+    // of every read reached through one.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/data/a.txt', 'stored')
+    await ws.fs.symlink('/data/link.txt', '/data/a.txt')
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/link.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+})
+
+// A cap truncates after the backend answered, so the delivered bytes
+// are a prefix while the markers still describe the whole file. The
+// pair is refused rather than degraded: bypassing the cap is a policy
+// bypass, and a null identity loses the same data one step later, once
+// the caller hashes the prefix and writes it back.
+describe('Ops.readFileWithIdentity under a policy cap', () => {
+  class CapReadBytes implements Policy {
+    constructor(private readonly maxBytes: number) {}
+    postOps(ctx: OpsResultContext): Action | null {
+      if (ctx.op === 'read') return new Limit({ maxBytes: this.maxBytes })
+      return null
+    }
+  }
+
+  function cappedWorkspace(maxBytes: number): Workspace {
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace(
+      { '/data': resource },
+      { mode: MountMode.WRITE, ops, policies: [new CapReadBytes(maxBytes)] },
+    )
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: null,
+      fn: (_accessor, path) => {
+        const data = new TextEncoder().encode('versioned')
+        record('read', path.virtual, resource.kind, data.byteLength, startOp(), {
+          fingerprint: 'fp-1',
+          revision: 'rev-1',
+        })
+        return data
+      },
+      write: false,
+    })
+    return ws
+  }
+
+  it('leaves the plain read serving the capped prefix', async () => {
+    const ws = cappedWorkspace(4)
+    expect(DEC.decode(await ws.fs.readFile('/data/a.txt'))).toBe('vers')
+  })
+
+  it('refuses a truncated pairing', async () => {
+    const ws = cappedWorkspace(4)
+    const err = await ws.fs.readFileWithIdentity('/data/a.txt').catch((e: unknown) => e)
+    expect(isCappedRead(err)).toBe(true)
+    expect((err as FsError).code).toBe('EINVAL')
+    expect((err as Error).message).toContain('policy cap truncated')
+  })
+
+  it('refuses through the workspace facade too', async () => {
+    const ws = cappedWorkspace(4)
+    const err = await ws.readFileWithIdentity('/data/a.txt').catch((e: unknown) => e)
+    expect(isCappedRead(err)).toBe(true)
+  })
+
+  it('still answers when the cap truncates nothing', async () => {
+    // The refusal is truncation, not the presence of a bound.
+    const ws = cappedWorkspace(64)
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/a.txt')
+    expect(DEC.decode(data)).toBe('versioned')
+    expect(identity).toEqual({ exists: true, revision: 'rev-1', fingerprint: 'fp-1' })
+  })
+
+  it('does not mistake a rendered read for a truncated one', async () => {
+    // A rendered read's marker record measures the bytes the backend
+    // moved (9), and the op answers with a 5-byte rendering; only the
+    // door knows no cap ran, which is why the report is what is read
+    // back rather than the two lengths.
+    const resource = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const op of resource.ops()) ops.register(op)
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, ops })
+    await ws.fs.writeFile('/data/hits.tally', 'raw-bytes')
+    ops.register({
+      name: 'read',
+      resource: resource.kind,
+      filetype: '.tally',
+      fn: (_accessor, path) => {
+        record('read', path.virtual, resource.kind, 'raw-bytes'.length, startOp(), {
+          fingerprint: 'fp-r',
+          revision: 'rev-r',
+        })
+        return new TextEncoder().encode('tally')
+      },
+      write: false,
+    })
+    const [data, identity] = await ws.fs.readFileWithIdentity('/data/hits.tally')
+    expect(DEC.decode(data)).toBe('tally')
+    expect(identity).toEqual({ exists: true, revision: 'rev-r', fingerprint: 'fp-r' })
   })
 })

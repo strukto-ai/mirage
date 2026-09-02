@@ -54,6 +54,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { Ops } from '../../ops/ops.ts'
+import type { LiveFileIdentity } from '../../ops/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
@@ -897,6 +898,38 @@ export class Workspace {
 
   async readdir(path: string): Promise<string[]> {
     return this.fs.readdir(path)
+  }
+
+  /**
+   * The backend's own identity for the file living at `path`.
+   *
+   * Delegated to the ops facade rather than dispatched here, so the
+   * link follow, the admission policies and the op recording fire
+   * exactly as they do for a shell line. Null when the mount's backend
+   * registers no identity op.
+   */
+  async liveIdentity(path: string): Promise<LiveFileIdentity | null> {
+    return this.fs.liveIdentity(path)
+  }
+
+  /**
+   * Read a file and the identity of the bytes just read.
+   *
+   * Delegated to the ops facade for the same reason as
+   * {@link liveIdentity}; the markers come from the read's own backend
+   * response.
+   *
+   * A policy-capped read refuses (`cappedRead`) rather than pairing a
+   * prefix with a whole-file identity: a `postOps` bound applies after
+   * the backend answered, so the bytes would be a fragment under an
+   * identity that still verifies. Plain `fs.readFile` still serves the
+   * capped prefix.
+   */
+  async readFileWithIdentity(
+    path: string,
+    options: { raw?: boolean } = {},
+  ): Promise<[Uint8Array, LiveFileIdentity | null]> {
+    return this.fs.readFileWithIdentity(path, options)
   }
 
   async dispatch(

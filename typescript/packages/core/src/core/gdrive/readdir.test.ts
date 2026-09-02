@@ -29,6 +29,8 @@ import { readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
+const DOC_MIME = 'application/vnd.google-apps.document'
+
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
 } as TokenManager
@@ -297,4 +299,77 @@ describe('readdir sizes', () => {
     expect(doc?.size).toBeNull()
     expect(doc?.extra.source_size).toBe(9999)
   })
+})
+
+describe('readdir duplicate sibling names', () => {
+  // Drive allows two siblings to share a name; a vfs path names exactly one
+  // file, so the listing reports the one resolveKey would answer with and
+  // the index binds the path to that same item. Blind last-wins in setDir
+  // used to leave whichever the server listed last, so only one of the two
+  // orders ever agreed with the resolver, by accident.
+  function dup(id: string, modifiedTime: string): DriveModule.DriveFile {
+    return { id, name: 'dup.txt', mimeType: 'text/plain', modifiedTime }
+  }
+
+  const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+
+  it('keeps the newest when the oldest is listed first', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      dup('old-id', '2026-01-01T00:00:00Z'),
+      dup('new-id', '2026-06-01T00:00:00Z'),
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/dup.txt'])
+    expect((await index.get('/dup.txt')).entry?.id).toBe('new-id')
+  })
+
+  it('keeps the newest when the newest is listed first', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      dup('new-id', '2026-06-01T00:00:00Z'),
+      dup('old-id', '2026-01-01T00:00:00Z'),
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/dup.txt'])
+    expect((await index.get('/dup.txt')).entry?.id).toBe('new-id')
+  })
+
+  it('leaves distinct names alone', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      { id: 'b', name: 'b.txt', mimeType: 'text/plain', modifiedTime: '2026-06-01T00:00:00Z' },
+      { id: 'a', name: 'a.txt', mimeType: 'text/plain', modifiedTime: '2026-01-01T00:00:00Z' },
+    ])
+    const index = new RAMIndexCacheStore()
+    expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/a.txt', '/b.txt'])
+  })
+
+  // The collapse keys on the rendered vfs name, so a binary file named
+  // `x.gdoc.json` and a Google Doc named `x` are one contest: one row,
+  // decided by time. The resolver merges its two name queries before
+  // ranking for exactly this reason.
+  for (const literalFirst of [true, false]) {
+    for (const newer of ['literal', 'native'] as const) {
+      it(`collapses a literal name against a rendered one (${newer} newer, literal listed ${
+        literalFirst ? 'first' : 'second'
+      })`, async () => {
+        const literal: DriveModule.DriveFile = {
+          id: 'literal-id',
+          name: 'x.gdoc.json',
+          mimeType: 'application/octet-stream',
+          modifiedTime: newer === 'literal' ? '2026-06-01T00:00:00Z' : '2026-01-01T00:00:00Z',
+        }
+        const doc: DriveModule.DriveFile = {
+          id: 'doc-id',
+          name: 'x',
+          mimeType: DOC_MIME,
+          modifiedTime: newer === 'native' ? '2026-06-01T00:00:00Z' : '2026-01-01T00:00:00Z',
+        }
+        vi.mocked(drive.listFiles).mockResolvedValue(literalFirst ? [literal, doc] : [doc, literal])
+        const index = new RAMIndexCacheStore()
+        expect(await readdir(makeAccessor(), ROOT, index)).toEqual(['/x.gdoc.json'])
+        expect((await index.get('/x.gdoc.json')).entry?.id).toBe(
+          newer === 'literal' ? 'literal-id' : 'doc-id',
+        )
+      })
+    }
+  }
 })

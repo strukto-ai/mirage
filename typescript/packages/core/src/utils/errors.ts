@@ -227,6 +227,41 @@ export function isMissingOp(err: unknown, op: string): boolean {
   return stamped.code === 'ENOTSUP' && stamped.op === op
 }
 
+// A read a policy cap truncated, asked for with its identity.
+// `Ops.readFileWithIdentity` throws it rather than pairing a prefix with
+// the whole file's markers: the bytes are not the file, and a
+// read-check-write caller that stamped them would later write the
+// fragment back under an identity that still verifies. The two ways to
+// degrade are both worse — bypassing the cap makes the identity read a
+// policy bypass, and answering `identity: null` loses the same data one
+// step later, since the caller hashes the prefix and writes it back
+// anyway. Stamped so a caller can recognize it without sniffing the
+// message; EINVAL, since what was asked for is unanswerable in this
+// configuration rather than refused, missing, or unsupported by the
+// backend. Mirrors Python's CappedReadError.
+export interface CappedReadError extends FsError {
+  cappedRead: true
+}
+
+export function cappedRead(path: string | { virtual: string; rawPath?: string }): CappedReadError {
+  const err = new Error(
+    'a policy cap truncated this read; no identity can describe these bytes',
+  ) as CappedReadError
+  err.code = 'EINVAL'
+  err.cappedRead = true
+  err.virtualPath = virtualOf(path)
+  return err
+}
+
+// True when the error is that stamp: the one recovery a caller has is
+// its own (read again without the identity, or run under a workspace
+// that does not cap this path), so it must be told apart from every
+// other EINVAL.
+export function isCappedRead(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  return (err as { cappedRead?: unknown }).cappedRead === true
+}
+
 // A refused mutation that is not absence and not a mode: a lock or a
 // policy in practice. Message-carrying, unlike `eacces`, because its
 // callers name what was refused (the s3 batch delete names its count).

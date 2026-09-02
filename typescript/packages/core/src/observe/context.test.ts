@@ -13,17 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /* eslint-disable @typescript-eslint/require-await */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   record,
   recordStream,
   revisionFor,
+  runRecorded,
   runWithRecording,
   runWithRevisions,
   runWithMountPrefix,
   startOp,
   withMountPrefix,
 } from './context.ts'
+import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 
 describe('runWithRecording / record / runWithMountPrefix', () => {
   it('record outside recording scope is a no-op', () => {
@@ -91,6 +93,32 @@ describe('runWithRecording / record / runWithMountPrefix', () => {
       }),
     )
     expect(records[0]?.path).toBe('/s3/s3-report.txt')
+  })
+
+  // The drive and box backends hand over PathSpec.resourcePath, which
+  // carries no leading slash; a plain concatenation would record
+  // '/drivereport.json', a path nothing can match or follow.
+  it('inserts the separator for a mount-relative path with no leading slash', async () => {
+    const [, records] = await runWithRecording(() =>
+      runWithMountPrefix('/drive', async () => {
+        record('read', 'sub/report.json', 'gdrive', 1, startOp())
+      }),
+    )
+    expect(records[0]?.path).toBe('/drive/sub/report.json')
+  })
+
+  it('normalizes a slashless path on a root mount', async () => {
+    const [, records] = await runWithRecording(async () => {
+      record('read', 'a.txt', 'gdrive', 1, startOp())
+    })
+    expect(records[0]?.path).toBe('/a.txt')
+  })
+
+  it('keeps a virtual path on a root mount', async () => {
+    const [, records] = await runWithRecording(async () => {
+      record('read', '/a.txt', 'disk', 1, startOp())
+    })
+    expect(records[0]?.path).toBe('/a.txt')
   })
 
   it('restores the enclosing prefix when a nested mount scope ends', async () => {
@@ -214,5 +242,52 @@ describe('revisions context', () => {
     await runWithRevisions(new Map([['/s3/a', 'v1']]), async () => {
       expect(revisionFor('/s3/a')).toBe('v1')
     })
+  })
+})
+
+describe('runRecorded on an isolating storage', () => {
+  it('the runtime under test really does isolate tasks', () => {
+    // Everything below is only about the no-queue branch, so it has to
+    // be the branch this file actually runs. The fallback branch is
+    // covered separately, in context_fallback.test.ts.
+    expect(asyncContextIsolatesTasks).toBe(true)
+  })
+
+  it('neither concurrency nor reentrancy queues, so no bound is ever waited out', async () => {
+    // AsyncLocalStorage gives every frame its own store, so there is
+    // nothing to serialize and no timer to arm. With the timers frozen,
+    // anything that reached the bounded wait would never settle -- so
+    // this run completing is the assertion.
+    vi.useFakeTimers()
+    try {
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      // Overlapping: the second frame must not wait for the first.
+      const first = runRecorded(async () => {
+        await held
+        record('read', '/first', 'test', 1, startOp(), { revision: 'rev-1' })
+        return 'A'
+      })
+      const second = runRecorded(async () => {
+        record('read', '/second', 'test', 1, startOp(), { revision: 'rev-2' })
+        return 'B'
+      })
+      expect(await second.done).toBe('B')
+      // Nested: an inner frame opened after an await inside a live one.
+      const outer = runRecorded(async () => {
+        await Promise.resolve()
+        const nested = runRecorded(async () => 'inner')
+        return await nested.done
+      })
+      expect(await outer.done).toBe('inner')
+      release()
+      expect(await first.done).toBe('A')
+      expect(first.records.map((r) => r.revision)).toEqual(['rev-1'])
+      expect(second.records.map((r) => r.revision)).toEqual(['rev-2'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

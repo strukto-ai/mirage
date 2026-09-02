@@ -19,6 +19,14 @@ class ResolvedPath:
     item_path: str | None = None
 
 
+# Name->id memos for the two namespace levels above a drive item. They
+# never expire: a site or a drive that is deleted and recreated under
+# the same name keeps answering with the id that is gone, which reads as
+# a 404 on every later call. Every caller that must not be told a stale
+# id passes ``fresh=True``, which relists and answers from *that*
+# listing rather than from the memo -- a name that vanished has to read
+# as missing, and re-reading the memo after a relist would still find
+# the old entry sitting there.
 _site_cache: dict[str, str] = {}
 _drive_cache: dict[tuple[str, str], str] = {}
 
@@ -49,36 +57,49 @@ async def _list_drives(accessor: SharePointAccessor,
 
 
 async def _resolve_site_id(accessor: SharePointAccessor,
-                           site_name: str) -> str | None:
-    if site_name in _site_cache:
+                           site_name: str,
+                           fresh: bool = False) -> str | None:
+    if not fresh and site_name in _site_cache:
         return _site_cache[site_name]
-    sites = await _list_sites(accessor)
-    for s in sites:
-        display = s.get("displayName", "")
-        name = s.get("name", "")
-        _site_cache[display] = s["id"]
-        _site_cache[name] = s["id"]
-    return _site_cache.get(site_name)
+    live: dict[str, str] = {}
+    for s in await _list_sites(accessor):
+        for key in (s.get("displayName", ""), s.get("name", "")):
+            if key:
+                live[key] = s["id"]
+    _site_cache.update(live)
+    return live.get(site_name)
 
 
-async def _resolve_drive_id(accessor: SharePointAccessor, site_id: str,
-                            drive_name: str) -> str | None:
+async def _resolve_drive_id(accessor: SharePointAccessor,
+                            site_id: str,
+                            drive_name: str,
+                            fresh: bool = False) -> str | None:
     key = (site_id, drive_name)
-    if key in _drive_cache:
+    if not fresh and key in _drive_cache:
         return _drive_cache[key]
-    drives = await _list_drives(accessor, site_id)
-    for d in drives:
-        _drive_cache[(site_id, d.get("name", ""))] = d["id"]
-    return _drive_cache.get(key)
+    live: dict[tuple[str, str], str] = {}
+    for d in await _list_drives(accessor, site_id):
+        name = d.get("name", "")
+        if name:
+            live[(site_id, name)] = d["id"]
+    _drive_cache.update(live)
+    return live.get(key)
 
 
 async def resolve(accessor: SharePointAccessor,
-                  path: PathSpec) -> ResolvedPath:
+                  path: PathSpec,
+                  fresh: bool = False) -> ResolvedPath:
     """Resolve a virtual path to (site_id, drive_id, item_path).
 
     Args:
         accessor (SharePointAccessor): The accessor with config.
         path (PathSpec): Virtual path to resolve.
+        fresh (bool): relist the sites and drives instead of reading
+            the name->id memos. Costs one call per namespace level the
+            path names (two for an unscoped mount, up to two for a
+            scoped one), and it is what makes a caller that must not be
+            handed a stale id -- the identity surface -- correct across
+            a delete-and-recreate.
 
     Returns:
         ResolvedPath: Resolved components.
@@ -95,10 +116,11 @@ async def resolve(accessor: SharePointAccessor,
     if config.site is not None and config.drive is not None:
         # Scoped mount: the whole mount lives inside one drive, so paths
         # are drive-relative and the site/drive namespace levels vanish.
-        site_id = await _resolve_site_id(accessor, config.site)
+        site_id = await _resolve_site_id(accessor, config.site, fresh)
         if site_id is None:
             return ResolvedPath(level="site", site_id=None)
-        drive_id = await _resolve_drive_id(accessor, site_id, config.drive)
+        drive_id = await _resolve_drive_id(accessor, site_id, config.drive,
+                                           fresh)
         if drive_id is None:
             return ResolvedPath(level="drive", site_id=site_id, drive_id=None)
         item_path = _scoped_item_path(config.key_prefix, raw)
@@ -117,7 +139,7 @@ async def resolve(accessor: SharePointAccessor,
     parts = raw.split("/", 2)
 
     site_name = parts[0]
-    site_id = await _resolve_site_id(accessor, site_name)
+    site_id = await _resolve_site_id(accessor, site_name, fresh)
     if site_id is None:
         return ResolvedPath(level="site", site_id=None)
 
@@ -125,7 +147,7 @@ async def resolve(accessor: SharePointAccessor,
         return ResolvedPath(level="site", site_id=site_id)
 
     drive_name = parts[1]
-    drive_id = await _resolve_drive_id(accessor, site_id, drive_name)
+    drive_id = await _resolve_drive_id(accessor, site_id, drive_name, fresh)
     if drive_id is None:
         return ResolvedPath(level="drive", site_id=site_id, drive_id=None)
 

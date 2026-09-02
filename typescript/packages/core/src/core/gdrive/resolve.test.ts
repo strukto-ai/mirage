@@ -24,6 +24,7 @@ vi.mock('../google/drive.ts', async () => {
 import type { FakeDrive } from './_test_util.ts'
 import {
   DOC_MIME,
+  addCollidingPair,
   makeGDriveAccessor,
   makeScopedGDriveAccessor,
   resetFakeDrive,
@@ -32,8 +33,12 @@ import { PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
 import {
   driveTargetName,
+  duplicateRank,
   eaccesOnDenied,
+  pickDuplicate,
   queryCandidates,
+  ranksAbove,
+  renderedName,
   resolveDir,
   resolveKey,
 } from './resolve.ts'
@@ -74,11 +79,51 @@ describe('gdrive resolve', () => {
     expect(node?.id).toBe(id)
   })
 
-  it('prefers a literal name over the native interpretation', async () => {
+  for (const literalFirst of [true, false]) {
+    for (const newer of ['literal', 'native'] as const) {
+      it(`ranks a literal name against a rendered one (${newer} newer, literal listed ${
+        literalFirst ? 'first' : 'second'
+      })`, async () => {
+        // A binary file literally named `x.gdoc.json` and a Google Doc
+        // named `x` render as one vfs name and are found by two
+        // different queries. Answering with the first query that
+        // matched made the resolver pick by query order while readdir
+        // picked by time, so liveIdentity could name one item and the
+        // read the other.
+        const [literal, doc] = addCollidingPair(fake, literalFirst, newer)
+        const node = await resolveKey(accessor, 'x.gdoc.json')
+        expect(node?.id).toBe(newer === 'literal' ? literal : doc)
+      })
+    }
+  }
+
+  it('breaks a tie between the two shapes by id, as the listing does', async () => {
+    // Kind is not part of the rank, so equal stamps fall through to the
+    // id -- the same tiebreak collapseDuplicates applies, which is the
+    // only reason the two agree here at all.
     const literal = fake.add('x.gdoc.json', 'root', undefined, ENC.encode('raw'))
-    fake.add('x', 'root', DOC_MIME)
+    const doc = fake.add('x', 'root', DOC_MIME)
     const node = await resolveKey(accessor, 'x.gdoc.json')
-    expect(node?.id).toBe(literal)
+    expect(node?.id).toBe(literal > doc ? literal : doc)
+  })
+
+  it('skips an item that renders under another name', async () => {
+    // The literal query matches a Drive *name*, and a Google Doc named
+    // `x.gdoc.json` renders as `x.gdoc.json.gdoc.json`: it is another
+    // path's item, and answering with it named a file no listing puts
+    // here.
+    const doc = fake.add('x.gdoc.json', 'root', DOC_MIME)
+    expect(await resolveKey(accessor, 'x.gdoc.json')).toBeNull()
+    expect((await resolveKey(accessor, 'x.gdoc.json.gdoc.json'))?.id).toBe(doc)
+  })
+
+  it('renderedName appends the suffix a google-apps file is listed under', () => {
+    expect(renderedName('Report', DOC_MIME)).toBe('Report.gdoc.json')
+    expect(renderedName('a.txt', 'text/plain')).toBe('a.txt')
+    expect(renderedName('d', FOLDER_MIME_TEST)).toBe('d')
+    // The rule composes, which is why the resolver has to filter on it:
+    // a native doc named like a rendered one is not that rendered one.
+    expect(renderedName('x.gdoc.json', DOC_MIME)).toBe('x.gdoc.json.gdoc.json')
   })
 
   it('resolveDir handles root and error cases', async () => {
@@ -148,5 +193,71 @@ describe('eaccesOnDenied', () => {
       message: expect.stringContaining('/gd/a.txt') as string,
     })
     await expect(serverError(null, spec)).rejects.toBeInstanceOf(GoogleApiError)
+  })
+})
+
+describe('gdrive duplicate sibling names', () => {
+  it('ranks newest modifiedTime first, breaking ties by the greater id', () => {
+    expect(
+      ranksAbove(
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+        duplicateRank('2026-01-01T00:00:00Z', 'zzz'),
+      ),
+    ).toBe(true)
+    // The id is a tiebreak, never the primary key.
+    expect(
+      ranksAbove(
+        duplicateRank('2026-06-01T00:00:00Z', 'bbb'),
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+      ),
+    ).toBe(true)
+    expect(
+      ranksAbove(
+        duplicateRank('2026-01-01T00:00:00Z', 'zzz'),
+        duplicateRank('2026-06-01T00:00:00Z', 'aaa'),
+      ),
+    ).toBe(false)
+  })
+
+  it('pickDuplicate takes the newest whatever order it was listed in', () => {
+    const old = { id: 'id1', name: 'dup.txt', modifiedTime: '2026-01-01T00:00:00Z' }
+    const fresh = { id: 'id2', name: 'dup.txt', modifiedTime: '2026-06-01T00:00:00Z' }
+    expect(pickDuplicate([old, fresh])?.id).toBe('id2')
+    expect(pickDuplicate([fresh, old])?.id).toBe('id2')
+    expect(pickDuplicate([])).toBeUndefined()
+  })
+
+  it('pickDuplicate tolerates a missing modifiedTime', () => {
+    const unstamped = { id: 'id1', name: 'dup.txt' }
+    const stamped = { id: 'id2', name: 'dup.txt', modifiedTime: '2026-01-01T00:00:00Z' }
+    expect(pickDuplicate([unstamped, stamped])?.id).toBe('id2')
+  })
+
+  it('resolveKey picks the newest of two same-named siblings, oldest listed first', async () => {
+    // The fake answers in insertion order and honours no orderBy, which
+    // is the point: the rule has to hold without the server sorting.
+    fake.add('dup.txt', 'root', undefined, undefined, undefined, '2026-01-01T00:00:00Z')
+    const newest = fake.add(
+      'dup.txt',
+      'root',
+      undefined,
+      undefined,
+      undefined,
+      '2026-06-01T00:00:00Z',
+    )
+    expect((await resolveKey(accessor, 'dup.txt'))?.id).toBe(newest)
+  })
+
+  it('resolveKey picks the newest of two same-named siblings, newest listed first', async () => {
+    const newest = fake.add(
+      'dup.txt',
+      'root',
+      undefined,
+      undefined,
+      undefined,
+      '2026-06-01T00:00:00Z',
+    )
+    fake.add('dup.txt', 'root', undefined, undefined, undefined, '2026-01-01T00:00:00Z')
+    expect((await resolveKey(accessor, 'dup.txt'))?.id).toBe(newest)
   })
 })

@@ -17,14 +17,46 @@ import logging
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
-from mirage.core.gdrive.resolve import root_context
-from mirage.core.google.drive import (MIME_TO_EXT, list_files,
-                                      list_shared_drives)
+from mirage.core.gdrive.resolve import (duplicate_rank, rendered_name,
+                                        root_context)
+from mirage.core.google.drive import list_files, list_shared_drives
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
+
+
+def collapse_duplicates(
+    entries: list[tuple[str, IndexEntry, bool]]
+) -> list[tuple[str, IndexEntry, bool]]:
+    """Keep one row per rendered vfs name, the one the resolver picks.
+
+    Drive allows two siblings to share a name; a vfs path names exactly
+    one file, so the listing has to choose, and it chooses by
+    :func:`duplicate_rank` — the same rule ``resolve_key`` applies to
+    the same set. Both halves of that matter. The key is the
+    :func:`rendered_name`, so a binary file named ``Report.gdoc.json``
+    and a Google Doc named ``Report`` are one contest and not two, which
+    is why the resolver merges its name queries before ranking them.
+    And the rank used to be an accident here, in the opposite direction:
+    the index stores one entry per path, so writing every row left
+    whichever the server listed *last* (its oldest, under
+    ``modifiedTime desc``) while the resolver answered with the first.
+    Listing both also printed a row no path could reach.
+
+    Args:
+        entries (list[tuple[str, IndexEntry, bool]]): (vfs name, entry,
+            is_dir) rows in the server's listing order.
+    """
+    best: dict[str, tuple[str, IndexEntry, bool]] = {}
+    for row in entries:
+        current = best.get(row[0])
+        if current is None or duplicate_rank(
+                row[1].remote_time, row[1].id) > duplicate_rank(
+                    current[1].remote_time, current[1].id):
+            best[row[0]] = row
+    return list(best.values())
 
 
 def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
@@ -87,11 +119,7 @@ async def readdir(
     for f in files:
         mime = f.get("mimeType", "")
         name = f["name"]
-        ext = MIME_TO_EXT.get(mime)
-        if ext:
-            filename = f"{name}{ext}"
-        else:
-            filename = name
+        filename = rendered_name(name, mime)
         is_dir = mime == "application/vnd.google-apps.folder"
         if is_dir:
             rt = "gdrive/folder"
@@ -126,6 +154,8 @@ async def readdir(
             extra=extra,
         )
         entries.append((filename, entry, is_dir))
+
+    entries = collapse_duplicates(entries)
 
     complete = True
     if not key and folder_id == "root":

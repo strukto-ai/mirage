@@ -25,8 +25,8 @@ from mirage.utils.key_prefix import under_path
 class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     """In-memory index cache using plain dicts + asyncio locks."""
 
-    def __init__(self, ttl: float = 600) -> None:
-        super().__init__()
+    def __init__(self, ttl: float = 600, fresh: bool = False) -> None:
+        super().__init__(fresh=fresh)
         self._ttl = ttl
         self._entries: dict[str, IndexEntry] = {}
         self._children: dict[str, list[str]] = {}

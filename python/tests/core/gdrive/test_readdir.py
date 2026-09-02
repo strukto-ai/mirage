@@ -455,3 +455,77 @@ async def test_readdir_scoped_mount_lists_folder_children(
         index=NULL_INDEX,
     )
     assert entries == ["/in.txt"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_collapses_duplicate_names_to_the_newest(
+        fake_drive, gdrive_accessor):
+    # Drive allows two siblings to share a name; a vfs path names one
+    # file, so the listing reports the one resolve_key would answer with
+    # and the index binds the path to that same item.
+    fake_drive.add("dup.txt", content=b"old", modified="2026-01-01T00:00:00Z")
+    newest = fake_drive.add("dup.txt",
+                            content=b"new",
+                            modified="2026-06-01T00:00:00Z")
+    store = RAMIndexCacheStore()
+    entries = await readdir(
+        gdrive_accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=store,
+    )
+    assert entries == ["/dup.txt"]
+    assert (await store.get("/dup.txt")).entry.id == newest
+
+
+@pytest.mark.asyncio
+async def test_readdir_keeps_the_newest_when_it_is_listed_first(
+        fake_drive, gdrive_accessor):
+    # The other listing order. Blind last-wins in set_dir used to leave
+    # whichever the server listed last, so only one of the two orders
+    # ever agreed with the resolver, by accident.
+    newest = fake_drive.add("dup.txt",
+                            content=b"new",
+                            modified="2026-06-01T00:00:00Z")
+    fake_drive.add("dup.txt", content=b"old", modified="2026-01-01T00:00:00Z")
+    store = RAMIndexCacheStore()
+    entries = await readdir(
+        gdrive_accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=store,
+    )
+    assert entries == ["/dup.txt"]
+    assert (await store.get("/dup.txt")).entry.id == newest
+
+
+@pytest.mark.asyncio
+async def test_readdir_duplicate_collapse_leaves_distinct_names_alone(
+        fake_drive, gdrive_accessor):
+    fake_drive.add("a.txt", modified="2026-01-01T00:00:00Z")
+    fake_drive.add("b.txt", modified="2026-06-01T00:00:00Z")
+    entries = await readdir(
+        gdrive_accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=NULL_INDEX,
+    )
+    assert entries == ["/a.txt", "/b.txt"]
+
+
+@pytest.mark.parametrize("literal_first", [True, False])
+@pytest.mark.parametrize("newer", ["literal", "native"])
+@pytest.mark.asyncio
+async def test_readdir_collapses_a_literal_name_against_a_rendered_one(
+        colliding_pair, gdrive_accessor, literal_first, newer):
+    # The collapse keys on the rendered vfs name, so a binary file named
+    # `x.gdoc.json` and a Google Doc named `x` are one contest: one row,
+    # decided by time. The resolver merges its two name queries before
+    # ranking for exactly this reason.
+    literal, doc = colliding_pair(literal_first, newer)
+    store = RAMIndexCacheStore()
+    entries = await readdir(
+        gdrive_accessor,
+        PathSpec(virtual="/", directory="/", resource_path=""),
+        index=store,
+    )
+    assert entries == ["/x.gdoc.json"]
+    expected = literal if newer == "literal" else doc
+    assert (await store.get("/x.gdoc.json")).entry.id == expected

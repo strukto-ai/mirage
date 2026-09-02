@@ -18,12 +18,77 @@ from typing import Any
 
 from mirage.io import OpReport
 from mirage.observe import OpRecord
-from mirage.observe.context import OpTimer, finish_record, start_op
+from mirage.observe.context import (OpTimer, RecordingScope, active_recorder,
+                                    finish_record, start_op)
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
+from mirage.ops.types import LiveFileIdentity
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import NoMountError
+from mirage.utils.errors import (NoMountError, OperationNotSupportedError,
+                                 capped_read)
 from mirage.utils.path import owner_prefix
+
+
+def read_kwargs(raw: bool, fresh: bool) -> dict[str, Any]:
+    """The op kwargs one read dispatches with.
+
+    Shared by ``read`` and ``read_with_identity`` so the second cannot
+    drift from the first: an identity read that stopped asking for the
+    stored bytes, or stopped asking for a fresh one, would stamp the
+    wrong answer without failing anything.
+
+    Args:
+        raw (bool): read stored bytes rather than a rendered form.
+        fresh (bool): refuse every cached answer.
+    """
+    kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+    if fresh:
+        kwargs["fresh"] = True
+    return kwargs
+
+
+def read_identity(records: list[OpRecord],
+                  path: str) -> LiveFileIdentity | None:
+    """The identity carried by the records one read of ``path`` emitted.
+
+    A versioned backend stamps ``fingerprint``/``revision`` on the
+    record for the response it just read, so the markers and the bytes
+    come from the same answer. Scanned newest first: a read may emit
+    more than one record (a rendered file reads its parts), and only a
+    content read ever carries a marker. TypeScript needs that direction
+    for a second reason its storage creates -- a frame its identity
+    queue could not release in time runs frameless and emits into the
+    frame still in flight, always before that frame's own marked
+    record -- so the two must not drift apart.
+
+    ``path`` is the filter, and it is what removes cross-path
+    contamination: ``OpRecord.path`` is the resolved virtual path, so a
+    marker stamped for some other file cannot be read as this one's.
+    Here that is about the enclosing frame rather than a sibling read:
+    contextvars give every task its own recorder, so nothing lands in
+    this scope by accident, but a command frame is shared by every op
+    the line ran. TypeScript needs the filter for the same reason plus
+    one more, and closes the rest by serializing its identity frames
+    where the storage cannot isolate tasks (``runRecorded``).
+
+    Args:
+        records (list[OpRecord]): the records the read emitted, in
+            emission order.
+        path (str): the resolved virtual path that was read.
+
+    Returns:
+        LiveFileIdentity | None: the identity the newest marked record
+        for ``path`` describes, None when no such record carried a
+        marker.
+    """
+    for rec in reversed(records):
+        if rec.path != path:
+            continue
+        if rec.revision is not None or rec.fingerprint is not None:
+            return LiveFileIdentity(exists=True,
+                                    revision=rec.revision,
+                                    fingerprint=rec.fingerprint)
+    return None
 
 
 class Ops:
@@ -167,7 +232,11 @@ class Ops:
             (len(v)
              for v in kwargs.values() if isinstance(v, (bytes, bytearray))), 0)
 
-    async def _call(self, op: str, path: str, **kwargs) -> Any:
+    async def _call(self,
+                    op: str,
+                    path: str,
+                    report: OpReport | None = None,
+                    **kwargs) -> Any:
         """Run one op through the workspace dispatcher and record it.
 
         The door owns the whole pipeline (follow, grants, gates, cache,
@@ -183,9 +252,16 @@ class Ops:
         off the op name, so there is nothing for a caller here to
         declare.
 
+        The report is the caller's when one is handed in, so a caller
+        that has to read the door's account back (the identity read
+        asks whether a cap truncated its bytes) sees the same object
+        the record is stamped from.
+
         Args:
             op (str): the op name.
             path (str): the virtual path.
+            report (OpReport | None): the caller's report to fill, or
+                None for one this call keeps to itself.
             **kwargs: op arguments, by the op function's names.
         """
         timer = start_op()
@@ -193,7 +269,7 @@ class Ops:
                 and not kwargs.get("nofollow")):
             path = self._links.follow(path)
         owner = self._owner(path)
-        report = OpReport()
+        report = report if report is not None else OpReport()
         try:
             result, _ = await self._dispatch(op,
                                              PathSpec.from_str_path(path),
@@ -246,7 +322,8 @@ class Ops:
                    path: str,
                    offset: int = 0,
                    size: int | None = None,
-                   raw: bool = False) -> bytes:
+                   raw: bool = False,
+                   fresh: bool = False) -> bytes:
         """Read file content.
 
         ``raw`` asks for the stored bytes, skipping a filetype-scoped
@@ -257,16 +334,29 @@ class Ops:
         the rendering over the file. TypeScript spells the same thing
         ``readFile(path, {raw: true})``.
 
+        ``fresh`` means no memory answers this read: the warm file cache
+        is refused (for a rendered read too), and the op runs against an
+        empty index instead of the mount's, so an id-addressed backend
+        resolves the path to an id live rather than from a remembered
+        binding. The bytes then come from the backend and carry whatever
+        markers it stamps on them. It costs a round trip every time, and
+        more than one on a backend that has to resolve the path to an id
+        first (drive re-lists each level it has no id for), so it is for
+        a caller that needs the backend's own answer rather than the
+        newest one seen, not a default.
+
         Args:
             path (str): Virtual path.
             offset (int): Byte offset for range reads.
             size (int | None): Number of bytes for range reads.
             raw (bool): Read stored bytes rather than a rendered form.
+            fresh (bool): Refuse every cached answer -- the warm file
+                cache and the mount's index alike.
 
         Returns:
             bytes: File content.
         """
-        kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+        kwargs = read_kwargs(raw, fresh)
         if offset or size is not None:
             return await self._call("read",
                                     path,
@@ -295,6 +385,143 @@ class Ops:
 
     async def stat(self, path: str) -> FileStat:
         return await self._call("stat", path)
+
+    async def live_identity(self, path: str) -> LiveFileIdentity | None:
+        """The backend's own identity for the file living at ``path``.
+
+        Dispatched like every other op, so the link follow, the session
+        grants, the admission policies and the recording all fire once
+        at the same door. The op consults no cache: it is not a read
+        op, so the warm file cache never answers it, and the backend
+        module ignores the index it is handed, which is what makes the
+        answer a live one.
+
+        A mount whose backend registers no identity op reads back as
+        None rather than raising: this is the programmatic capability
+        probe, and an honest None is what a caller can branch on. Every
+        other failure propagates, and the raw op keeps raising ENOTSUP
+        for a direct ``execute_op`` caller.
+
+        Args:
+            path (str): Virtual path.
+
+        Returns:
+            LiveFileIdentity | None: the identity, or None when the
+            mount has no identity op.
+        """
+        try:
+            return await self._call("live_identity", path)
+        except OperationNotSupportedError:
+            return None
+
+    async def read_with_identity(
+            self,
+            path: str,
+            raw: bool = False) -> tuple[bytes, LiveFileIdentity | None]:
+        """Read a file and the identity of the bytes just read.
+
+        The stamp comes from the read's own backend response, never
+        from a second call: s3 and gridfs take both markers off the GET
+        that delivered the bytes, and drive and graph capture the
+        metadata immediately before the download, so their residual
+        window can only report a stamp older than the bytes, which
+        fails safe as a spurious stale refusal rather than a silently
+        accepted stale write.
+
+        Both of those captures are gated on a recording being active,
+        so the read runs inside its own recording frame. The frame is
+        nested rather than shared: a sibling task writing into an
+        enclosing line's sink would otherwise be able to hand this read
+        another path's markers. What the frame collected is handed up
+        to the enclosing scope on the way out, on the error path too,
+        so a line's byte accounting still sees every op that happened.
+        The markers are then read back per path, so a marker a sibling
+        op left in the enclosing frame cannot be mistaken for this
+        read's.
+
+        The enclosing recorder is captured here, on the line before the
+        nested scope opens, and that is safe in a way TypeScript's twin
+        is not: the recorder is a contextvar, an asyncio task gets its
+        own copy of the context when it is created, and a sibling task's
+        ``RecordingScope`` therefore cannot be seen from this one. So
+        the recorder read here is always this task's true enclosing one,
+        whenever it is read. TypeScript's fallback storage is one shared
+        frame stack with no such isolation, which is why ``runRecorded``
+        there has to take the enclosing frame at bind time instead.
+
+        The read is ``fresh``, which is the dispatcher's "no memory
+        answers this one" and covers both memories. The warm file cache
+        is skipped, because bytes it hands back crossed no network and
+        carry no marker, and the caller would read that as "this file
+        has no identity" for a file the backend versions. The mount's
+        index is skipped too -- the op is handed an empty one -- because
+        on an id-addressed backend a remembered name->id binding never
+        expires, so a stale one would stamp the identity of the file
+        that used to live at this path onto that file's bytes and both
+        would be the wrong file's.
+
+        A revision pin is workspace state, not a memory, so ``fresh``
+        never overrides it: a pinned read is one fresh backend call for
+        that exact revision and pairs with that revision's own identity,
+        keeping a restored snapshot's view consistent. The write-side
+        check is what refuses overwriting a newer head.
+
+        A failed read propagates as it is; no identity is synthesized
+        for it.
+
+        A policy-capped read refuses rather than pairing a prefix with
+        a whole-file identity. A ``post_ops`` policy may bound a read
+        (``Limit(max_bytes=...)``), and the door applies that bound
+        after the backend already answered, so the delivered bytes are
+        a prefix while the markers still describe the whole file --
+        the pair a read-check-write caller would stamp and then write
+        the prefix back under. ``CappedReadError`` is the answer;
+        bypassing the cap would make this door a policy bypass, and
+        ``identity=None`` would only move the same loss one step
+        later. Plain ``read`` is untouched and still serves the
+        capped prefix.
+
+        ``raw`` is ``read``'s own flag, passed straight through: a
+        caller that stamps stored bytes has to read stored bytes, or
+        the stamp describes a rendering the write path never stores.
+        No offset/size window is offered, because the identity of half
+        a file is not a question the backend can answer.
+
+        Args:
+            path (str): Virtual path.
+            raw (bool): Read stored bytes rather than a rendered form.
+
+        Returns:
+            tuple[bytes, LiveFileIdentity | None]: the content, and its
+            identity or None when the backend recorded no marker.
+
+        Raises:
+            CappedReadError: a post_ops policy cap truncated the read.
+        """
+        # The record names the link-followed path, because ``_call``
+        # follows before it dispatches; the filter has to compare
+        # against that same spelling.
+        target = path if self._links is None else self._links.follow(path)
+        outer = active_recorder()
+        scope = RecordingScope()
+        # The door's account is read back rather than measured: the
+        # length the backend moved and the length delivered differ for
+        # a rendered read too, so only the door can say which gap a cap
+        # made. Dispatched through ``_call`` rather than ``read``
+        # because the report has to be this caller's.
+        report = OpReport()
+        try:
+            data = await self._call("read",
+                                    path,
+                                    report=report,
+                                    **read_kwargs(raw, True))
+        finally:
+            scope.close()
+            if outer is not None:
+                outer.sink.extend(scope.records)
+        if report.capped:
+            raise capped_read(target)
+        return data, read_identity(scope.records, target)
 
     async def readdir(self, path: str) -> list[str]:
         return await self._call("readdir", path)

@@ -15,6 +15,7 @@
 import { NOOPAccessor } from '../../accessor/base.ts'
 import { applyIo } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { applyOpLimit, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { getExtension } from '../../commands/resolve.ts'
@@ -45,6 +46,7 @@ import {
   ConsistencyPolicy,
   FileStat,
   FileType,
+  type Limit,
   MountMode,
   PathSpec,
   ResourceName,
@@ -128,6 +130,36 @@ function memoryAnswered(report: OpReport | undefined, moved: number | null = nul
   report?.served(ResourceName.RAM, moved)
 }
 
+/**
+ * Apply an op's postOps output cap, stamping what it truncated.
+ *
+ * The transfer already happened, so the cap changes what the caller
+ * receives, not what the backend moved; the report already carries the
+ * moved count. What it cannot carry is that the two now disagree: a
+ * warm hit stamps a moved count too, and a rendered read returns a
+ * different count from the one its backend moved, so a caller cannot
+ * tell a truncation from either by comparing lengths. The one place
+ * that knows is here, where the cap runs. Mirrors Python's `_bounded`.
+ */
+async function bounded(
+  result: unknown,
+  bound: Limit | null,
+  report: OpReport | undefined,
+): Promise<unknown> {
+  if (bound === null) return result
+  const before = result instanceof Uint8Array ? result.byteLength : null
+  const capped = await applyOpLimit(result, bound)
+  if (
+    report !== undefined &&
+    before !== null &&
+    capped instanceof Uint8Array &&
+    capped.byteLength < before
+  ) {
+    report.capped = true
+  }
+  return capped
+}
+
 export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & Resource
@@ -187,6 +219,38 @@ export class Dispatcher {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p))
         return stat
       })
+    }
+    // `fresh` is the caller's "do not answer this from memory", and it
+    // silences both memories the op would otherwise reach. The
+    // warm-cache early return below is skipped, so the op reaches the
+    // backend and its own answer is what gets recorded; and the op runs
+    // against an empty index of its own instead of the mount's, so an
+    // id-addressed backend (drive, box, dropbox) resolves the path to
+    // an id from a live listing rather than from a remembered name->id
+    // binding. Ops.readFileWithIdentity needs both: a read served from
+    // the cache stamps no fingerprint or revision, and a read that
+    // resolved a remembered id would stamp the file that used to live
+    // at the path.
+    // The index is *replaced*, not dropped, because it is also how a
+    // live listing reaches the resolver: drive's read warms the parent
+    // directory into the index and reads the id back out of it, so an
+    // undefined index answers ENOENT for a file that is there. Nothing
+    // else sees the substitute, so a fresh read leaves the mount's
+    // index exactly as it found it.
+    // The substitute is also *marked* fresh, because a backend can hold
+    // a name->id memory the index cannot reach: sharepoint remembers
+    // site and drive ids on its accessor, so an empty index alone would
+    // let a deleted-and-recreated drive answer with the old id. Marking
+    // the store rather than forwarding a kwarg keeps the signal on the
+    // one object every backend read already receives.
+    // `fresh` is consumed here, never forwarded: no backend takes it.
+    // Mirrors Python's Dispatcher.dispatch.
+    const fresh = kwargs?.fresh === true
+    if (fresh) {
+      const rest = { ...kwargs }
+      delete rest.fresh
+      rest.index = new RAMIndexCacheStore({ fresh: true })
+      kwargs = rest
     }
     // Hidden paths answer before anything else can: the typed path is
     // checked so a link inside hidden space cannot be followed out of
@@ -279,8 +343,7 @@ export class Dispatcher {
       // gate and the cap, so whatever they throw cannot erase it.
       memoryAnswered(report)
       const fallbackBound = await postOpsGate(this.policies, opName, p, fallbackWrite, '', fallback)
-      const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
-      return [gated, new IOResult()]
+      return [await bounded(fallback, fallbackBound, report), new IOResult()]
     }
     const [resource, scope, mode] = resolved
     // resolve() above already threw for a path outside every mount, so
@@ -308,7 +371,7 @@ export class Dispatcher {
     // nothing populates it from here, so skipping the probe is the
     // whole fix. Mirrors Python's Dispatcher.dispatch.
     const raw = kwargs?.filetype === null
-    if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
+    if (caches && !raw && !fresh && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
       if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
         // The cache holds the whole object, so a ranged read is answered
@@ -325,9 +388,7 @@ export class Dispatcher {
         // as traffic that never happened.
         memoryAnswered(report, window.byteLength)
         const warmBound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, window)
-        const served = (
-          warmBound !== null ? await applyOpLimit(window, warmBound) : window
-        ) as Uint8Array
+        const served = (await bounded(window, warmBound, report)) as Uint8Array
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
@@ -444,12 +505,7 @@ export class Dispatcher {
       result = mergeOverlayStat(this.namespace.metaFor(p.virtual), result)
     }
     const bound = await postOpsGate(this.policies, opName, p, opWrite, mountPrefix, result)
-    if (bound !== null) {
-      // The transfer already happened, so the limit changes what the
-      // caller receives, not what the backend moved; the report above
-      // already carries the moved count.
-      result = await applyOpLimit(result, bound)
-    }
+    result = await bounded(result, bound, report)
     return [result, new IOResult()]
   }
 
@@ -736,8 +792,7 @@ export class Dispatcher {
     )
     memoryAnswered(report)
     const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
-    if (bound !== null) return (await applyOpLimit(result, bound)) as string | null
-    return result
+    return (await bounded(result, bound, report)) as string | FileStat | null
   }
 
   /**

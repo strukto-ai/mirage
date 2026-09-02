@@ -30,6 +30,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.ops import Ops
+from mirage.ops.types import LiveFileIdentity
 from mirage.policy import (AskHandler, Decisions, Explanation,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
@@ -1013,6 +1014,44 @@ class Workspace:
                          resolved=False)
         raw, _ = await self.dispatch("readdir", scope)
         return raw
+
+    async def live_identity(self, path: str) -> LiveFileIdentity | None:
+        """The backend's own identity for the file living at ``path``.
+
+        Delegated to the ops facade rather than dispatched here, so the
+        link follow, the admission policies and the op recording fire
+        exactly as they do for a shell line. None when the mount's
+        backend registers no identity op.
+
+        Args:
+            path (str): Virtual path.
+        """
+        return await self.ops.live_identity(path)
+
+    async def read_with_identity(
+            self,
+            path: str,
+            raw: bool = False) -> tuple[bytes, LiveFileIdentity | None]:
+        """Read a file and the identity of the bytes just read.
+
+        Delegated to the ops facade for the same reason as
+        :meth:`live_identity`; the markers come from the read's own
+        backend response.
+
+        A policy-capped read refuses rather than pairing a prefix with
+        a whole-file identity: a ``post_ops`` bound applies after the
+        backend answered, so the bytes would be a fragment under an
+        identity that still verifies. Plain ``ops.read`` still serves
+        the capped prefix.
+
+        Args:
+            path (str): Virtual path.
+            raw (bool): Read stored bytes rather than a rendered form.
+
+        Raises:
+            CappedReadError: a post_ops policy cap truncated the read.
+        """
+        return await self.ops.read_with_identity(path, raw=raw)
 
     # ── execution ────────────────────────────────────────────────────────────
 

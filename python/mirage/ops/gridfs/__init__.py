@@ -14,5 +14,7 @@
 
 from mirage.commands.builtin.gridfs.io import IO
 from mirage.ops.generic import make_generic_ops
+from mirage.ops.gridfs.identity import live_identity
+from mirage.ops.registry import registered_ops
 
-OPS = make_generic_ops("gridfs", IO)
+OPS = [*make_generic_ops("gridfs", IO), *registered_ops(live_identity)]

@@ -22,11 +22,23 @@ class IndexCacheStore:
 
     Abstract base. Maps resource paths to IndexEntry metadata.
     Subclasses implement storage and concurrency.
+
+    ``fresh`` is False on every store a mount owns and True only on the
+    private, empty one the dispatcher substitutes for a ``fresh`` op.
+    It is the signal a backend reads when the memory it has to silence
+    does not live in this store: sharepoint remembers site and drive
+    ids on its accessor, so an empty index alone would not stop a
+    deleted-and-recreated drive from answering with the old id. Nothing
+    consults it for entries; it says only "no memory answers this one".
+
+    Args:
+        fresh (bool): whether this store stands in for a fresh op.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fresh: bool = False) -> None:
         super().__init__()
         self._closed = False
+        self.fresh = fresh
 
     async def get(self, resource_path: str) -> LookupResult:
         raise NotImplementedError

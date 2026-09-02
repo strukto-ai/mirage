@@ -1,9 +1,11 @@
 import pytest
 
 import mirage.core.msgraph.drive_ops as drive_ops
+from mirage.core.msgraph.client import GraphError
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.drive_ops import (DriveLoc, _move_body,
-                                           _parent_reference, iter_tree)
+                                           _parent_reference, identity_item,
+                                           iter_tree)
 
 
 def _url(path: str, action: str = "") -> str:
@@ -77,3 +79,58 @@ async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
         "size": 3,
         "file": {}
     }, False)]
+
+
+@pytest.mark.asyncio
+async def test_identity_item_found_returns_ctag_fingerprint(monkeypatch):
+
+    async def fake_graph_get(config, url, params=None, session=None):
+        return {"id": "1", "name": "a.txt", "cTag": "ctag-1", "file": {}}
+
+    monkeypatch.setattr(drive_ops, "graph_get", fake_graph_get)
+    result = await identity_item(MsGraphConfig(access_token="token"),
+                                 _loc("d1", "a.txt"), "/a.txt")
+    assert result.exists is True
+    assert result.fingerprint == "ctag-1"
+    # Bounded per the identity contract: identity_item never issues the
+    # $expand=versions call capture_item_metadata makes, so revision stays
+    # None until a bounded revision call is proven safe.
+    assert result.revision is None
+
+
+@pytest.mark.asyncio
+async def test_identity_item_404_reports_exists_false(monkeypatch):
+
+    async def fake_graph_get(config, url, params=None, session=None):
+        raise GraphError(404, "itemNotFound", "no")
+
+    monkeypatch.setattr(drive_ops, "graph_get", fake_graph_get)
+    result = await identity_item(MsGraphConfig(access_token="token"),
+                                 _loc("d1", "missing.txt"), "/missing.txt")
+    assert result.exists is False
+    assert result.revision is None
+    assert result.fingerprint is None
+
+
+@pytest.mark.asyncio
+async def test_identity_item_folder_raises_eisdir(monkeypatch):
+
+    async def fake_graph_get(config, url, params=None, session=None):
+        return {"id": "2", "name": "dir", "folder": {"childCount": 0}}
+
+    monkeypatch.setattr(drive_ops, "graph_get", fake_graph_get)
+    with pytest.raises(IsADirectoryError):
+        await identity_item(MsGraphConfig(access_token="token"),
+                            _loc("d1", "dir"), "/dir")
+
+
+@pytest.mark.asyncio
+async def test_identity_item_non_404_error_propagates(monkeypatch):
+
+    async def fake_graph_get(config, url, params=None, session=None):
+        raise GraphError(500, "serviceUnavailable", "boom")
+
+    monkeypatch.setattr(drive_ops, "graph_get", fake_graph_get)
+    with pytest.raises(GraphError):
+        await identity_item(MsGraphConfig(access_token="token"),
+                            _loc("d1", "a.txt"), "/a.txt")

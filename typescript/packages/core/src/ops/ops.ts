@@ -14,12 +14,13 @@
 
 import { OpReport } from '../io/types.ts'
 import type { OpRecord } from '../observe/record.ts'
-import { finishRecord, type OpTimer, startOp } from '../observe/context.ts'
+import { finishRecord, type OpTimer, runRecorded, startOp } from '../observe/context.ts'
 import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
+import type { LiveFileIdentity } from './types.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
-import { exdev, isMissingPath } from '../utils/errors.ts'
+import { cappedRead, exdev, isMissingOp, isMissingPath } from '../utils/errors.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 
 export type OpSink = (rec: OpRecord) => Promise<void>
@@ -30,6 +31,61 @@ interface MountOwner {
 }
 
 export type OwnerOf = (path: string) => MountOwner | null
+
+/**
+ * The identity carried by the records one read of `path` emitted.
+ *
+ * A versioned backend stamps fingerprint/revision on the record for the
+ * response it just read, so the markers and the bytes come from the same
+ * answer. Scanned newest first: a read may emit more than one record (a
+ * rendered file reads its parts), and only a content read ever carries a
+ * marker.
+ *
+ * That direction is not a formality on the fallback storage. A frame
+ * the identity queue could not release in time runs frameless
+ * (`runRecorded`), and its records land in the frame still in flight;
+ * they are emitted while that frame is waiting on its backend, so they
+ * precede the record it stamps its own markers on. Newest-first is
+ * therefore what keeps the slow read's own answer; scanning the other
+ * way would hand it the late-comer's.
+ *
+ * `path` is the filter, and it is what removes cross-path contamination:
+ * `OpRecord.path` is the resolved virtual path, so a marker stamped for
+ * some other file cannot be read as this one's. It still earns its keep
+ * where the frames are not serialized: an enclosing command frame is
+ * shared by every op the line ran, so a marker from a sibling read
+ * reaches this scan whatever the storage does about isolation.
+ * It is no longer what holds the browser together, though. Two
+ * overlapping identity reads used to be able to land records in each
+ * other's frame under `FallbackStorage`, and a same-path pair was
+ * indistinguishable by path alone; `runRecorded` now serializes those
+ * frames when the storage cannot isolate tasks, so no two of them are
+ * live at once and each read scans only its own records.
+ * Mirrors Python's `read_identity`.
+ */
+export function readIdentity(records: readonly OpRecord[], path: string): LiveFileIdentity | null {
+  for (const rec of [...records].reverse()) {
+    if (rec.path !== path) continue
+    if (rec.revision !== null || rec.fingerprint !== null) {
+      return { exists: true, revision: rec.revision, fingerprint: rec.fingerprint }
+    }
+  }
+  return null
+}
+
+/**
+ * The op kwargs one read dispatches with.
+ *
+ * Shared by `readFile` and `readFileWithIdentity` so the second cannot
+ * drift from the first: an identity read that stopped asking for the
+ * stored bytes, or stopped asking for a fresh one, would stamp the
+ * wrong answer without failing anything. Mirrors Python's `read_kwargs`.
+ */
+export function readOpKwargs(raw: boolean, fresh: boolean): OpKwargs {
+  const kwargs: OpKwargs = raw ? { filetype: null } : {}
+  if (fresh) kwargs.fresh = true
+  return kwargs
+}
 
 // The op's byte count for recording: the result first, else the input
 // (write payloads travel as the first positional argument). Mirrors
@@ -123,12 +179,18 @@ export class Ops {
    * path is link-followed here first so the record carries the resolved
    * path; the door's second follow of an already-resolved path is a
    * no-op. Mirrors Python's Ops._through_door.
+   *
+   * The report is the caller's when one is handed in, so a caller that
+   * has to read the door's account back (the identity read asks whether
+   * a cap truncated its bytes) sees the same object the record is
+   * stamped from.
    */
   private async through(
     op: string,
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    caller: OpReport | null = null,
   ): Promise<unknown> {
     const timer = startOp()
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
@@ -137,7 +199,7 @@ export class Ops {
     const skipFollow = NO_FOLLOW_OPS.has(op) || kwargs.nofollow === true
     const followed = this.links !== null && !skipFollow ? this.links.follow(path) : path
     const owner = this.ownerOf(followed)
-    const report = new OpReport()
+    const report = caller ?? new OpReport()
     let result: unknown
     try {
       const [value] = await this.dispatch(op, PathSpec.fromStrPath(followed), args, kwargs, report)
@@ -185,14 +247,23 @@ export class Ops {
   // `raw` skips the filetype cascade: an explicit null filetype stops
   // the door from stamping the path's extension, so a rendered read op
   // (gdoc/gsheet/gmail) is bypassed and the stored bytes come back.
+  // `fresh` means no memory answers this read: the warm file cache is
+  // refused (for a rendered read too), and the op runs against an empty
+  // index instead of the mount's, so an id-addressed backend resolves
+  // the path to an id live rather than from a remembered binding. The
+  // bytes then come from the backend and carry whatever markers it
+  // stamps on them; it costs a round trip every time, and more than one
+  // on a backend that has to resolve the path to an id first (drive
+  // re-lists each level it has no id for), so it is for a caller that
+  // needs the backend's own answer rather than the newest one seen.
   // `offset`/`size` ride the same kwargs the generic read op already reads,
   // so a backend with a native range fetches one window instead of the whole
-  // object. Python spells this `read(path, offset, size, raw)`.
+  // object. Python spells this `read(path, offset, size, raw, fresh)`.
   async readFile(
     path: string,
-    options: { raw?: boolean; offset?: number; size?: number | null } = {},
+    options: { raw?: boolean; fresh?: boolean; offset?: number; size?: number | null } = {},
   ): Promise<Uint8Array> {
-    const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
+    const kwargs = readOpKwargs(options.raw === true, options.fresh === true)
     const offset = options.offset ?? 0
     const size = options.size ?? null
     if (offset !== 0 || size !== null) {
@@ -227,6 +298,119 @@ export class Ops {
 
   async stat(path: string): Promise<FileStat> {
     return (await this.through('stat', path)) as FileStat
+  }
+
+  /**
+   * The backend's own identity for the file living at `path`.
+   *
+   * Dispatched like every other op, so the link follow, the session
+   * grants, the admission policies and the recording all fire once at
+   * the same door. The op consults no cache: it is not a read op, so
+   * the warm file cache never answers it, and the backend module
+   * ignores the index it is handed, which is what makes the answer a
+   * live one.
+   *
+   * A mount whose backend registers no identity op reads back as null
+   * rather than throwing: this is the programmatic capability probe,
+   * and an honest null is what a caller can branch on. Every other
+   * failure propagates, and the raw op keeps throwing ENOTSUP for a
+   * direct `dispatch` caller. Mirrors Python's `live_identity`.
+   */
+  async liveIdentity(path: string): Promise<LiveFileIdentity | null> {
+    try {
+      return (await this.through('live_identity', path)) as LiveFileIdentity
+    } catch (err) {
+      if (isMissingOp(err, 'live_identity')) return null
+      throw err
+    }
+  }
+
+  /**
+   * Read a file and the identity of the bytes just read.
+   *
+   * The stamp comes from the read's own backend response, never from a
+   * second call: s3 and gridfs take both markers off the GET that
+   * delivered the bytes, and drive and graph capture the metadata
+   * immediately before the download, so their residual window can only
+   * report a stamp older than the bytes, which fails safe as a spurious
+   * stale refusal rather than a silently accepted stale write.
+   *
+   * Both of those captures are gated on a recording being active, so
+   * the read runs inside its own recording frame. The frame is nested
+   * rather than shared: a sibling task writing into an enclosing line's
+   * records would otherwise be able to hand this read another path's
+   * markers. `runRecorded` names that frame's array up front rather
+   * than reading it back from inside the callback, which under the
+   * browser's `FallbackStorage` can be a concurrent read's frame, and
+   * it serializes these frames outright where that storage is in use,
+   * so a record emitted after an await cannot land in a newer read's
+   * frame and leave this one with no identity at all. What the frame
+   * collected is handed up to the enclosing frame on the way out, on
+   * the error path too, so a line's byte accounting still sees every op
+   * that happened -- and `runRecorded` owns that hand-up, because the
+   * enclosing frame can only be read at the instant the frame binds,
+   * which under the serializing queue is not when this method runs.
+   * The markers are then read back per path, which is what keeps a
+   * sibling op's marker in the enclosing frame from being mistaken for
+   * this read's.
+   *
+   * The read is `fresh`, which is the dispatcher's "no memory answers
+   * this one" and covers both memories. The warm file cache is skipped,
+   * because bytes it hands back crossed no network and carry no marker,
+   * and the caller would read that as "this file has no identity" for a
+   * file the backend versions. The mount's index is skipped too — the
+   * op is handed an empty one — because on an id-addressed backend a
+   * remembered name->id binding never expires, so a stale one would
+   * stamp the identity of the file that used to live at this path onto
+   * that file's bytes and both would be the wrong file's.
+   *
+   * A revision pin is workspace state, not a memory, so `fresh` never
+   * overrides it: a pinned read is one fresh backend call for that
+   * exact revision and pairs with that revision's own identity, keeping
+   * a restored snapshot's view consistent. The write-side check is what
+   * refuses overwriting a newer head.
+   *
+   * A failed read propagates as it is; no identity is synthesized for
+   * it.
+   *
+   * A policy-capped read refuses rather than pairing a prefix with a
+   * whole-file identity. A `postOps` policy may bound a read
+   * (`new Limit({maxBytes})`), and the door applies that bound after
+   * the backend already answered, so the delivered bytes are a prefix
+   * while the markers still describe the whole file — the pair a
+   * read-check-write caller would stamp and then write the prefix back
+   * under. `cappedRead` is the answer; bypassing the cap would make
+   * this door a policy bypass, and `identity: null` would only move the
+   * same loss one step later. Plain `readFile` is untouched and still
+   * serves the capped prefix.
+   *
+   * `raw` is `readFile`'s own option, passed straight through: a caller
+   * that stamps stored bytes has to read stored bytes, or the stamp
+   * describes a rendering the write path never stores. `offset`/`size`
+   * are deliberately not offered, because the identity of half a file
+   * is not a question the backend can answer. Mirrors Python's
+   * `read_with_identity`.
+   */
+  async readFileWithIdentity(
+    path: string,
+    options: { raw?: boolean } = {},
+  ): Promise<[Uint8Array, LiveFileIdentity | null]> {
+    // The record names the link-followed path, because `through`
+    // follows before it dispatches; the filter has to compare against
+    // that same spelling.
+    const target = this.links !== null ? this.links.follow(path) : path
+    // The door's account is read back rather than measured: the length
+    // the backend moved and the length delivered differ for a rendered
+    // read too, so only the door can say which gap a cap made.
+    // Dispatched through `through` rather than `readFile` because the
+    // report has to be this caller's.
+    const report = new OpReport()
+    const { records: inner, done } = runRecorded(() =>
+      this.through('read', path, [], readOpKwargs(options.raw === true, true), report),
+    )
+    const data = (await done) as Uint8Array
+    if (report.capped) throw cappedRead(target)
+    return [data, readIdentity(inner, target)]
   }
 
   // The three probes below answer "is this path there?", so only a genuine

@@ -1,0 +1,27 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/version/live_identity.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "version/live_identity.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "=== wrote /data/report.txt ===",
+    "live_identity: None",
+    "read_with_identity bytes: hello world",
+    "read_with_identity identity: None"
+  ]
+}

@@ -35,8 +35,9 @@ from mirage.core.msgraph.client import (GraphError, graph_delete, graph_get,
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.observe.context import (active_recorder, record, record_stream,
                                     revision_for, start_op)
+from mirage.ops.types import LiveFileIdentity
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent, listing_error
+from mirage.utils.errors import eisdir, enoent, listing_error
 from mirage.utils.filetype import guess_type
 from mirage.utils.ranges import window_for
 
@@ -315,6 +316,35 @@ def entry_stat(item: dict[str, Any]) -> FileStat:
             "etag": item.get("eTag"),
         },
     )
+
+
+async def identity_item(config: MsGraphConfig, loc: DriveLoc,
+                        virtual: str) -> LiveFileIdentity:
+    """Bounded identity lookup: one plain item GET, no version history.
+
+    ``$expand=versions`` (``capture_item_metadata``) pulls the whole
+    version history, which the identity guarantee forbids; this reads
+    only the current item and its ``cTag``, so ``revision`` stays None
+    until a bounded revision call is proven safe (see #572).
+
+    Args:
+        config (MsGraphConfig): the mount's Graph config.
+        loc (DriveLoc): the item's address.
+        virtual (str): full virtual path, for error messages.
+    """
+    try:
+        item = await graph_get(config, loc.item())
+    except GraphError as exc:
+        if exc.status == 404:
+            return LiveFileIdentity(exists=False,
+                                    revision=None,
+                                    fingerprint=None)
+        raise
+    if "folder" in item:
+        raise eisdir(virtual)
+    return LiveFileIdentity(exists=True,
+                            revision=None,
+                            fingerprint=item.get("cTag"))
 
 
 def current_version_id(versions: list[dict[str, Any]]) -> str | None:

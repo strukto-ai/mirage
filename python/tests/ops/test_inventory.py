@@ -96,6 +96,7 @@ OPS_INVENTORY = {
     ],
     "gdrive": [
         ("create", "gdrive", "", True),
+        ("live_identity", "gdrive", "", False),
         ("mkdir", "gdrive", "", True),
         ("read", "gdrive", "", False),
         ("readdir", "gdrive", "", False),
@@ -115,6 +116,19 @@ OPS_INVENTORY = {
         ("read", "gmail", "", False),
         ("readdir", "gmail", "", False),
         ("stat", "gmail", "", False),
+    ],
+    "gridfs": [
+        ("create", "gridfs", "", True),
+        ("live_identity", "gridfs", "", False),
+        ("mkdir", "gridfs", "", True),
+        ("read", "gridfs", "", False),
+        ("readdir", "gridfs", "", False),
+        ("rename", "gridfs", "", True),
+        ("rmdir", "gridfs", "", True),
+        ("stat", "gridfs", "", False),
+        ("truncate", "gridfs", "", True),
+        ("unlink", "gridfs", "", True),
+        ("write", "gridfs", "", True),
     ],
     "gsheets": [
         ("read", "gdrive", ".gsheet.json", False),
@@ -202,6 +216,7 @@ OPS_INVENTORY = {
     ],
     "onedrive": [
         ("create", "onedrive", "", True),
+        ("live_identity", "onedrive", "", False),
         ("mkdir", "onedrive", "", True),
         ("read", "onedrive", "", False),
         ("readdir", "onedrive", "", False),
@@ -252,6 +267,7 @@ OPS_INVENTORY = {
     ],
     "s3": [
         ("create", "s3", "", True),
+        ("live_identity", "s3", "", False),
         ("mkdir", "s3", "", True),
         ("read", "s3", "", False),
         ("readdir", "s3", "", False),
@@ -264,6 +280,7 @@ OPS_INVENTORY = {
     ],
     "sharepoint": [
         ("create", "sharepoint", "", True),
+        ("live_identity", "sharepoint", "", False),
         ("mkdir", "sharepoint", "", True),
         ("read", "sharepoint", "", False),
         ("readdir", "sharepoint", "", False),

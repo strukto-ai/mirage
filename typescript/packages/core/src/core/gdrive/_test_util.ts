@@ -47,6 +47,7 @@ export class FakeDrive {
     mime = FILE_MIME,
     content: Uint8Array = new Uint8Array(0),
     driveId?: string,
+    modified = '2026-01-01T00:00:00Z',
   ): string {
     this.counter += 1
     const id = `id${String(this.counter)}`
@@ -55,7 +56,7 @@ export class FakeDrive {
       name,
       mimeType: mime,
       parents: [parent],
-      modifiedTime: '2026-01-01T00:00:00Z',
+      modifiedTime: modified,
       content,
       ...(driveId === undefined ? {} : { driveId }),
     })
@@ -174,6 +175,39 @@ export class FakeDrive {
     if (!this.items.has(fileId)) throw new Error(`no item ${fileId}`)
     return Promise.resolve(this.public(fileId))
   }
+}
+
+export const OLD_TIME = '2026-01-01T00:00:00Z'
+export const NEW_TIME = '2026-06-01T00:00:00Z'
+
+/**
+ * Add a binary named `x.gdoc.json` beside a Doc named `x`.
+ *
+ * Both render as the vfs name `x.gdoc.json` — the collision that
+ * reaches the resolver as two separate name queries and the listing as
+ * two rows of one contest. `literalFirst` picks the listing order and
+ * `newer` picks which one should win; the ids come back as
+ * [binary file id, native doc id]. Mirrors python's `colliding_pair`
+ * fixture.
+ */
+export function addCollidingPair(
+  fake: FakeDrive,
+  literalFirst: boolean,
+  newer: 'literal' | 'native',
+): [string, string] {
+  const raw = new TextEncoder().encode('raw')
+  const literalTime = newer === 'literal' ? NEW_TIME : OLD_TIME
+  const docTime = newer === 'native' ? NEW_TIME : OLD_TIME
+  let literal: string
+  let doc: string
+  if (literalFirst) {
+    literal = fake.add('x.gdoc.json', 'root', undefined, raw, undefined, literalTime)
+    doc = fake.add('x', 'root', DOC_MIME, undefined, undefined, docTime)
+  } else {
+    doc = fake.add('x', 'root', DOC_MIME, undefined, undefined, docTime)
+    literal = fake.add('x.gdoc.json', 'root', undefined, raw, undefined, literalTime)
+  }
+  return [literal, doc]
 }
 
 // Mutable singleton the module mock delegates to; reset per test.

@@ -85,8 +85,14 @@ export function isNative(node: DriveNode): boolean {
 // current state, not a possibly stale cache.
 //
 // A google-native file renders as `<name><suffix>` (e.g. `Report.gdoc.json`),
-// so a suffixed segment is looked up both as a literal name and as the
-// stripped native document, literal first.
+// so a suffixed segment has to be looked up both as a literal Drive name and
+// as the stripped native document. They are two *queries*, not two
+// priorities: an item from either can render as this segment, and which one
+// the path names is decided afterwards by duplicateRank, over the merged set.
+// Only a segment ending in a rendered suffix costs the second query, and the
+// queries cannot answer with the same item twice -- the literal one matches a
+// Drive name equal to the segment, every other one a strictly shorter name.
+// Mirrors python's query_candidates.
 export function queryCandidates(segment: string): [string, string | null][] {
   const candidates: [string, string | null][] = [[segment, null]]
   for (const [ext, mime] of Object.entries(SUFFIX_TO_MIME)) {
@@ -95,6 +101,17 @@ export function queryCandidates(segment: string): [string, string | null][] {
     }
   }
   return candidates
+}
+
+// The vfs name a Drive item is listed and resolved under. A google-apps file
+// has no bytes of its own, so the mount renders it as JSON and names it with
+// the matching suffix; everything else keeps its Drive name. Written once and
+// read by both sides, because the two reach a file by different routes --
+// readdir renders every listed item and resolveSegment filters query results
+// -- and a name built one way in one of them is a path only one of them can
+// reach. Mirrors python's rendered_name.
+export function renderedName(name: string, mimeType: string): string {
+  return `${name}${MIME_TO_EXT[mimeType] ?? ''}`
 }
 
 // Destination Drive name for moving/copying a node to a vfs basename: a
@@ -106,6 +123,61 @@ export function driveTargetName(basename: string, node: DriveNode): string {
     return basename.slice(0, -ext.length)
   }
   return basename
+}
+
+/**
+ * Selection rank among Drive siblings that share one vfs name.
+ *
+ * Drive allows duplicate names in a folder, so a vfs path can name more
+ * than one item and something has to choose. **Newest `modifiedTime`
+ * wins, ties broken by the greater id**, and the rule is written here
+ * once because two paths reach the same file: the direct query in
+ * `resolveSegment` (which `liveIdentity` and every mutation go through)
+ * and the listing that warms the index (which every read goes through).
+ * Ordering them differently made `liveIdentity(path)` name a different
+ * item than the read of that same path, which a read-check-write caller
+ * sees as a conflict with no writer.
+ *
+ * Both halves are compared as strings: Drive stamps `modifiedTime`
+ * RFC3339 with a fixed `Z` offset, so lexical order is chronological
+ * order, and the id is a deterministic tiebreak rather than a
+ * server-order accident.
+ *
+ * The rank has no notion of *kind*, deliberately. Two items sharing a
+ * vfs name need not be the same kind of thing — a binary file named
+ * `Report.gdoc.json` collides with a Google Doc named `Report` (see
+ * {@link renderedName}) — and a rule that preferred one kind would have
+ * to be spelled identically on both sides to stay agreeable. Recency is
+ * the one fact both sides already read off the item. Mirrors python's
+ * `duplicate_rank`.
+ */
+export function duplicateRank(modifiedTime: string, id: string): [string, string] {
+  return [modifiedTime, id]
+}
+
+// Whether `a` outranks `b` by duplicateRank. Python compares the tuples
+// with `>` directly; TypeScript has to spell the comparison out.
+export function ranksAbove(a: [string, string], b: [string, string]): boolean {
+  return a[0] === b[0] ? a[1] > b[1] : a[0] > b[0]
+}
+
+// The one Drive item a name resolves to, by duplicateRank, over every item
+// that renders under that one vfs name whichever query found it. Mirrors
+// python's pick_duplicate.
+export function pickDuplicate(items: readonly DriveFile[]): DriveFile | undefined {
+  let best: DriveFile | undefined
+  for (const item of items) {
+    if (
+      best === undefined ||
+      ranksAbove(
+        duplicateRank(item.modifiedTime ?? '', item.id),
+        duplicateRank(best.modifiedTime ?? '', best.id),
+      )
+    ) {
+      best = item
+    }
+  }
+  return best
 }
 
 export function nodeFromItem(item: DriveFile, driveId: string | null): DriveNode {
@@ -124,16 +196,27 @@ export async function resolveSegment(
   driveId: string | null,
   atRoot: boolean,
 ): Promise<DriveNode | null> {
+  // Every query first, one rank after: a binary file literally named
+  // `Report.gdoc.json` and a Google Doc named `Report` render as the same
+  // vfs name and are found by different queries, so answering with the
+  // first query that matched let the resolver name an item the listing had
+  // already ranked below the other one -- the same false conflict
+  // duplicateRank exists to close, one level up.
+  const matches: DriveFile[] = []
   for (const [name, mime] of queryCandidates(segment)) {
-    const matches = await listFiles(tm, {
-      folderId: parentId,
-      driveId,
-      name,
-      mimeType: mime,
-    })
-    const first = matches[0]
-    if (first !== undefined) return nodeFromItem(first, driveId)
+    for (const item of await listFiles(tm, { folderId: parentId, driveId, name, mimeType: mime })) {
+      // A query on the literal name also finds items that render under a
+      // longer one (a Google Doc actually named `Report.gdoc.json` is
+      // `Report.gdoc.json.gdoc.json` in the vfs), and those are a different
+      // path's business.
+      if (renderedName(item.name, item.mimeType ?? '') === segment) matches.push(item)
+    }
   }
+  // Not matches[0]: the server's own order is only a proxy for the rule,
+  // and the listing that warms the index cannot read it at all. See
+  // duplicateRank.
+  const best = pickDuplicate(matches)
+  if (best !== undefined) return nodeFromItem(best, driveId)
   if (atRoot) {
     // Shared Drive enumeration is best-effort, mirroring readdir: a missing
     // scope must not break resolution of My Drive paths.

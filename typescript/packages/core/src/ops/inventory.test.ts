@@ -36,6 +36,7 @@ import { ONEDRIVE_OPS } from './onedrive/index.ts'
 import { POSTGRES_OPS } from './postgres/index.ts'
 import { QDRANT_OPS } from './qdrant/index.ts'
 import { RAM_OPS } from './ram/index.ts'
+import { S3_OPS } from './s3/index.ts'
 import { SLACK_OPS } from './slack/index.ts'
 import { SHAREPOINT_OPS } from './sharepoint/index.ts'
 import { TRELLO_OPS } from './trello/index.ts'
@@ -70,6 +71,7 @@ const TABLES = {
   postgres: POSTGRES_OPS,
   qdrant: QDRANT_OPS,
   ram: RAM_OPS,
+  s3: S3_OPS,
   slack: SLACK_OPS,
   sharepoint: SHAREPOINT_OPS,
   trello: TRELLO_OPS,
@@ -128,6 +130,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
   ],
   gdrive: [
     ['create', 'gdrive', '', true],
+    ['live_identity', 'gdrive', '', false],
     ['mkdir', 'gdrive', '', true],
     ['read', 'gdrive', '', false],
     ['readdir', 'gdrive', '', false],
@@ -195,6 +198,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
   ],
   onedrive: [
     ['create', 'onedrive', '', true],
+    ['live_identity', 'onedrive', '', false],
     ['mkdir', 'onedrive', '', true],
     ['read', 'onedrive', '', false],
     ['readdir', 'onedrive', '', false],
@@ -229,6 +233,19 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['unlink', 'ram', '', true],
     ['write', 'ram', '', true],
   ],
+  s3: [
+    ['create', 's3', '', true],
+    ['live_identity', 's3', '', false],
+    ['mkdir', 's3', '', true],
+    ['read', 's3', '', false],
+    ['readdir', 's3', '', false],
+    ['rename', 's3', '', true],
+    ['rmdir', 's3', '', true],
+    ['stat', 's3', '', false],
+    ['truncate', 's3', '', true],
+    ['unlink', 's3', '', true],
+    ['write', 's3', '', true],
+  ],
   slack: [
     ['read', 'slack', '', false],
     ['readdir', 'slack', '', false],
@@ -236,6 +253,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
   ],
   sharepoint: [
     ['create', 'sharepoint', '', true],
+    ['live_identity', 'sharepoint', '', false],
     ['mkdir', 'sharepoint', '', true],
     ['read', 'sharepoint', '', false],
     ['readdir', 'sharepoint', '', false],

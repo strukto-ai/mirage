@@ -135,6 +135,14 @@ function displayName(item: Record<string, unknown>): string {
 
 export class SharePointAccessor extends Accessor {
   readonly config: SharePointConfigResolved
+  // Name->id memos for the two namespace levels above a drive item.
+  // They never expire: a site or a drive deleted and recreated under
+  // the same name keeps answering with the id that is gone, which
+  // reads as a 404 on every later call. Every caller that must not be
+  // told a stale id resolves with `fresh`, which relists and answers
+  // from *that* listing rather than from the memo — a name that
+  // vanished has to read as missing, and re-reading the memo after a
+  // relist would still find the old entry sitting there.
   private readonly siteCache = new Map<string, string>()
   private readonly driveCache = new Map<string, string>()
 
@@ -198,23 +206,53 @@ export class SharePointAccessor extends Accessor {
     return (await this.driveEntries(siteId)).map((entry) => entry[0])
   }
 
-  private async siteId(name: string): Promise<string | null> {
-    if (!this.siteCache.has(name)) await this.listSites()
-    return this.siteCache.get(name) ?? null
+  private async siteId(name: string, fresh: boolean): Promise<string | null> {
+    const memo = this.siteCache.get(name)
+    if (!fresh && memo !== undefined) return memo
+    const live = new Map<string, string>()
+    for (const site of await this.siteItems()) {
+      const id = typeof site.id === 'string' ? site.id : null
+      const display = displayName(site)
+      if (id === null || display === '') continue
+      live.set(display, id)
+      const alias = typeof site.name === 'string' ? site.name : ''
+      if (alias !== '') live.set(alias, id)
+    }
+    for (const [key, id] of live) this.siteCache.set(key, id)
+    return live.get(name) ?? null
   }
 
-  private async driveId(siteId: string, name: string): Promise<string | null> {
+  private async driveId(siteId: string, name: string, fresh: boolean): Promise<string | null> {
     const key = `${siteId}\0${name}`
-    if (!this.driveCache.has(key)) await this.listDrives(siteId)
-    return this.driveCache.get(key) ?? null
+    const memo = this.driveCache.get(key)
+    if (!fresh && memo !== undefined) return memo
+    const live = new Map<string, string>()
+    for (const drive of await this.driveItems(siteId)) {
+      if (typeof drive.id !== 'string' || typeof drive.name !== 'string') continue
+      if (drive.name === '') continue
+      live.set(`${siteId}\0${drive.name}`, drive.id)
+    }
+    for (const [cached, id] of live) this.driveCache.set(cached, id)
+    return live.get(key) ?? null
   }
 
-  async resolve(path: string): Promise<ResolvedSharePointPath> {
+  /**
+   * Resolve a mount-relative path to (siteId, driveId, itemPath).
+   *
+   * `fresh` relists the sites and drives instead of reading the
+   * name->id memos, at the cost of one call per namespace level the
+   * path names (two for an unscoped mount, none more). It is what
+   * makes the identity surface correct across a delete-and-recreate:
+   * the memos never expire, so a drive recreated under the same name
+   * would otherwise be addressed by an id that is gone. Mirrors
+   * Python's `resolve`.
+   */
+  async resolve(path: string, fresh = false): Promise<ResolvedSharePointPath> {
     const raw = stripSlash(path)
     if (this.config.site !== null && this.config.drive !== null) {
-      const siteId = await this.siteId(this.config.site)
+      const siteId = await this.siteId(this.config.site, fresh)
       if (siteId === null) return { level: 'site', siteId: null, driveId: null, itemPath: null }
-      const driveId = await this.driveId(siteId, this.config.drive)
+      const driveId = await this.driveId(siteId, this.config.drive, fresh)
       if (driveId === null) return { level: 'drive', siteId, driveId: null, itemPath: null }
       const itemPath =
         this.config.keyPrefix !== '' && raw !== ''
@@ -226,10 +264,10 @@ export class SharePointAccessor extends Accessor {
     }
     if (raw === '') return { level: 'root', siteId: null, driveId: null, itemPath: null }
     const parts = raw.split('/')
-    const siteId = await this.siteId(parts[0] ?? '')
+    const siteId = await this.siteId(parts[0] ?? '', fresh)
     if (siteId === null) return { level: 'site', siteId: null, driveId: null, itemPath: null }
     if (parts.length === 1) return { level: 'site', siteId, driveId: null, itemPath: null }
-    const driveId = await this.driveId(siteId, parts[1] ?? '')
+    const driveId = await this.driveId(siteId, parts[1] ?? '', fresh)
     if (driveId === null) return { level: 'drive', siteId, driveId: null, itemPath: null }
     if (parts.length === 2) return { level: 'drive', siteId, driveId, itemPath: null }
     return { level: 'item', siteId, driveId, itemPath: parts.slice(2).join('/') }

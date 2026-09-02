@@ -17,12 +17,21 @@ import errno
 import pytest
 
 from mirage import Workspace
+from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.config import IndexEntry, LookupResult, LookupStatus
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.context import reset_current_session, set_current_session
+from mirage.io import IOResult
+from mirage.observe.context import (RecordingScope, record, revision_for,
+                                    start_op)
 from mirage.ops import Ops
+from mirage.ops.registry import RegisteredOp
+from mirage.ops.types import LiveFileIdentity
 from mirage.policy import (Action, Deny, OpsContext, OpsResultContext, Policy,
                            PolicyDenied)
 from mirage.resource.ram import RAMResource
-from mirage.types import FileType, HiddenPaths, MountMode
+from mirage.types import FileType, HiddenPaths, Limit, MountMode
+from mirage.utils.errors import CappedReadError
 from mirage.workspace.session import Session
 
 from .conftest import make_ops, run
@@ -518,6 +527,395 @@ class TestAttachedOpsOneDoor:
             await ws.close()
 
 
+class TestLiveIdentity:
+    """The identity capability probe: no op wired reads back None, and a
+    wired mount answers from the backend even when its own index cache
+    is stale or actively lying."""
+
+    def test_no_op_wired_reads_back_none(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", b"hello"))
+        assert run(ops.live_identity("/data/a.txt")) is None
+
+    def test_a_wired_mount_answers_with_the_backend_struct(self):
+        resource = RAMResource()
+        fresh = LiveFileIdentity(exists=True, revision="r1", fingerprint="fp1")
+
+        async def fake_live_identity(accessor, path, **kwargs):
+            return fresh
+
+        resource.register_op(
+            RegisteredOp(name="live_identity",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_live_identity,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        assert run(ws.ops.live_identity("/data/a.txt")) == fresh
+
+    def test_ignores_a_wrong_entry_and_a_lying_negative_cache(self):
+        # The index holds a stale positive entry for this exact path, and
+        # its own get() answers NOT_FOUND for everything regardless of
+        # what was put -- live_identity must still answer from the
+        # backend, proving the op never consults the index either way.
+        resource = RAMResource()
+
+        class _LyingIndex(RAMIndexCacheStore):
+
+            async def get(self, resource_path):
+                return LookupResult(status=LookupStatus.NOT_FOUND)
+
+        lying = _LyingIndex()
+        resource._index = lying
+        run(
+            lying.put(
+                "/a.txt",
+                IndexEntry(id="wrong-id",
+                           name="a.txt",
+                           resource_type="ram/file")))
+        fresh = LiveFileIdentity(exists=True,
+                                 revision="fresh-rev",
+                                 fingerprint="fresh-fp")
+
+        async def fake_live_identity(accessor, path, **kwargs):
+            return fresh
+
+        resource.register_op(
+            RegisteredOp(name="live_identity",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_live_identity,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        assert run(ws.ops.live_identity("/data/a.txt")) == fresh
+
+
+class _CachingRAM(RAMResource):
+    caches_reads = True
+
+
+async def _stamped_read(accessor, path, **kwargs) -> bytes:
+    """A backend read that stamps markers on its own record.
+
+    Args:
+        accessor: the mount's accessor.
+        path: the path being read.
+        **kwargs: the op's other arguments, unused.
+    """
+    data = b"versioned"
+    record("read",
+           path.virtual,
+           "ram",
+           len(data),
+           start_op(),
+           fingerprint="fp-1",
+           revision="rev-1")
+    return data
+
+
+class TestReadWithIdentity:
+    """The read-side stamp comes from the read's own recorded markers,
+    never a second call, and forwards to an enclosing recording frame."""
+
+    def test_returns_bytes_and_none_on_ram(self):
+        ops, _ = make_ops()
+        run(ops.write("/data/a.txt", b"hello"))
+        data, identity = run(ops.read_with_identity("/data/a.txt"))
+        assert data == b"hello"
+        assert identity is None
+
+    def test_identity_populated_when_the_read_stamps_markers(self):
+        resource = RAMResource()
+
+        async def fake_read(accessor, path, **kwargs):
+            data = b"versioned"
+            record("read",
+                   path.virtual,
+                   "ram",
+                   len(data),
+                   start_op(),
+                   fingerprint="fp-1",
+                   revision="rev-1")
+            return data
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"versioned"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-1",
+                                            fingerprint="fp-1")
+
+    def test_nested_records_forward_to_an_enclosing_scope_on_success(self):
+        resource = RAMResource()
+
+        async def fake_read(accessor, path, **kwargs):
+            record("read",
+                   path.virtual,
+                   "ram",
+                   4,
+                   start_op(),
+                   fingerprint="fp-2",
+                   revision="rev-2")
+            return b"data"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        outer = RecordingScope()
+        try:
+            run(ws.ops.read_with_identity("/data/a.txt"))
+        finally:
+            outer.close()
+        assert any(r.revision == "rev-2" for r in outer.records)
+
+    def test_nested_records_forward_to_an_enclosing_scope_on_a_raising_read(
+            self):
+        resource = RAMResource()
+
+        async def failing_read(accessor, path, **kwargs):
+            record("read",
+                   path.virtual,
+                   "ram",
+                   0,
+                   start_op(),
+                   fingerprint="fp-3",
+                   revision="rev-3")
+            raise RuntimeError("boom")
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=failing_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        outer = RecordingScope()
+        try:
+            with pytest.raises(RuntimeError):
+                run(ws.ops.read_with_identity("/data/a.txt"))
+        finally:
+            outer.close()
+        assert any(r.revision == "rev-3" for r in outer.records)
+
+    def test_the_warm_file_cache_does_not_answer_the_identity_read(self):
+        # A cached read crosses no network and stamps no marker, so
+        # serving one here would hand back bytes with identity None for
+        # a file the backend versions. The plain read still takes the
+        # cache; only this one refuses it.
+        resource = _CachingRAM()
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=_stamped_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(
+            ws.apply_io(
+                IOResult(reads={"/data/a.txt": b"CACHED"},
+                         cache=["/data/a.txt"])))
+        assert run(ws.ops.read("/data/a.txt")) == b"CACHED"
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"versioned"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-1",
+                                            fingerprint="fp-1")
+
+    def test_the_mount_index_does_not_answer_the_identity_read(self):
+        # The other half of "fresh": an id-addressed backend turns a
+        # path into an id through the index, and a remembered binding
+        # never expires, so a stale one would stamp the identity of the
+        # file that used to live at this path onto that file's bytes.
+        # The op is handed an empty store of its own -- not None, which
+        # is not a store, and not the mount's, which is the memory being
+        # refused -- and the mount's own index is left untouched.
+        resource = RAMResource()
+        seen: list[IndexCacheStore | None] = []
+
+        async def capturing_read(accessor, path, index=None, **kwargs):
+            seen.append(index)
+            return b"live"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=capturing_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(ws.ops.read("/data/a.txt"))
+        run(ws.ops.read_with_identity("/data/a.txt"))
+        plain, fresh = seen
+        assert plain is resource.index
+        assert isinstance(fresh, RAMIndexCacheStore)
+        assert fresh is not resource.index
+        assert run(fresh.entries()) == {}
+
+    def test_a_marker_for_another_path_is_not_read_as_this_one(self):
+        # FallbackStorage (the browser) hands the newest live frame to
+        # every reader, so a concurrent read's record can land in this
+        # frame. Filtering on the record's own path is what stops that
+        # record from being reported as this file's identity.
+        resource = RAMResource()
+
+        async def cross_talking_read(accessor, path, **kwargs):
+            record("read",
+                   "/data/other.txt",
+                   "ram",
+                   1,
+                   start_op(),
+                   fingerprint="fp-other",
+                   revision="rev-other")
+            return b"mine"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=cross_talking_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"mine"
+        assert identity is None
+
+    def test_a_read_through_a_symlink_still_finds_its_marker(self):
+        # The record names the followed path, so the filter has to
+        # follow too: comparing against the link's own name would drop
+        # the marker of every read reached through one.
+        resource = RAMResource()
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=_stamped_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(ws.ops.write("/data/a.txt", b"stored"))
+        run(ws.ops.symlink("/data/link.txt", "/data/a.txt"))
+        data, identity = run(ws.ops.read_with_identity("/data/link.txt"))
+        assert data == b"versioned"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-1",
+                                            fingerprint="fp-1")
+
+
+class _CapReadBytes(Policy):
+    """A post_ops policy that bounds every read to ``max_bytes``."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self._max_bytes = max_bytes
+
+    async def post_ops(self, ctx: OpsResultContext) -> Action | None:
+        if ctx.op == "read":
+            return Limit(max_bytes=self._max_bytes)
+        return None
+
+
+async def _rendered_read(accessor, path, **kwargs) -> bytes:
+    """A rendered read: markers describe the stored bytes it read.
+
+    The record measures the source (9 bytes), the op answers with a
+    shorter rendering, and neither number is wrong -- which is why the
+    truncation test cannot be a length comparison.
+
+    Args:
+        accessor: the mount's accessor.
+        path: the path being read.
+        **kwargs: the op's other arguments, unused.
+    """
+    record("read",
+           path.virtual,
+           "ram",
+           len(b"raw-bytes"),
+           start_op(),
+           fingerprint="fp-r",
+           revision="rev-r")
+    return b"tally"
+
+
+def _capped_workspace(max_bytes: int) -> Workspace:
+    """A workspace whose reads a post_ops policy bounds.
+
+    Args:
+        max_bytes (int): the bound every read is capped to.
+    """
+    resource = RAMResource()
+    resource.register_op(
+        RegisteredOp(name="read",
+                     resource="ram",
+                     filetype=None,
+                     fn=_stamped_read,
+                     write=False))
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws.policies.add(_CapReadBytes(max_bytes))
+    return ws
+
+
+class TestReadWithIdentityUnderAPolicyCap:
+    """A cap truncates after the backend answered, so the delivered
+    bytes are a prefix while the markers still describe the whole file.
+    The pair is refused rather than degraded: bypassing the cap is a
+    policy bypass, and a None identity loses the same data one step
+    later, once the caller hashes the prefix and writes it back."""
+
+    def test_the_plain_read_still_serves_the_capped_prefix(self):
+        ws = _capped_workspace(4)
+        assert run(ws.ops.read("/data/a.txt")) == b"vers"
+
+    def test_the_identity_read_refuses_a_truncated_pairing(self):
+        ws = _capped_workspace(4)
+        with pytest.raises(CappedReadError) as excinfo:
+            run(ws.ops.read_with_identity("/data/a.txt"))
+        assert excinfo.value.errno == errno.EINVAL
+        assert "policy cap truncated" in str(excinfo.value)
+
+    def test_the_workspace_facade_refuses_it_too(self):
+        ws = _capped_workspace(4)
+        with pytest.raises(CappedReadError):
+            run(ws.read_with_identity("/data/a.txt"))
+
+    def test_a_cap_that_truncates_nothing_still_answers(self):
+        # The refusal is truncation, not the presence of a bound: a cap
+        # wider than the file leaves the delivered bytes whole.
+        ws = _capped_workspace(64)
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"versioned"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-1",
+                                            fingerprint="fp-1")
+
+    def test_a_rendered_read_is_not_mistaken_for_a_truncated_one(self):
+        # A rendered read's marker record measures the bytes the backend
+        # moved (9), and the op answers with a 5-byte rendering; only the
+        # door knows no cap ran, which is why the report is what is read
+        # back rather than the two lengths.
+        resource = RAMResource()
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=".tally",
+                         fn=_rendered_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        run(ws.ops.write("/data/hits.tally", b"raw-bytes"))
+        data, identity = run(ws.ops.read_with_identity("/data/hits.tally"))
+        assert data == b"tally"
+        assert identity == LiveFileIdentity(exists=True,
+                                            revision="rev-r",
+                                            fingerprint="fp-r")
+
+
 class TestProbesAndConveniences:
     """The surface union with the TS facade (R7b).
 
@@ -557,3 +955,46 @@ class TestProbesAndConveniences:
         run(ops.write("/data/dir/a.txt", b"1"))
         run(ops.mkdir("/data/dir/sub"))
         assert run(ops.list_files("/data/dir")) == ["a.txt"]
+
+
+class TestReadWithIdentityUnderARevisionPin:
+    """A revision pin is workspace state, not a memory: a pinned read is
+    one fresh backend call for that exact revision, and the identity it
+    pairs with is that revision's own. fresh silences caches and the
+    index, never the pin, so a restored snapshot keeps one consistent
+    view and the write-side check is what refuses the overwrite."""
+
+    def test_a_pinned_read_pairs_with_the_pinned_revision(self):
+        resource = RAMResource()
+
+        async def fake_read(accessor, path, **kwargs):
+            pinned = revision_for(path.virtual)
+            if pinned is not None:
+                record("read",
+                       path.virtual,
+                       "ram",
+                       3,
+                       start_op(),
+                       revision=pinned)
+                return b"old"
+            record("read", path.virtual, "ram", 3, start_op(), revision="r2")
+            return b"new"
+
+        resource.register_op(
+            RegisteredOp(name="read",
+                         resource="ram",
+                         filetype=None,
+                         fn=fake_read,
+                         write=False))
+        ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+        mount = ws.namespace.registry.mount_for("/data/a.txt")
+        mount.revisions["/data/a.txt"] = "r1"
+
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"old"
+        assert identity is not None and identity.revision == "r1"
+
+        del mount.revisions["/data/a.txt"]
+        data, identity = run(ws.ops.read_with_identity("/data/a.txt"))
+        assert data == b"new"
+        assert identity is not None and identity.revision == "r2"
