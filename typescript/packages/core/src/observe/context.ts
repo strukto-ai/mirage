@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createAsyncContext } from '../utils/async_context.ts'
+import { type Clock, SystemClock } from '../utils/clock.ts'
 import { OpRecord } from './record.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
@@ -101,23 +102,40 @@ export interface RecordOptions {
  */
 export class OpTimer {
   private readonly startMs: number
+  private readonly clockRef: Clock
 
-  constructor() {
-    this.startMs = performance.now()
+  /**
+   * @param clock the clock both readings are taken from. Passing one is
+   *   what makes a duration assertable without a sleep.
+   */
+  constructor(clock: Clock) {
+    this.clockRef = clock
+    this.startMs = Math.floor(clock.monotonic() * 1000)
   }
 
   /** Milliseconds elapsed since the timer was opened. */
   get elapsedMs(): number {
-    return Math.floor(performance.now() - this.startMs)
+    return Math.floor(this.clockRef.monotonic() * 1000) - this.startMs
+  }
+
+  /** The clock every reading of this op's timing comes from. */
+  get clock(): Clock {
+    return this.clockRef
   }
 }
 
 /**
  * Open the record path's stopwatch for one op. Hand the timer to
  * {@link record} or {@link finishRecord} when the op completes.
+ *
+ * A component that holds the workspace's clock passes it; a backend core
+ * op holds no workspace handle and passes nothing, which opens a
+ * system-clocked timer exactly as before the seam existed.
+ *
+ * @param clock the clock to time with; undefined means the real one.
  */
-export function startOp(): OpTimer {
-  return new OpTimer()
+export function startOp(clock?: Clock): OpTimer {
+  return new OpTimer(clock ?? new SystemClock())
 }
 
 /**
@@ -126,8 +144,9 @@ export function startOp(): OpTimer {
  * The one place an op's duration and wall-clock stamp are read, shared
  * by the recorder sink ({@link record}) and by the `Ops` facade's own
  * ledger, so the two cannot disagree about what a duration measures.
- * `path` is stored as given: a caller that needs mount prefixing
- * applies it first.
+ * Both readings come off the timer's own clock, so an injected one
+ * governs the stamp as well as the duration. `path` is stored as given:
+ * a caller that needs mount prefixing applies it first.
  */
 export function finishRecord(
   op: string,
@@ -143,7 +162,7 @@ export function finishRecord(
     path,
     source,
     bytes: nbytes,
-    timestamp: Date.now(),
+    timestamp: Math.floor(timer.clock.now() * 1000),
     durationMs: elapsed,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,

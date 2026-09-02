@@ -20,10 +20,11 @@ import time
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.core import MountCore
+from mirage.fuse.core import PREFETCH_TTL, MountCore
 from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.utils.stat_view import mtime_ns
 from mirage.workspace import Workspace
 
@@ -326,3 +327,63 @@ async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
     got = seeded._apply_stat_attrs(dict(entry), epoch)
     assert got["st_mtime"] == 0
     assert got["st_ctime"] == 0
+
+
+class SteppingClock:
+    """A clock whose wall reading can jump while monotonic stands still.
+
+    ManualClock moves both readings together, which is right for virtual
+    time passing but cannot express the case a deadline has to survive:
+    NTP stepping the system clock while no real time has elapsed.
+    """
+
+    def __init__(self) -> None:
+        self.wall = 1_700_000_000.0
+        self.mono = 0.0
+
+    def now(self) -> float:
+        return self.wall
+
+    def monotonic(self) -> float:
+        return self.mono
+
+
+@pytest.mark.asyncio
+async def test_prefetch_ttl_boundary_on_an_injected_clock():
+    # The prefetch cache is a deadline in monotonic seconds, so an
+    # injected clock is the only way to sit on the boundary exactly:
+    # fresh one second before the TTL, gone the second it lands.
+    clock = ManualClock()
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE, clock=clock)
+    await ws.execute("tee /u.json", stdin=b"payload")
+    core = MountCore(ws.fs)
+    assert core.prefetch_read("/u.json") == b"payload"
+    clock.advance(PREFETCH_TTL - 1)
+    assert core.cached_data("/u.json") == b"payload"
+    assert core.cached_size("/u.json") == len(b"payload")
+    clock.advance(1)
+    assert core.cached_data("/u.json") is None
+    assert core.cached_size("/u.json") is None
+    assert "/u.json" not in core._prefetch
+
+
+@pytest.mark.asyncio
+async def test_prefetch_deadline_ignores_a_wall_clock_jump():
+    # The deadline is a duration, so it must be measured on the
+    # monotonic reading. Reading wall clock instead would expire every
+    # prefetched file the moment NTP stepped the system clock forward.
+    clock = SteppingClock()
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE, clock=clock)
+    await ws.execute("tee /u.json", stdin=b"payload")
+    core = MountCore(ws.fs)
+    assert core.prefetch_read("/u.json") == b"payload"
+    clock.wall += 10 * 365 * 24 * 3600
+    assert core.cached_data("/u.json") == b"payload"
+
+
+@pytest.mark.asyncio
+async def test_core_takes_the_workspace_clock_from_the_facade():
+    clock = ManualClock()
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE, clock=clock)
+    core = MountCore(ws.fs)
+    assert core._clock is clock

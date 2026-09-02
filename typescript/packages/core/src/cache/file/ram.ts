@@ -14,25 +14,54 @@
 
 import { RAMResource } from '../../resource/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
 import { defaultFingerprint, parseLimit } from './utils.ts'
 
+/**
+ * The RAM byte cache.
+ *
+ * This is the one file-cache store that ages entries itself, so it is
+ * the one that holds a clock. The redis store expires its keys with
+ * server-side `EXPIRE` and reads no time client-side, so there is
+ * nothing there to inject.
+ */
 export class RAMFileCacheStore extends RAMResource implements FileCache {
   private readonly entries = new Map<string, CacheEntry>()
   private readonly lock = new KeyLock()
   private readonly limit: number
+  private readonly clockRef: Clock
   private size = 0
   private maxDrainBytesValue: number | null = null
   // Promises cannot be cancelled; clearing the map makes the drain's
   // completion check fail so the result is discarded instead.
   readonly drainTasks = new Map<string, Promise<void>>()
 
-  constructor(options: { limit?: string | number; maxDrainBytes?: number | null } = {}) {
+  /**
+   * @param options.limit capacity, as bytes or a size string.
+   * @param options.maxDrainBytes cap on a background drain's buffer;
+   *   null derives it from `limit`.
+   * @param options.clock the clock every entry's age is measured
+   *   against; undefined means the real one.
+   */
+  constructor(
+    options: {
+      limit?: string | number
+      maxDrainBytes?: number | null
+      clock?: Clock
+    } = {},
+  ) {
     super()
     this.limit = parseLimit(options.limit ?? '512MB')
+    this.clockRef = options.clock ?? new SystemClock()
     this.maxDrainBytes = options.maxDrainBytes ?? null
+  }
+
+  // The current whole second, as `cachedAt` records it.
+  private seconds(): number {
+    return Math.floor(this.clockRef.now())
   }
 
   get maxDrainBytes(): number | null {
@@ -70,7 +99,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     return this.lock.withLock(key, () => {
       const entry = this.entries.get(key)
       if (entry === undefined) return Promise.resolve(null)
-      if (entry.expired) {
+      if (entry.isExpired(this.seconds())) {
         this.size -= entry.size
         this.entries.delete(key)
         this.store.files.delete(key)
@@ -96,7 +125,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
       const fp = options.fingerprint ?? defaultFingerprint(data)
       const entry = new CacheEntry({
         size: data.byteLength,
-        cachedAt: Math.floor(Date.now() / 1000),
+        cachedAt: this.seconds(),
         fingerprint: fp,
         ttl: options.ttl ?? null,
       })
@@ -115,7 +144,8 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   ): Promise<boolean> {
     const placed = await this.lock.withLock(key, () => {
       const existing = this.entries.get(key)
-      if (existing !== undefined && !existing.expired) return Promise.resolve(false)
+      if (existing !== undefined && !existing.isExpired(this.seconds()))
+        return Promise.resolve(false)
       if (existing !== undefined) {
         this.size -= existing.size
         this.entries.delete(key)
@@ -123,7 +153,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
       const fp = options.fingerprint ?? defaultFingerprint(data)
       const entry = new CacheEntry({
         size: data.byteLength,
-        cachedAt: Math.floor(Date.now() / 1000),
+        cachedAt: this.seconds(),
         fingerprint: fp,
         ttl: options.ttl ?? null,
       })
@@ -170,7 +200,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   override exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath
     const entry = this.entries.get(k)
-    return Promise.resolve(entry !== undefined && !entry.expired)
+    return Promise.resolve(entry !== undefined && !entry.isExpired(this.seconds()))
   }
 
   isFresh(key: string, remoteFingerprint: string): Promise<boolean> {

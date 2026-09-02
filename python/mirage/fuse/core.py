@@ -28,6 +28,7 @@ from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.runtime.handles import FileTable, merge_writes
 from mirage.types import FileStat, FileType
+from mirage.utils.clock import Clock
 from mirage.utils.stat_view import DIR_MODE, FILE_MODE, LINK_MODE, mtime_ns
 from mirage.workspace.session.session import Session
 
@@ -73,6 +74,15 @@ class MountCore:
                  session: Session | None = None) -> None:
         self._ops = ops
         self._session = session
+        # The prefetch TTL is a duration, so it is measured on the
+        # facade's clock. There is no second door: a core is always
+        # handed the facade, and the facade carries the workspace's
+        # clock, so injecting one here would be a way to disagree with
+        # the workspace about what time it is.
+        self._clock: Clock = ops.clock
+        # The mount's own creation stamp, not a deadline. It answers
+        # "when was this mounted", so it reads the real clock even when
+        # the ops facade is running on an injected one.
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
@@ -283,7 +293,7 @@ class MountCore:
         if entry is None:
             return None
         data, expires = entry
-        if time.monotonic() >= expires:
+        if self._clock.monotonic() >= expires:
             del self._prefetch[path]
             return None
         return data
@@ -320,7 +330,7 @@ class MountCore:
             return None
         # No inflight dedup: FUSE mounts run nothreads=True, so callbacks are
         # serialized and two opens cannot race (TS needs the dedup map).
-        self._prefetch[path] = (data, time.monotonic() + PREFETCH_TTL)
+        self._prefetch[path] = (data, self._clock.monotonic() + PREFETCH_TTL)
         return data
 
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:

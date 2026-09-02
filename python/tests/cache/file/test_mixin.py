@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import patch
+import time
 
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.file.redis import RedisFileCacheStore
+from mirage.utils.clock import ManualClock
 
 
 class TestGetSet:
@@ -168,11 +169,11 @@ class TestTTL:
 
     @pytest.mark.asyncio
     async def test_ttl_expired(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-        with patch("mirage.cache.file.entry.time.time", return_value=1000.0):
-            await cache.set("/a", b"data", ttl=10)
-        with patch("mirage.cache.file.entry.time.time", return_value=1011.0):
-            result = await cache.get("/a")
+        clock = ManualClock(start=1000.0)
+        cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+        await cache.set("/a", b"data", ttl=10)
+        clock.advance(11)
+        result = await cache.get("/a")
         assert result is None
 
     @pytest.mark.asyncio
@@ -181,7 +182,7 @@ class TestTTL:
         await cache.set("/a", b"data")
         entry = cache._entries["/a"]
         assert entry.ttl is None
-        assert entry.expired is False
+        assert entry.is_expired(int(time.time())) is False
 
 
 class TestFingerprint:

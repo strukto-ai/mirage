@@ -22,6 +22,7 @@ from mirage.observe.context import OpTimer, finish_record, start_op
 from mirage.ops.config import NO_FOLLOW_OPS, NamespaceLinks, OpsMount
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.errors import NoMountError
 from mirage.utils.path import owner_prefix
 
@@ -51,7 +52,8 @@ class Ops:
                  observer: Any | None = None,
                  agent_id: str = "default",
                  session_id: str = "default",
-                 links: NamespaceLinks | None = None) -> None:
+                 links: NamespaceLinks | None = None,
+                 clock: Clock | None = None) -> None:
         self._mounts = sorted(mounts,
                               key=lambda m: len(m.prefix),
                               reverse=True)
@@ -60,7 +62,17 @@ class Ops:
         self._session_id = session_id
         self._links = links
         self._dispatch = dispatch
+        # The workspace's clock, so every op this facade times and
+        # stamps reads the same one. It is also the clock a kernel
+        # mount's core takes, since the core is handed this facade and
+        # nothing else from the workspace.
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self.records: list[OpRecord] = []
+
+    @property
+    def clock(self) -> Clock:
+        """The clock this facade times ops with."""
+        return self._clock
 
     @property
     def links(self) -> NamespaceLinks | None:
@@ -188,7 +200,7 @@ class Ops:
             path (str): the virtual path.
             **kwargs: op arguments, by the op function's names.
         """
-        timer = start_op()
+        timer = start_op(self._clock)
         if (self._links is not None and op not in NO_FOLLOW_OPS
                 and not kwargs.get("nofollow")):
             path = self._links.follow(path)

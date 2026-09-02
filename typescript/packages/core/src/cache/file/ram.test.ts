@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ManualClock } from '../../utils/clock.ts'
 import { RAMFileCacheStore } from './ram.ts'
 
 function encode(s: string): Uint8Array {
@@ -133,5 +134,53 @@ describe('RAMFileCacheStore', () => {
     expect(c.cacheSize).toBe(2)
     expect(c.cacheEntries).toBe(1)
     expect(await c.get('/d/a.txt')).toBeNull()
+  })
+
+  it('holds the TTL boundary exactly on an injected clock', async () => {
+    // The boundary the seam exists for: probed at ttl-1 and at ttl with
+    // no sleep, no real time, and nothing patched globally.
+    const clock = new ManualClock(1000)
+    const c = new RAMFileCacheStore({ limit: 1024, clock })
+    await c.set('/f.txt', encode('hello'), { ttl: 10 })
+    clock.advance(9)
+    expect(await c.exists('/f.txt')).toBe(true)
+    expect(decode(await c.get('/f.txt'))).toBe('hello')
+    clock.advance(1)
+    expect(await c.exists('/f.txt')).toBe(false)
+    expect(await c.get('/f.txt')).toBeNull()
+  })
+
+  it('drops an expired entry on read', async () => {
+    const clock = new ManualClock(0)
+    const c = new RAMFileCacheStore({ limit: 1024, clock })
+    await c.set('/f.txt', encode('hello'), { ttl: 5 })
+    clock.advance(5)
+    expect(await c.get('/f.txt')).toBeNull()
+    expect(c.cacheSize).toBe(0)
+    expect(c.cacheEntries).toBe(0)
+  })
+
+  it('add replaces an entry the clock expired', async () => {
+    const clock = new ManualClock(0)
+    const c = new RAMFileCacheStore({ limit: 1024, clock })
+    await c.set('/f.txt', encode('old'), { ttl: 5 })
+    expect(await c.add('/f.txt', encode('new'))).toBe(false)
+    clock.advance(5)
+    expect(await c.add('/f.txt', encode('new'))).toBe(true)
+    expect(decode(await c.get('/f.txt'))).toBe('new')
+  })
+
+  it('stamps cachedAt from the injected clock', async () => {
+    const clock = new ManualClock(4242)
+    const c = new RAMFileCacheStore({ limit: 1024, clock })
+    await c.set('/f.txt', encode('hello'))
+    expect(c.snapshotEntries()[0]?.entry.cachedAt).toBe(4242)
+  })
+
+  it('stamps from the real clock by default', async () => {
+    const c = new RAMFileCacheStore({ limit: 1024 })
+    await c.set('/f.txt', encode('hello'))
+    const cachedAt = c.snapshotEntries()[0]?.entry.cachedAt ?? 0
+    expect(Math.abs(cachedAt - Date.now() / 1000)).toBeLessThan(5)
   })
 })

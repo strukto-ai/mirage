@@ -15,10 +15,11 @@
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
+import { type Clock, ManualClock } from '@struktoai/mirage-core/utils/clock'
 import { mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { MountCore } from './core.ts'
+import { MountCore, PREFETCH_TTL_MS } from './core.ts'
 
 const NAIVE_STAMP = '2026-01-02T03:04:05'
 
@@ -279,5 +280,58 @@ describe('applyStatAttrs', () => {
     const got = core.applyStatAttrs({ ...base }, epoch)
     expect(got.mtime.getTime()).toBe(0)
     expect(got.ctime.getTime()).toBe(0)
+  })
+})
+
+/**
+ * A clock whose wall reading can jump while monotonic stands still.
+ *
+ * ManualClock moves both readings together, which is right for virtual
+ * time passing but cannot express the case a deadline has to survive:
+ * NTP stepping the system clock while no real time has elapsed.
+ */
+class SteppingClock implements Clock {
+  wall = 1_700_000_000
+  mono = 0
+
+  now(): number {
+    return this.wall
+  }
+
+  monotonic(): number {
+    return this.mono
+  }
+}
+
+describe('MountCore clock', () => {
+  it('holds the prefetch TTL boundary on an injected clock', async () => {
+    // The prefetch cache is a deadline in milliseconds, so an injected
+    // clock is the only way to sit on the boundary exactly: fresh one
+    // second before the TTL, gone the second it lands.
+    const clock = new ManualClock()
+    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE, clock })
+    await ws.execute("echo -n 'payload' > /u.json")
+    const core = new MountCore(ws.fs)
+    expect(await core.prefetch('/u.json')).not.toBeNull()
+    clock.advance(PREFETCH_TTL_MS / 1000 - 1)
+    expect(core.cachedData('/u.json')).not.toBeNull()
+    expect(core.cachedSize('/u.json')).toBe(7)
+    clock.advance(1)
+    expect(core.cachedSize('/u.json')).toBeNull()
+    expect(core.cachedData('/u.json')).toBeNull()
+    expect(core.prefetchCache.has('/u.json')).toBe(false)
+  })
+
+  it('ignores a wall clock jump when judging the prefetch deadline', async () => {
+    // The deadline is a duration, so it must be measured on the
+    // monotonic reading. Reading wall clock instead would expire every
+    // prefetched file the moment NTP stepped the system clock forward.
+    const clock = new SteppingClock()
+    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE, clock })
+    await ws.execute("echo -n 'payload' > /u.json")
+    const core = new MountCore(ws.fs)
+    expect(await core.prefetch('/u.json')).not.toBeNull()
+    clock.wall += 10 * 365 * 24 * 3600
+    expect(core.cachedData('/u.json')).not.toBeNull()
   })
 })
