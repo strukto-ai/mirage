@@ -1,0 +1,107 @@
+---
+title: NFS
+icon: network-wired
+description: Expose a MIRAGE workspace as a real OS directory with no filesystem driver installed.
+---
+
+NFS mode does what [FUSE mode](/home/setup/fuse) does — a mount becomes a
+real OS directory that any tool can read — but through the kernel's own
+NFSv3 client, which every desktop OS already ships. Nothing has to be
+installed on the machine: no macFUSE kernel extension, no FSKit shim, no
+WinFsp.
+
+MIRAGE runs a loopback NFSv3 server over the op tree and asks the kernel to
+mount it. Both the MOUNT and NFS programs answer on one TCP port (20490 by
+default), so no portmapper (111) and no NLM are involved, and the mount is
+made with `actimeo=0` so the client never serves a stale attribute — the
+analogue of the FUSE mounts' `attr_timeout=0`.
+
+The mount is also **soft**, and that is deliberate. The kernel's default is
+a hard mount, where an I/O whose server stops answering blocks forever and
+uninterruptibly — and on macOS anything that walks the mount table (Finder,
+`df`, Spotlight) walks into it, so one wedged mount freezes the desktop
+rather than the caller. Here the server *is* the process that asked for the
+mount, so a deadlock in it is exactly that case. MIRAGE therefore mounts
+with `soft,timeo=50,retrans=3` (a stalled call fails after ~15s instead of
+hanging), adds `intr` on macOS so a blocked call is killable, and
+`deadtimeout=60` so the kernel forcibly unmounts a mount nothing has
+answered for a minute. Teardown escalates `umount` → `umount -f` →
+`diskutil unmount force`, each bounded, and says which command clears the
+mountpoint if all three fail.
+
+Set `soft=False` if you would rather wait out a slow server than see an
+I/O error — but only where something else can force the unmount.
+
+## Matrix
+
+| OS | Python | TypeScript (Node) | Notes |
+| --- | --- | --- | --- |
+| macOS | ✅ supported | ✅ supported | a loopback mount needs **no privileges**; many mounts per process |
+| Linux | ✅ supported | ✅ supported | `mount` needs privileges, so run the process with them |
+| Windows | ❌ refused | ❌ refused | the client is Pro-only and `mount.exe` speaks another grammar; refused at the guard rather than mis-mounted |
+| Browser | ❌ | ❌ | no kernel; use the virtual executor instead |
+
+SDK wiring: [Python NFS setup](/python/setup/nfs),
+[TypeScript NFS setup](/typescript/setup/nfs).
+
+## Why you might pick it over FUSE
+
+| | FUSE / FSKit | NFS |
+| --- | --- | --- |
+| Driver to install | macFUSE, or WinFsp on Windows | none, the OS client is built in |
+| Mounts per process | **one** on macOS | many, one server exports every prefix |
+| Elevated rights | needed to install the driver | none on macOS; needed on Linux to run `mount` |
+| Write durability | the kernel's own COMMIT | buffered per handle, flushed on an idle timer (see below) |
+| Windows | experimental (Python + WinFsp) | refused |
+
+The one-server-many-mounts property is the interesting one: the MOUNT
+protocol takes a path, so a single server exposing the whole tree backs any
+number of kernel mountpoints (`127.0.0.1:/` here, `:/docs` there). That is
+the macOS one-FUSE-mount-per-process limit dissolved.
+
+## Two things to know before you use it
+
+<Warning>
+  **An NFSv3 export carries no authentication of its own.** The server binds
+  `127.0.0.1` by default and both SDKs keep it there unless you say
+  otherwise. Binding anywhere reachable publishes the workspace to whoever
+  can reach the port, unguarded.
+</Warning>
+
+<Warning>
+  **Never touch your own mountpoint from the process serving it.** The NFS
+  server runs on that process's event loop, so a synchronous `stat` or read
+  of the mountpoint blocks the loop that has to answer it — the same
+  self-touch deadlock the TypeScript FUSE mounts have. Read the mount from a
+  subprocess (or another process entirely); both SDK examples do.
+</Warning>
+
+## Writes
+
+The server library gives the adapter no COMMIT signal (NFSv3 `stable_how`
+never reaches it), so writes are buffered per open handle and flushed when
+the handle goes idle (5 seconds by default) or when the buffer passes its
+ceiling (16 MiB). The sweep itself runs on that same period, so a write
+reaches the resource within roughly two windows — reads through the mount
+never wait, because the adapter merges the buffer. Unmounting flushes everything: the kernel client writes
+its dirty pages back as final WRITEs while the server is still up, then the
+adapter stores whatever is still buffered, then the server stops. Closing
+the workspace does that in the right order for you.
+
+macOS clients also send **overlapping and out-of-order** WRITEs during an
+ordinary `cp`; the write buffer is arrival-ordered and later-wins so the
+stored bytes match, pinned by a 1 MiB md5 round-trip in
+`integ/nfs/truth_nfs.json`.
+
+## The native extension
+
+Each SDK carries the server as an optional native extension, both wrapping
+[nfsserve](https://github.com/huggingface/nfsserve):
+
+| SDK | Package | Built with |
+| --- | --- | --- |
+| Python | `mirage-nfs` | PyO3 + maturin |
+| TypeScript | `@struktoai/mirage-nfs-node` | napi-rs |
+
+Importing MIRAGE never requires either one; the error you get when a mount
+asks for a missing extension names the install command.

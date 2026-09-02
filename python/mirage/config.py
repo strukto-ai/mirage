@@ -334,7 +334,7 @@ class MountBlock(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     command_limits: dict[str, Limit] = Field(default_factory=dict)
     # How the mount is exposed: vfs (default, mirage's own filesystem only),
-    # fuse, or fskit. mountpoint is honored by the kernel backends.
+    # fuse, fskit, or nfs. mountpoint is honored by the kernel backends.
     backend: MountBackend = MountBackend.VFS
     mountpoint: str | None = None
 

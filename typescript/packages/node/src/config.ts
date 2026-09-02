@@ -592,7 +592,7 @@ export interface MountBlock {
   mode?: string
   config?: Record<string, unknown>
   command_limits?: Record<string, Record<string, unknown>>
-  /** vfs (default), fuse, or fskit. Mirrors Python's MountBlock.backend. */
+  /** vfs (default), fuse, fskit, or nfs. Mirrors Python's MountBlock.backend. */
   backend?: string
   mountpoint?: string
 }

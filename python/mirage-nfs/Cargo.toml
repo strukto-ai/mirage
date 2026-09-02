@@ -1,0 +1,17 @@
+[package]
+name = "mirage-nfs"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+description = "NFSv3 kernel-mount server for mirage workspaces (nfsserve + PyO3)"
+
+[lib]
+name = "mirage_nfs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"], default-features = false }
+nfsserve = "0.11"
+async-trait = "0.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

@@ -61,18 +61,16 @@ export {
 } from './commands/builtin/redis/_provision.ts'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
 export { FuseManager } from './workspace/fuse.ts'
-export { MirageFS, type MirageFSOptions, type FuseAttr } from './fuse/fs.ts'
-export { MountCore, type MountCoreOptions } from './fuse/core.ts'
-export { classifyErrno, classifyError } from './fuse/errors.ts'
+export { MirageFS, type MirageFSOptions, type MountAttrs } from './fuse/fs.ts'
+export { MountCore, type MountCoreOptions } from './mount/core.ts'
+export { classifyErrno } from './mount/errors.ts'
+export { requireKernelBackend, resolveBackend, unsizedMounts } from './mount/backend.ts'
 export {
   checkMountpoint,
   checkPlatform,
   checkSizes,
   FSKIT_MOUNT_ROOT,
   prepareBackend,
-  requireKernelBackend,
-  resolveBackend,
-  unsizedMounts,
 } from './fuse/backend.ts'
 export {
   mount as fuseMount,
@@ -80,7 +78,36 @@ export {
   type FuseHandle,
   type MountOptions as FuseMountOptions,
 } from './fuse/mount.ts'
-export { isMacosMetadata } from './fuse/platform/macos.ts'
+export { isMacosMetadata } from './mount/platform/macos.ts'
+export { NFSManager, type NFSManagerOptions } from './workspace/nfs.ts'
+export { MirageNFS } from './nfs/delegate.ts'
+export { NFSConfig, type NFSConfigInit } from './nfs/config.ts'
+export {
+  ESTALE_WIRE,
+  NFSError,
+  nfsErrno,
+  RenameIntoSelfError,
+  StaleHandleError,
+} from './nfs/errors.ts'
+export {
+  checkPlatformNfs,
+  checkPortAvailable,
+  checkSizesNfs,
+  prepareNfsBackend,
+  prepareNfsMount,
+  requiresPrivilege,
+} from './nfs/backend.ts'
+export {
+  buildDelegate as buildNfsDelegate,
+  loadAddon as loadNfsAddon,
+  mountArgs as nfsMountArgs,
+  runMount as nfsRunMount,
+  runUmount as nfsRunUmount,
+  startServer as nfsStartServer,
+  umountArgs as nfsUmountArgs,
+  type NFSServerHandle,
+} from './nfs/mount.ts'
+export type { DirEntry as NFSDirEntry, NFSAttrs } from './nfs/types.ts'
 export { S3Resource, type S3ResourceState } from './resource/s3/s3.ts'
 export { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
 export { GridFSResource, type GridFSResourceState } from './resource/gridfs/gridfs.ts'

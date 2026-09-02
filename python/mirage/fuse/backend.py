@@ -16,8 +16,9 @@ import logging
 import posixpath
 import sys
 
+from mirage.mount.backend import require_kernel_backend, resolve_backend
 from mirage.ops import Ops
-from mirage.types import KERNEL_BACKENDS, MountBackend
+from mirage.types import MountBackend
 
 logger = logging.getLogger(__name__)
 
@@ -25,50 +26,6 @@ logger = logging.getLogger(__name__)
 # opaque driver error, so the rule is enforced here rather than discovered
 # at run time (github.com/strukto-ai/mirage#82).
 FSKIT_MOUNT_ROOT = "/Volumes"
-
-
-def resolve_backend(value: "str | MountBackend | None") -> MountBackend:
-    """Coerce a user-supplied backend name into a MountBackend.
-
-    Missing means VFS, everywhere: an absent ``backend`` in YAML, ``None``
-    here, and the ``Mount`` dataclass default all resolve to the same thing.
-    Callers that need a kernel mount say so explicitly rather than relying
-    on this function to reinterpret an absent value.
-
-    Args:
-        value (str | MountBackend | None): the requested backend; None and
-            the empty string mean VFS.
-
-    Returns:
-        MountBackend: the resolved backend.
-
-    Raises:
-        ValueError: the name is not a known backend.
-    """
-    if value is None or value == "":
-        return MountBackend.VFS
-    try:
-        return MountBackend(str(value).lower())
-    except ValueError:
-        known = ", ".join(b.value for b in MountBackend)
-        raise ValueError(
-            f"unknown mount backend {value!r}; expected one of: {known}")
-
-
-def require_kernel_backend(backend: MountBackend) -> None:
-    """Reject a backend that registers nothing with the kernel.
-
-    Args:
-        backend (MountBackend): the resolved backend.
-
-    Raises:
-        ValueError: the backend is VFS, so there is no mount to make.
-    """
-    if backend not in KERNEL_BACKENDS:
-        raise ValueError(
-            f"backend {backend.value!r} does not register a mountpoint; it "
-            "is served inside mirage's own filesystem, so there is nothing "
-            "to mount")
 
 
 def check_platform(backend: MountBackend) -> None:

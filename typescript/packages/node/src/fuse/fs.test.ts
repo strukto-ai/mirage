@@ -17,7 +17,7 @@ import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { MirageFS, type FuseAttr } from './fs.ts'
+import { MirageFS, type MountAttrs } from './fs.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -66
@@ -55,7 +55,7 @@ describe('MirageFS — getattr', () => {
   it('reports root as a directory', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o040000)
   })
@@ -63,7 +63,7 @@ describe('MirageFS — getattr', () => {
   it('reports a mount-prefix path as a virtual directory', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o040000)
   })
@@ -71,7 +71,7 @@ describe('MirageFS — getattr', () => {
   it('reports a file under a mount with correct size', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     expect(attr.size).toBe('hello world\n'.length)
@@ -241,7 +241,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     )
     const readSpy = vi.spyOn(ws.fs, 'readFile')
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/api.json')
     expect(code).toBe(0)
     expect(attr.size).toBe(0)
     // The point of reporting 0: getattr stays cheap.
@@ -296,7 +296,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     )
     const mfs = new MirageFS(ws.fs)
     await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
-    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
+    const [, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/api.json')
     expect(attr.size).toBe(bytes.byteLength)
   })
 
@@ -309,7 +309,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     )
     const mfs = new MirageFS(ws.fs)
     const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', fh)
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'fgetattr', '/data/api.json', fh)
     expect(code).toBe(0)
     expect(attr.size).toBe(bytes.byteLength)
   })
@@ -427,7 +427,7 @@ describe('MirageFS — namespace links', () => {
     const ws = await mkWs()
     await ws.execute('ln -s /data/greeting.txt /data/lnk')
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/lnk')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/lnk')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o120000)
     expect(attr.size).toBe('greeting.txt'.length)
@@ -505,7 +505,7 @@ describe('MirageFS — stat attr overlay', () => {
     const ws = await mkWs()
     await ws.execute('chmod 640 /data/greeting.txt')
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     expect(attr.mode & 0o7777).toBe(0o640)
@@ -515,7 +515,7 @@ describe('MirageFS — stat attr overlay', () => {
     const ws = await mkWs()
     await ws.execute('touch -t 202603041200 /data/greeting.txt')
     const mfs = new MirageFS(ws.fs)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    const [code, attr] = await callOp<[number, MountAttrs]>(mfs, 'getattr', '/data/greeting.txt')
     expect(code).toBe(0)
     expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0, 0))
   })
@@ -528,14 +528,18 @@ describe('MirageFS — session binding', () => {
     const session = ws.createSession('narrow', { profile: { paths: { hide: ['/extra'] } } })
 
     const bound = new MirageFS(ws.fs, { session })
-    const [okCode, attr] = await callOp<[number, FuseAttr]>(bound, 'getattr', '/data/greeting.txt')
+    const [okCode, attr] = await callOp<[number, MountAttrs]>(
+      bound,
+      'getattr',
+      '/data/greeting.txt',
+    )
     expect(okCode).toBe(0)
     expect(attr.mode & 0o170000).toBe(0o100000)
     const [deniedCode] = await callOp<[number]>(bound, 'getattr', '/extra/secret.txt')
     expect(deniedCode).toBeLessThan(0)
 
     const unbound = new MirageFS(ws.fs)
-    const [plainCode] = await callOp<[number, FuseAttr]>(unbound, 'getattr', '/extra/secret.txt')
+    const [plainCode] = await callOp<[number, MountAttrs]>(unbound, 'getattr', '/extra/secret.txt')
     expect(plainCode).toBe(0)
   })
 

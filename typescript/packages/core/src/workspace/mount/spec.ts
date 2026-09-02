@@ -28,6 +28,16 @@ export interface MountSpecOptions {
    * directory appropriate for the backend. Ignored when backend is `vfs`.
    */
   mountpoint?: string
+  /**
+   * Server knobs for `backend: nfs`. One server serves every nfs prefix
+   * of a workspace, so the FIRST declared mount fixes them and a later
+   * one is ignored -- the same rule addNfsMount follows. Ignored
+   * entirely for every other backend.
+   *
+   * Typed loosely here because NFSConfig lives in the node package and
+   * core must not import upward; the node workspace narrows it.
+   */
+  nfsConfig?: unknown
   commandLimits?: Record<string, Limit>
 }
 

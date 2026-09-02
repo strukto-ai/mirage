@@ -19,6 +19,7 @@ import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
 import type { Limit } from '@struktoai/mirage-core/types'
+import type { NFSConfig } from './nfs/config.ts'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   ExecuteOptions,
@@ -58,7 +59,7 @@ export class Workspace extends CoreWorkspace {
     const commandLimits: Record<string, Record<string, Limit>> = {
       ...(options.commandLimits ?? {}),
     }
-    const mountTargets: [string, MountBackend, string | undefined][] = []
+    const mountTargets: [string, MountBackend, string | undefined, NFSConfig | undefined][] = []
     for (const [prefix, value] of Object.entries(resources)) {
       if (value instanceof Mount) {
         specs[prefix] =
@@ -67,7 +68,12 @@ export class Workspace extends CoreWorkspace {
           commandLimits[prefix] = value.options.commandLimits
         const backend = value.options.backend ?? MountBackend.VFS
         if (KERNEL_BACKENDS.includes(backend))
-          mountTargets.push([prefix, backend, value.options.mountpoint])
+          mountTargets.push([
+            prefix,
+            backend,
+            value.options.mountpoint,
+            value.options.nfsConfig as NFSConfig | undefined,
+          ])
       } else {
         specs[prefix] = value
       }
@@ -86,12 +92,12 @@ export class Workspace extends CoreWorkspace {
       // runs on a daemon thread so its failure never reaches the main process.
       // On Node's single event loop we swallow it here, otherwise the unhandled
       // rejection would terminate the process under Node's default policy.
-      const setups = mountTargets.map(([prefix, backend, mountpoint]) =>
-        this.addFuseMount(prefix, mountpoint, undefined, backend).then(
+      const setups = mountTargets.map(([prefix, backend, mountpoint, nfsConfig]) =>
+        this.addFuseMount(prefix, mountpoint, undefined, backend, nfsConfig).then(
           () => undefined,
           (err: unknown) => {
             process.stderr.write(
-              `mirage: FUSE auto-mount failed for ${prefix}, continuing without it: ${
+              `mirage: ${backend} auto-mount failed for ${prefix}, continuing without it: ${
                 err instanceof Error ? err.message : String(err)
               }\n`,
             )
@@ -118,11 +124,41 @@ export class Workspace extends CoreWorkspace {
     mountpoint?: string,
     sessionId?: string,
     backend?: MountBackend,
+    nfsConfig?: NFSConfig,
   ): Promise<string> {
-    return this.kernelMounts.add(prefix, mountpoint, sessionId, backend)
+    return this.kernelMounts.add(prefix, mountpoint, sessionId, backend, nfsConfig)
   }
 
   removeFuseMount(prefix: string, sessionId?: string): Promise<void> {
+    return this.kernelMounts.remove(prefix, sessionId)
+  }
+
+  /**
+   * Expose a subtree over nfs and return its mountpoint.
+   *
+   * One server backs every unscoped nfs mount of a workspace, so a second
+   * prefix costs a kernel mount rather than a second server. A
+   * session-scoped mount is the exception and gets its own server,
+   * because a server serves one delegate; every scoped prefix of the same
+   * session then shares that one. The server runs on this process's event
+   * loop, so the self-touch rule applies verbatim: never stat or read the
+   * mountpoint synchronously from here.
+   *
+   * @param prefix the virtual prefix to expose
+   * @param mountpoint where to mount; undefined picks a path
+   * @param config server knobs, honored by the mount that starts the server
+   * @param sessionId session whose mount grants scope every op served here
+   */
+  addNfsMount(
+    prefix: string,
+    mountpoint?: string,
+    config?: NFSConfig,
+    sessionId?: string,
+  ): Promise<string> {
+    return this.kernelMounts.addNfs(prefix, mountpoint, sessionId, config)
+  }
+
+  removeNfsMount(prefix: string, sessionId?: string): Promise<void> {
     return this.kernelMounts.remove(prefix, sessionId)
   }
 
@@ -132,6 +168,19 @@ export class Workspace extends CoreWorkspace {
 
   get fuseMountpoint(): string | null {
     return this.kernelMounts.mountpoint
+  }
+
+  get nfsMountpoints(): Record<string, string> {
+    return this.kernelMounts.nfsMountpoints
+  }
+
+  /**
+   * Await the eager kernel mounts started in the constructor, nfs ones
+   * included. The twin of python's `nfs_ready`, which exists there
+   * because its constructor mounts fuse synchronously and cannot await.
+   */
+  async nfsReady(): Promise<void> {
+    await this.fuseReady()
   }
 
   /** Await the eager per-mount fuse mounts started in the constructor. */

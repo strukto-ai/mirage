@@ -1,0 +1,20 @@
+[package]
+name = "mirage-nfs-node"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+description = "NFSv3 kernel-mount server for mirage workspaces (nfsserve + napi-rs)"
+
+[lib]
+name = "mirage_nfs_node"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi8", "async", "tokio_rt"] }
+napi-derive = "2"
+nfsserve = "0.11"
+async-trait = "0.1"
+tokio = { version = "1", default-features = false, features = ["time"] }
+
+[build-dependencies]
+napi-build = "2"

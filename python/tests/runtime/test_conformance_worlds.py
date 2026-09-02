@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.fuse.core import MountCore
+from mirage.fuse.fs import MirageFS
 from mirage.io.types import materialize
+from mirage.mount.core import MountCore
 from mirage.resource.ram import RAMResource
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
@@ -197,9 +198,9 @@ async def test_fuse_readdir_merges_child_mount_and_link():
     try:
         assert (await _sh(ws, "ln -s /base/inner /base/lnk"))[0] == 0
         core = MountCore(ws.ops)
-        names = core.readdir("/base")
+        names = await core.readdir("/base")
         assert "a.txt" in names and "inner" in names and "lnk" in names
-        assert core.getattr("/base/inner")["st_mode"] & 0o040000
+        assert (await core.getattr("/base/inner")).mode & 0o040000
     finally:
         await ws.close()
 
@@ -400,12 +401,12 @@ async def test_fuse_core_confines_a_hidden_mount():
     ws = scoped_world("monty")
     try:
         sess = ws.get_session("agent")
-        core = MountCore(ws.ops, session=sess)
+        fs = MirageFS(ws.ops, session=sess)
         with pytest.raises(FileNotFoundError):
-            core.readdir("/closed")
+            fs.readdir("/closed", 0)
         with pytest.raises(FileNotFoundError):
-            fh = core.open("/closed/sec.txt")
-            core.read("/closed/sec.txt", 4096, 0, fh)
+            fh = fs.open("/closed/sec.txt", 0)
+            fs.read("/closed/sec.txt", 4096, 0, fh)
     finally:
         await ws.close()
 
@@ -475,14 +476,16 @@ async def test_scoped_walk_reaches_a_child_below_hidden_content():
     ws = granted_child_world("monty")
     try:
         sess = ws.get_session("agent")
-        core = MountCore(ws.ops, session=sess)
-        names = core.readdir("/base")
+        # Through the adapter: a scoped mount binds its session at the
+        # adapter's entry points, so that is where the narrowing applies.
+        fs = MirageFS(ws.ops, session=sess)
+        names = fs.readdir("/base", 0)
         assert "inner" in names
         assert "a.txt" not in names
-        assert core.getattr("/base")["st_mode"] & 0o040000
-        assert "deep.txt" in core.readdir("/base/inner")
+        assert fs.getattr("/base")["st_mode"] & 0o040000
+        assert "deep.txt" in fs.readdir("/base/inner", 0)
         with pytest.raises(FileNotFoundError):
-            core.getattr("/base/a.txt")
+            fs.getattr("/base/a.txt")
     finally:
         await ws.close()
 

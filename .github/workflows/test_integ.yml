@@ -33,6 +33,7 @@ jobs:
       database: ${{ steps.filter.outputs.database }}
       data: ${{ steps.filter.outputs.data }}
       fuse: ${{ steps.filter.outputs.fuse }}
+      nfs: ${{ steps.filter.outputs.nfs }}
       observability: ${{ steps.filter.outputs.observability }}
     steps:
       - uses: dorny/paths-filter@v4
@@ -114,6 +115,24 @@ jobs:
               - 'typescript/packages/node/src/workspace.ts'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+            nfs:
+              - 'integ/nfs/**'
+              - 'integ/check_json.py'
+              - 'integ/package.json'
+              - 'python/mirage/nfs/**'
+              - 'python/mirage/workspace/nfs.py'
+              - 'python/mirage-nfs/**'
+              - 'typescript/packages/node/src/nfs/**'
+              - 'typescript/packages/node/src/workspace/nfs.ts'
+              - 'typescript/packages/mirage-nfs/**'
+              # The kernel-mount registry routes nfs prefixes and keeps a
+              # manager per session, and lifecycle drives the teardown
+              # order the batteries assert; both can break an nfs mount
+              # without a file under the paths above changing.
+              - 'python/mirage/workspace/workspace/kernel_mounts.py'
+              - 'python/mirage/workspace/workspace/lifecycle.py'
+              - 'typescript/packages/node/src/workspace/workspace/kernel_mounts.ts'
+              - '.github/workflows/test_integ.yml'
 
   typescript-build:
     needs: changes
@@ -1186,6 +1205,230 @@ jobs:
             --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
             2>/dev/null | tail -40 || true
 
+  integ-nfs-macos:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.nfs == 'true') }}
+    runs-on: macos-15
+    # In the gate. This is the only job in the repo that runs cargo, and
+    # it builds both NFS extensions from source: the whole backend is
+    # unverified without it. Both batteries print the same 32 keys and
+    # check_json.py accepts them against integ/nfs/truth_nfs.json, on a
+    # developer Mac and on a hosted runner alike -- a loopback NFS mount
+    # needs no privileges on either.
+    #
+    # It skips on a PR that touches no nfs path, and the gate reads a
+    # skipped job as neither failure nor cancellation, so promoting it
+    # costs unrelated PRs nothing.
+    #
+    # macOS rather than linux because a loopback NFS mount needs no
+    # privileges there: linux reserves mount(2) for root, and neither
+    # battery elevates the mount command.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show the toolchain (the runner image ships rust)
+        run: |
+          sw_vers
+          cargo --version
+          rustc --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync
+
+      - name: Build and install the mirage-nfs wheel
+        # maturin is its build backend, so a plain install builds the
+        # crate; it is not declared as an extra of mirage-ai yet.
+        working-directory: python
+        run: uv pip install ./mirage-nfs
+
+      - name: Run the Python NFS battery and check
+        run: |
+          ./python/.venv/bin/python integ/nfs/nfs.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/nfs/truth_nfs.json
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install dependencies
+        # --ignore-scripts because this runner has no macFUSE,
+        # deliberately: the point of the nfs backend is that it needs no
+        # filesystem driver, and @zkochan/fuse-native compiles against
+        # fuse.h at install time. It is a devDependency of packages/node,
+        # not just an optional one of integ, so --no-optional does not
+        # reach it. Ignoring scripts is exact rather than broad here:
+        # pnpm-workspace.yaml's onlyBuiltDependencies allowlists that one
+        # package, so it is the only build there is to skip, and nothing
+        # the TypeScript battery imports needs it.
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false --ignore-scripts
+
+      - name: Download TypeScript build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: integ-typescript-dist
+          path: typescript/packages
+
+      - name: Build the napi addon
+        # cargo names the artifact lib<crate>.dylib; the loader wants a
+        # .node, which is what the battery and smoke.mjs require by path
+        # until the package is published to npm.
+        working-directory: typescript/packages/mirage-nfs
+        run: |
+          cargo build --release
+          cp target/release/libmirage_nfs_node.dylib mirage_nfs_node.node
+
+      - name: Show what holds the nfs port
+        # The TypeScript battery failed here with EADDRINUSE on 20490
+        # while the Python one, which ran earlier in this same job, had
+        # already exited and cleaned its mounts -- and the same sequence
+        # does not reproduce on a developer Mac, where TIME_WAIT entries
+        # for that port are present and the next bind takes it anyway.
+        # So this names the holder rather than guessing at it again.
+        run: |
+          lsof -nP -iTCP:20490 || echo "lsof: nothing on 20490"
+          netstat -an | grep 20490 || echo "netstat: no sockets on 20490"
+          mount | grep -i nfs || echo "mount: no nfs mounts"
+          pgrep -fl 'nfs.py|mirage' || echo "pgrep: no battery process left"
+
+      - name: Run the TypeScript NFS battery and check
+        working-directory: integ
+        env:
+          MIRAGE_NFS_ADDON: ${{ github.workspace }}/typescript/packages/mirage-nfs/mirage_nfs_node.node
+        run: |
+          pnpm exec tsx nfs/nfs.ts 2>&1 \
+            | ../python/.venv/bin/python check_json.py nfs/truth_nfs.json
+
+  integ-nfs-linux:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.nfs == 'true') }}
+    runs-on: ubuntu-latest
+    # Advisory until it has had a green run, the way integ-nfs-macos was.
+    # The macOS job is the one in the gate because a loopback mount needs
+    # no privileges there; linux reserves mount(2) for root, so both
+    # batteries run under sudo here and nothing else in this workflow
+    # does. What it buys is the platform the macOS job cannot cover:
+    # `nolock` rather than `nolocks`, `umount -l` as the last teardown
+    # rung, and mount.nfs instead of mount_nfs.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the kernel nfs client
+        # mount.nfs lives in nfs-common; without it the mount command
+        # fails as "unknown filesystem type 'nfs'", which reads like a
+        # kernel gap rather than a missing package.
+        # The fuse packages ride along for the differential below: this
+        # is the only runner where both kernel tiers exist at once, which
+        # is what makes diffing them possible at all. mfusepy is ctypes
+        # over libfuse *2*, so fuse3 alone is not enough -- the same pair
+        # integ-fuse installs, minus the libfuse3 headers, which only
+        # fuse-native needs and this job never builds.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nfs-common fuse3 libfuse2t64 || \
+            sudo apt-get install -y nfs-common fuse3 libfuse2
+
+      - name: Show the toolchain (the runner image ships rust)
+        run: |
+          uname -a
+          cargo --version
+          rustc --version
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        # --extra fuse for the differential: it mounts the same tree both
+        # ways, so it needs mfusepy as well as the nfs wheel.
+        working-directory: python
+        run: uv sync --extra fuse
+
+      - name: Build and install the mirage-nfs wheel
+        working-directory: python
+        run: uv pip install ./mirage-nfs
+
+      - name: Run the Python NFS battery and check
+        # Under sudo because the mount command needs the privilege and
+        # mirage does not elevate for you -- a library that shelled out to
+        # sudo would hang on a password prompt anywhere but here.
+        run: |
+          sudo ./python/.venv/bin/python integ/nfs/nfs.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py integ/nfs/truth_nfs.json
+
+      - name: Diff the two kernel mounts of one tree
+        # The adapter-level parity suites run everywhere and prove the
+        # two adapters answer alike; this proves it still holds with a
+        # real client asking, which is the run #888 asked for and the
+        # only place it can happen.
+        run: |
+          sudo ./python/.venv/bin/python integ/nfs/differential.py 2>&1 \
+            | ./python/.venv/bin/python integ/check_json.py \
+                integ/nfs/truth_differential.json
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.0.10
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install dependencies
+        # --ignore-scripts for the same reason as the macOS job: this
+        # runner has no libfuse headers and the nfs backend must not need
+        # them. See that job for why --no-optional does not reach it.
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false --ignore-scripts
+
+      - name: Download TypeScript build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: integ-typescript-dist
+          path: typescript/packages
+
+      - name: Build the napi addon
+        working-directory: typescript/packages/mirage-nfs
+        run: |
+          cargo build --release
+          cp target/release/libmirage_nfs_node.so mirage_nfs_node.node
+
+      - name: Run the TypeScript NFS battery and check
+        working-directory: integ
+        run: |
+          sudo MIRAGE_NFS_ADDON=${{ github.workspace }}/typescript/packages/mirage-nfs/mirage_nfs_node.node \
+            node_modules/.bin/tsx nfs/nfs.ts 2>&1 \
+            | ../python/.venv/bin/python check_json.py nfs/truth_nfs.json
+
   integ-runtime:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
@@ -1623,7 +1866,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime]
+    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-nfs-macos, integ-observability, integ-facets, integ-runtime]
     if: always()
     steps:
       - name: Check required jobs

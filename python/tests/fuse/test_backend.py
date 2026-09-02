@@ -53,8 +53,10 @@ def test_resolve_backend_rejects_unknown():
 
 def test_no_auto_backend():
     # Deliberate: auto-selecting fskit would silently break every API-backed
-    # mount, so the only safe value is also the default.
-    assert [b.value for b in MountBackend] == ["vfs", "fuse", "fskit"]
+    # mount, so the only safe value is also the default. New backends may be
+    # added; "auto" may not.
+    assert "auto" not in [b.value for b in MountBackend]
+    assert [b.value for b in MountBackend] == ["vfs", "fuse", "fskit", "nfs"]
 
 
 def test_missing_backend_is_vfs_everywhere():

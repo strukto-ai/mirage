@@ -137,6 +137,10 @@ async def close_async(ws: "Workspace", ) -> None:
     async with ws._close_lock:
         if ws._async_closed:
             return
+        # First: unmounting an nfs export makes the kernel client flush
+        # its dirty pages as final WRITEs, which need both a live server
+        # and the resources those writes land in.
+        await ws._kernel_mounts.close_nfs()
         await ws._watch.detach()
         await ws.job_table.kill_all()
         await ws.job_table.close_consoles()

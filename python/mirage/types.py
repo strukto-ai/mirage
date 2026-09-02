@@ -265,6 +265,11 @@ class MountBackend(StrEnum):
     and is reached through the command surface, with nothing registered with
     the kernel. FUSE and FSKIT additionally expose it as a real mountpoint.
 
+    NFS serves the tree from a loopback NFSv3 server the kernel mounts,
+    which needs no filesystem driver at all: macOS and Linux both ship an
+    NFS client. On macOS that also means no admin rights, since a
+    loopback NFS mount is unprivileged where macFUSE needs a kext.
+
     FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
     ``direct_io`` equivalent, so it serves correct reads only for resources
     that set ``SIZES_ALWAYS_KNOWN``; ``mirage.fuse.backend`` warns at mount
@@ -280,11 +285,12 @@ class MountBackend(StrEnum):
     VFS = "vfs"
     FUSE = "fuse"
     FSKIT = "fskit"
+    NFS = "nfs"
 
 
 # Backends that register a real mountpoint with the kernel.
 KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
-    {MountBackend.FUSE, MountBackend.FSKIT})
+    {MountBackend.FUSE, MountBackend.FSKIT, MountBackend.NFS})
 
 MOUNT_MODE_RANK: dict[MountMode, int] = {
     MountMode.READ: 1,

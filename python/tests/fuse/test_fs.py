@@ -602,11 +602,12 @@ async def test_prefetch_expires_after_ttl(sizeless_fs):
     fs, _ = sizeless_fs
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
-    data, _ = fs.core._prefetch["/u.json"]
-    fs.core._prefetch["/u.json"] = (data, 0.0)
+    # Force the entry past its deadline rather than sleeping the TTL.
+    data = fs.core._prefetch.get("/u.json")
+    fs.core._prefetch._entries["/u.json"] = (data, 0.0)
     attrs = fs.getattr("/u.json")
     assert attrs["st_size"] == 0
-    assert "/u.json" not in fs.core._prefetch
+    assert fs.core._prefetch.get("/u.json") is None
 
 
 @pytest.mark.asyncio
@@ -622,10 +623,10 @@ async def test_open_then_read_does_not_refetch(sizeless_fs):
 async def test_flush_drops_prefetch(sizeless_fs):
     fs, _ = sizeless_fs
     fh = fs.open("/u.json", os.O_RDWR)
-    assert "/u.json" in fs.core._prefetch
+    assert fs.core._prefetch.get("/u.json") is not None
     fs.write("/u.json", b"NEW", 0, fh)
     fs.flush("/u.json", fh)
-    assert "/u.json" not in fs.core._prefetch
+    assert fs.core._prefetch.get("/u.json") is None
 
 
 @pytest.mark.asyncio
@@ -634,7 +635,7 @@ async def test_unlink_drops_prefetch(sizeless_fs):
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
     fs.unlink("/u.json")
-    assert "/u.json" not in fs.core._prefetch
+    assert fs.core._prefetch.get("/u.json") is None
 
 
 @pytest.mark.asyncio
@@ -715,7 +716,10 @@ async def test_getattr_honors_touch_mtime(seed_ws):
     await seed_ws.execute("touch -t 202603041200 /a.txt")
     fs = MirageFS(seed_ws.ops)
     stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
-    assert fs.getattr("/a.txt")["st_mtime"] == int(stamp.timestamp()) * 10**9
+    # Seconds, which is what libfuse's st_mtime is. This asserted
+    # nanoseconds until 2026-08, and so pinned as correct a mount whose
+    # every file was dated far past 2106.
+    assert fs.getattr("/a.txt")["st_mtime"] == stamp.timestamp()
 
 
 @pytest.mark.asyncio

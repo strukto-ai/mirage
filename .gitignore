@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Native node addons (napi-rs builds mirage_nfs_node.node in place)
+*.node
+
 # Distribution / packaging
 .Python
 build/

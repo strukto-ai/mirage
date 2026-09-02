@@ -19,7 +19,7 @@ import pytest
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import CommandSpec
-from mirage.fuse.core import MountCore
+from mirage.fuse.fs import MirageFS
 from mirage.io.types import IOResult
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.policy.types import SessionContext
@@ -72,17 +72,20 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
     # namespace table directly, at a layer no session view covers.
     ws = _two_mounts()
     sess = ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
-    core = MountCore(ws.ops, session=sess)
+    # Through the adapter, not the core: a scoped mount binds its
+    # session at the adapter's entry points, the way the nfs delegate
+    # does, so the core stays free of a policy only a caller can apply.
+    fs = MirageFS(ws.ops, session=sess)
     with pytest.raises(PermissionError):
-        core.symlink("/b/lk", "/a/x.txt")
+        fs.symlink("/b/lk", "/a/x.txt")
     assert not ws.namespace.is_link("/b/lk")
 
 
 def test_fuse_symlink_on_visible_turf_still_works():
     ws = _two_mounts()
     sess = ws.create_session("agent")
-    core = MountCore(ws.ops, session=sess)
-    core.symlink("/a/lk", "x.txt")
+    fs = MirageFS(ws.ops, session=sess)
+    fs.symlink("/a/lk", "x.txt")
     assert ws.namespace.readlink("/a/lk") == "x.txt"
 
 
@@ -1180,10 +1183,10 @@ def test_fuse_hides_hidden_paths():
     # scoped shell about what exists.
     ws = _hidden_paths_ws()
     sess = ws.get_session("agent")
-    core = MountCore(ws.ops, session=sess)
+    fs = MirageFS(ws.ops, session=sess)
     with pytest.raises(FileNotFoundError):
-        core.getattr("/a/secrets/token.txt")
-    names = core.readdir("/a")
+        fs.getattr("/a/secrets/token.txt")
+    names = fs.readdir("/a", 0)
     assert "secrets" not in names
     assert "note.key" not in names
 

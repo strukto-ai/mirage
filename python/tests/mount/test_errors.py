@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from mirage.fuse.errors import NO_XATTR, classify_error
+from mirage.mount.errors import NO_XATTR, classify_error
 from mirage.runtime.errors import CrossMountError
 from mirage.utils.errors import no_mount
 from mirage.utils.path import CycleError

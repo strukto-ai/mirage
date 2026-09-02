@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.nfs.config import NFSConfig
 from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountBackend, MountMode
 from mirage.workspace.mount.spec import Mount
@@ -86,7 +87,26 @@ def test_kernel_targets_selects_only_real_mountpoints():
                   backend=MountBackend.FUSE,
                   mountpoint="/tmp/mp"),
         }, MountMode.WRITE)
-    assert kernel_targets(specs) == [("/fuse", MountBackend.FUSE, "/tmp/mp")]
+    assert kernel_targets(specs) == [("/fuse", MountBackend.FUSE, "/tmp/mp",
+                                      None)]
+
+
+def test_kernel_targets_carry_a_declared_nfs_config():
+    # A declared mount is the only place a user can express these, so
+    # without this `backend=nfs` in a spec could not choose a port, an
+    # idle window or a soft mount -- only add_nfs_mount could be tuned.
+    config = NFSConfig(port=12345)
+    specs = normalize_resources(
+        {
+            "/nfs":
+            Mount(resource=RAMResource(),
+                  backend=MountBackend.NFS,
+                  mountpoint="/tmp/mp",
+                  nfs_config=config),
+        }, MountMode.WRITE)
+
+    assert kernel_targets(specs) == [("/nfs", MountBackend.NFS, "/tmp/mp",
+                                      config)]
 
 
 def test_limits_are_copied_not_aliased():

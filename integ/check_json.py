@@ -28,7 +28,11 @@ Unlike check_lines.sh this compares values, not substrings: a truth of
 
 import json
 import sys
+from collections import deque
 from typing import TextIO
+
+# Enough of a traceback to name the failure without pasting a whole run.
+TAIL_LINES = 40
 
 
 def load_expected(path: str) -> dict:
@@ -44,36 +48,52 @@ def load_expected(path: str) -> dict:
         return json.load(fh)
 
 
-def find_actual(stream: TextIO) -> dict | None:
-    """Return the last single-line JSON object in a captured stream.
+def find_actual(stream: TextIO) -> tuple[dict | None, list[str]]:
+    """Return the last single-line JSON object, and the noise around it.
+
+    The tail is kept because a probe that died has its reason in it. The
+    stream is consumed here, so anything this function drops is gone:
+    reporting only "no JSON result" made every crash look alike, whether
+    the probe threw on import, refused a platform, or never ran.
 
     Args:
         stream (TextIO): the captured probe output.
 
     Returns:
-        dict | None: the parsed result, or None if the probe emitted none.
+        tuple[dict | None, list[str]]: the parsed result, or None if the
+        probe emitted none, and the last lines that were not it.
     """
     found = None
+    tail: deque[str] = deque(maxlen=TAIL_LINES)
     for line in stream:
         text = line.strip()
-        if not text.startswith("{"):
-            continue
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            found = value
-    return found
+        if text.startswith("{"):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError:
+                value = None
+            if isinstance(value, dict):
+                found = value
+                continue
+        if text:
+            tail.append(text)
+    return found, list(tail)
 
 
 def main() -> int:
     truth = sys.argv[1]
     expected = load_expected(truth)
-    actual = find_actual(sys.stdin)
+    actual, tail = find_actual(sys.stdin)
     if actual is None:
         print(f"FAIL: {truth} not satisfied (no JSON result in output)",
               file=sys.stderr)
+        if tail:
+            print(f"--- last {len(tail)} lines the probe printed ---",
+                  file=sys.stderr)
+            for line in tail:
+                print(line, file=sys.stderr)
+        else:
+            print("--- the probe printed nothing at all ---", file=sys.stderr)
         return 1
     rc = 0
     matched = 0

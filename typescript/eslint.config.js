@@ -73,5 +73,20 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Plain node ESM that lives outside every tsconfig project: the
+    // addon's cargo-to-.node build step and its smoke driver. Type-aware
+    // rules need a program these files are not part of, and `no-undef`
+    // has no node globals to check them against without pulling in the
+    // `globals` package for two scripts.
+    files: ['**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: false },
+    },
+    rules: {
+      'no-undef': 'off',
+    },
+  },
   prettierConfig,
 )

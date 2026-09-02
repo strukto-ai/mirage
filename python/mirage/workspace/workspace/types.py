@@ -15,6 +15,7 @@
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
+from mirage.nfs.config import NFSConfig
 from mirage.resource.base import BaseResource
 from mirage.types import Limit, MountBackend, MountMode
 from mirage.workspace.mount.spec import Mount
@@ -38,4 +39,5 @@ class MountSpec:
     mode: MountMode
     backend: MountBackend = MountBackend.VFS
     mountpoint: str | None = None
+    nfs_config: NFSConfig | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)

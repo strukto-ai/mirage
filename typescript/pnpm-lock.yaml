@@ -588,6 +588,8 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  packages/mirage-nfs: {}
+
   packages/node:
     dependencies:
       '@aws-sdk/client-secrets-manager':
@@ -642,6 +644,9 @@ importers:
       '@lancedb/lancedb':
         specifier: ^0.30.0
         version: 0.30.0(apache-arrow@21.1.0)
+      '@struktoai/mirage-nfs-node':
+        specifier: workspace:*
+        version: link:../mirage-nfs
       '@types/mailparser':
         specifier: ^3.4.6
         version: 3.4.6

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mirage-nfs"
+version = "0.0.1"
+description = "NFSv3 kernel-mount server for mirage workspaces"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Zecheng Zhang", email = "zecheng@strukto.ai" },
+]
+keywords = [
+    "nfs",
+    "nfsv3",
+    "mount",
+    "vfs",
+    "ai-agents",
+]
+
+[project.urls]
+Homepage = "https://www.strukto.ai/"
+Repository = "https://github.com/strukto-ai/mirage"
+Issues = "https://github.com/strukto-ai/mirage/issues"
+
+[tool.maturin]
+module-name = "mirage_nfs"

@@ -21,34 +21,18 @@ import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingOp } from '@struktoai/mirage-core/utils/errors'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { DIR_MODE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import type { Session } from '@struktoai/mirage-core/workspace/session/session'
-import { errnoError } from './errors.ts'
+import { ENOENT, classifyErrno, errnoError } from './errors.ts'
+import { PrefetchCache } from './prefetch.ts'
+import { applyStatAttrs, dirStat, fileStat, linkStat } from './stat.ts'
+import type { MountAttrs, MountEntry } from './types.ts'
 import { isMacosMetadata } from './platform/macos.ts'
-
-export interface FuseAttr {
-  mtime: Date
-  atime: Date
-  ctime: Date
-  nlink: number
-  size: number
-  mode: number
-  uid: number
-  gid: number
-}
 
 export interface Handle {
   path: string
   data?: Uint8Array
   writeBuf?: [number, Uint8Array][]
 }
-
-interface PrefetchEntry {
-  data: Uint8Array
-  expires: number
-}
-
-const PREFETCH_TTL_MS = 30_000
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -88,8 +72,7 @@ export class MountCore {
   // In-memory extended attributes, keyed by path. Backends have no POSIX
   // xattrs, so these are advisory and never persisted; see setxattr.
   readonly xattrs = new Map<string, Map<string, Buffer>>()
-  readonly prefetchCache = new Map<string, PrefetchEntry>()
-  private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
+  private readonly prefetchCache = new PrefetchCache()
   private readonly uid: number
   private readonly gid: number
 
@@ -109,57 +92,19 @@ export class MountCore {
     return path === '/' ? this.root : this.root + path
   }
 
-  dirStat(): FuseAttr {
-    return {
-      mtime: this.now,
-      atime: this.now,
-      ctime: this.now,
-      nlink: 2,
-      size: 0,
-      mode: DIR_MODE,
-      uid: this.uid,
-      gid: this.gid,
-    }
+  /** This mount's base directory row, before any namespace overlay. */
+  dirStat(): MountAttrs {
+    return dirStat(this.uid, this.gid, this.now)
   }
 
-  fileStat(size: number): FuseAttr {
-    return {
-      mtime: this.now,
-      atime: this.now,
-      ctime: this.now,
-      nlink: 1,
-      size,
-      mode: FILE_MODE,
-      uid: this.uid,
-      gid: this.gid,
-    }
+  /** This mount's base row for a regular file of `size` bytes. */
+  fileStat(size: number): MountAttrs {
+    return fileStat(size, this.uid, this.gid, this.now)
   }
 
-  /**
-   * Fold merged stat attributes into an attr record. The workspace stat
-   * already carries the namespace overlay (chmod bits, chown ids, touched
-   * mtime), so honoring these fields here is what makes metadata ops
-   * visible through a mount. String uid/gid (names) are skipped: the kernel
-   * wants numeric ids and there is no user db to map against.
-   */
-  applyStatAttrs(entry: FuseAttr, s: FileStat): FuseAttr {
-    if (s.mode !== null) {
-      entry.mode = (entry.mode & ~0o7777) | (s.mode & 0o7777)
-    }
-    if (typeof s.uid === 'number') entry.uid = s.uid
-    if (typeof s.gid === 'number') entry.gid = s.gid
-    if (s.modified !== null) {
-      // One translator per language: the naive-stamp-is-UTC rule lives
-      // in core's stat view, never re-parsed here with a bare Date.
-      // Null means the stamp did not parse; epoch zero is a real time
-      // and lands.
-      const ms = mtimeMs(s)
-      if (ms !== null) {
-        entry.mtime = new Date(ms)
-        entry.ctime = new Date(ms)
-      }
-    }
-    return entry
+  /** See {@link applyStatAttrs}; kept as a method for the adapters. */
+  applyStatAttrs(entry: MountAttrs, s: FileStat): MountAttrs {
+    return applyStatAttrs(entry, s)
   }
 
   /**
@@ -192,42 +137,25 @@ export class MountCore {
     return posix.relative(parent, virtualTarget)
   }
 
-  /**
-   * The attrs a namespace link reports, from its own node row.
-   *
-   * Built from the target string alone, every link over a mount answered
-   * the mount's construction time and the mounting user, so what
-   * `chown -h` and `touch -h` wrote was invisible through the kernel.
-   * The row is the same one the door answers a no-follow stat with. Size
-   * stays the displayable target's length (what this mount's readlink
-   * returns), and the mode is always lrwxrwxrwx: a symlink's permission
-   * bits are not consulted by any POSIX system.
-   */
-  linkStat(target: string, virtual: string): FuseAttr {
-    const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
+  /** The row a namespace link at `path` reports; see {@link linkStat}. */
+  linkStat(target: string, virtual: string): MountAttrs {
     const row = this.ops.links?.linkStatAt(virtual) ?? null
-    if (row !== null) this.applyStatAttrs(entry, row)
-    entry.mode = 0o120777
-    return entry
+    return linkStat(target, row, this.uid, this.gid, this.now)
   }
 
   cachedSize(path: string): number | null {
     for (const ctx of this.handles.values()) {
       if (ctx.path === path && ctx.data !== undefined) return ctx.data.byteLength
     }
-    const entry = this.prefetchCache.get(path)
-    if (entry !== undefined && entry.expires > Date.now()) return entry.data.byteLength
-    return null
+    const data = this.prefetchCache.get(path)
+    return data === null ? null : data.byteLength
   }
 
   cachedData(path: string): Uint8Array | null {
     for (const ctx of this.handles.values()) {
       if (ctx.path === path && ctx.data !== undefined) return ctx.data
     }
-    const entry = this.prefetchCache.get(path)
-    if (entry !== undefined && entry.expires > Date.now()) return entry.data
-    if (entry !== undefined) this.prefetchCache.delete(path)
-    return null
+    return this.prefetchCache.get(path)
   }
 
   /**
@@ -240,21 +168,18 @@ export class MountCore {
   async prefetch(path: string): Promise<Uint8Array | null> {
     const cached = this.cachedData(path)
     if (cached !== null) return cached
-    const inflight = this.prefetchInflight.get(path)
-    if (inflight !== undefined) return inflight
-    const promise = (async (): Promise<Uint8Array | null> => {
+    return this.prefetchCache.claim(path, async () => {
       try {
-        const data = await this.ops.readFile(this.resolve(path))
-        this.prefetchCache.set(path, { data, expires: Date.now() + PREFETCH_TTL_MS })
-        return data
-      } catch {
+        return await this.ops.readFile(this.resolve(path))
+      } catch (err) {
+        // Open stays permissive for a file that is not there; the read
+        // after it surfaces the real error. Anything else propagates,
+        // rather than a bare catch turning a policy denial into an
+        // unhydrated file that then reads as empty.
+        if (classifyErrno(err) !== ENOENT) throw err
         return null
-      } finally {
-        this.prefetchInflight.delete(path)
       }
-    })()
-    this.prefetchInflight.set(path, promise)
-    return promise
+    })
   }
 
   /** Drain and return accumulated op records (mirrors Python's drainOps). */
@@ -266,6 +191,10 @@ export class MountCore {
 
   private async writeFile(path: string, data: Uint8Array): Promise<void> {
     await this.ops.writeFile(this.resolve(path), data)
+    // Every write funnels through here, so this one call is what keeps a
+    // size-unknown file from reading back its pre-write bytes for the
+    // rest of the TTL. Python invalidates at the same points.
+    this.prefetchCache.invalidate(path)
   }
 
   /**
@@ -277,22 +206,34 @@ export class MountCore {
     let existing: Uint8Array = new Uint8Array(0)
     try {
       existing = await this.ops.readFile(this.resolve(path), { raw: true })
-    } catch {
-      // missing file: start from empty; the write creates it
+    } catch (err) {
+      // Only a missing file, which the write then creates. A bare catch
+      // read every transient backend, auth or policy failure as "empty",
+      // and the whole-object write below then stored the pending ranges
+      // alone -- destroying content nobody touched. Same bug the nfs
+      // delegate's readBase had; python's twin catches FileNotFoundError
+      // and nothing else.
+      if (classifyErrno(err) !== ENOENT) throw err
     }
     await this.writeFile(path, mergeWrites(existing, writes))
   }
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
 
-  async getattr(path: string): Promise<FuseAttr> {
+  /**
+   * Attributes for a path, with no name policy applied.
+   *
+   * Split from `getattr` because refusing a name and describing an
+   * entry are two different questions, and only one protocol fuses
+   * them. libfuse has no LOOKUP: its getattr *is* the lookup, so the
+   * refusal belongs there. NFSv3 looks a name up once and then addresses
+   * the entry by handle, so re-applying a name policy to a handle it
+   * already minted makes a file the client just created vanish -- which
+   * is what macOS `cp` hit, since it copies extended attributes through
+   * an AppleDouble `._name` the filter matches.
+   */
+  async attrsFor(path: string): Promise<MountAttrs> {
     if (path === '/') return this.dirStat()
-    // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
-    // Reject early to avoid hitting the ops layer.
-    const name = path.slice(path.lastIndexOf('/') + 1)
-    if (isMacosMetadata(name)) {
-      throw errnoError('ENOENT', `no such file or directory: ${path}`)
-    }
     // Link check must precede the workspace stat: the fs facade follows
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
@@ -311,8 +252,23 @@ export class MountCore {
     return this.applyStatAttrs(this.fileStat(size), s)
   }
 
+  /**
+   * Attributes for a path a caller reached by name.
+   *
+   * macOS Finder and Spotlight probe .DS_Store, ._*, .Spotlight-V100 and
+   * friends on every listing; refusing here keeps the probe off the
+   * backend entirely.
+   */
+  async getattr(path: string): Promise<MountAttrs> {
+    const name = path.slice(path.lastIndexOf('/') + 1)
+    if (isMacosMetadata(name)) {
+      throw errnoError('ENOENT', `no such file or directory: ${path}`)
+    }
+    return this.attrsFor(path)
+  }
+
   /** Attributes through an open handle, or path-based when not hydrated. */
-  async fgetattr(path: string, fd: number): Promise<FuseAttr> {
+  async fgetattr(path: string, fd: number): Promise<MountAttrs> {
     // fstat(fd) after open: the open handler prefetched size-unknown files
     // into the handle, so answer with the real byte length instead of the
     // 0 that path-based getattr reported before open.
@@ -335,6 +291,26 @@ export class MountCore {
     return ['.', '..', ...[...names].sort(compareCodePoints)]
   }
 
+  /**
+   * The same listing as {@link readdir}, described per entry.
+   *
+   * A protocol that lists with attributes would otherwise stat every
+   * name again, once per entry per listing, and would have to join each
+   * child path itself -- which is how an adapter ends up disagreeing
+   * with the core about what a name resolves to. `.` and `..` are
+   * absent: they are the caller's to emit, and libfuse and NFSv3 emit
+   * them differently.
+   */
+  async readdirEntries(path: string): Promise<MountEntry[]> {
+    const entries: MountEntry[] = []
+    for (const name of await this.readdir(path)) {
+      if (name === '.' || name === '..') continue
+      const child = posix.join(path, name)
+      entries.push({ name, path: child, attrs: await this.attrsFor(child) })
+    }
+    return entries
+  }
+
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
     const ctx = this.handles.get(fd)
     // Filetype-aware read: no `raw: true`, so an extension with a
@@ -342,11 +318,39 @@ export class MountCore {
     // none by default, so this reads raw bytes until a mount adds one.
     // Matches Python's `self._ops.read(path)`, which also dispatches.
     if (ctx !== undefined && ctx.data === undefined) {
-      const cached = this.cachedData(path)
-      ctx.data = cached ?? (await this.ops.readFile(this.resolve(path)))
+      ctx.data = this.cachedData(path) ?? (await this.fetchWhole(path))
     }
-    const data = ctx?.data ?? this.cachedData(path) ?? (await this.ops.readFile(this.resolve(path)))
+    const data = ctx?.data ?? this.cachedData(path) ?? (await this.fetchWhole(path))
     return data.subarray(pos, pos + len)
+  }
+
+  /**
+   * Fetch a whole object and cache it.
+   *
+   * The fill site `read` needs, not only the one `prefetch` does on
+   * open. NFSv3 has no OPEN, so its reads never reached that fill and
+   * every 64 KiB READ refetched the entire file: 16 full fetches to
+   * serve 1 MiB, and one backend request per 64 KiB on an API mount.
+   * The bytes are already in hand, so this costs retention only.
+   */
+  private async fetchWhole(path: string): Promise<Uint8Array> {
+    const data = await this.ops.readFile(this.resolve(path))
+    this.prefetchCache.put(path, data)
+    return data
+  }
+
+  /**
+   * Replace a file's whole content.
+   *
+   * The write an adapter that buffers whole objects needs. It exists so
+   * that adapter does not reach the facade directly: a store that
+   * bypasses the core also bypasses the cache invalidation, and the
+   * next read is served pre-write bytes for the rest of the TTL --
+   * which for a flush means losing the batch the flush before it
+   * stored.
+   */
+  async store(path: string, data: Uint8Array): Promise<void> {
+    await this.writeFile(path, data)
   }
 
   /** Buffer a write on its handle, or apply it directly when there is none. */
@@ -370,6 +374,7 @@ export class MountCore {
       if (!isMissingOp(dispatchErr, 'create')) throw dispatchErr
       await this.writeFile(path, new Uint8Array(0))
     }
+    this.prefetchCache.invalidate(path)
     return this.handles.add({ path })
   }
 
@@ -412,7 +417,7 @@ export class MountCore {
   async unlink(path: string): Promise<void> {
     await this.ops.unlink(this.resolve(path))
     this.xattrs.delete(path)
-    this.prefetchCache.delete(path)
+    this.prefetchCache.invalidate(path)
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -421,6 +426,7 @@ export class MountCore {
     // copy+unlink instead of addressing the destination against the
     // source's backend.
     await this.ops.rename(this.resolve(src), this.resolve(dst))
+    this.prefetchCache.invalidate(src, dst)
     const moved = this.xattrs.get(src)
     if (moved !== undefined) {
       this.xattrs.delete(src)
@@ -441,6 +447,7 @@ export class MountCore {
     // Prefer the resource's dedicated `truncate` op (atomic on most
     // backends). Fall back to read/resize/write for resources that don't
     // expose one.
+    this.prefetchCache.invalidate(path)
     try {
       await this.ops.truncate(this.resolve(path), size)
     } catch (dispatchErr) {
@@ -515,8 +522,12 @@ export class MountCore {
   async flush(path: string, fd: number): Promise<void> {
     const ctx = this.handles.get(fd)
     if (ctx?.writeBuf === undefined || ctx.writeBuf.length === 0) return
-    const writes = ctx.writeBuf
+    // Store first, clear only on success. Clearing up front lost the
+    // whole batch whenever the store failed -- and under fskit, where
+    // RELEASE arrives with no FLUSH before it, that batch is the only
+    // copy the file has. Python's twin has always been in this order;
+    // the failure differential is what caught the divergence.
+    await this.applyWrites(path, ctx.writeBuf)
     ctx.writeBuf = []
-    await this.applyWrites(path, writes)
   }
 }

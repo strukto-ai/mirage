@@ -1,0 +1,39 @@
+{
+  "name": "@struktoai/mirage-nfs-node",
+  "version": "0.0.1",
+  "description": "NFSv3 kernel-mount server for mirage workspaces (nfsserve + napi-rs)",
+  "keywords": [
+    "nfs",
+    "nfsv3",
+    "mount",
+    "napi-rs",
+    "vfs",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/mirage-nfs"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "main": "mirage_nfs_node.node",
+  "files": [
+    "mirage_nfs_node.node"
+  ],
+  "scripts": {
+    "build:addon": "cargo build --release && node build.mjs",
+    "prepublishOnly": "pnpm run build:addon",
+    "smoke": "node smoke.mjs"
+  }
+}

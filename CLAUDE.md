@@ -397,22 +397,70 @@ sits inline in the inode and occupies no data blocks (`stat` reports
 option it can express; comparing against it would also make every regular file
 look wrong (a 6-byte file is `6` in bytes, `4` in 1 KiB blocks).
 
+## Mount
+
+`mirage/mount/` (`packages/node/src/mount/`) is the protocol-neutral half of
+every kernel mount, and it names no binding: not mfusepy, not
+`@zkochan/fuse-native`, not nfsserve. Each adapter package beside it —
+`mirage/fuse/`, `mirage/nfs/` — owns exactly one protocol's vocabulary. The
+split is what stopped the nfs adapter from importing out of `fuse/`, which it
+did when the fuse adapter was simply the one written first.
+
+- **`core.py` / `core.ts` is `MountCore`**, which decides what the filesystem
+  *does*: name policy, link handling, write buffering, the size-unknown
+  path. It is **async-native**. An adapter whose kernel interface is
+  synchronous owns the bridge and the loop it runs on, because that is the
+  adapter's constraint and not this layer's: `MirageFS` holds the loop thread
+  and the `run_coroutine_threadsafe` call, and `MirageNFS` simply awaits.
+- **`types.py` / `types.ts`** holds `MountAttrs`, `MountEntry` and `SetAttrs` —
+  the answers, in POSIX terms rather than any binding's. The core used to
+  answer in libfuse's own `st_*` dict, so the nfs delegate read `entry["st_mode"]`
+  out of a shape named for a library it does not use. `MountAttrs.as_stat_dict`
+  is where that spelling lives now, and only the libfuse adapter calls it.
+- **`stat.py` / `stat.ts`** is `dir_stat` / `file_stat` / `link_stat` /
+  `apply_stat_attrs` as pure functions of `(uid, gid, now)`. Pure because a row
+  is worth testing without a workspace behind it, and because `link_stat` is
+  the one place a link's own node row overrides the mount's defaults — which is
+  what makes `chown -h` and `touch -h` visible through a kernel mount.
+- **`prefetch.py` / `prefetch.ts`** is the TTL cache for size-unknown files.
+  Sync: expiry is a clock read and eviction is a dict delete. Only the *fill*
+  is async, and it stays in the core, which is the layer that can reach a
+  backend. **Every mutation invalidates** — write, create, truncate, rename,
+  unlink — because serving a stale read for the rest of a 30s window is worse
+  than the refetch it saves. TS's twin additionally dedups in-flight fills
+  (`claim`), which python does not need: its FUSE mounts run `nothreads=True`,
+  so two opens of one path cannot interleave.
+- **`writebuf.py` / `writebuf.ts`** is `WriteBuffer`, and it lives here rather
+  than in `nfs/` although NFS is the only adapter using one today: nothing in
+  it is NFSv3's, and the reason it exists (a protocol that acknowledges a write
+  before the bytes are stored) is not either.
+- **`backend.py` / `backend.ts`** resolves a backend name and answers
+  `route_of` / `routeOf`: `NONE`, `THREAD` or `LOOP`, one row per
+  `MountBackend` member. The table is exhaustive on purpose — python raises
+  when a member has no row, TypeScript's `Record<MountBackend, KernelRoute>`
+  fails to compile — because a backend that silently inherits the last `else`
+  branch is how a loop-served mount ends up being started from a constructor.
+  `KernelMounts` routes on this, never on `backend is NFS`.
+- **`platform/macos.py` / `platform/macos.ts`** is `is_macos_metadata`, the
+  one name policy, so both adapters refuse `._foo`/`.DS_Store` identically.
+
 ## FUSE
 
 - **The mount layer is split core/adapter in both languages.** `MountCore`
-  (`python/mirage/fuse/core.py`, `typescript/packages/node/src/fuse/core.ts`)
-  owns all filesystem semantics in POSIX terms and imports nothing from
-  mfusepy or `@zkochan/fuse-native`; `MirageFS` in `fs.py`/`fs.ts` is the
-  libfuse adapter and owns only the callback signatures plus errno
+  (see **Mount** above) owns all filesystem semantics in POSIX terms;
+  `MirageFS` in `fuse/fs.py`/`fuse/fs.ts` is the libfuse adapter and owns only
+  the callback signatures, the sync bridge onto its own loop thread, and errno
   translation. Core methods raise ordinary exceptions; adapters classify them
-  through `classify_error`/`classifyErrno` (`fuse/errors.py`, `fuse/errors.ts`),
-  which is one shared table, not per-method `except` arms. Put new filesystem
-  behavior in the core, not the adapter.
-- **One `backend` field per mount: `vfs | fuse | fskit`** (`MountBackend` in
-  `mirage/types.py`, beside `MountMode`). `vfs` is the default and means the
-  mount lives only inside mirage's own filesystem; `fuse` and `fskit` also
-  register a real mountpoint, with `mountpoint` pinning where. There is no
-  `fuse=True` boolean any more, and no `auto` backend.
+  through `classify_error`/`classifyErrno` (`mount/errors.py`,
+  `mount/errors.ts`), which is one shared table, not per-method `except` arms.
+  Put new filesystem behavior in the core, not the adapter.
+- **One `backend` field per mount: `vfs | fuse | fskit | nfs`** (`MountBackend`
+  in `mirage/types.py`, beside `MountMode`). `vfs` is the default and means the
+  mount lives only inside mirage's own filesystem; `fuse`, `fskit` and `nfs`
+  also register a real mountpoint, with `mountpoint` pinning where. There is no
+  `fuse=True` boolean any more, and no `auto` backend. `nfs` is a different
+  tier and has its own section below; everything in this one is the libfuse
+  family.
   `Mount(..., backend=MountBackend.FSKIT)` routes through macFUSE 5.x's FSKit
   shim (no kernel extension). Rules live in `fuse/backend.py` and are enforced
   at mount time: macOS-only, mountpoint must be under `/Volumes`, and every
@@ -456,6 +504,126 @@ look wrong (a 6-byte file is `6` in bytes, `4` in 1 KiB blocks).
 - **`FileStat.size` must be the rendered content's byte length or `None`, never a storage-side or source-side number.** A confidently wrong size is worse than an unknown one: over FUSE it makes `wc -c`/`ls -l` lie and risks truncated copies, while `None` rides the unknown-size machinery above. Postgres `rows.jsonl` (on-disk `table_size_bytes` vs rendered JSONL), Dify documents (uploaded source size vs rendered segment text), Gmail messages (`sizeEstimate` vs rendered `.gmail.json`), Drive-rendered google-apps files (Drive storage size vs rendered `.gdoc/.gsheet/.gslide` JSON; raw binary downloads keep Drive's size), and Microsoft Graph folders (OneDrive/SharePoint report an aggregate subtree `size` on the folder facet, not any content length) made this mistake; their storage/source numbers now live in `extra` (`size_bytes` / `source_size` / `size_estimate`). Do not reintroduce it in new backends. Graph's `folder.childCount` rides along in `extra` too, and is what `find -empty` reads for a directory.
 - **macOS allows only one FUSE mount per process.** The second mount dies with `fuse: cannot register signal source` (mfusepy registers libfuse signal handlers, which only the first mount in a process can claim). Multi-mount scenarios (`integ/fuse/fuse.py` mounts two) pass only on Linux; do not debug them as regressions on macOS. A failed run leaks the first mount: list with `mount | grep MirageFS`, clean with `umount <mountpoint>`.
 - **Windows (WinFsp) conventions differ in three ways**, all handled in the python mount path (`_prepare_mountpoint`, `_await_ready`, the teardown branches): the mountpoint must NOT exist (WinFsp creates it; an existing dir fails with "mount point in use"), `os.path.ismount` never sees WinFsp directory mounts (readiness = bare existence), and there is no `fusermount` (WinFsp unmounts when the serving process exits). Ownership: mount with `uid=-1,gid=-1` (WinFsp builtin: files owned by the mounting user); never report raw POSIX ids into the SFU/Cygwin SID mapping, and `os.getuid` does not exist there (MirageFS caches a guarded uid/gid once). Behavior quirk: Windows cannot stat without opening a handle, so size-unknown files hydrate on first stat and report their real size even "pre-open" (multi-mount per process works). The `integ-fuse-windows` job is advisory (not in the gate).
+
+## NFS
+
+The second kernel-mount tier, and the one that needs no driver installed:
+`backend=nfs` runs a loopback NFSv3 server over the op tree and asks the
+kernel's own client to mount it. The shape is FUSE's — a library marshals the
+protocol, a thin native layer forwards callbacks, the adapter lives in the host
+language — and the library is `huggingface/nfsserve`, wrapped once per language
+(`python/mirage-nfs` via PyO3, `typescript/packages/mirage-nfs` via napi-rs) so
+one protocol implementation sits behind both adapters exactly as libfuse does.
+The wrapper is a dumb pipe: ids, paths, buffering and every semantic live in
+the adapter, where they are unit-testable without a mount.
+
+- **`MirageNFS` is a delegate over `MountCore`, not a second filesystem.**
+  It lives in `nfs/delegate.py` / `nfs/delegate.ts` — named for what it does,
+  since `fs.py` beside `fuse/fs.py` invited exactly the copy that used to be
+  there. It holds a core and forwards to it; what it owns is only what NFSv3
+  has and mirage does not: file ids, cookies, the write buffer's wire-visible
+  size, and `NFSAttrs`. `_wire_attrs` / `wireAttrs` is the whole conversion,
+  and it is sync, so `readdir` converts a listing the core already described
+  (`readdir_entries` / `readdirEntries`) without a second stat per name.
+  The core being async is what makes this work: the nfsserve trait is async
+  and every callback runs on the workspace's own loop, so the delegate awaits
+  the core, which awaits the op facade, and no bridge is involved anywhere.
+  Two adapters answering the same questions is still a thing that drifts, so
+  both are driven over identically seeded workspaces and diffed case by case
+  (`tests/mount/test_adapter_parity.py`, `mount/adapter_parity.test.ts`),
+  including the one divergence that is deliberate: a size-unknown file reads
+  the same bytes through either adapter, but only FUSE can restate its size
+  afterwards, because it hydrates on OPEN and NFSv3 has no OPEN to hydrate on.
+- **One server, many mounts.** The MOUNT protocol takes a path, so a single
+  server exporting the whole tree backs any number of mountpoints
+  (`127.0.0.1:/` here, `:/docs` there) — the macOS one-FUSE-mount-per-process
+  limit dissolved. That is why `NFSManager` (`workspace/nfs.py`,
+  `workspace/nfs.ts`) owns the server rather than the mount: the first mount
+  starts it and fixes its config, every later mount reuses both.
+- **A session-scoped mount gets its own server**, for the same reason: one
+  server serves one delegate, so narrowing to a session cannot reuse the
+  unscoped one. `KernelMounts` keeps a manager per session id, so a second
+  scoped prefix of the same session reuses that session's server, and its last
+  unmount stops it — the unscoped server outlives its mounts on purpose,
+  because it is the workspace's own. The scoping itself wraps the *entry
+  points* the server calls (`SessionBoundNFS`, `bindSession`), never the op
+  call sites inside the adapter: an adapter that binds sixteen of seventeen
+  call sites still serves the seventeenth with the workspace's full reach, and
+  nothing at the missing call site looks wrong. `tests/nfs/test_session.py`
+  fails if the adapter grows a method the bound list does not name.
+- **Python's sync `KernelMounts.add` refuses a `LOOP`-routed backend;
+  TypeScript's async one forwards it.** Not a divergence to fix: python's seam
+  is synchronous and this server needs a running loop, so the only honest
+  answer there is to name `add_nfs_mount`. TypeScript's `add` is already async,
+  so it forwards, and its constructor route reaches the same place. Both ask
+  `route_of` / `routeOf` rather than testing for `nfs`, so the next
+  loop-served backend inherits the refusal instead of silently deadlocking.
+- **The self-touch rule reaches Python here.** Under FUSE, python is immune
+  because libfuse runs its loop on a thread; under NFS the server is served by
+  the workspace's loop in *both* languages, so a synchronous stat of your own
+  mountpoint deadlocks the loop that must answer it. Every touch goes through a
+  subprocess or `to_thread`, readiness included (`_ismount_off_loop`), and the
+  mountpoint-collision check answers from the registry **before**
+  `prepare_mountpoint` touches the path.
+- **The mount is soft, and that is a safety property rather than tuning.** The
+  kernel's default is a hard mount, where an I/O whose server stopped answering
+  blocks forever and uninterruptibly — and since macOS walks the mount table
+  for Finder, `df` and Spotlight, one wedged mount takes the desktop with it,
+  not just the caller. The server *is* the process that mounted, so its own
+  deadlock is exactly that case. `mount_options` therefore emits
+  `soft,timeo=50,retrans=3`, plus `intr` and `deadtimeout=60` on darwin, all
+  off `NFSConfig`. Teardown escalates in four bounded rungs — plain, a retry
+  for EBUSY, `umount -f`, then `umount -l` on linux or `diskutil unmount force`
+  on darwin — because every rung can itself block on a dead mount. Do not make
+  any of these unbounded, and do not restore the hard default.
+- **Writes are buffered because the library leaves no choice.** nfsserve
+  hardcodes `FILE_SYNC` on WRITE and never forwards COMMIT (the trait exposes
+  neither), while `MountCore`'s write path is whole-object — so an unbuffered
+  adapter pays a read-merge-write per ~64 KB wire WRITE. `writebuf` holds one
+  buffer per fileid, flushed on an idle timer and at teardown; READ and GETATTR
+  overlay what is pending, or `cp x /mnt/f && cat /mnt/f` reads stale bytes
+  inside the idle window and post-WRITE attrs report the old size, which
+  clients read as an error. REMOVE **drops** the buffer (flushing would
+  recreate the file), and SETATTR(size) flushes-or-clips before truncating.
+  Writes are kept in **arrival order, later-wins**, not sorted by offset: the
+  macOS client issues out-of-order and overlapping WRITEs during a plain `cp`,
+  which is what corrupts nfsserve's own demo filesystem. The durability caveat
+  is the honest consequence: a client is told every write is durable while the
+  bytes may sit buffered until the idle flush.
+- **Fileids are monotonic u64 and never reused**, since the crate's generation
+  counter is per-server rather than per-file. `rename` fixes the exact path and
+  every descendant; a destination under its own source is refused with EINVAL
+  **before** the table is touched, because the fixup loop would corrupt it.
+- **Size-unknown files read as empty, and the mount warns.** NFSv3 has no OPEN
+  procedure and no `direct_io`, so FUSE's hydrate-on-open never fires and the
+  client stops reading at the GETATTR size. Same failure mode as FSKit;
+  `check_sizes_nfs` warns at mount time and byte-store mounts are unaffected.
+  Do not paper over it with a fake size.
+- **Teardown order is load-bearing**: unmount first, because the kernel client
+  flushes its dirty pages as final WRITEs that need a live server, then
+  `flush_all`, then stop the server. `Workspace.close` runs the nfs teardown
+  before anything else for the same reason.
+- **A stale handle crosses the boundary differently in each language.** Python's
+  `bridge.rs` recognizes `StaleHandleError` by class name and answers
+  NFS3ERR_STALE directly; napi carries no exception class, so the TypeScript
+  adapter sends errno **70** (`ESTALE_WIRE`) and the addon's table maps it —
+  deliberately not the host's ESTALE, since linux's 116 would fall through that
+  same table to NFS3ERR_IO. On the napi side a *failed* `Attrs` reply still has
+  to carry `fileid`/`size`/`isDir`/`isSymlink`, which are not `Option`; a bare
+  `{errno}` fails to deserialize and the client sees SERVERFAULT. The other
+  reply shapes are all-`Option`, so `{errno}` alone is fine there.
+- **`stop()` has to end the flusher, not just the listener.** Both background
+  tasks in the addon hold threadsafe functions, and a threadsafe function keeps
+  node's event loop referenced, so an idle flusher that loops forever means a
+  script which mounts and closes cleanly never exits. Both tasks now select on
+  one `watch` channel that `stop()` sends on and dropping the handle closes.
+  Python reaches the same place differently: it owns its tokio runtime and
+  `shutdown_timeout` aborts both tasks. `smoke.mjs` ends without
+  `process.exit()` and fails on a watchdog if the process is still alive ten
+  seconds after `stop()`, which is what pins this.
+- **Windows is refused at the guard**, not attempted: the client is Pro-only
+  and `mount.exe` speaks another grammar. macOS needs no privileges for a
+  loopback mount; linux needs them to run `mount`.
 
 ## Development Setup
 
