@@ -592,7 +592,8 @@ class Workspace:
 
     @property
     def file_prompt(self) -> str:
-        return build_file_prompt(self._registry.mounts())
+        return build_file_prompt(self._registry.mounts(),
+                                 self._registry.clis.items())
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 

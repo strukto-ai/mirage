@@ -31,6 +31,5 @@ def test_prompt_includes_path_anatomy_and_normalized_shapes():
 
 
 def test_write_prompt_points_at_the_cli():
-    assert "linear issue create" in WRITE_PROMPT
-    assert "linear comment add" in WRITE_PROMPT
-    assert "linear --help" in WRITE_PROMPT
+    assert "linear CLI" in WRITE_PROMPT
+    assert "man linear" in WRITE_PROMPT

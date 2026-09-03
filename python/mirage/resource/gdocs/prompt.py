@@ -62,9 +62,8 @@ PROMPT = """\
     .revisionId"""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws docs write --document <doc-id> --text "text to append"
-    See gws docs --help for the raw API passthroughs.
+  Writes go through the gws CLI when it is installed; run man gws for \
+the guide.
 
   Newline gotcha: bash double-quoted "...\\n..." is NOT a newline; the
   literal characters \\ + n end up in the doc. Either:

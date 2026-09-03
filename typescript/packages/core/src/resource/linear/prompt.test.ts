@@ -34,8 +34,6 @@ describe('LINEAR_PROMPT', () => {
 
 describe('LINEAR_WRITE_PROMPT', () => {
   it('points at the linear CLI', () => {
-    expect(LINEAR_WRITE_PROMPT).toContain('linear issue create')
-    expect(LINEAR_WRITE_PROMPT).toContain('linear comment add')
-    expect(LINEAR_WRITE_PROMPT).toContain('linear --help')
+    expect(LINEAR_WRITE_PROMPT).toContain('run man linear for the guide')
   })
 })

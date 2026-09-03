@@ -15,6 +15,7 @@
 from collections.abc import Sequence
 from functools import partial
 
+from mirage.commands.cli.skill import skill_for
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.spec import SPECS
@@ -201,10 +202,18 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
         return None
     # The root's dialect, so a manual page reads exactly like the
     # --help it renders from.
-    return node_help(" ".join((head, ) + path),
-                     node,
-                     spec.usage_style,
-                     visible=partial(_child_visible, head, path, session))
+    help_text = node_help(" ".join((head, ) + path),
+                          node,
+                          spec.usage_style,
+                          visible=partial(_child_visible, head, path, session))
+    # A skill teaches an invented grammar the flag table cannot: only
+    # the head-only page (the program's own manual, not one verb's)
+    # leads with it, and only when the spec ships one.
+    if not verbs:
+        skill = skill_for(spec.name)
+        if skill is not None:
+            return skill.body + "\n\n" + help_text
+    return help_text
 
 
 def _render_man_index(registry: MountRegistry, session: Session) -> str:

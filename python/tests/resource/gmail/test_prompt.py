@@ -39,11 +39,9 @@ def test_prompt_mentions_grep_skips_binary_attachments():
     assert "binary" in rendered.lower()
 
 
-def test_write_prompt_examples_match_actual_signatures():
-    assert "gws gmail send" in WRITE_PROMPT
-    assert "--to" in WRITE_PROMPT
-    assert "--subject" in WRITE_PROMPT
-    assert "--body" in WRITE_PROMPT
+def test_write_prompt_points_at_the_cli():
+    assert "gws CLI" in WRITE_PROMPT
+    assert "man gws" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm_and_newline_gotcha():

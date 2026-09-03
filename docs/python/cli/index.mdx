@@ -68,3 +68,17 @@ the programs it was given but cannot uninstall them.
 Reading stays on the mount (`cat`, `grep`, `jq` over the virtual
 files); acting goes through the CLI. The mounted tree's
 `<name>__<id>` path segments supply the IDs the CLI flags take.
+
+## Skills
+
+A CLI whose grammar is mirage's own invention (`discord`, `gws`,
+`linear`, `ntn`, `slack`) ships an [agentskills.io](https://agentskills.io)
+`SKILL.md` under `plugins/mirage/skills/<cli>/`, because there is no
+real program an agent already knows to fall back on; `git`, `gh`,
+`psql` and `redis-cli` mirror a real program and ship none. Once a CLI
+is installed, the workspace's system prompt lists it by that skill's
+frontmatter `description`, and `man <cli>` (no verb) leads with the
+skill's body before the usual verb listing. The same
+`plugins/mirage/skills/` directory is what the Codex, Grok Build and
+Claude Code plugins load, so a skill is written once and read from four
+places.

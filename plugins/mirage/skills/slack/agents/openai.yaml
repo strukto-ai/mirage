@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slack CLI"
+  short_description: "Send, react and search Slack messages"
+  default_prompt: "Use $slack to act on Slack channels and messages through the slack CLI."

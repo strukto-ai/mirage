@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.builtin.ntn import NTN
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.slack import SlackConfig, SlackResource
@@ -38,7 +39,7 @@ def test_file_prompt_shows_write_commands_for_writable_mounts():
     )
     prompt = ws.file_prompt
     assert "/slack" in prompt
-    assert "slack send-message" in prompt
+    assert "Writes go through the slack CLI" in prompt
 
 
 def test_file_prompt_hides_write_commands_for_readonly():
@@ -49,7 +50,7 @@ def test_file_prompt_hides_write_commands_for_readonly():
     )
     prompt = ws.file_prompt
     assert "/slack" in prompt
-    assert "slack send-message" not in prompt
+    assert "Writes go through the slack CLI" not in prompt
 
 
 def test_file_prompt_substitutes_prefix_in_write_prompt():
@@ -62,3 +63,36 @@ def test_file_prompt_substitutes_prefix_in_write_prompt():
     prompt = ws.file_prompt
     assert "/home/zecheng/gdocs/owned/<file>.gdoc.json" in prompt
     assert "{prefix}" not in prompt
+
+
+def test_file_prompt_lists_installed_clis():
+    ws = Workspace({}, mode=MountMode.WRITE)
+    ws.register_cli("ntn", NTN, {"api_key": "secret_fake"})
+    prompt = ws.file_prompt
+    assert "Installed CLIs" in prompt
+    assert "- ntn — " in prompt
+    assert "Guide: man ntn" in prompt
+
+
+def test_file_prompt_omits_cli_section_with_none_installed():
+    ws = Workspace({}, mode=MountMode.WRITE)
+    prompt = ws.file_prompt
+    assert "Installed CLIs" not in prompt
+
+
+def test_file_prompt_lists_each_install_of_a_shared_spec_separately():
+    ws = Workspace({}, mode=MountMode.WRITE)
+    ws.register_cli("ntn", NTN, {"api_key": "secret_fake"})
+    ws.register_cli("ntn2", NTN, {"api_key": "secret_other"})
+    prompt = ws.file_prompt
+    assert "- ntn — " in prompt
+    assert "Guide: man ntn" in prompt
+    assert "- ntn2 — " in prompt
+    assert "Guide: man ntn2" in prompt
+    ntn_line = next(line for line in prompt.splitlines()
+                    if line.startswith("- ntn — "))
+    ntn2_line = next(line for line in prompt.splitlines()
+                     if line.startswith("- ntn2 — "))
+    ntn_desc = ntn_line.split("—", 1)[1].rsplit("Guide:", 1)[0]
+    ntn2_desc = ntn2_line.split("—", 1)[1].rsplit("Guide:", 1)[0]
+    assert ntn_desc == ntn2_desc

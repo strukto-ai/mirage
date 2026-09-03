@@ -37,7 +37,4 @@ export const DISCORD_PROMPT = `{prefix}
   so grep falls back to per-file scan via CDN download. Binary attachments
   (JPG, PDF) will produce noise.`
 
-export const DISCORD_WRITE_PROMPT = `  Writes go through the discord CLI if installed:
-    discord send --channel <channel-id> --text "message"
-    discord react --channel <channel-id> --message <id> --emoji "✅"
-  See discord --help for every verb (edit, delete, threads, polls).`
+export const DISCORD_WRITE_PROMPT = `  Writes go through the discord CLI when it is installed; run man discord for the guide.`

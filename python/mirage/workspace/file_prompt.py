@@ -12,15 +12,56 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
+
+from mirage.commands.cli.skill import skill_for
 from mirage.types import MountMode
+from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.mount import MountEntry
 
 HELP_HINT = (
     "Tip: run `man` to list every available command grouped by resource, "
     "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
 
+CLI_SECTION_HEADER = (
+    "Installed CLIs (act on a service by name; the mounts above are how "
+    "you find its ids):")
 
-def build_file_prompt(mounts: list[MountEntry]) -> str:
+
+def _cli_description(install: CLIInstall) -> str:
+    """The description for one installed CLI's row.
+
+    The skill's frontmatter description when the spec ships one,
+    else the spec's own description, else a placeholder.
+
+    Args:
+        install (CLIInstall): the installation to describe.
+    """
+    skill = skill_for(install.spec.name)
+    if skill is not None:
+        return skill.description
+    return install.spec.description or "(no description)"
+
+
+def _cli_section(clis: Mapping[str, CLIInstall]) -> str:
+    """The "Installed CLIs" section, empty string when nothing is installed.
+
+    Args:
+        clis (Mapping[str, CLIInstall]): installs keyed by head word.
+    """
+    if not clis:
+        return ""
+    lines = [CLI_SECTION_HEADER]
+    for head in sorted(clis):
+        desc = _cli_description(clis[head])
+        if not desc.endswith("."):
+            desc += "."
+        lines.append(f"- {head} — {desc} Guide: man {head}")
+    return "\n".join(lines)
+
+
+def build_file_prompt(mounts: list[MountEntry],
+                      clis: Mapping[str, CLIInstall]) -> str:
     parts: list[str] = [HELP_HINT]
     for m in mounts:
         prompt = m.resource.PROMPT
@@ -32,4 +73,7 @@ def build_file_prompt(mounts: list[MountEntry]) -> str:
             section += "\n" + m.resource.WRITE_PROMPT.replace(
                 "{prefix}", prefix)
         parts.append(section)
+    cli_section = _cli_section(clis)
+    if cli_section:
+        parts.append(cli_section)
     return "\n\n".join(parts)

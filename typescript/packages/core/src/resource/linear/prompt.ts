@@ -124,7 +124,4 @@ export const LINEAR_PROMPT = `{prefix}
   comments, projects, cycles, labels, users, documents, search), use
   the linear CLI if installed: linear --help`
 
-export const LINEAR_WRITE_PROMPT = `  Writes go through the linear CLI if installed:
-    linear issue create --team STR --title "Title" --description "Body"
-    linear comment add STR-42 --body "comment"
-  See linear --help for every verb.`
+export const LINEAR_WRITE_PROMPT = `  Writes go through the linear CLI when it is installed; run man linear for the guide.`

@@ -39,7 +39,5 @@ PROMPT = """\
   (JPG, PDF) will produce noise."""
 
 WRITE_PROMPT = """\
-  Writes go through the discord CLI if installed:
-    discord send --channel <channel-id> --text "message"
-    discord react --channel <channel-id> --message <id> --emoji "✅"
-  See discord --help for every verb (edit, delete, threads, polls)."""
+  Writes go through the discord CLI when it is installed; run man \
+discord for the guide."""

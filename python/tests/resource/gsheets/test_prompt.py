@@ -26,14 +26,9 @@ def test_prompt_includes_buckets_and_structure():
     assert "gws sheets read" in rendered
 
 
-def test_write_prompt_examples_match_actual_signatures():
-    assert "gws sheets write" in WRITE_PROMPT
-    assert "gws sheets append" in WRITE_PROMPT
-    assert "--spreadsheet" in WRITE_PROMPT
-    assert "--range" in WRITE_PROMPT
-    assert "--values" in WRITE_PROMPT
-    assert "--json-values" in WRITE_PROMPT
-    assert "gws sheets --help" in WRITE_PROMPT
+def test_write_prompt_points_at_the_cli():
+    assert "gws CLI" in WRITE_PROMPT
+    assert "man gws" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm():

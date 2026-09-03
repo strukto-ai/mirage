@@ -61,7 +61,7 @@ const PASSTHROUGH_REST = new Operand({ type: 'str' })
  * is mirage's to answer. CLISpec init accepts instance fields, so each
  * spread is a plain init bag (the withHelpSupport pattern).
  */
-function parseSpecFor(leaf: CLISpec): [CLISpec, boolean] {
+export function parseSpecFor(leaf: CLISpec): [CLISpec, boolean] {
   // eslint-disable-next-line @typescript-eslint/no-misused-spread
   if (ownsArgv(leaf)) return [new CLISpec({ ...leaf, rest: PASSTHROUGH_REST }), false]
   if (leaf.options.some((option) => option.long === '--help')) return [leaf, false]

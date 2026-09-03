@@ -886,7 +886,7 @@ export class Workspace {
   }
 
   get filePrompt(): string {
-    return buildFilePrompt(this.registry.allMounts())
+    return buildFilePrompt(this.registry.allMounts(), this.registry.clis.items())
   }
 
   /**

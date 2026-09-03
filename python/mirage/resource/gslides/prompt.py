@@ -67,9 +67,8 @@ PROMPT = """\
     .slides[0].objectId"""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws slides presentations create --json '{"title": "My Deck"}'
-    See gws slides --help for the raw API passthroughs.
+  Writes go through the gws CLI when it is installed; run man gws for \
+the guide.
 
   Delete:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive

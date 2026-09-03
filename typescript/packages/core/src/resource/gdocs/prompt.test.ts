@@ -29,10 +29,7 @@ describe('GDOCS_PROMPT', () => {
 
 describe('GDOCS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GDOCS_WRITE_PROMPT).toContain('gws docs write')
-    expect(GDOCS_WRITE_PROMPT).toContain('--document')
-    expect(GDOCS_WRITE_PROMPT).toContain('--text')
-    expect(GDOCS_WRITE_PROMPT).toContain('gws docs --help')
+    expect(GDOCS_WRITE_PROMPT).toContain('run man gws for the guide')
     expect(GDOCS_WRITE_PROMPT).toContain('gws docs documents batchUpdate --json')
   })
 

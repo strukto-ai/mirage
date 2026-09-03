@@ -67,11 +67,8 @@ PROMPT = """\
     gws sheets read --spreadsheet <id> --range Sheet1!A1:C10"""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws sheets write --spreadsheet <id> --range Sheet1!A1:B2 \\
-      --json-values '[["Name", "Score"], ["Alice", 42]]'
-    gws sheets append --spreadsheet <id> --values "Bob,37"
-    See gws sheets --help for the raw API passthroughs.
+  Writes go through the gws CLI when it is installed; run man gws for \
+the guide.
 
   Delete:
     rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive

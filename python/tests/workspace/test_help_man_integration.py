@@ -148,9 +148,12 @@ def test_man_unknown_command_exits_1():
 
 def _cli_ws():
     ws = _ws()
+    # The spec's own name, not the installed head word, is what
+    # skill_for keys on; "acmeapi" deliberately is not a real skilled
+    # CLI's name so this fixture never picks up a real skill body.
     ws.register_cli(
         "linear",
-        CLISpec(name="linear",
+        CLISpec(name="acmeapi",
                 description="Linear API client",
                 subcommands=(
                     CLISpec(name="issue",

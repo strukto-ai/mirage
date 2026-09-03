@@ -36,7 +36,4 @@ export const SLACK_PROMPT = `{prefix}
   rg over files/ uses Slack's server-side file content search; works on
   PDFs, Word docs, code snippets that Slack has indexed.`
 
-export const SLACK_WRITE_PROMPT = `  Writes go through the slack CLI if installed:
-    slack send-message --channel <channel-id> --text "message"
-    slack send-message --channel <channel-id> --thread-ts <ts> --text "reply"
-  See slack --help for every verb (react, pins, member-info, search).`
+export const SLACK_WRITE_PROMPT = `  Writes go through the slack CLI when it is installed; run man slack for the guide.`

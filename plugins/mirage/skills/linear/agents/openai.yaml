@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linear CLI"
+  short_description: "Act on Linear issues, teams and projects"
+  default_prompt: "Use $linear to read and write Linear state through the linear CLI."

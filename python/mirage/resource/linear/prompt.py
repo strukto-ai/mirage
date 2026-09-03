@@ -126,7 +126,5 @@ PROMPT = """\
   the linear CLI if installed: linear --help"""
 
 WRITE_PROMPT = """\
-  Writes go through the linear CLI if installed:
-    linear issue create --team STR --title "Title" --description "Body"
-    linear comment add STR-42 --body "comment"
-  See linear --help for every verb."""
+  Writes go through the linear CLI when it is installed; run man linear \
+for the guide."""

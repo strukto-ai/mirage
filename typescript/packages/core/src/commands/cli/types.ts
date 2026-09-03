@@ -73,6 +73,18 @@ export interface CLIDoors {
   sessionView?: SessionView
 }
 
+/** One agent skill: the frontmatter facts a host reads before loading and the body it loads. */
+export interface Skill {
+  /** frontmatter `name`, the skill directory name */
+  readonly name: string
+  /** frontmatter `description`, one line */
+  readonly description: string
+  /** Markdown after the closing `---`, trimmed */
+  readonly body: string
+  /** the whole SKILL.md verbatim */
+  readonly text: string
+}
+
 /**
  * Everything one CLI line hands its handler, built once per line by the
  * executor. The record carries both views of the invocation: the process

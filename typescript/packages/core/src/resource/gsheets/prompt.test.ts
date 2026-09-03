@@ -30,13 +30,7 @@ describe('GSHEETS_PROMPT', () => {
 
 describe('GSHEETS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets write')
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets append')
-    expect(GSHEETS_WRITE_PROMPT).toContain('--spreadsheet')
-    expect(GSHEETS_WRITE_PROMPT).toContain('--range')
-    expect(GSHEETS_WRITE_PROMPT).toContain('--values')
-    expect(GSHEETS_WRITE_PROMPT).toContain('--json-values')
-    expect(GSHEETS_WRITE_PROMPT).toContain('gws sheets --help')
+    expect(GSHEETS_WRITE_PROMPT).toContain('run man gws for the guide')
   })
 
   it('documents rm', () => {

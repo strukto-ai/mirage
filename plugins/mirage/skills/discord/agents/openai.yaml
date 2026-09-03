@@ -1,0 +1,4 @@
+interface:
+  display_name: "Discord CLI"
+  short_description: "Send, react and search Discord messages"
+  default_prompt: "Use $discord to act on Discord guilds and messages through the discord CLI."

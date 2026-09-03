@@ -43,10 +43,7 @@ describe('GMAIL_PROMPT', () => {
 
 describe('GMAIL_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GMAIL_WRITE_PROMPT).toContain('gws gmail send')
-    expect(GMAIL_WRITE_PROMPT).toContain('--to')
-    expect(GMAIL_WRITE_PROMPT).toContain('--subject')
-    expect(GMAIL_WRITE_PROMPT).toContain('--body')
+    expect(GMAIL_WRITE_PROMPT).toContain('run man gws for the guide')
   })
 
   it('documents rm (trash) and the newline gotcha', () => {

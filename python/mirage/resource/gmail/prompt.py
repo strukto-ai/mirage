@@ -76,8 +76,8 @@ PROMPT = """\
   CLI if installed: gws gmail --help"""
 
 WRITE_PROMPT = """\
-  Sending mail goes through the gws CLI if installed:
-    gws gmail send --to "to@email.com" --subject "Hi" --body "..."
+  Sending mail goes through the gws CLI when it is installed; run man \
+gws for the guide.
 
   Body gotcha: bash double-quoted "...\\n..." is NOT a newline.
   Use $'line1\\nline2' (ANSI-C quoting) or "$(printf '...\\n...')"

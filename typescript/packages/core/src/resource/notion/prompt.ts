@@ -37,12 +37,4 @@ export const NOTION_PROMPT = `{prefix}
   <page-id>, ntn datasources query <data-source-id>, ntn datasources
   resolve <database-id>.`
 
-export const NOTION_WRITE_PROMPT = `  Writes go through the ntn CLI if installed:
-    ntn pages create --parent data-source:<data-source-id> --content '# Title'
-    ntn pages edit <page-id> --content '## Notes'
-    ntn pages trash <page-id> --yes
-  --parent takes page:<id>, database:<id> or data-source:<id>, and
-  --content also reads stdin. Blocks, comments and search have no typed
-  verb; reach them through ntn api:
-    ntn api v1/blocks/<block-id>/children -X PATCH -d '{"children":[...]}'
-  See ntn --help: api, auth, datasources, pages, whoami.`
+export const NOTION_WRITE_PROMPT = `  Writes go through the ntn CLI when it is installed; run man ntn for the guide.`
