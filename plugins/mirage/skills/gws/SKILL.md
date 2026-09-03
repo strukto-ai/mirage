@@ -25,8 +25,8 @@ file or directory name.
 
 ```bash
 ls /gmail/INBOX/2026-05-03/                 # <subject>__<message-id>.gmail.json
-ls /gdrive/owned/                           # <date>_<title>__<spreadsheet-id>.gsheet.json
-cat /gdrive/owned/2026-05-01_Q3_Plan__sheet0001.gsheet.json | jq -r '.spreadsheetId'
+ls /gsheets/owned/                          # <date>_<title>__<spreadsheet-id>.gsheet.json
+cat /gsheets/owned/2026-05-01_Q3_Plan__sheet0001.gsheet.json | jq -r '.spreadsheetId'
 ls /gcal/primary/2026-08-11/                # <eventId>__<HHMM-HHMM>_<title>.gcal.json
 ```
 
