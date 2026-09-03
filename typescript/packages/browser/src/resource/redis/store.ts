@@ -306,6 +306,9 @@ export class UpstashRedisStore implements RedisStoreLike {
     offset: number,
     size: number | null,
   ): Promise<Uint8Array | null> {
+    // GETRANGE bounds are inclusive and -1 means the last byte, so a
+    // zero-length window would compute an end of -1 and read the whole value.
+    if (size === 0) return (await this.hasFile(path)) ? new Uint8Array(0) : null
     const key = this.fk(path)
     const end = size === null ? -1 : offset + size - 1
     const [exists, raw] = await this.pipeline(

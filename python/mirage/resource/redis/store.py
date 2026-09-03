@@ -111,7 +111,8 @@ class RedisStore:
         ``GETRANGE`` slices server-side, so a window costs the window
         rather than the whole value on the wire. Its bounds are
         inclusive and ``-1`` means the last byte, which is how "to the
-        end" is spelled.
+        end" is spelled, so a zero-length window is answered without a
+        ``GETRANGE`` at all rather than computing that same ``-1``.
 
         ``EXISTS`` rides along in the same pipeline because ``GETRANGE``
         answers an empty string for a missing key, for an empty file and
@@ -123,6 +124,8 @@ class RedisStore:
             offset (int): first byte to read.
             size (int | None): how many bytes, or None for the rest.
         """
+        if size == 0:
+            return b"" if await self.has_file(path) else None
         key = self._fk(path)
         end = -1 if size is None else offset + size - 1
         async with self._client.pipeline(transaction=False) as pipe:

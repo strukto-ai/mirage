@@ -113,6 +113,16 @@ describe.skipIf(skip)('RedisStore', () => {
     expect((await store.listDirs()).size).toBe(0)
   })
 
+  it('getFileRange slices, reads to the end, and reads no bytes for a zero-length window', async () => {
+    const bytes = Uint8Array.from({ length: 256 }, (_, i) => i)
+    await store.setFile('/a.bin', bytes)
+    expect(await store.getFileRange('/a.bin', 10, 5)).toEqual(bytes.slice(10, 15))
+    expect(await store.getFileRange('/a.bin', 250, null)).toEqual(bytes.slice(250))
+    expect(await store.getFileRange('/a.bin', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/a.bin', 10, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/nope', 0, 0)).toBeNull()
+  })
+
   it('clear drops a staging key left by a chunked browser write', async () => {
     const c = await store.client()
     await c.set(`${prefix}tmp:/big:abc`, 'partial')

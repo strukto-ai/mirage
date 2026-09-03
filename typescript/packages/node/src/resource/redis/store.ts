@@ -118,6 +118,9 @@ export class RedisStore implements RedisStoreLike {
     offset: number,
     size: number | null,
   ): Promise<Uint8Array | null> {
+    // GETRANGE bounds are inclusive and -1 means the last byte, so a
+    // zero-length window would compute an end of -1 and read the whole value.
+    if (size === 0) return (await this.hasFile(path)) ? new Uint8Array(0) : null
     const c = await this.client()
     const mod = (await import('redis')) as unknown as {
       RESP_TYPES: { readonly BLOB_STRING: number }

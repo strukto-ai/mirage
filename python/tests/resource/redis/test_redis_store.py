@@ -139,6 +139,17 @@ async def test_clear(store):
 
 
 @pytest.mark.asyncio
+async def test_get_file_range(store):
+    body = bytes(range(256))
+    await store.set_file("/a.bin", body)
+    assert await store.get_file_range("/a.bin", 10, 5) == body[10:15]
+    assert await store.get_file_range("/a.bin", 250, None) == body[250:]
+    assert await store.get_file_range("/a.bin", 0, 0) == b""
+    assert await store.get_file_range("/a.bin", 10, 0) == b""
+    assert await store.get_file_range("/nope", 0, 0) is None
+
+
+@pytest.mark.asyncio
 async def test_clear_drops_a_browser_staging_key(store):
     await store._client.set("test:store:tmp:/big:abc", b"partial")
     await store.clear()

@@ -190,6 +190,14 @@ describe('UpstashRedisStore', () => {
     expect(await store.getFileRange('/a.bin', 300, 5)).toEqual(new Uint8Array(0))
   })
 
+  it('getFileRange reads no bytes for a zero-length window', async () => {
+    const { store } = make()
+    await store.setFile('/a.bin', ALL_BYTES)
+    expect(await store.getFileRange('/a.bin', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/a.bin', 10, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/nope', 0, 0)).toBeNull()
+  })
+
   it('getFileRange returns null for a missing file', async () => {
     const { store } = make()
     expect(await store.getFileRange('/nope', 0, 5)).toBeNull()
