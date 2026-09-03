@@ -19,8 +19,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 SKILLS_DIR = ROOT / "plugins/mirage/skills"
 PY_OUT = ROOT / "python/mirage/commands/cli/generated/skills_data.py"
-TS_OUT = (ROOT / "typescript/packages/core/src/commands/cli/generated"
-          / "skills_data.ts")
+TS_OUT = (ROOT / "typescript/packages/core/src/commands/cli/generated" /
+          "skills_data.ts")
 
 LICENSE_PY = (ROOT / "scripts/gen_specs.py").read_text().split("\n")[:13]
 
