@@ -17,7 +17,7 @@ See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDepen
 ## Usage
 
 ```ts
-import { Mount, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountBackend, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
   '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
