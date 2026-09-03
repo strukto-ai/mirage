@@ -46,8 +46,10 @@ claude plugin install mirage@mirage
 The plugin carries the Mirage MCP tools and one skill per virtualized CLI
 (`linear`, `slack`, `discord`, `gws`, `ntn`) under `plugins/mirage/skills/`.
 Each skill teaches the loop the CLI relies on: find an identifier on the
-mount with `ls`, then act with the CLI. Over a FUSE mount the same skills
-are readable from the shell with `man <cli>`.
+mount with `ls`, then act with the CLI. That loop runs through the plugin's
+MCP tools, not through the FUSE mount above: a CLI is dispatched by
+`ws.execute()` inside the Mirage shell, so `man <cli>` only works there, not
+as a real host command over a FUSE-mounted directory.
 
 ## Why FUSE instead of an SDK integration?
 
