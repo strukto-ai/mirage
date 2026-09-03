@@ -166,6 +166,23 @@ function renderManIndex(registry: MountRegistry, session: Session): string {
 }
 
 /**
+ * Whether the session can see every node of an installed tree. A skill
+ * advertises lines across the whole program, so it leads the manual only
+ * when the profile hides none of them: a narrowed manual lists the verbs
+ * the session may run, and a skill teaching the rest would be advertising
+ * lines that cannot run.
+ */
+function treeVisible(head: string, spec: CLISpec, session: Session): boolean {
+  const stack: [CLISpec, readonly string[]][] = [[spec, []]]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [node, path] = next
+    if (!verbVisible(head, path, session)) return false
+    for (const child of node.subcommands) stack.push([child, [...path, child.name]])
+  }
+  return true
+}
+
+/**
  * The page (or pages) for an installed head word.
  *
  * A CLI may not take a general command's name, but a mount can register
@@ -193,7 +210,7 @@ function cliMan(
   // The skill IS the guide when the line asks for the head word bare: its
   // body goes first, the node's own --help rendering follows so the page
   // never drifts from the program it documents.
-  if (verbs.length === 0) {
+  if (verbs.length === 0 && treeVisible(head, install.spec, session)) {
     const skill = skillFor(install.spec.name)
     if (skill !== null) entry = `${skill.body}\n\n${entry}`
   }

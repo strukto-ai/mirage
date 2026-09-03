@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Skill } from './types.ts'
+import { SKILLED_CLIS } from './constants.ts'
 import { SKILLS } from './generated/skills_data.ts'
 
 const FRONTMATTER_DELIM = '---'
@@ -80,9 +81,12 @@ export function parseSkill(text: string): Skill {
  * The skill for a CLI's spec name, null when the CLI ships none. Keyed by
  * `install.spec.name` (the program the skill teaches), never the installed
  * head word, so two accounts installed under different names share one
- * skill.
+ * skill. Only SKILLED_CLIS answer: the generated map also carries the
+ * plugin's own skills (`mirage-filesystem`), and a user spec that happens to
+ * share such a name must not inherit one.
  */
 export function skillFor(name: string): Skill | null {
+  if (!SKILLED_CLIS.has(name)) return null
   const text = SKILLS[name]
   if (text === undefined) return null
   return parseSkill(text)

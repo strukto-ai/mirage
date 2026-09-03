@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.cli.constants import SKILLED_CLIS
 from mirage.commands.cli.generated.skills_data import SKILLS
 from mirage.commands.cli.types import Skill
 
@@ -46,8 +47,8 @@ def parse_skill(text: str) -> Skill:
         raise ValueError("SKILL.md must start with a '---' frontmatter "
                          "fence")
     lines = text.split("\n")
-    close_at = next(
-        (i for i in range(1, len(lines)) if lines[i] == "---"), None)
+    close_at = next((i for i in range(1, len(lines)) if lines[i] == "---"),
+                    None)
     if close_at is None:
         raise ValueError("SKILL.md frontmatter is unterminated (no "
                          "closing '---' line)")
@@ -78,10 +79,15 @@ def skill_for(name: str) -> Skill | None:
 
     Keyed by the SPEC name (``install.spec.name``), never the
     installed head word, so two installs of one spec share one skill.
+    Only ``SKILLED_CLIS`` answer: the generated map also carries the
+    plugin's own skills (``mirage-filesystem``), and a user spec that
+    happens to share such a name must not inherit one.
 
     Args:
         name (str): a ``CLISpec.name``.
     """
+    if name not in SKILLED_CLIS:
+        return None
     text = SKILLS.get(name)
     if text is None:
         return None

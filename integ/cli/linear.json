@@ -451,7 +451,7 @@
       "command": "man linear | head -1",
       "expect": {
         "exit": 0,
-        "stdout": "linear: Linear GraphQL API client\n",
+        "stdout": "# linear\n",
         "stderr": ""
       }
     },

@@ -14,6 +14,8 @@
 
 import asyncio
 
+from mirage.commands.cli.builtin.ntn import NTN
+from mirage.commands.cli.skill import skill_for
 from mirage.commands.cli.types import CLISpec
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
@@ -194,6 +196,25 @@ def test_man_lists_only_the_cli_verbs_the_profile_can_reach():
     assert _err(io) == "man: no entry for linear team\n"
     # The host's own view is unnarrowed.
     assert "team" in _out(_exec(ws, "man linear"))
+
+
+def test_man_omits_the_skill_when_the_profile_narrows_the_tree():
+    ws = _cli_ws()
+    ws.register_cli("ntn", NTN, {"api_key": "secret_fake"})
+    skill = skill_for("ntn")
+    assert skill is not None
+    body_first_line = skill.body.splitlines()[0]
+    # Unnarrowed, the skill leads the page.
+    assert _out(_exec(ws, "man ntn")).startswith(body_first_line)
+    # A profile reaching only part of the tree gets the verb listing
+    # alone: the skill teaches lines that session cannot run.
+    ws.create_session("narrow",
+                      profile={"commands": {
+                          "allow": ["man", "ntn pages"]
+                      }})
+    page = _out(_run(ws.execute("man ntn", session_id="narrow")))
+    assert body_first_line not in page
+    assert "pages" in page
 
 
 def test_which_reports_a_missing_name_through_the_status_only():

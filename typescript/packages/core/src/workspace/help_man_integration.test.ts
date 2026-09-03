@@ -223,6 +223,23 @@ describe('--help and man through the executor', () => {
     expect(page).not.toContain(bodyFirstLine)
   })
 
+  it('man omits the skill when the profile narrows the tree', async () => {
+    const ws = await makeWs()
+    ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
+    const bodyFirstLine = skillFor('ntn')?.body.split('\n')[0] ?? ''
+    expect(bodyFirstLine).not.toBe('')
+    // Unnarrowed, the skill leads the page.
+    expect(stdoutStr(await ws.execute('man ntn')).startsWith(bodyFirstLine)).toBe(true)
+    // A profile reaching only part of the tree gets the verb listing alone:
+    // the skill teaches lines that session cannot run.
+    ws.createSession('narrow', {
+      profile: { commands: { allow: ['man', 'ntn pages'], ask: [], deny: [] } },
+    })
+    const page = stdoutStr(await ws.execute('man ntn', { sessionId: 'narrow' }))
+    expect(page).not.toContain(bodyFirstLine)
+    expect(page).toContain('pages')
+  })
+
   it('which reports a missing name through the status only', async () => {
     const io = await (await cliWs()).execute('which nope-xyz')
     expect(io.exitCode).toBe(1)

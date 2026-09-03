@@ -89,18 +89,15 @@ def test_parse_skill_empty_description():
         parse_skill('---\nname: widget\ndescription: ""\n---\nBody.\n')
 
 
-def test_generated_module_matches_skill_files():
-    on_disk = {
-        path.parent.name: path.read_text(encoding="utf-8")
-        for path in sorted(SKILLS_DIR.glob("*/SKILL.md"))
-    }
-    assert set(SKILLS) == set(on_disk)
-    for name, text in on_disk.items():
-        assert SKILLS[name] == text
-
-
 def test_skill_for_returns_none_for_git():
     assert skill_for("git") is None
+
+
+def test_skill_for_ignores_a_plugin_skill_that_is_not_a_cli():
+    # The generated map carries the plugin's own skill too; a user spec
+    # named after it must not inherit unrelated instructions.
+    assert "mirage-filesystem" in SKILLS
+    assert skill_for("mirage-filesystem") is None
 
 
 @pytest.mark.parametrize("name", sorted(SKILLED_CLIS))

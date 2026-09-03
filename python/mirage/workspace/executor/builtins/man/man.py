@@ -171,6 +171,29 @@ def _child_visible(head: str, path: tuple[str, ...], session: Session,
     return verb_visible(head, (*path, verb), session)
 
 
+def _tree_visible(head: str, spec: CLISpec, session: Session) -> bool:
+    """Whether the session can see every node of an installed tree.
+
+    A skill advertises lines across the whole program, so it leads the
+    manual only when the profile hides none of them: a narrowed manual
+    lists the verbs the session may run, and a skill teaching the rest
+    would be advertising lines that cannot run.
+
+    Args:
+        head (str): installed head word, as typed.
+        spec (CLISpec): the installed program tree.
+        session (Session): the session reading the manual.
+    """
+    stack: list[tuple[CLISpec, tuple[str, ...]]] = [(spec, ())]
+    while stack:
+        node, path = stack.pop()
+        if not verb_visible(head, path, session):
+            return False
+        stack.extend(
+            (child, (*path, child.name)) for child in node.subcommands)
+    return True
+
+
 def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
                       session: Session) -> str | None:
     """The page for one node of an installed CLI, None when verbs miss
@@ -208,8 +231,9 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
                           visible=partial(_child_visible, head, path, session))
     # A skill teaches an invented grammar the flag table cannot: only
     # the head-only page (the program's own manual, not one verb's)
-    # leads with it, and only when the spec ships one.
-    if not verbs:
+    # leads with it, only when the spec ships one, and only for a
+    # session that may run every line it teaches.
+    if not verbs and _tree_visible(head, spec, session):
         skill = skill_for(spec.name)
         if skill is not None:
             return skill.body + "\n\n" + help_text

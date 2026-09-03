@@ -201,6 +201,13 @@ describe('skillFor', () => {
   it('returns null for an unregistered name', () => {
     expect(skillFor('no-such-cli')).toBeNull()
   })
+
+  it('ignores a plugin skill that is not a CLI', () => {
+    // The generated map carries the plugin's own skill too; a user spec
+    // named after it must not inherit unrelated instructions.
+    expect(SKILLS['mirage-filesystem']).toBeDefined()
+    expect(skillFor('mirage-filesystem')).toBeNull()
+  })
 })
 
 describe('generated skills_data is in sync with plugins/mirage/skills', () => {
