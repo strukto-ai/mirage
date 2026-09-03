@@ -19,7 +19,7 @@ import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
 const ws = new Workspace({ '/mail': new EmailResource(config) })
 ws.registerCli('himalaya', HIMALAYA, config)
 
-await ws.execute('himalaya envelope list --unseen --max 5')
+await ws.execute('himalaya envelope list --mailbox INBOX --page-size 5')
 ```
 
 In YAML the same install rides the `clis:` section:

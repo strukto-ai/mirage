@@ -20,7 +20,7 @@ from mirage.commands.cli.builtin.himalaya import HIMALAYA
 ws = Workspace({"/mail": EmailResource(config)})
 ws.register_cli("himalaya", HIMALAYA, config.model_dump())
 
-await ws.execute("himalaya envelope list --unseen --max 5")
+await ws.execute("himalaya envelope list --mailbox INBOX --page-size 5")
 ```
 
 In YAML the same install rides the `clis:` section:
