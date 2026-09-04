@@ -20,27 +20,52 @@ pnpm add @struktoai/mirage-node @qdrant/js-client-rest
 ```
 
 ```ts
-import { QdrantResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { QdrantResource, MountMode, Workspace } from "@struktoai/mirage-node";
 
 const fashion = new QdrantResource({
   config: {
-    url: 'https://xyz.cloud.qdrant.io',
+    url: "https://xyz.cloud.qdrant.io",
     apiKey: process.env.QDRANT_API_KEY,
-    collection: 'fashion',
-    groupBy: ['gender', 'articleType', 'baseColour'],
-    idField: 'id',
-    textField: 'productDisplayName',
-    blobField: 'image_b64',
-    blobExt: 'jpg',
+    collection: "fashion",
+    groupBy: ["gender", "articleType", "baseColour"],
+    idField: "id",
+    textField: "productDisplayName",
+    blobField: "image_b64",
+    blobExt: "jpg",
     searchLimit: 5,
   },
-})
+});
 
-const ws = new Workspace({ '/fashion/': fashion }, { mode: MountMode.READ })
+const ws = new Workspace({ "/fashion/": fashion }, { mode: MountMode.READ });
 
-await ws.execute('ls /fashion/Men/Shoes/White')
-await ws.execute('search "red running shoes" /fashion') // ranked paths + score + content
+await ws.execute("ls /fashion/Men/Shoes/White");
+await ws.execute('search "red running shoes" /fashion'); // ranked paths + score + content
 ```
+
+### Document and chunk lineage
+
+Config fields accept Qdrant's dotted nested-key syntax. A LangChain-style
+payload with `page_content` and `metadata: { source, page }` can therefore use:
+
+```ts
+const docs = new QdrantResource({
+  config: {
+    collection: "company_docs",
+    groupBy: ["metadata.source"],
+    basenameFields: ["metadata.source"],
+    nameField: "metadata.page",
+    textField: "page_content",
+  },
+});
+```
+
+For a source value `s3://docs/policies/refund-2026.pdf` and page value `004`,
+the chunk text is exposed as
+`refund-2026.pdf/004__<point-id>.txt`. The point id remains as a stable suffix,
+so duplicate labels cannot collide and direct reads work without a warm cache.
+`basenameFields` strips URL/path parents from the named `groupBy` fields; omit
+a field to preserve its complete value in one path-safe segment. Basenames must
+be unique within a parent group, and ambiguous listings are refused.
 
 ## Filesystem layout
 
@@ -50,8 +75,9 @@ await ws.execute('search "red running shoes" /fashion') // ranked paths + score 
 /fashion/<gender>/<articleType>/<baseColour>/<id>.jpg   # raw blob bytes
 ```
 
-`<id>` is the Qdrant point id. Semantic search is the `search` command, not a
-path: it returns ranked points as the canonical `<id>.txt` (or `<id>.json`) paths
+`<id>` is the Qdrant point id. With `nameField`, leaf stems use
+`<name>__<id>`. Semantic search is the `search` command, not a path: it returns
+ranked points as the canonical `.txt` (or `.json`) paths
 above, annotated with the similarity score.
 
 ## Search embedding

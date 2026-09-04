@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
+from mirage.core.qdrant.fields import field_value, group_name, row_stem
 from mirage.core.qdrant.query import search_rows
 from mirage.core.qdrant.render import render_json, render_text
 from mirage.resource.qdrant.config import QdrantConfig
@@ -22,7 +23,7 @@ from mirage.types import PathSpec
 
 
 def _content_ext(row: dict[str, Any], config: QdrantConfig) -> str:
-    if config.text_field and row.get(config.text_field) is not None:
+    if config.text_field and field_value(row, config.text_field) is not None:
         return "txt"
     return "json"
 
@@ -44,9 +45,11 @@ def _canonical_path(row: dict[str, Any], config: QdrantConfig, table: str,
     if not config.collection:
         segs.append(str(table))
     for column in config.group_by:
-        if column in row and row[column] is not None:
-            segs.append(str(row[column]))
-    segs.append(f"{row[config.id_field]}.{_content_ext(row, config)}")
+        value = field_value(row, column)
+        if value is not None:
+            segs.append(
+                group_name(value, basename=column in config.basename_fields))
+    segs.append(f"{row_stem(row, config)}.{_content_ext(row, config)}")
     prefix = mount_prefix.rstrip("/")
     return prefix + "/" + "/".join(segs)
 

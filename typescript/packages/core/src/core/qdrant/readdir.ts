@@ -25,6 +25,7 @@ import { ROOT, type ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes, renderJson, renderText } from './render.ts'
 import { detectFor, filtersOf, tableOf } from './scope.ts'
 import { globPrefix, globStemPrefix, hasGlobPrefix } from '../../utils/glob_walk.ts'
+import { fieldValue, groupName, rowStem } from './fields.ts'
 
 const GROUP_TYPE = 'qdrant/group'
 
@@ -50,38 +51,39 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
   const entries: [string, IndexEntry][] = []
   for (const row of rows) {
     const id = String(row[config.idField])
+    const stem = rowStem(row, config)
     entries.push([
-      `${id}.json`,
+      `${stem}.json`,
       new IndexEntry({
         id,
-        name: `${id}.json`,
+        name: `${stem}.json`,
         resourceType: 'qdrant/row_json',
-        vfsName: `${id}.json`,
+        vfsName: `${stem}.json`,
         size: renderJson(row, config).byteLength,
       }),
     ])
     if (
       config.textField !== null &&
-      row[config.textField] !== null &&
-      row[config.textField] !== undefined
+      fieldValue(row, config.textField) !== null &&
+      fieldValue(row, config.textField) !== undefined
     ) {
       entries.push([
-        `${id}.txt`,
+        `${stem}.txt`,
         new IndexEntry({
           id,
-          name: `${id}.txt`,
+          name: `${stem}.txt`,
           resourceType: 'qdrant/row_text',
-          vfsName: `${id}.txt`,
+          vfsName: `${stem}.txt`,
           size: renderText(row, config).byteLength,
         }),
       ])
     }
     if (
       config.blobField !== null &&
-      row[config.blobField] !== null &&
-      row[config.blobField] !== undefined
+      fieldValue(row, config.blobField) !== null &&
+      fieldValue(row, config.blobField) !== undefined
     ) {
-      const blobName = `${id}.${config.blobExt}`
+      const blobName = `${stem}.${config.blobExt}`
       entries.push([
         blobName,
         new IndexEntry({
@@ -89,7 +91,7 @@ function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, I
           name: blobName,
           resourceType: 'qdrant/row_blob',
           vfsName: blobName,
-          size: blobSize(row[config.blobField]),
+          size: blobSize(fieldValue(row, config.blobField)),
         }),
       ])
     }
@@ -110,26 +112,68 @@ function rowPrefix(pattern: string | null, config: QdrantConfigResolved): string
   return globStemPrefix(pattern, suffixes)
 }
 
+async function resolvedFilters(
+  accessor: QdrantAccessor,
+  table: string,
+  filters: Record<string, string>,
+): Promise<Record<string, string> | null> {
+  const resolved: Record<string, string> = {}
+  for (const [column, value] of Object.entries(filters)) {
+    if (!accessor.config.basenameFields.includes(column)) {
+      resolved[column] = value
+      continue
+    }
+    const values = await accessor.distinct(
+      table,
+      column,
+      resolved,
+      accessor.config.maxRows,
+      value,
+      true,
+    )
+    const matches = values.filter((raw) => groupName(raw, true) === value)
+    if (matches.length === 0) return null
+    if (matches.length > 1) {
+      throw new Error(
+        `qdrant: basename collision for ${JSON.stringify(column)}: ${JSON.stringify(value)}`,
+      )
+    }
+    resolved[column] = matches[0] ?? ''
+  }
+  return resolved
+}
+
 async function children(accessor: QdrantAccessor, match: ScopeMatch): Promise<Listed | null> {
   const config = accessor.config
   const table = tableOf(config, match)
-  const filters = filtersOf(config, match)
   const pattern = match.pattern
   if (!(await accessor.tableExists(table))) return null
+  const filters = await resolvedFilters(accessor, table, filtersOf(config, match))
+  if (filters === null) return null
   const depth = Object.keys(filters).length
   if (depth < config.groupBy.length) {
-    const groupPrefix = globPrefix(pattern)
+    const displayPrefix = globPrefix(pattern)
+    const basename = config.basenameFields.includes(config.groupBy[depth] ?? '')
     const names = await accessor.distinct(
       table,
       config.groupBy[depth] ?? '',
       filters,
       config.maxRows,
-      groupPrefix,
+      displayPrefix,
+      basename,
     )
     const listing: DirListing = {
-      entries: names.map((name): [string, IndexEntry] => [name, dirEntry(name)]),
+      entries: names
+        .map((name) => groupName(name, basename))
+        .filter((name) => name.startsWith(displayPrefix))
+        .map((rendered): [string, IndexEntry] => {
+          return [rendered, dirEntry(rendered)]
+        }),
       seeds: {},
-      partial: groupPrefix !== '',
+      partial: displayPrefix !== '',
+    }
+    if (new Set(listing.entries.map(([name]) => name)).size !== listing.entries.length) {
+      throw new Error('qdrant: basenameFields produced a path collision')
     }
     return listing
   }

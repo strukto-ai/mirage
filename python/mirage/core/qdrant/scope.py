@@ -17,6 +17,7 @@ from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.codec import JSON_NAME, Codec
 from mirage.core.hierarchy.scope import (DetectFn, Scope, ScopeMatch, Segment,
                                          Slot, make_detect_scope)
+from mirage.core.qdrant.fields import group_value
 from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import ContentType
 from mirage.utils.filetype import content_type_for_extension
@@ -101,5 +102,6 @@ def filters_of(config: QdrantConfig, match: ScopeMatch) -> dict[str, str]:
         value = match.slots.get(f"g{i}")
         if value is None:
             break
-        filters[column] = value
+        filters[column] = (value if column in config.basename_fields else
+                           group_value(value))
     return filters

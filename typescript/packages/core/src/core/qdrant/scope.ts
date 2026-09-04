@@ -19,6 +19,7 @@ import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import { Codec, JSON_NAME } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope, type DetectFn, type ScopeMatch } from '../hierarchy/scope.ts'
+import { groupValue } from './fields.ts'
 
 const TXT = new Codec({ suffix: '.txt' })
 
@@ -95,7 +96,7 @@ export function filtersOf(config: QdrantConfigResolved, match: ScopeMatch): Reco
     const value = match.slots[`g${String(i)}`]
     const column = config.groupBy[i]
     if (value === undefined || column === undefined) break
-    filters[column] = value
+    filters[column] = config.basenameFields.includes(column) ? value : groupValue(value)
   }
   return filters
 }

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fieldValue, groupName } from './fields.ts'
+
 export type QdrantRow = Record<string, unknown>
 
 export interface QdrantPoint {
@@ -46,11 +48,11 @@ export function idPrefixTest(prefix: string): PointTest {
 }
 
 /** Keep points whose payload value starts with a literal prefix. */
-export function valuePrefixTest(column: string, prefix: string): PointTest {
+export function valuePrefixTest(column: string, prefix: string, basename = false): PointTest {
   return (point) => {
-    const value = point.payload?.[column]
+    const value = fieldValue(point.payload ?? {}, column)
     if (value === null || value === undefined) return false
-    return String(value as string | number | boolean).startsWith(prefix)
+    return groupName(value, basename).startsWith(prefix)
   }
 }
 

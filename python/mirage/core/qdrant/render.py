@@ -15,6 +15,7 @@
 import base64
 from typing import Any
 
+from mirage.core.qdrant.fields import field_value, without_field
 from mirage.core.render.json import compact_json_text
 from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import JsonValue
@@ -31,16 +32,14 @@ def blob_bytes(value: JsonValue) -> bytes:
 
 
 def render_json(row: dict[str, Any], config: QdrantConfig) -> bytes:
-    data = {
-        key: value
-        for key, value in row.items() if key not in _SKIP_KEYS
-        and key != config.vector_field and key != config.blob_field
-    }
+    data = {key: value for key, value in row.items() if key not in _SKIP_KEYS}
+    data = without_field(data, config.vector_field)
+    data = without_field(data, config.blob_field)
     return (compact_json_text(data) + "\n").encode()
 
 
 def render_text(row: dict[str, Any], config: QdrantConfig) -> bytes:
-    value = row.get(config.text_field) if config.text_field else None
+    value = field_value(row, config.text_field)
     if value is None:
         return b""
     return (str(value) + "\n").encode()

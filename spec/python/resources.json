@@ -2082,6 +2082,9 @@
         "api_key": {
           "required": false
         },
+        "basename_fields": {
+          "required": false
+        },
         "blob_ext": {
           "required": false
         },
@@ -2110,6 +2113,9 @@
           "required": false
         },
         "max_rows": {
+          "required": false
+        },
+        "name_field": {
           "required": false
         },
         "port": {

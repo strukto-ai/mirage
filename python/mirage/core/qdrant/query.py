@@ -21,6 +21,7 @@ from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from mirage.accessor.qdrant import QdrantAccessor
+from mirage.core.qdrant.fields import field_value, group_name, row_stem
 
 logger = logging.getLogger(__name__)
 
@@ -78,17 +79,21 @@ def id_prefix_test(prefix: str) -> PointTest:
     return keep
 
 
-def value_prefix_test(column: str, prefix: str) -> PointTest:
+def value_prefix_test(column: str,
+                      prefix: str,
+                      basename: bool = False) -> PointTest:
     """Keep points whose payload value starts with a literal prefix.
 
     Args:
         column (str): the payload field the group level is named from.
         prefix (str): the literal prefix a group glob asked for.
+        basename (bool): compare against the rendered path basename.
     """
 
     def keep(point: Any) -> bool:
-        value = (point.payload or {}).get(column)
-        return value is not None and str(value).startswith(prefix)
+        value = field_value(point.payload or {}, column)
+        return value is not None and group_name(
+            value, basename=basename).startswith(prefix)
 
     return keep
 
@@ -175,13 +180,14 @@ async def distinct_values(accessor: QdrantAccessor,
                           column: str,
                           filters: dict[str, str],
                           limit: int,
-                          prefix: str = "") -> list[str]:
-    keep = value_prefix_test(column, prefix) if prefix else None
+                          prefix: str = "",
+                          basename: bool = False) -> list[str]:
+    keep = value_prefix_test(column, prefix, basename) if prefix else None
     points = await _scroll_all(accessor, table, filters, limit, keep)
     values = {
-        str(payload[column])
+        str(value)
         for point in points
-        if (payload := point.payload or {}).get(column) is not None
+        if (value := field_value(point.payload or {}, column)) is not None
     }
     return sorted(values)
 
@@ -191,7 +197,14 @@ async def rows_matching(accessor: QdrantAccessor,
                         filters: dict[str, str],
                         limit: int,
                         prefix: str = "") -> list[dict[str, Any]]:
-    keep = id_prefix_test(prefix) if prefix else None
+    keep: PointTest | None
+    if prefix and accessor.config.name_field:
+
+        def keep(point: Any) -> bool:
+            return row_stem(_point_to_row(point, accessor.config.id_field),
+                            accessor.config).startswith(prefix)
+    else:
+        keep = id_prefix_test(prefix) if prefix else None
     points = await _scroll_all(accessor, table, filters, limit, keep)
     return [_point_to_row(point, accessor.config.id_field) for point in points]
 

@@ -22,6 +22,7 @@ import { makeRead, type Reader } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes, renderJson, renderText } from './render.ts'
 import { detectFor, tableOf } from './scope.ts'
+import { fieldValue, pointIdFromStem } from './fields.ts'
 
 async function rowOf(
   accessor: QdrantAccessor,
@@ -32,7 +33,7 @@ async function rowOf(
   const row = await accessor.rowRecord(
     tableOf(config, match),
     config.idField,
-    match.slots.row_id ?? '',
+    pointIdFromStem(match.slots.row_id ?? '', config),
   )
   if (row === null) throw enoent(virtual)
   return row
@@ -56,8 +57,8 @@ async function readText(
   const row = await rowOf(accessor, match, path.virtual)
   if (
     config.textField === null ||
-    row[config.textField] === null ||
-    row[config.textField] === undefined
+    fieldValue(row, config.textField) === null ||
+    fieldValue(row, config.textField) === undefined
   ) {
     throw enoent(path.virtual)
   }
@@ -72,7 +73,7 @@ async function readBlob(
   const config = accessor.config
   if (config.blobField === null) throw enoent(path.virtual)
   const row = await rowOf(accessor, match, path.virtual)
-  const value = row[config.blobField]
+  const value = fieldValue(row, config.blobField)
   if (value === null || value === undefined) throw enoent(path.virtual)
   return blobBytes(value)
 }

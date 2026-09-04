@@ -60,4 +60,17 @@ describe('qdrant render', () => {
   it('renderText is empty when the text field is missing', () => {
     expect(renderText({ id: 3 }, config).length).toBe(0)
   })
+
+  it('resolves nested text and blob fields consistently', () => {
+    const nested = resolveQdrantConfig({
+      textField: 'document.text',
+      blobField: 'document.blob',
+    })
+    const row = { id: 3, document: { text: 'chunk', blob: 'Ynl0ZXM=' } }
+    expect(DEC.decode(renderText(row, nested))).toBe('chunk\n')
+    expect(JSON.parse(DEC.decode(renderJson(row, nested)))).toEqual({
+      id: 3,
+      document: { text: 'chunk' },
+    })
+  })
 })

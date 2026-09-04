@@ -29,7 +29,9 @@ const QdrantConfigSchema = z.object({
   apiKey: secretStr().optional(),
   collection: z.string().optional(),
   groupBy: z.array(z.string()).optional(),
+  basenameFields: z.array(z.string()).optional(),
   idField: z.string().optional(),
+  nameField: z.string().optional(),
   textField: z.string().optional(),
   blobField: z.string().optional(),
   blobExt: z.string().optional(),
@@ -53,7 +55,9 @@ export interface QdrantConfigResolved {
   apiKey: string | null
   collection: string | null
   groupBy: string[]
+  basenameFields: string[]
   idField: string
+  nameField: string | null
   textField: string | null
   blobField: string | null
   blobExt: string
@@ -72,7 +76,9 @@ export function resolveQdrantConfig(config: QdrantConfig): QdrantConfigResolved 
     apiKey: config.apiKey ?? null,
     collection: config.collection ?? null,
     groupBy: config.groupBy ?? [],
+    basenameFields: config.basenameFields ?? [],
     idField: config.idField ?? 'id',
+    nameField: config.nameField ?? null,
     textField: config.textField ?? null,
     blobField: config.blobField ?? null,
     blobExt: config.blobExt ?? 'bin',

@@ -20,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.read import Reader, make_read
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.qdrant.fields import field_value, point_id_from_stem
 from mirage.core.qdrant.query import row_record
 from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import detect_for, table_of
@@ -30,8 +31,9 @@ from mirage.utils.errors import enoent
 async def _row_of(accessor: QdrantAccessor, match: ScopeMatch,
                   virtual: str) -> dict[str, Any]:
     config = accessor.config
+    row_id = point_id_from_stem(match.slots["row_id"], config)
     row = await row_record(accessor, table_of(config, match), config.id_field,
-                           match.slots["row_id"])
+                           row_id)
     if row is None:
         raise enoent(virtual)
     return row
@@ -47,7 +49,7 @@ async def _read_text(accessor: QdrantAccessor, match: ScopeMatch,
                      path: PathSpec, index: IndexCacheStore) -> bytes:
     config = accessor.config
     row = await _row_of(accessor, match, path.virtual)
-    if not config.text_field or row.get(config.text_field) is None:
+    if not config.text_field or field_value(row, config.text_field) is None:
         raise enoent(path)
     return render_text(row, config)
 
@@ -58,7 +60,7 @@ async def _read_blob(accessor: QdrantAccessor, match: ScopeMatch,
     if not config.blob_field:
         raise enoent(path)
     row = await _row_of(accessor, match, path.virtual)
-    value = row.get(config.blob_field)
+    value = field_value(row, config.blob_field)
     if value is None:
         raise enoent(path)
     return blob_bytes(value)

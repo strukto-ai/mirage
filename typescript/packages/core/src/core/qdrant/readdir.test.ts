@@ -100,6 +100,44 @@ describe('qdrant readdir sizes', () => {
   })
 })
 
+describe('qdrant document lineage', () => {
+  const lineageConfig = resolveQdrantConfig({
+    collection: 'docs',
+    groupBy: ['metadata.source'],
+    basenameFields: ['metadata.source'],
+    nameField: 'metadata.page',
+    textField: 'page_content',
+  })
+  const lineageRow: QdrantRow = {
+    id: 17,
+    page_content: 'Refunds are processed within 14 days',
+    metadata: { source: 's3://docs/policies/refund-2026.pdf', page: '004' },
+  }
+  const lineageAccessor = {
+    config: lineageConfig,
+    tableExists: () => Promise.resolve(true),
+    distinct: (
+      _table: string,
+      _column: string,
+      filters: Record<string, string>,
+    ): Promise<string[]> =>
+      Promise.resolve(
+        Object.keys(filters).length === 0
+          ? ['s3://docs/policies/refund-2026.pdf']
+          : ['s3://docs/policies/refund-2026.pdf'],
+      ),
+    rowsMatching: () => Promise.resolve([lineageRow]),
+  } as unknown as QdrantAccessor
+
+  it('lists a source basename then meaningful chunk files', async () => {
+    await expect(readdir(lineageAccessor, spec('/'))).resolves.toEqual(['/refund-2026.pdf'])
+    await expect(readdir(lineageAccessor, spec('/refund-2026.pdf'))).resolves.toEqual([
+      '/refund-2026.pdf/004__17.json',
+      '/refund-2026.pdf/004__17.txt',
+    ])
+  })
+})
+
 const CAP = 5
 const WIDE = 40
 
@@ -165,6 +203,37 @@ describe('qdrant readdir narrows a capped listing', () => {
     )
     expect(ids(out)).toEqual(['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004'])
     expect(seen.prefix).toBe('')
+  })
+
+  it('passes a rendered basename prefix into the capped scan', async () => {
+    const seen: { prefix?: string; basename?: boolean } = {}
+    const acc = {
+      config: resolveQdrantConfig({
+        collection: 'wide',
+        groupBy: ['source'],
+        basenameFields: ['source'],
+        maxRows: CAP,
+      }),
+      tableExists: () => Promise.resolve(true),
+      distinct: (
+        _table: string,
+        _column: string,
+        _filters: Record<string, string>,
+        _limit: number,
+        prefix: string,
+        basename: boolean,
+      ) => {
+        seen.prefix = prefix
+        seen.basename = basename
+        const values = Array.from({ length: WIDE }, (_, i) => `s3://docs/other-${String(i)}.pdf`)
+        values.push('s3://archive/target-late.pdf')
+        return Promise.resolve(
+          values.filter((value) => (value.split('/').pop() ?? '').startsWith(prefix)).slice(0, CAP),
+        )
+      },
+    } as unknown as QdrantAccessor
+    await expect(readdir(acc, globbed('/', 'target*'))).resolves.toEqual(['/target-late.pdf'])
+    expect(seen).toEqual({ prefix: 'target', basename: true })
   })
 
   it('does not cache a narrowed listing as the directory', async () => {

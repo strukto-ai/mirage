@@ -28,6 +28,7 @@ import {
 } from '../core/qdrant/client.ts'
 import type { QdrantConfigResolved } from '../resource/qdrant/config.ts'
 import { compareCodePoints } from '../utils/sort.ts'
+import { fieldValue, rowStem } from '../core/qdrant/fields.ts'
 
 type QdrantClientCtor = new (opts: {
   url?: string
@@ -149,12 +150,13 @@ export class QdrantAccessor extends Accessor {
     filters: Record<string, string>,
     limit: number,
     prefix = '',
+    basename = false,
   ): Promise<string[]> {
-    const keep = prefix === '' ? undefined : valuePrefixTest(column, prefix)
+    const keep = prefix === '' ? undefined : valuePrefixTest(column, prefix, basename)
     const points = await this.scrollFiltered(table, filters, limit, keep)
     const values = new Set<string>()
     for (const point of points) {
-      const value = point.payload?.[column]
+      const value = fieldValue(point.payload ?? {}, column)
       if (value !== null && value !== undefined)
         values.add(String(value as string | number | boolean))
     }
@@ -168,7 +170,13 @@ export class QdrantAccessor extends Accessor {
     limit: number,
     prefix = '',
   ): Promise<QdrantRow[]> {
-    const keep = prefix === '' ? undefined : idPrefixTest(prefix)
+    const keep =
+      prefix === ''
+        ? undefined
+        : this.config.nameField !== null
+          ? (point: QdrantPoint) =>
+              rowStem(pointToRow(point, this.config.idField), this.config).startsWith(prefix)
+          : idPrefixTest(prefix)
     const points = await this.scrollFiltered(table, filters, limit, keep)
     return points.map((point) => pointToRow(point, this.config.idField))
   }

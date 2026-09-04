@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { buildFilter, candidateIds, coerce, pointToRow } from './client.ts'
+import { buildFilter, candidateIds, coerce, pointToRow, valuePrefixTest } from './client.ts'
 
 describe('qdrant client helpers', () => {
   it('coerces numeric strings only', () => {
@@ -42,6 +42,14 @@ describe('qdrant client helpers', () => {
   it('maps a point to a row keyed by the point id', () => {
     const row = pointToRow({ id: 7, payload: { label: 'cat' } }, 'id')
     expect(row).toEqual({ label: 'cat', id: 7 })
+  })
+
+  it('matches a rendered basename rather than the source prefix', () => {
+    const keep = valuePrefixTest('metadata.source', 'report-', true)
+    expect(keep({ id: 1, payload: { metadata: { source: 's3://archive/report-late.pdf' } } })).toBe(
+      true,
+    )
+    expect(keep({ id: 2, payload: { metadata: { source: 's3://archive/notes.pdf' } } })).toBe(false)
   })
 
   it('produces id candidates by type, none for invalid ids', () => {

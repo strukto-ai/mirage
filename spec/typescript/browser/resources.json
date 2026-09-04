@@ -1580,6 +1580,9 @@
         "apiKey": {
           "required": false
         },
+        "basenameFields": {
+          "required": false
+        },
         "blobExt": {
           "required": false
         },
@@ -1605,6 +1608,9 @@
           "required": false
         },
         "maxRows": {
+          "required": false
+        },
+        "nameField": {
           "required": false
         },
         "port": {

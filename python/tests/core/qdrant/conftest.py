@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage.core.qdrant.fields import field_value
 from mirage.resource.qdrant.config import QdrantConfig
 
 COLLECTION = "animals"
@@ -54,7 +55,7 @@ def _match(point: SimpleNamespace, scroll_filter) -> bool:
     if scroll_filter is None:
         return True
     for condition in scroll_filter.must:
-        value = (point.payload or {}).get(condition.key)
+        value = field_value(point.payload or {}, condition.key)
         if str(value) != str(condition.match.value):
             return False
     return True
@@ -156,6 +157,27 @@ def accessor(qdrant_config) -> FakeAccessor:
     return FakeAccessor(qdrant_config, FakeQdrantClient())
 
 
+@pytest.fixture
+def lineage() -> FakeAccessor:
+    client = FakeQdrantClient()
+    client.points[0].payload = {
+        "page_content": "Refunds are processed within 14 days",
+        "metadata": {
+            "source": "s3://docs/policies/refund-2026.pdf",
+            "page": "004",
+        },
+    }
+    client.points = client.points[:1]
+    config = QdrantConfig(
+        collection=COLLECTION,
+        group_by=["metadata.source"],
+        basename_fields=["metadata.source"],
+        name_field="metadata.page",
+        text_field="page_content",
+    )
+    return FakeAccessor(config, client)
+
+
 WIDE_CAP = 5
 WIDE_POINTS = 600
 
@@ -186,3 +208,16 @@ def capped() -> FakeAccessor:
                      id_field="id",
                      text_field="name",
                      max_rows=WIDE_CAP), WideQdrantClient())
+
+
+@pytest.fixture
+def basename_capped() -> FakeAccessor:
+    client = WideQdrantClient()
+    for point in client.points:
+        point.payload["source"] = f"s3://docs/other-{point.id}.pdf"
+    client.points[-1].payload["source"] = "s3://archive/target-late.pdf"
+    return FakeAccessor(
+        QdrantConfig(collection=COLLECTION,
+                     group_by=["source"],
+                     basename_fields=["source"],
+                     max_rows=WIDE_CAP), client)

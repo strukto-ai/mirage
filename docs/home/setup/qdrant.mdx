@@ -56,5 +56,11 @@ Folder listings filter on payload fields. A filtered listing scrolls first and
 only creates keyword payload indexes for the `group_by` fields if Qdrant reports
 one is required. `max_rows` caps how many points are scanned per folder.
 
+For document/chunk collections, config field names accept dotted payload paths:
+use `group_by=["metadata.source"]`, `basename_fields=["metadata.source"]`,
+`name_field="metadata.page"`, and `text_field="page_content"` to expose a
+source-document folder with readable page/chunk filenames. TypeScript uses the
+camelCase equivalents `groupBy`, `basenameFields`, `nameField`, and `textField`.
+
 See the [Python](/python/resource/qdrant) and [TypeScript](/typescript/setup/qdrant)
 resource pages for full config.

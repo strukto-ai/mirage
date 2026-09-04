@@ -39,3 +39,9 @@ async def test_read_blob_returns_raw_bytes(accessor):
 async def test_read_missing_row_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await read(accessor, _ps("/animals/cat/big/999.json"))
+
+
+@pytest.mark.asyncio
+async def test_read_named_chunk_with_nested_text_field(lineage):
+    data = await read(lineage, _ps("/refund-2026.pdf/004__1.txt"))
+    assert data == b"Refunds are processed within 14 days\n"

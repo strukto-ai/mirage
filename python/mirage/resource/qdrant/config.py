@@ -23,7 +23,9 @@ class QdrantConfig(BaseModel):
     api_key: SecretStr | None = None
     collection: str | None = None
     group_by: list[str] = []
+    basename_fields: list[str] = []
     id_field: str = "id"
+    name_field: str | None = None
     text_field: str | None = None
     blob_field: str | None = None
     blob_ext: str = "bin"

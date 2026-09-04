@@ -53,3 +53,13 @@ async def test_search_empty_query_raises(accessor):
                                  top_k=2,
                                  threshold=0.0,
                                  mount_prefix="/db")
+
+
+@pytest.mark.asyncio
+async def test_search_emits_document_lineage_path_for_nested_payload(lineage):
+    out = (await search_rows_output(lineage,
+                                    "refund", [_ps("/db")],
+                                    top_k=1,
+                                    threshold=0.0,
+                                    mount_prefix="/db")).decode()
+    assert out.startswith("/db/refund-2026.pdf/004__1.txt:")

@@ -36,6 +36,39 @@ ws = Workspace({"/fashion/": resource}, mode=MountMode.READ)
 The mapping is config-driven; nothing about the dataset is hardcoded. Point
 `group_by` at different payload fields and the folder tree changes.
 
+### Document and chunk lineage
+
+Config fields use Qdrant's dotted nested-key syntax. For example, a LangChain-style
+point can be mounted by source document and named by page:
+
+```json
+{
+  "page_content": "Refunds are processed within 14 days…",
+  "metadata": {
+    "source": "s3://docs/policies/refund-2026.pdf",
+    "page": "004"
+  }
+}
+```
+
+```python
+config = QdrantConfig(
+    collection="company_docs",
+    group_by=["metadata.source"],
+    basename_fields=["metadata.source"],
+    name_field="metadata.page",
+    text_field="page_content",
+)
+```
+
+This produces `refund-2026.pdf/004__<point-id>.txt`. The readable prefix comes
+from `name_field`; the Qdrant point id remains as a stable suffix so duplicate
+page labels cannot collide and a direct read never depends on a warm listing
+cache. `basename_fields` strips URL/path parents from the named `group_by`
+fields. Leave a field out to preserve its complete value in one path-safe
+segment. Basenames must be unique within their parent group; Mirage refuses an
+ambiguous listing instead of silently merging two source documents.
+
 ## Filesystem layout
 
 Every path is translated into a Qdrant query. Descending a folder adds one
@@ -51,8 +84,9 @@ payload filter; the leaf level lists points.
       <id>.<ext>                   # raw blob / image bytes (when blob_field set)
 ```
 
-`<id>` is the Qdrant point id. When `collection` is set the collection level is
-elided, so the mount root is that collection:
+`<id>` is the Qdrant point id. When `name_field` is set, leaf stems instead use
+`<name>__<id>`. When `collection` is set the collection level is elided, so the
+mount root is that collection:
 
 ```text
 /fashion/
@@ -86,7 +120,7 @@ $ cat /fashion/Men/Shoes/White/3.json
 ## Semantic search
 
 Search is a command, not a path. It returns each ranked point as its **canonical
-content path** (the `<id>.txt`, or `<id>.json` when no `text_field` is set)
+content path** (the `.txt`, or `.json` when no `text_field` is set)
 annotated with the similarity score, followed by the content:
 
 ```text
@@ -102,18 +136,18 @@ Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
 
 All commands delegate to Mirage's shared implementations.
 
-| Command       | Behaviour on a Qdrant mount                                   |
-| ------------- | ------------------------------------------------------------- |
-| `ls`          | list collections, payload folders, or point files            |
-| `cd`          | navigate (each level narrows the filter)                      |
-| `tree`        | render the folder hierarchy                                   |
-| `cat`         | print a point's text/JSON, or dump raw blob/image bytes       |
-| `stat`        | directory vs file, blob size, image mime type                 |
-| `find`        | walk the tree (e.g. `find /fashion -name '*.txt'`)            |
-| `grep` / `rg` | lexical search over the text/JSON files                       |
-| `search`      | semantic (vector) search -> ranked content paths + score      |
-| `head` / `tail` | first/last lines of a file                                  |
-| `wc`          | count lines/bytes of a file                                   |
+| Command         | Behaviour on a Qdrant mount                              |
+| --------------- | -------------------------------------------------------- |
+| `ls`            | list collections, payload folders, or point files        |
+| `cd`            | navigate (each level narrows the filter)                 |
+| `tree`          | render the folder hierarchy                              |
+| `cat`           | print a point's text/JSON, or dump raw blob/image bytes  |
+| `stat`          | directory vs file, blob size, image mime type            |
+| `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
+| `grep` / `rg`   | lexical search over the text/JSON files                  |
+| `search`        | semantic (vector) search -> ranked content paths + score |
+| `head` / `tail` | first/last lines of a file                               |
+| `wc`            | count lines/bytes of a file                              |
 
 ## Access pattern
 

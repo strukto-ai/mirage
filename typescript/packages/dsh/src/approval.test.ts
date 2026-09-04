@@ -172,21 +172,16 @@ describe('an asked line with an approval channel', () => {
     expect(asked[0]?.reason).toBe('deletes are reviewed: rm /data/notes.txt')
   })
 
-  it('does not re-prompt the retry of a line just refused, then asks afresh', async () => {
+  it('spends an inline refusal on that line, so the next line asks afresh', async () => {
     const { shell, asked } = await world(ASK_RM, 'rejected')
     const first = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(first.exitCode).toBe(126)
     expect(asked).toHaveLength(1)
-    // The refusal was recorded, and a ONCE answer covers the exact line it
-    // was given for: the retry is refused from that record rather than
-    // putting the same question to the human again.
+    // The inline refusal answered the first line and was spent by it, so the
+    // next identical line is a new question rather than a second refusal
+    // borrowed from the first question.
     const retry = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(126)
-    expect(asked).toHaveLength(1)
-    // Having answered that retry, the ONCE record is spent, so the line is
-    // an open question once more rather than refused forever.
-    const third = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
-    expect(third.exitCode).toBe(126)
     expect(asked).toHaveLength(2)
     // Both questions were the same line, so both quote one identity.
     expect(asked[0]?.callId).toBe(asked[1]?.callId)

@@ -18,21 +18,16 @@ import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { renderJson, renderText } from './render.ts'
+import { fieldValue, groupName, rowStem } from './fields.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function toStr(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'object') return JSON.stringify(value)
-  return String(value as string | number | boolean | bigint)
-}
-
 function contentExt(row: QdrantRow, config: QdrantConfigResolved): string {
   if (
     config.textField !== null &&
-    row[config.textField] !== null &&
-    row[config.textField] !== undefined
+    fieldValue(row, config.textField) !== null &&
+    fieldValue(row, config.textField) !== undefined
   ) {
     return 'txt'
   }
@@ -57,10 +52,12 @@ function canonicalPath(
   const segs: string[] = []
   if (config.collection === null) segs.push(table)
   for (const column of config.groupBy) {
-    const value = row[column]
-    if (value !== null && value !== undefined) segs.push(toStr(value))
+    const value = fieldValue(row, column)
+    if (value !== null && value !== undefined) {
+      segs.push(groupName(value, config.basenameFields.includes(column)))
+    }
   }
-  segs.push(`${toStr(row[config.idField])}.${contentExt(row, config)}`)
+  segs.push(`${rowStem(row, config)}.${contentExt(row, config)}`)
   const prefix = rstripSlash(mountPrefix)
   return `${prefix}/${segs.join('/')}`
 }
