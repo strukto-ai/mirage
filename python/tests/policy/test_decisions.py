@@ -219,8 +219,8 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
     # standing, so the gate behind it consumes the same one.
     handed = Decisions(on_ask=allow)
     asked.clear()
-    assert await handed.resolve(
-        _ctx(), Ask("sign-off", rule=RULE), None, True) is None
+    assert await handed.resolve(_ctx(), Ask("sign-off", rule=RULE), None,
+                                True) is None
     assert await handed.resolve(_ctx(), Ask("sign-off", rule=RULE)) is None
     assert len(asked) == 1
 
