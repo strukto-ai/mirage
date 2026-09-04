@@ -24,6 +24,7 @@ import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode, Refusal } from '../../types.ts'
+import type { Clock } from '../../utils/clock.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
@@ -73,6 +74,13 @@ export interface WorkspaceOptions {
    * closes it.
    */
   cache?: CacheConfig
+  /**
+   * The one clock this workspace and its components read time through;
+   * omitted means the real one. Threaded to the file cache (entry
+   * TTLs), the op facade (op durations and stamps) and, through that
+   * facade, a kernel mount's prefetch TTL.
+   */
+  clock?: Clock
   index?: IndexConfig
   /**
    * Builds each background job's console from its job id, so job

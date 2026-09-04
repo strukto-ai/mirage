@@ -252,14 +252,17 @@ class Decisions:
         Every rule the ask names has to be answered, because each won a
         subject of its own and a nod covers the subject it was given
         for. They are asked one at a time, the retry of the line raising
-        the next, and a ONCE answer is only spent once the whole line is
+        the next, and a ONCE grant is only spent once the whole line is
         answered: spending one while another is still waiting would make
         the first question come back on every retry. Once the line IS
-        answered, every ONCE answer behind it is spent -- the ones
+        answered, every ONCE grant behind it is spent -- the ones
         already on file and the ones a host gave inline moments ago
         alike -- so an answer never outlives the line it was given for.
         The exception is ``hand_off``, for the pass that asks on another
         pass's behalf.
+
+        An inline refusal stands for the immediate retry, which consumes
+        it without prompting the host again.
 
         Args:
             ctx (CommandContext): the asked line.
@@ -297,18 +300,10 @@ class Decisions:
             if record is not None:
                 continue
             action = await self._raise(ctx, rule, argv, cancel)
-            if action is None:
-                continue
-            # A refusal the host gave while this line waited refused THIS
-            # line, so it is spent by it -- unless a later pass on the
-            # same line still has to read it, which is the pass that
-            # refuses in place. A question left waiting, or a killed run,
-            # answered nothing and spends nothing.
-            if isinstance(action, Deny) and not hand_off:
-                await self._spend(
-                    ctx.session_id,
-                    self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
-            return action
+            if action is not None:
+                # Keep a new refusal for the retry; the settled branch
+                # above consumes it when that retry arrives.
+                return action
         # Every rule is answered and the line may run. Unless another pass
         # on this same line is still to come, the ledger is read again
         # rather than trusting the entry snapshot, because a host that
@@ -317,15 +312,15 @@ class Decisions:
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
         await self._spend(
-            ctx.session_id, spent if hand_off else
-            self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
+            ctx.session_id, spent if hand_off else self._once_answers(
+                ctx.session_id, rules, argv, ctx.cwd))
         return None
 
     def _once_answers(
         self,
         session_id: str,
         rules: Sequence[CommandRule],
-        argv: Sequence[str],
+        argv: tuple[str, ...],
         cwd: str,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
@@ -334,7 +329,7 @@ class Decisions:
         Args:
             session_id (str): the asking session.
             rules (Sequence[CommandRule]): the rules the ask named.
-            argv (Sequence[str]): the line, command name first.
+            argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
 
         Returns:

@@ -159,7 +159,7 @@ describe('decisions', () => {
   it('spends an inline answer on the line that asked, not the next one', async () => {
     // The host answers while the line waits, so the answer belongs to that
     // line. Allowing once must not let the next identical line through with
-    // nobody asked, and refusing once must not refuse it either.
+    // nobody asked. A refusal still covers the immediate retry.
     let asked = 0
     const allow = (r: Decision): Promise<Decision> => {
       asked += 1
@@ -176,9 +176,10 @@ describe('decisions', () => {
       return Promise.resolve({ ...r, outcome: Outcome.DENY, scope: Scope.ONCE })
     }
     const refused = new Decisions(null, deny)
-    expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
-    expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
-    expect(refusals).toBe(2)
+    for (const expected of [1, 1, 2]) {
+      expect((await refused.resolve(ctx(), ASK))?.kind).toBe('deny')
+      expect(refusals).toBe(expected)
+    }
 
     // A SESSION answer still stands for the rest of the session.
     const forever = new Decisions(null, (r: Decision) =>

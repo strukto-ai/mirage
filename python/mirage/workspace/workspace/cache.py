@@ -17,6 +17,7 @@ from typing import Any
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.utils.clock import Clock
 
 RedisFileCacheStore: Any
 try:
@@ -29,7 +30,8 @@ else:
 
 
 def build_file_cache(cache: CacheConfig | None,
-                     cache_limit: str | int) -> FileCacheMixin:
+                     cache_limit: str | int,
+                     clock: Clock | None = None) -> FileCacheMixin:
     """Build the workspace's file cache from its config.
 
     Args:
@@ -37,6 +39,9 @@ def build_file_cache(cache: CacheConfig | None,
             RAM store sized by ``cache_limit``.
         cache_limit (str | int): the legacy size knob, used only when
             no config is given.
+        clock (Clock | None): the workspace's clock, handed to the store
+            that ages entries itself. The redis store takes none: its
+            TTLs are server-side ``EXPIRE`` and it reads no time here.
 
     Raises:
         ImportError: a Redis cache was asked for without the extra.
@@ -53,4 +58,6 @@ def build_file_cache(cache: CacheConfig | None,
         )
     limit = cache.limit if cache is not None else cache_limit
     max_drain = cache.max_drain_bytes if cache is not None else None
-    return RAMFileCacheStore(cache_limit=limit, max_drain_bytes=max_drain)
+    return RAMFileCacheStore(cache_limit=limit,
+                             max_drain_bytes=max_drain,
+                             clock=clock)

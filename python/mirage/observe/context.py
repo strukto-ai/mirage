@@ -18,6 +18,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from mirage.observe.record import OpRecord
+from mirage.utils.clock import Clock, SystemClock
 
 
 @dataclass(frozen=True)
@@ -184,27 +185,45 @@ class OpTimer:
     finishes, so an op module hands this around instead of reading a
     clock of its own. The wall-clock stamp the record carries is taken
     at finish time, not here.
+
+    Args:
+        clock (Clock): the clock both readings are taken from. Passing
+            one is what makes a duration assertable without a sleep.
     """
 
-    __slots__ = ("_start_ms", )
+    __slots__ = ("_clock", "_start_ms")
 
-    def __init__(self) -> None:
-        self._start_ms = int(time.monotonic() * 1000)
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
+        self._start_ms = int(clock.monotonic() * 1000)
 
     @property
     def elapsed_ms(self) -> int:
         """Milliseconds elapsed since the timer was opened."""
-        return int(time.monotonic() * 1000) - self._start_ms
+        return int(self._clock.monotonic() * 1000) - self._start_ms
+
+    @property
+    def clock(self) -> Clock:
+        """The clock every reading of this op's timing comes from."""
+        return self._clock
 
 
-def start_op() -> OpTimer:
+def start_op(clock: Clock | None = None) -> OpTimer:
     """Open the record path's stopwatch for one op.
+
+    A component that holds the workspace's clock passes it; a backend
+    core op holds no workspace handle and passes nothing, which opens a
+    system-clocked timer exactly as before the seam existed.
+
+    Args:
+        clock (Clock | None): the clock to time with; None means the
+            real one.
 
     Returns:
         OpTimer: a running timer, to hand to :func:`record` or
         :func:`finish_record` when the op completes.
     """
-    return OpTimer()
+    return OpTimer(clock if clock is not None else SystemClock())
 
 
 def finish_record(op: str,
@@ -219,6 +238,8 @@ def finish_record(op: str,
     The one place an op's duration and wall-clock stamp are read, shared
     by the recorder sink (:func:`record`) and by the ``Ops`` facade's own
     ledger, so the two cannot disagree about what a duration measures.
+    Both readings come off the timer's own clock, so an injected one
+    governs the stamp as well as the duration.
 
     Args:
         op (str): Operation name ("read", "write").
@@ -238,7 +259,7 @@ def finish_record(op: str,
         path=path,
         source=source,
         bytes=nbytes,
-        timestamp=int(time.time() * 1000),
+        timestamp=int(timer.clock.now() * 1000),
         duration_ms=elapsed,
         fingerprint=fingerprint,
         revision=revision,

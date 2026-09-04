@@ -43,6 +43,7 @@ import {
 import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/routing/types.ts'
 import { ExecutionNode } from './types.ts'
+import { ManualClock } from '../utils/clock.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -502,6 +503,63 @@ describe('cli registry snapshot', () => {
     expect(clis[0]?.name).toBe('pager')
     expect(clis[0]?.script?.source).toBe("print('hi')")
     await ws.close()
+  })
+
+  it('ages a restored cache entry on the injected clock', async () => {
+    // A snapshot stores cachedAt and ttl as data, so the restored
+    // entry's expiry is decided by the clock the restoring workspace was
+    // given, never by the wall clock of the run that took it.
+    const src = new Workspace(
+      { '/data': new RAMResource() },
+      {
+        mode: MountMode.WRITE,
+        ops: new OpsRegistry(),
+        shellParser: parser,
+        clock: new ManualClock(1000),
+      },
+    )
+    await src.cache.set('/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })
+    const state = await toStateDict(src)
+
+    const clock = new ManualClock(1000)
+    const restored = await Workspace.fromState(state, {
+      mode: MountMode.WRITE,
+      ops: new OpsRegistry(),
+      shellParser: parser,
+      clock,
+    })
+    const entry = (
+      restored as unknown as {
+        cache: { snapshotEntries(): { key: string; entry: { cachedAt: number; ttl: number } }[] }
+      }
+    ).cache.snapshotEntries()[0]
+    expect(entry?.entry.cachedAt).toBe(1000)
+    expect(entry?.entry.ttl).toBe(10)
+    expect(await restored.cache.exists('/c.txt')).toBe(true)
+    clock.advance(9)
+    expect(await restored.cache.exists('/c.txt')).toBe(true)
+    clock.advance(1)
+    expect(await restored.cache.exists('/c.txt')).toBe(false)
+    await src.close()
+    await restored.close()
+  })
+
+  it('a copy keeps the workspace clock', async () => {
+    const clock = new ManualClock()
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { mode: MountMode.WRITE, ops: new OpsRegistry(), shellParser: parser, clock },
+    )
+    const copied = await ws.copy()
+    // A copy reads time the way its origin does, so a TTL stamped on
+    // the copy still expires on the clock the origin was given.
+    await copied.cache.set('/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })
+    clock.advance(9)
+    expect(await copied.cache.exists('/c.txt')).toBe(true)
+    clock.advance(1)
+    expect(await copied.cache.exists('/c.txt')).toBe(false)
+    await ws.close()
+    await copied.close()
   })
 })
 

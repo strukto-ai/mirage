@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from pydantic import BaseModel
 
 
@@ -23,8 +21,12 @@ class CacheEntry(BaseModel):
     fingerprint: str | None = None
     ttl: int | None = None
 
-    @property
-    def expired(self) -> bool:
+    def is_expired(self, now: int) -> bool:
+        """Check expiry using the RAMFileCacheStore's clock reading.
+
+        Args:
+            now (int): whole seconds since the unix epoch.
+        """
         if self.ttl is None:
             return False
-        return (int(time.time()) - self.cached_at) >= self.ttl
+        return (now - self.cached_at) >= self.ttl
