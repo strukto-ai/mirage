@@ -78,16 +78,42 @@ export function parseSkill(text: string): Skill {
 }
 
 /**
+ * `text` with every mention of the program `name` spelled `head`. A mention
+ * is the bare word: not a piece of a longer identifier, a path segment or a
+ * dotted name, so `ntn` in `ntn-prod`, `/ntn` or `foo.ntn` is left alone.
+ * Every skill names its program only in the lowercase head word (the
+ * product is capitalized in prose), which is what makes a plain word match
+ * safe.
+ */
+function respell(text: string, name: string, head: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`(^|[^\\w/.-])${escaped}(?![\\w-])`, 'gm')
+  return text.replace(pattern, (_match, before: string) => `${before}${head}`)
+}
+
+/**
  * The skill for a CLI's spec name, null when the CLI ships none. Keyed by
  * `install.spec.name` (the program the skill teaches), never the installed
  * head word, so two accounts installed under different names share one
  * skill. Only SKILLED_CLIS answer: the generated map also carries the
  * plugin's own skills (`mirage-filesystem`), and a user spec that happens to
  * share such a name must not inherit one.
+ *
+ * A skill is written for the program's own name, and an install may answer
+ * to another word (`ntn-prod` beside `ntn`). Given that `head`, the
+ * description and body are respelled for it, so the lines the manual teaches
+ * are the lines this install runs and not another account's; `name` and
+ * `text` stay the file's.
  */
-export function skillFor(name: string): Skill | null {
+export function skillFor(name: string, head?: string): Skill | null {
   if (!SKILLED_CLIS.has(name)) return null
   const text = SKILLS[name]
   if (text === undefined) return null
-  return parseSkill(text)
+  const skill = parseSkill(text)
+  if (head === undefined || head === skill.name) return skill
+  return {
+    ...skill,
+    description: respell(skill.description, skill.name, head),
+    body: respell(skill.body, skill.name, head),
+  }
 }

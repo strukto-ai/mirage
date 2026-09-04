@@ -208,6 +208,37 @@ describe('skillFor', () => {
     expect(SKILLS['mirage-filesystem']).toBeDefined()
     expect(skillFor('mirage-filesystem')).toBeNull()
   })
+
+  it('respells the program for the installed head', () => {
+    // An install answering to another word gets a skill that teaches that
+    // word: a manual for `ntn-prod` must not teach `ntn` lines, which run
+    // another account or nothing.
+    const written = skillFor('ntn')
+    const renamed = skillFor('ntn', 'ntn-prod')
+    if (written === null || renamed === null) throw new Error('ntn ships no skill')
+    const bare = /(^|[^\w/.-])ntn(?![\w-])/gm
+    expect(renamed.body.match(bare)).toBeNull()
+    expect(renamed.description.match(bare)).toBeNull()
+    expect(renamed.body.split('ntn-prod').length - 1).toBe((written.body.match(bare) ?? []).length)
+    expect(renamed.description).toContain('`ntn-prod` CLI')
+    // The file itself and the key are the program's own.
+    expect(renamed.name).toBe('ntn')
+    expect(renamed.text).toBe(written.text)
+  })
+
+  it('leaves the skill alone under its own head', () => {
+    expect(skillFor('ntn', 'ntn')).toEqual(skillFor('ntn'))
+  })
+
+  it('respells only the bare word', () => {
+    // A longer identifier, a path segment or a dotted name that merely
+    // contains the program's name is not a mention of it. Probed through
+    // a skill whose body carries every shape.
+    const renamed = skillFor('gws', 'gws-x')
+    if (renamed === null) throw new Error('gws ships no skill')
+    expect(renamed.body).not.toMatch(/(^|[^\w/.-])gws(?![\w-])/m)
+    expect(renamed.body).toContain('gws-x ')
+  })
 })
 
 describe('generated skills_data is in sync with plugins/mirage/skills', () => {

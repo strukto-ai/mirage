@@ -47,7 +47,7 @@ describe('filePrompt', () => {
     expect(ramWs().filePrompt).not.toContain('Installed CLIs')
   })
 
-  it('lists each install of a shared spec separately with the same description', () => {
+  it('lists each install of a shared spec separately, each under its own head', () => {
     const ws = ramWs()
     ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
     ws.registerCli('ntn2', NTN, { apiKey: 'secret_other' })
@@ -58,7 +58,10 @@ describe('filePrompt', () => {
       const afterDash = line.slice(line.indexOf('—') + 1)
       return afterDash.slice(0, afterDash.indexOf('Guide:'))
     }
-    expect(descriptionOf('ntn')).toBe(descriptionOf('ntn2'))
+    // One skill, respelled for the head each install answers to.
+    expect(descriptionOf('ntn')).toContain('`ntn` CLI')
+    expect(descriptionOf('ntn2')).toContain('`ntn2` CLI')
+    expect(descriptionOf('ntn').replaceAll('`ntn`', '`ntn2`')).toBe(descriptionOf('ntn2'))
     expect(ws.filePrompt).toContain('Guide: man ntn2')
   })
 })

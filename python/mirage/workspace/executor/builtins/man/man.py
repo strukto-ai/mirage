@@ -232,9 +232,11 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
     # A skill teaches an invented grammar the flag table cannot: only
     # the head-only page (the program's own manual, not one verb's)
     # leads with it, only when the spec ships one, and only for a
-    # session that may run every line it teaches.
+    # session that may run every line it teaches. It is respelled for
+    # the installed head, so ``man ntn-prod`` teaches ``ntn-prod`` lines
+    # and not another install's.
     if not verbs and _tree_visible(head, spec, session):
-        skill = skill_for(spec.name)
+        skill = skill_for(spec.name, head)
         if skill is not None:
             return skill.body + "\n\n" + help_text
     return help_text

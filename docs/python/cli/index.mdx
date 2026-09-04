@@ -77,10 +77,10 @@ A CLI whose grammar is mirage's own invention (`discord`, `gws`,
 seen these programs, so nothing in its training says how to use them;
 the skill is that missing knowledge. `git`, `gh`, `psql` and `redis-cli`
 imitate real programs the model already knows, so they ship no skill.
-Once a CLI
-is installed, the workspace's system prompt lists it by that skill's
-frontmatter `description`, and `man <cli>` (no verb) leads with the
-skill's body before the usual verb listing. The same
-`plugins/mirage/skills/` directory is what the Codex, Grok Build and
-Claude Code plugins load, so a skill is written once and read from five
-places.
+Once a CLI is installed, the workspace's system prompt lists it by that
+skill's frontmatter `description`, and `man <cli>` (no verb) leads with
+the skill's body before the usual verb listing. Both are respelled for
+the head word the install answers to, so `man ntn-prod` teaches
+`ntn-prod` lines. The same `plugins/mirage/skills/` directory is what
+the Codex, Grok Build and Claude Code plugins load, so a skill is
+written once and read from five places.

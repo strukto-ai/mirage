@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import re
 from unittest.mock import MagicMock
 
 from mirage.commands.cli.builtin.ntn import NTN
@@ -321,3 +322,15 @@ def test_handle_man_verb_page_has_no_skill_body():
                                   _SESSION))[0].decode()
     assert "Usage: ntn pages" in text
     assert body_first_line not in text
+
+
+def test_handle_man_respells_the_skill_for_a_renamed_install():
+    # The spec is ``ntn``; installed as ``ntn-prod`` the manual must
+    # teach ``ntn-prod`` lines, not lines that run another install.
+    reg = _mk_registry([])
+    reg.clis.install("ntn-prod", NTN, {"api_key": "secret_fake"})
+    text = asyncio.run(handle_man(["ntn-prod"], reg, _SESSION))[0].decode()
+    assert text.startswith("# ntn-prod")
+    assert "ntn-prod pages get" in text
+    assert re.search(r"(?:^|[^\w/.-])ntn(?![\w-])", text, re.MULTILINE) is None
+    assert "Usage: ntn-prod" in text

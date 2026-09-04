@@ -213,6 +213,18 @@ describe('--help and man through the executor', () => {
     expect(page).toContain('Usage: ntn')
   })
 
+  it('man <cli> respells the skill for a renamed install', async () => {
+    // The spec is `ntn`; installed as `ntn-prod` the manual must teach
+    // `ntn-prod` lines, not lines that run another install.
+    const ws = await makeWs()
+    ws.registerCli('ntn-prod', NTN, { apiKey: 'secret_fake' })
+    const page = stdoutStr(await ws.execute('man ntn-prod'))
+    expect(page.startsWith('# ntn-prod')).toBe(true)
+    expect(page).toContain('ntn-prod pages get')
+    expect(page).not.toMatch(/(^|[^\w/.-])ntn(?![\w-])/m)
+    expect(page).toContain('Usage: ntn-prod')
+  })
+
   it('man <cli> <verb> carries no skill body', async () => {
     const ws = await makeWs()
     ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })

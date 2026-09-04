@@ -21,7 +21,7 @@ import pytest
 import mirage.commands.cli.builtin  # noqa: F401  registers builtin specs
 from mirage.commands.cli.constants import SKILLED_CLIS
 from mirage.commands.cli.generated.skills_data import SKILLS
-from mirage.commands.cli.skill import parse_skill, skill_for
+from mirage.commands.cli.skill import _respell, parse_skill, skill_for
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.walk import walk
 from mirage.workspace.executor.command.cli import parse_spec_for
@@ -133,3 +133,31 @@ def test_skill_examples_dry_parse_against_the_real_tree(name):
         parsed = parse_flags(list(result.argv), parse_spec, prog, "/")
         refusal = option_error(prog, parsed)
         assert refusal is None, f"{line!r} does not parse: {refusal}"
+
+
+def test_skill_for_respells_the_program_for_the_installed_head():
+    # An install answering to another word gets a skill that teaches
+    # that word: a manual for ``ntn-prod`` must not teach ``ntn`` lines,
+    # which run another account or nothing.
+    written = skill_for("ntn")
+    renamed = skill_for("ntn", "ntn-prod")
+    assert written is not None and renamed is not None
+    bare = re.compile(r"(?:^|[^\w/.-])ntn(?![\w-])", re.MULTILINE)
+    assert bare.search(renamed.body) is None
+    assert bare.search(renamed.description) is None
+    assert renamed.body.count("ntn-prod") == len(bare.findall(written.body))
+    assert "`ntn-prod` CLI" in renamed.description
+    # The file itself and the key are the program's own.
+    assert renamed.name == "ntn"
+    assert renamed.text == written.text
+
+
+def test_skill_for_leaves_the_skill_alone_under_its_own_head():
+    assert skill_for("ntn", "ntn") == skill_for("ntn")
+
+
+def test_skill_for_respells_only_the_bare_word():
+    # A longer identifier, a path segment or a dotted name that merely
+    # contains the program's name is not a mention of it.
+    assert (_respell("ntn foo.ntn /ntn ntn-prod `ntn`\nntn", "ntn",
+                     "H") == "H foo.ntn /ntn ntn-prod `H`\nH")

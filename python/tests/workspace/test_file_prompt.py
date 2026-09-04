@@ -95,4 +95,7 @@ def test_file_prompt_lists_each_install_of_a_shared_spec_separately():
                      if line.startswith("- ntn2 — "))
     ntn_desc = ntn_line.split("—", 1)[1].rsplit("Guide:", 1)[0]
     ntn2_desc = ntn2_line.split("—", 1)[1].rsplit("Guide:", 1)[0]
-    assert ntn_desc == ntn2_desc
+    # One skill, respelled for the head each install answers to.
+    assert "`ntn` CLI" in ntn_desc
+    assert "`ntn2` CLI" in ntn2_desc
+    assert ntn_desc.replace("`ntn`", "`ntn2`") == ntn2_desc

@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+from dataclasses import replace
+
 from mirage.commands.cli.constants import SKILLED_CLIS
 from mirage.commands.cli.generated.skills_data import SKILLS
 from mirage.commands.cli.types import Skill
@@ -74,7 +77,26 @@ def parse_skill(text: str) -> Skill:
     return Skill(name=name, description=description, body=body, text=text)
 
 
-def skill_for(name: str) -> Skill | None:
+def _respell(text: str, name: str, head: str) -> str:
+    """``text`` with every mention of the program ``name`` spelled ``head``.
+
+    A mention is the bare word: not a piece of a longer identifier, a
+    path segment or a dotted name, so ``ntn`` in ``ntn-prod``,
+    ``/ntn`` or ``foo.ntn`` is left alone. Every skill names its program
+    only in the lowercase head word (the product is capitalized in
+    prose), which is what makes a plain word match safe.
+
+    Args:
+        text (str): skill prose or body, as written for ``name``.
+        name (str): the program's own name, the spec name.
+        head (str): the word the install answers to.
+    """
+    pattern = re.compile(r"(^|[^\w/.-])" + re.escape(name) + r"(?![\w-])",
+                         re.MULTILINE)
+    return pattern.sub(lambda m: m.group(1) + head, text)
+
+
+def skill_for(name: str, head: str | None = None) -> Skill | None:
     """The parsed skill for a CLI spec name, None when it ships none.
 
     Keyed by the SPEC name (``install.spec.name``), never the
@@ -83,12 +105,25 @@ def skill_for(name: str) -> Skill | None:
     plugin's own skills (``mirage-filesystem``), and a user spec that
     happens to share such a name must not inherit one.
 
+    A skill is written for the program's own name, and an install may
+    answer to another word (``ntn-prod`` beside ``ntn``). Given that
+    ``head``, the description and body are respelled for it, so the
+    lines the manual teaches are the lines this install runs and not
+    another account's; ``name`` and ``text`` stay the file's.
+
     Args:
         name (str): a ``CLISpec.name``.
+        head (str | None): the installed head word; None or the spec
+            name itself leaves the skill as written.
     """
     if name not in SKILLED_CLIS:
         return None
     text = SKILLS.get(name)
     if text is None:
         return None
-    return parse_skill(text)
+    skill = parse_skill(text)
+    if head is None or head == skill.name:
+        return skill
+    return replace(skill,
+                   description=_respell(skill.description, skill.name, head),
+                   body=_respell(skill.body, skill.name, head))

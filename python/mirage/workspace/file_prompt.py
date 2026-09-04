@@ -28,16 +28,18 @@ CLI_SECTION_HEADER = (
     "you find its ids):")
 
 
-def _cli_description(install: CLIInstall) -> str:
+def _cli_description(head: str, install: CLIInstall) -> str:
     """The description for one installed CLI's row.
 
     The skill's frontmatter description when the spec ships one,
-    else the spec's own description, else a placeholder.
+    respelled for the head this install answers to, else the spec's
+    own description, else a placeholder.
 
     Args:
+        head (str): the installed head word.
         install (CLIInstall): the installation to describe.
     """
-    skill = skill_for(install.spec.name)
+    skill = skill_for(install.spec.name, head)
     if skill is not None:
         return skill.description
     return install.spec.description or "(no description)"
@@ -53,7 +55,7 @@ def _cli_section(clis: Mapping[str, CLIInstall]) -> str:
         return ""
     lines = [CLI_SECTION_HEADER]
     for head in sorted(clis):
-        desc = _cli_description(clis[head])
+        desc = _cli_description(head, clis[head])
         if not desc.endswith("."):
             desc += "."
         lines.append(f"- {head} — {desc} Guide: man {head}")

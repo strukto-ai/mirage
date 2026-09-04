@@ -207,9 +207,12 @@ agent discovers state, the CLI is how it acts.
   Every fenced line in a skill that starts with the head word is dry-parsed
   through `walk` and the leaf parser in CI, so a skill cannot teach a line the
   program refuses. A skill is keyed by the spec name, never the installed head
-  word, so two installs of one spec share it. Resource `WRITE_PROMPT`s point at
-  the CLI in one line and teach nothing themselves: the mount is one account's
-  state and the CLI is another install, and a prompt that rendered `ntn`
+  word, so two installs of one spec share it, and `skill_for`/`skillFor`
+  respells the bare program word for the head an install answers to, so
+  `man ntn-prod` teaches `ntn-prod` lines and not another account's. Resource
+  `WRITE_PROMPT`s point at the CLI in one line and teach nothing themselves:
+  the mount is one account's state and the CLI is another install, and a
+  prompt that rendered `ntn`
   lines whether or not `ntn` was installed was teaching a program that might
   not exist.
 
