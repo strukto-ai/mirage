@@ -233,13 +233,15 @@ export class Decisions {
    * Every rule the ask names has to be answered, because each won a
    * subject of its own and a nod covers the subject it was given for.
    * They are asked one at a time, the retry of the line raising the
-   * next, and a ONCE answer is only spent once the whole line is
+   * next, and a ONCE grant is only spent once the whole line is
    * answered: spending one while another is still waiting would make
    * the first question come back on every retry. Once the line IS
-   * answered, every ONCE answer behind it is spent — the ones already
+   * answered, every ONCE grant behind it is spent — the ones already
    * on file and the ones a host gave inline moments ago alike — so an
    * answer never outlives the line it was given for. The exception is
    * `handOff`, for the pass that asks on another pass's behalf.
+   * An inline refusal stands for the immediate retry, which consumes
+   * it without prompting the host again.
    *
    * @param ctx the classified command being admitted.
    * @param ask the chain's Ask.
@@ -279,15 +281,11 @@ export class Decisions {
     for (const [rule, record] of answers) {
       if (record !== null) continue
       const action = await this.raise(ctx, rule, argv, signal)
-      if (action === null) continue
-      // A refusal the host gave while this line waited refused THIS line, so
-      // it is spent by it — unless a later pass on the same line still has to
-      // read it, which is the pass that refuses in place. A question left
-      // waiting, or a killed run, answered nothing and spends nothing.
-      if (action.kind === 'deny' && !handOff) {
-        await this.spend(sessionId, this.onceAnswers(sessionId, rules, argv, ctx.cwd))
+      if (action !== null) {
+        // Keep a new refusal for the retry; the settled branch above
+        // consumes it when that retry arrives.
+        return action
       }
-      return action
     }
     // Every rule is answered and the line may run. Unless another pass on this
     // same line is still to come, the ledger is read again rather than trusting

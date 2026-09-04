@@ -187,7 +187,7 @@ async def test_a_host_that_answers_inside_the_line_leaves_nothing_waiting():
 async def test_an_inline_answer_is_spent_by_the_line_that_asked():
     """The host answers while the line waits, so the answer belongs to
     that line: allowing once must not let the next identical line
-    through unasked, and refusing once must not refuse it either."""
+    through unasked. A refusal still covers the immediate retry."""
     asked = []
 
     async def allow(record: Decision) -> Decision:
@@ -210,10 +210,10 @@ async def test_an_inline_answer_is_spent_by_the_line_that_asked():
                                    scope=Scope.ONCE)
 
     refused = Decisions(on_ask=deny)
-    for _ in range(2):
+    for expected in (1, 1, 2):
         action = await refused.resolve(_ctx(), Ask("sign-off", rule=RULE))
         assert isinstance(action, Deny)
-    assert len(refusals) == 2
+        assert len(refusals) == expected
 
     # The pass that asks on another pass's behalf leaves its answer
     # standing, so the gate behind it consumes the same one.
