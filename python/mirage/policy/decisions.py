@@ -317,8 +317,8 @@ class Decisions:
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
         await self._spend(
-            ctx.session_id, spent if hand_off else
-            self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
+            ctx.session_id, spent if hand_off else self._once_answers(
+                ctx.session_id, rules, argv, ctx.cwd))
         return None
 
     def _once_answers(
