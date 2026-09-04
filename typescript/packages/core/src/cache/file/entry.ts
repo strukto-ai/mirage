@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SystemClock } from '../../utils/clock.ts'
+
 export interface CacheEntryInit {
   size: number
   cachedAt: number
@@ -31,6 +33,11 @@ export class CacheEntry {
     this.fingerprint = init.fingerprint ?? null
     this.ttl = init.ttl ?? null
     Object.freeze(this)
+  }
+
+  /** System-time expiry retained for the public v0.0.6 API; stores use isExpired. */
+  get expired(): boolean {
+    return this.isExpired(Math.floor(new SystemClock().now()))
   }
 
   /**

@@ -14,7 +14,9 @@
 
 import time
 
-from mirage.cache.file.entry import CacheEntry
+import pytest
+
+from mirage.cache import CacheEntry
 
 
 def test_cache_entry_creation():
@@ -49,3 +51,11 @@ def test_expiry_is_read_at_the_boundary():
     entry = CacheEntry(cached_at=1000, size=1, ttl=10)
     assert entry.is_expired(1009) is False
     assert entry.is_expired(1010) is True
+
+
+@pytest.mark.parametrize("now, expected", [(1009.9, False), (1010, True)])
+def test_public_expired_property_uses_system_time(monkeypatch, now, expected):
+    monkeypatch.setattr(time, "time", lambda: now)
+    entry = CacheEntry(cached_at=1000, size=1, ttl=10)
+    assert entry.expired is expected
+    assert CacheEntry(cached_at=0, size=1).expired is False

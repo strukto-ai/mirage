@@ -14,12 +14,22 @@
 
 from pydantic import BaseModel
 
+from mirage.utils.clock import SystemClock
+
 
 class CacheEntry(BaseModel):
     size: int
     cached_at: int
     fingerprint: str | None = None
     ttl: int | None = None
+
+    @property
+    def expired(self) -> bool:
+        """System-time expiry retained for the public v0.0.6 API.
+
+        Stores use ``is_expired`` with their own clock instead.
+        """
+        return self.is_expired(int(SystemClock().now()))
 
     def is_expired(self, now: int) -> bool:
         """Whether this entry's TTL has run out at ``now``.

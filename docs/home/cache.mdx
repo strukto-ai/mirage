@@ -104,3 +104,48 @@ await ws.execute('grep alert /s3/data/log.jsonl')
 ## Relationship To Snapshots
 
 The file cache is exactly what a [snapshot](/home/snapshot) serializes: `ws.snapshot()` writes the cached bytes for every touched path into the tar, and `Workspace.load()` restores them into the file cache so a replayed run reads from local state. The index cache is not snapshotted; it rebuilds lazily after load.
+
+## Controlling Time
+
+Pass a `Clock` to the workspace to control RAM file-cache expiry, op-facade timing, and FUSE prefetch expiry. `SystemClock` is the default. `ManualClock` stays fixed until `advance(seconds)` moves it, so tests can check TTL boundaries without sleeping.
+
+<CodeGroup>
+
+```python Python
+from mirage import Workspace
+from mirage.resource.ram import RAMResource
+from mirage.utils.clock import ManualClock
+
+clock = ManualClock(start=1000)
+ws = Workspace({"/data": RAMResource()}, clock=clock)
+
+await ws.cache.set("/data/file.txt", b"hello", ttl=10)
+clock.advance(9)
+assert await ws.cache.exists("/data/file.txt")
+clock.advance(1)
+assert not await ws.cache.exists("/data/file.txt")
+await ws.close()
+```
+
+```typescript TypeScript
+import { RAMResource, Workspace } from '@struktoai/mirage-node'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
+
+const clock = new ManualClock(1000)
+const ws = new Workspace({ '/data': new RAMResource() }, { clock })
+
+await ws.cache.set('/data/file.txt', new TextEncoder().encode('hello'), { ttl: 10 })
+clock.advance(9)
+console.assert(await ws.cache.exists('/data/file.txt'))
+clock.advance(1)
+console.assert(!(await ws.cache.exists('/data/file.txt')))
+await ws.close()
+```
+
+</CodeGroup>
+
+Both clock readings use seconds: `now()` supplies Unix timestamps, and `monotonic()` measures elapsed time. RAM file-cache TTLs retain whole-second wall timestamps because entries can survive a snapshot round trip. FUSE prefetch expiry and op durations use monotonic time. Redis expiry remains server-controlled; index TTLs and backend-internal timers keep their own clocks.
+
+`CacheEntry.expired` continues to check system time for existing callers. For an explicit time reading, use `entry.is_expired(now)` in Python or `entry.isExpired(now)` in TypeScript.
+
+Copies share the original workspace's clock. When restoring a snapshot, pass `clock` to Python `Workspace.load()` / `Workspace.from_state()` or TypeScript `Workspace.load()` / `Workspace.fromState()`. Use a compatible wall-time origin so saved cache timestamps age as intended; the clock itself is not serialized.
