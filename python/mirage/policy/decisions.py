@@ -317,15 +317,15 @@ class Decisions:
         # standing for the next identical one, and whoever allowed once
         # would have allowed twice.
         await self._spend(
-            ctx.session_id, spent if hand_off else
-            self._once_answers(ctx.session_id, rules, argv, ctx.cwd))
+            ctx.session_id, spent if hand_off else self._once_answers(
+                ctx.session_id, rules, argv, ctx.cwd))
         return None
 
     def _once_answers(
         self,
         session_id: str,
         rules: Sequence[CommandRule],
-        argv: Sequence[str],
+        argv: tuple[str, ...],
         cwd: str,
     ) -> tuple[Decision, ...]:
         """Every ONCE answer standing behind this line, as the ledger
@@ -334,7 +334,7 @@ class Decisions:
         Args:
             session_id (str): the asking session.
             rules (Sequence[CommandRule]): the rules the ask named.
-            argv (Sequence[str]): the line, command name first.
+            argv (tuple[str, ...]): the line, command name first.
             cwd (str): the directory the line was typed in.
 
         Returns:
