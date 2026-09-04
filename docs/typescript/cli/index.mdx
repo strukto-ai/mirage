@@ -72,9 +72,11 @@ files); acting goes through the CLI. The mounted tree's
 
 A CLI whose grammar is mirage's own invention (`discord`, `gws`,
 `linear`, `ntn`, `slack`) ships an [agentskills.io](https://agentskills.io)
-`SKILL.md` under `plugins/mirage/skills/<cli>/`, because there is no
-real program an agent already knows to fall back on; `git`, `gh`,
-`psql` and `redis-cli` mirror a real program and ship none. Once a CLI
+`SKILL.md` under `plugins/mirage/skills/<cli>/`. The model has never
+seen these programs, so nothing in its training says how to use them;
+the skill is that missing knowledge. `git`, `gh`, `psql` and `redis-cli`
+imitate real programs the model already knows, so they ship no skill.
+Once a CLI
 is installed, the workspace's system prompt lists it by that skill's
 frontmatter `description`, and `man <cli>` (no verb) leads with the
 skill's body before the usual verb listing. The same
