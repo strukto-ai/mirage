@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SystemClock } from '../../utils/clock.ts'
-
 export interface CacheEntryInit {
   size: number
   cachedAt: number
@@ -35,21 +33,10 @@ export class CacheEntry {
     Object.freeze(this)
   }
 
-  /** System-time expiry retained for the public v0.0.6 API; stores use isExpired. */
-  get expired(): boolean {
-    return this.isExpired(Math.floor(new SystemClock().now()))
-  }
-
   /**
-   * Whether this entry's TTL has run out at `now`.
+   * Check expiry using the RAMFileCacheStore's clock reading.
    *
-   * The reading is a parameter rather than something the entry takes for
-   * itself: an entry is immutable data that a snapshot stores and
-   * restores verbatim, so it has no clock of its own to hold. The store
-   * that owns the entry holds the clock and says what the time is.
-   *
-   * @param now whole seconds since the unix epoch, from the owning
-   *   store's clock.
+   * @param now whole seconds since the unix epoch.
    */
   isExpired(now: number): boolean {
     if (this.ttl === null) return false

@@ -12,41 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * The one door mirage reads time through.
- *
- * Two readings, because a deadline and a stamp are different questions.
- * `monotonic` measures a duration or a TTL and never moves backwards,
- * which wall clock cannot promise, since NTP can step it
- * mid-measurement. `now` answers what time it is, which is the only
- * thing a stored timestamp can mean.
- *
- * Implemented by {@link SystemClock} in production and
- * {@link ManualClock} under a test or an embedding harness. It is a
- * structural interface, so an embedder's own class satisfies it by
- * shape and needs no import of mirage. Mirrors python's `Clock`.
- */
+/** Wall time for timestamps and monotonic time for durations, in seconds. */
 export interface Clock {
   /** Seconds since the unix epoch. */
   now(): number
-  /**
-   * Seconds from an arbitrary origin that never moves backwards.
-   *
-   * Seconds rather than milliseconds so the unit matches python's
-   * `time.monotonic()` and the interface reads the same in both
-   * languages.
-   */
+  /** Seconds from an arbitrary origin that never moves backwards. */
   monotonic(): number
 }
 
-/**
- * The real clock: both readings delegate to the platform.
- *
- * The default everywhere, so production behavior is exactly what it was
- * before the seam existed. Stateless, so constructing one per holder
- * costs nothing and there is no shared instance for code to reach
- * ambiently.
- */
+/** Platform clock used when no clock is supplied. */
 export class SystemClock implements Clock {
   /** Seconds since the unix epoch. */
   now(): number {
@@ -59,36 +33,12 @@ export class SystemClock implements Clock {
   }
 }
 
-/**
- * A clock that stands still until the caller moves it.
- *
- * Reading it has no side effect, so a test can probe a TTL at `ttl - 1`
- * and again at `ttl` and get exactly those two answers. `advance` is
- * the only thing that moves time, which is what makes a boundary
- * assertion mean what it says.
- *
- * An earlier draft ticked the clock on every read, copying
- * `integ/server/kit/typescript/clock.ts`. That was the wrong model to
- * copy: the kit's clock is a timestamp generator that hands each file a
- * distinct mtime, not a clock a duration is measured with, and a read
- * that moves time makes every deadline depend on how many times the
- * code under test happened to look. A test that needs two events
- * ordered advances between them and says so.
- *
- * Wall and monotonic are held separately, because they answer different
- * questions and a caller may only ever compare like with like.
- * `advance` moves both, since virtual time passing is one event.
- * Mirrors python's `ManualClock`.
- */
+/** Clock advanced explicitly by the caller. Readings have no side effects. */
 export class ManualClock implements Clock {
   private wall: number
   private mono = 0
 
-  /**
-   * @param start the wall-clock reading, in seconds. 0 keeps a run
-   *   reproducible; pass `Date.now() / 1000` for a wall-clock-relative
-   *   one.
-   */
+  /** @param start initial wall time in seconds; monotonic starts at zero. */
   constructor(start = 0) {
     this.wall = start
   }

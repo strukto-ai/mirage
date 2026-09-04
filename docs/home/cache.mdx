@@ -146,6 +146,4 @@ await ws.close()
 
 Both clock readings use seconds: `now()` supplies Unix timestamps, and `monotonic()` measures elapsed time. RAM file-cache TTLs retain whole-second wall timestamps because entries can survive a snapshot round trip. FUSE prefetch expiry and op durations use monotonic time. Redis expiry remains server-controlled; index TTLs and backend-internal timers keep their own clocks.
 
-`CacheEntry.expired` continues to check system time for existing callers. For an explicit time reading, use `entry.is_expired(now)` in Python or `entry.isExpired(now)` in TypeScript.
-
 Copies share the original workspace's clock. When restoring a snapshot, pass `clock` to Python `Workspace.load()` / `Workspace.from_state()` or TypeScript `Workspace.load()` / `Workspace.fromState()`. Use a compatible wall-time origin so saved cache timestamps age as intended; the clock itself is not serialized.
