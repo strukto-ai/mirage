@@ -180,7 +180,7 @@ class CacheManager:
             await self._evict_dir(parent or "/")
 
     async def drop_prefix(self) -> None:
-        """Drop every cached body under this mount, path unspecified.
+        """Drop the mount key and every cached body beneath it.
 
         For a mutation that names no path: an account CLI writes to its
         service by id, so nothing here can say which file changed, only
@@ -194,6 +194,7 @@ class CacheManager:
         """
         if not self._caches_reads or self._file_cache is None:
             return
+        await self._file_cache.remove(self._prefix or "/")
         await self._file_cache.evict_prefix(self._prefix + "/")
 
     async def _invalidate_parent(self, key: str) -> None:

@@ -169,7 +169,7 @@ export class CacheManager {
   }
 
   /**
-   * Drop every cached body under this mount, path unspecified.
+   * Drop the mount key and every cached body beneath it.
    *
    * For a mutation that names no path: an account CLI writes to its service by
    * id, so nothing here can say which file changed, only that this mount's
@@ -183,6 +183,7 @@ export class CacheManager {
    */
   async dropPrefix(): Promise<void> {
     if (!this.cachesReads || this.fileCache === null) return
+    await this.fileCache.remove(this.prefix === '' ? '/' : this.prefix)
     await this.fileCache.evictPrefix(this.prefix + '/')
   }
 
