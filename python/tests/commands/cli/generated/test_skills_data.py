@@ -13,11 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pathlib
+import runpy
 
 from mirage.commands.cli.generated.skills_data import SKILLS
 
 REPO = pathlib.Path(__file__).resolve().parents[5]
 SKILLS_DIR = REPO / "plugins/mirage/skills"
+
+
+def test_generator_preserves_non_bmp_characters():
+    generator = runpy.run_path(str(REPO / "scripts/gen_skills.py"))
+    text = "React with 👍"
+    namespace = {}
+    exec(generator["render_py"]({"discord": text}), namespace)
+    assert namespace["SKILLS"]["discord"] == text
 
 
 def test_generated_module_matches_skill_files():

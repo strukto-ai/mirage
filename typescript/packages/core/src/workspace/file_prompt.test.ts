@@ -14,9 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { NTN } from '../commands/cli/builtin/ntn/index.ts'
+import { CLISpec } from '../commands/cli/types.ts'
+import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
+import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 function ramWs(): Workspace {
@@ -24,7 +27,10 @@ function ramWs(): Workspace {
   r.store.dirs.add('/')
   const registry = new OpsRegistry()
   registry.registerResource(r)
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry })
+  return new Workspace(
+    { '/': r },
+    { mode: MountMode.WRITE, ops: registry, shellParserFactory: getTestParser },
+  )
 }
 
 describe('filePrompt', () => {
@@ -45,6 +51,25 @@ describe('filePrompt', () => {
 
   it('omits the CLI section when nothing is installed', () => {
     expect(ramWs().filePrompt).not.toContain('Installed CLIs')
+  })
+
+  it('keeps a custom CLI guide when its spec name matches a builtin', async () => {
+    const ws = ramWs()
+    ws.registerCli(
+      'ntn-custom',
+      new CLISpec({
+        name: 'ntn',
+        description: 'Custom utility',
+        fn: () => [null, new IOResult()],
+      }),
+    )
+    expect(ws.filePrompt).toContain('Custom utility')
+    expect(ws.filePrompt).not.toContain('Notion')
+    const page = await ws.execute('man ntn-custom')
+    expect(page.exitCode).toBe(0)
+    const text = new TextDecoder().decode(page.stdout)
+    expect(text).toContain('Custom utility')
+    expect(text).not.toContain('Notion')
   })
 
   it('lists each install of a shared spec separately, each under its own head', () => {

@@ -23,6 +23,7 @@ from mirage.commands.cli.constants import SKILLED_CLIS
 from mirage.commands.cli.generated.skills_data import SKILLS
 from mirage.commands.cli.skill import _respell, parse_skill, skill_for
 from mirage.commands.cli.specs import cli_spec_for
+from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import walk
 from mirage.workspace.executor.command.cli import parse_spec_for
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -90,19 +91,20 @@ def test_parse_skill_empty_description():
 
 
 def test_skill_for_returns_none_for_git():
-    assert skill_for("git") is None
+    assert skill_for(cli_spec_for("git")) is None
 
 
 def test_skill_for_ignores_a_plugin_skill_that_is_not_a_cli():
     # The generated map carries the plugin's own skill too; a user spec
     # named after it must not inherit unrelated instructions.
     assert "mirage-filesystem" in SKILLS
-    assert skill_for("mirage-filesystem") is None
+    assert skill_for(CLISpec(name="mirage-filesystem",
+                             fn=lambda inv: None)) is None
 
 
 @pytest.mark.parametrize("name", sorted(SKILLED_CLIS))
 def test_skilled_cli_has_a_matching_skill(name):
-    skill = skill_for(name)
+    skill = skill_for(cli_spec_for(name))
     assert skill is not None, f"{name!r} has no skill on disk yet"
     assert skill.name == name
     assert len(skill.description) <= 1024
@@ -110,7 +112,7 @@ def test_skilled_cli_has_a_matching_skill(name):
 
 @pytest.mark.parametrize("name", sorted(SKILLED_CLIS))
 def test_skill_examples_dry_parse_against_the_real_tree(name):
-    skill = skill_for(name)
+    skill = skill_for(cli_spec_for(name))
     assert skill is not None, f"{name!r} has no skill on disk yet"
     spec = cli_spec_for(name)
     examples = []
@@ -139,8 +141,8 @@ def test_skill_for_respells_the_program_for_the_installed_head():
     # An install answering to another word gets a skill that teaches
     # that word: a manual for ``ntn-prod`` must not teach ``ntn`` lines,
     # which run another account or nothing.
-    written = skill_for("ntn")
-    renamed = skill_for("ntn", "ntn-prod")
+    written = skill_for(cli_spec_for("ntn"))
+    renamed = skill_for(cli_spec_for("ntn"), "ntn-prod")
     assert written is not None and renamed is not None
     bare = re.compile(r"(?:^|[^\w/.-])ntn(?![\w-])", re.MULTILINE)
     assert bare.search(renamed.body) is None
@@ -153,7 +155,8 @@ def test_skill_for_respells_the_program_for_the_installed_head():
 
 
 def test_skill_for_leaves_the_skill_alone_under_its_own_head():
-    assert skill_for("ntn", "ntn") == skill_for("ntn")
+    assert skill_for(cli_spec_for("ntn"),
+                     "ntn") == skill_for(cli_spec_for("ntn"))
 
 
 def test_skill_for_respells_only_the_bare_word():

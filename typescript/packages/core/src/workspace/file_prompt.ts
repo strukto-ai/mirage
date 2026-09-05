@@ -42,7 +42,7 @@ function renderCliSection(clis: ReadonlyMap<string, CLIInstall>): string {
   for (const head of heads) {
     const install = clis.get(head)
     if (install === undefined) continue
-    const skill = skillFor(install.spec.name, head)
+    const skill = skillFor(install.spec, head)
     const description =
       skill !== null ? skill.description : (install.spec.description ?? '(no description)')
     lines.push(`- ${head} — ${terminated(description)} Guide: man ${head}`)

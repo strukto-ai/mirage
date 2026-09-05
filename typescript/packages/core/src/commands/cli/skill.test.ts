@@ -28,7 +28,10 @@ import { GWS } from './builtin/gws/index.ts'
 import { LINEAR } from './builtin/linear/index.ts'
 import { NTN } from './builtin/ntn/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
-import type { CLISpec } from './types.ts'
+import { GIT } from './builtin/git/index.ts'
+import { CLISpec } from './types.ts'
+import { IOResult } from '../../io/types.ts'
+import { cliSpecFor } from './specs.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(HERE, '../../../../../..')
@@ -195,26 +198,30 @@ describe('parseSkill', () => {
 
 describe('skillFor', () => {
   it('returns null for a CLI with no skill', () => {
-    expect(skillFor('git')).toBeNull()
+    expect(skillFor(GIT)).toBeNull()
   })
 
   it('returns null for an unregistered name', () => {
-    expect(skillFor('no-such-cli')).toBeNull()
+    expect(
+      skillFor(new CLISpec({ name: 'no-such-cli', fn: () => [null, new IOResult()] })),
+    ).toBeNull()
   })
 
   it('ignores a plugin skill that is not a CLI', () => {
     // The generated map carries the plugin's own skill too; a user spec
     // named after it must not inherit unrelated instructions.
     expect(SKILLS['mirage-filesystem']).toBeDefined()
-    expect(skillFor('mirage-filesystem')).toBeNull()
+    expect(
+      skillFor(new CLISpec({ name: 'mirage-filesystem', fn: () => [null, new IOResult()] })),
+    ).toBeNull()
   })
 
   it('respells the program for the installed head', () => {
     // An install answering to another word gets a skill that teaches that
     // word: a manual for `ntn-prod` must not teach `ntn` lines, which run
     // another account or nothing.
-    const written = skillFor('ntn')
-    const renamed = skillFor('ntn', 'ntn-prod')
+    const written = skillFor(NTN)
+    const renamed = skillFor(NTN, 'ntn-prod')
     if (written === null || renamed === null) throw new Error('ntn ships no skill')
     const bare = /(^|[^\w/.-])ntn(?![\w-])/gm
     expect(renamed.body.match(bare)).toBeNull()
@@ -227,14 +234,14 @@ describe('skillFor', () => {
   })
 
   it('leaves the skill alone under its own head', () => {
-    expect(skillFor('ntn', 'ntn')).toEqual(skillFor('ntn'))
+    expect(skillFor(NTN, 'ntn')).toEqual(skillFor(NTN))
   })
 
   it('respells only the bare word', () => {
     // A longer identifier, a path segment or a dotted name that merely
     // contains the program's name is not a mention of it. Probed through
     // a skill whose body carries every shape.
-    const renamed = skillFor('gws', 'gws-x')
+    const renamed = skillFor(GWS, 'gws-x')
     if (renamed === null) throw new Error('gws ships no skill')
     expect(renamed.body).not.toMatch(/(^|[^\w/.-])gws(?![\w-])/m)
     expect(renamed.body).toContain('gws-x ')
@@ -261,7 +268,7 @@ describe('generated skills_data is in sync with plugins/mirage/skills', () => {
 describe('SKILLED_CLIS', () => {
   for (const name of SKILLED_CLIS) {
     it(`'${name}' ships a skill whose frontmatter matches`, () => {
-      const skill = skillFor(name)
+      const skill = skillFor(cliSpecFor(name))
       expect(skill).not.toBeNull()
       if (skill === null) return
       expect(skill.name).toBe(name)
@@ -271,7 +278,7 @@ describe('SKILLED_CLIS', () => {
 
   it('git is not a skilled CLI', () => {
     expect(SKILLED_CLIS.has('git')).toBe(false)
-    expect(skillFor('git')).toBeNull()
+    expect(skillFor(GIT)).toBeNull()
   })
 })
 
@@ -281,7 +288,7 @@ describe('skill bash examples dry-parse', () => {
     if (spec === undefined) {
       throw new Error(`add '${name}' to CLI_SPECS in skill.test.ts`)
     }
-    const skill = skillFor(name)
+    const skill = skillFor(spec)
     if (skill === null) {
       it(`'${name}' skill body dry-parses`, () => {
         throw new Error(`no skill for '${name}'; add plugins/mirage/skills/${name}/SKILL.md`)

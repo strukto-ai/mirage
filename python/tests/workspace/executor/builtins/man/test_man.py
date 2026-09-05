@@ -302,7 +302,7 @@ def _ntn_registry(mounts=None) -> None:
 
 
 def test_handle_man_leads_with_the_skill_body_for_a_skilled_cli():
-    skill = skill_for("ntn")
+    skill = skill_for(NTN)
     assert skill is not None
     first_heading = next(line for line in skill.body.splitlines()
                          if line.startswith("#"))
@@ -315,7 +315,7 @@ def test_handle_man_leads_with_the_skill_body_for_a_skilled_cli():
 
 
 def test_handle_man_verb_page_has_no_skill_body():
-    skill = skill_for("ntn")
+    skill = skill_for(NTN)
     assert skill is not None
     body_first_line = skill.body.splitlines()[0]
     text = asyncio.run(handle_man(["ntn", "pages"], _ntn_registry(),

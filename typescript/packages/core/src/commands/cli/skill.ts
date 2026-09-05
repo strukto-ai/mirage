@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Skill } from './types.ts'
+import type { CLISpec, Skill } from './types.ts'
 import { SKILLED_CLIS } from './constants.ts'
 import { SKILLS } from './generated/skills_data.ts'
+import { builtinSpecFor } from './specs.ts'
 
 const FRONTMATTER_DELIM = '---'
 
@@ -92,10 +93,10 @@ function respell(text: string, name: string, head: string): string {
 }
 
 /**
- * The skill for a CLI's spec name, null when the CLI ships none. Keyed by
- * `install.spec.name` (the program the skill teaches), never the installed
- * head word, so two accounts installed under different names share one
- * skill. Only SKILLED_CLIS answer: the generated map also carries the
+ * The skill for a bundled CLI spec, null when it ships none. Bound to the
+ * builtin tree itself, so a custom tree with the same name cannot inherit
+ * an unrelated guide. Two installs of one builtin still share one skill.
+ * Only SKILLED_CLIS answer: the generated map also carries the
  * plugin's own skills (`mirage-filesystem`), and a user spec that happens to
  * share such a name must not inherit one.
  *
@@ -105,8 +106,9 @@ function respell(text: string, name: string, head: string): string {
  * are the lines this install runs and not another account's; `name` and
  * `text` stay the file's.
  */
-export function skillFor(name: string, head?: string): Skill | null {
-  if (!SKILLED_CLIS.has(name)) return null
+export function skillFor(spec: CLISpec, head?: string): Skill | null {
+  const name = spec.name
+  if (!SKILLED_CLIS.has(name) || builtinSpecFor(name) !== spec) return null
   const text = SKILLS[name]
   if (text === undefined) return null
   const skill = parseSkill(text)

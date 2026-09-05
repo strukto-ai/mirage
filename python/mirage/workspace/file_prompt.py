@@ -39,7 +39,7 @@ def _cli_description(head: str, install: CLIInstall) -> str:
         head (str): the installed head word.
         install (CLIInstall): the installation to describe.
     """
-    skill = skill_for(install.spec.name, head)
+    skill = skill_for(install.spec, head)
     if skill is not None:
         return skill.description
     return install.spec.description or "(no description)"

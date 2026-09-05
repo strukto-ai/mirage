@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.commands.cli.builtin.ntn import NTN
+from mirage.commands.cli.types import CLISpec
+from mirage.io.types import IOResult
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.slack import SlackConfig, SlackResource
@@ -78,6 +82,23 @@ def test_file_prompt_omits_cli_section_with_none_installed():
     ws = Workspace({}, mode=MountMode.WRITE)
     prompt = ws.file_prompt
     assert "Installed CLIs" not in prompt
+
+
+def test_custom_cli_with_builtin_spec_name_keeps_its_own_guide():
+
+    async def custom(inv):
+        return None, IOResult()
+
+    ws = Workspace({})
+    ws.register_cli(
+        "ntn-custom",
+        CLISpec(name="ntn", description="Custom utility", fn=custom))
+    assert "Custom utility" in ws.file_prompt
+    assert "Notion" not in ws.file_prompt
+    page = asyncio.run(ws.execute("man ntn-custom"))
+    assert page.exit_code == 0
+    assert b"Custom utility" in page.stdout
+    assert b"Notion" not in page.stdout
 
 
 def test_file_prompt_lists_each_install_of_a_shared_spec_separately():

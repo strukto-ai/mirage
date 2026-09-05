@@ -30,11 +30,14 @@ cat /gsheets/owned/2026-05-01_Q3_Plan__sheet0001.gsheet.json | jq -r '.spreadshe
 ls /gcal/primary/2026-08-11/                # <eventId>__<HHMM-HHMM>_<title>.gcal.json
 ```
 
-The id is the segment after the last `__`. Gmail's `--id`/`--message-id`,
-Sheets' `--spreadsheet`, Docs' `--document`, and a passthrough's
-`--params '{"fileId": ...}'`/`{"calendarId": ..., "eventId": ...}` all take
-that id directly; there is no separate name-lookup flag, since Google's own
-ids (not human titles) are what every method expects.
+For Gmail, Sheets and Docs, the id follows the last `__`; remove the
+`.gmail.json`, `.gsheet.json` or `.gdoc.json` suffix first. Calendar event
+filenames instead start with the event id, **before the first `__`**;
+`cat` the event and read `.id` to get it directly. The primary calendar id
+is `primary`; other calendar directories end in `__<calendarId>`.
+Gmail's `--id`/`--message-id`, Sheets' `--spreadsheet`, Docs' `--document`,
+and a passthrough's `--params '{"fileId": ...}'` or
+`'{"calendarId": ..., "eventId": ...}'` take these ids, not human titles.
 
 ## Common lines
 

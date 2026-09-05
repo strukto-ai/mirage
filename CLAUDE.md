@@ -206,8 +206,9 @@ agent discovers state, the CLI is how it acts.
   generated verb listing, and the plugin hosts load the file themselves.
   Every fenced line in a skill that starts with the head word is dry-parsed
   through `walk` and the leaf parser in CI, so a skill cannot teach a line the
-  program refuses. A skill is keyed by the spec name, never the installed head
-  word, so two installs of one spec share it, and `skill_for`/`skillFor`
+  program refuses. A skill is bound to the builtin spec itself, so a custom
+  tree with the same name cannot inherit its guide. Two installs of one
+  builtin share it, and `skill_for`/`skillFor`
   respells the bare program word for the head an install answers to, so
   `man ntn-prod` teaches `ntn-prod` lines and not another account's. Resource
   `WRITE_PROMPT`s point at the CLI in one line and teach nothing themselves:

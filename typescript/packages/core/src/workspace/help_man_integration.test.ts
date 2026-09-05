@@ -203,7 +203,7 @@ describe('--help and man through the executor', () => {
   it('man <cli> leads with the skill body for a skilled CLI', async () => {
     const ws = await makeWs()
     ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
-    const skill = skillFor('ntn')
+    const skill = skillFor(NTN)
     if (skill === null) throw new Error('ntn ships no skill')
     const firstHeading = skill.body.split('\n').find((line) => line.startsWith('#'))
     if (firstHeading === undefined) throw new Error('ntn skill body has no heading')
@@ -228,7 +228,7 @@ describe('--help and man through the executor', () => {
   it('man <cli> <verb> carries no skill body', async () => {
     const ws = await makeWs()
     ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
-    const bodyFirstLine = skillFor('ntn')?.body.split('\n')[0] ?? ''
+    const bodyFirstLine = skillFor(NTN)?.body.split('\n')[0] ?? ''
     expect(bodyFirstLine).not.toBe('')
     const page = stdoutStr(await ws.execute('man ntn pages'))
     expect(page).toContain('Usage: ntn pages')
@@ -238,7 +238,7 @@ describe('--help and man through the executor', () => {
   it('man omits the skill when the profile narrows the tree', async () => {
     const ws = await makeWs()
     ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
-    const bodyFirstLine = skillFor('ntn')?.body.split('\n')[0] ?? ''
+    const bodyFirstLine = skillFor(NTN)?.body.split('\n')[0] ?? ''
     expect(bodyFirstLine).not.toBe('')
     // Unnarrowed, the skill leads the page.
     expect(stdoutStr(await ws.execute('man ntn')).startsWith(bodyFirstLine)).toBe(true)

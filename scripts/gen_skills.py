@@ -40,8 +40,9 @@ def load_skills() -> dict[str, str]:
 def render_py(skills: dict[str, str]) -> str:
     head = "\n".join(LICENSE_PY)
     note = "\n".join("# " + line for line in NOTE.split("\n"))
-    rows = "".join(f"    {json.dumps(name)}: {json.dumps(text)},\n"
-                   for name, text in skills.items())
+    rows = "".join(
+        f"    {json.dumps(name)}: {json.dumps(text, ensure_ascii=False)},\n"
+        for name, text in skills.items())
     return f"{head}\n\n{note}\n\nSKILLS: dict[str, str] = {{\n{rows}}}\n"
 
 

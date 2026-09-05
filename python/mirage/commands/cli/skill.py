@@ -17,7 +17,8 @@ from dataclasses import replace
 
 from mirage.commands.cli.constants import SKILLED_CLIS
 from mirage.commands.cli.generated.skills_data import SKILLS
-from mirage.commands.cli.types import Skill
+from mirage.commands.cli.specs import builtin_spec_for
+from mirage.commands.cli.types import CLISpec, Skill
 
 _QUOTES = ('"', "'")
 
@@ -96,11 +97,12 @@ def _respell(text: str, name: str, head: str) -> str:
     return pattern.sub(lambda m: m.group(1) + head, text)
 
 
-def skill_for(name: str, head: str | None = None) -> Skill | None:
-    """The parsed skill for a CLI spec name, None when it ships none.
+def skill_for(spec: CLISpec, head: str | None = None) -> Skill | None:
+    """The parsed skill for a bundled CLI spec, None when it ships none.
 
-    Keyed by the SPEC name (``install.spec.name``), never the
-    installed head word, so two installs of one spec share one skill.
+    Bound to the bundled spec itself, never just its name or installed
+    head word, so a custom tree with the same name cannot inherit an
+    unrelated guide. Two installs of one builtin still share one skill.
     Only ``SKILLED_CLIS`` answer: the generated map also carries the
     plugin's own skills (``mirage-filesystem``), and a user spec that
     happens to share such a name must not inherit one.
@@ -112,11 +114,12 @@ def skill_for(name: str, head: str | None = None) -> Skill | None:
     another account's; ``name`` and ``text`` stay the file's.
 
     Args:
-        name (str): a ``CLISpec.name``.
+        spec (CLISpec): the installed program tree.
         head (str | None): the installed head word; None or the spec
             name itself leaves the skill as written.
     """
-    if name not in SKILLED_CLIS:
+    name = spec.name
+    if name not in SKILLED_CLIS or builtin_spec_for(name) is not spec:
         return None
     text = SKILLS.get(name)
     if text is None:

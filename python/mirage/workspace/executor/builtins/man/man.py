@@ -236,7 +236,7 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
     # the installed head, so ``man ntn-prod`` teaches ``ntn-prod`` lines
     # and not another install's.
     if not verbs and _tree_visible(head, spec, session):
-        skill = skill_for(spec.name, head)
+        skill = skill_for(spec, head)
         if skill is not None:
             return skill.body + "\n\n" + help_text
     return help_text

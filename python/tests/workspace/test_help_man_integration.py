@@ -201,7 +201,7 @@ def test_man_lists_only_the_cli_verbs_the_profile_can_reach():
 def test_man_omits_the_skill_when_the_profile_narrows_the_tree():
     ws = _cli_ws()
     ws.register_cli("ntn", NTN, {"api_key": "secret_fake"})
-    skill = skill_for("ntn")
+    skill = skill_for(NTN)
     assert skill is not None
     body_first_line = skill.body.splitlines()[0]
     # Unnarrowed, the skill leads the page.

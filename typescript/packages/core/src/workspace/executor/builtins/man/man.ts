@@ -213,7 +213,7 @@ function cliMan(
   if (verbs.length === 0 && treeVisible(head, install.spec, session)) {
     // Respelled for the installed head, so `man ntn-prod` teaches
     // `ntn-prod` lines and not another install's.
-    const skill = skillFor(install.spec.name, head)
+    const skill = skillFor(install.spec, head)
     if (skill !== null) entry = `${skill.body}\n\n${entry}`
   }
   const sections = [entry]
