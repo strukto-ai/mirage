@@ -105,9 +105,11 @@ describe('CacheManager', () => {
 
   it("drops this mount's bodies without touching a neighbour", async () => {
     const [cache, index] = await seeded()
+    await cache.set('/data', new TextEncoder().encode('exact'))
     await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
     const manager = new CacheManager(cache, index, '/data/', true)
     await manager.dropPrefix()
+    expect(await cache.exists('/data')).toBe(false)
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     expect(await cache.exists('/other/keep.txt')).toBe(true)
   })

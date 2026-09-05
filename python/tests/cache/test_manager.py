@@ -157,20 +157,23 @@ def test_null_index_is_tolerated():
     assert _run(_no_index_case()) is False
 
 
-async def _drop_prefix_case() -> tuple[bool, bool, bool]:
+async def _drop_prefix_case() -> tuple[bool, bool, bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
+    await cache.set("/data", b"exact\n")
     await cache.set("/other/keep.txt", b"safe\n")
     manager = CacheManager(cache, index, "/data/", True)
     await manager.drop_prefix()
-    return (await cache.exists("/data/arch/h.txt"), await
+    return (await cache.exists("/data"), await
+            cache.exists("/data/arch/h.txt"), await
             cache.exists("/other/keep.txt"), manager._caches_reads)
 
 
 def test_drop_prefix_evicts_this_mount_only():
     """A path-unknown mutation drops the mount's bodies without reaching
     into a neighbouring mount's keyspace."""
-    dropped, kept, _ = _run(_drop_prefix_case())
+    exact, dropped, kept, _ = _run(_drop_prefix_case())
+    assert exact is False
     assert dropped is False
     assert kept is True
 

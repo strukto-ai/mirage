@@ -137,7 +137,7 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
 
 
 async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
-    """Remove one mount, closing its resource if nothing else uses it.
+    """Remove one mount, its cached scope, and any unshared resource.
 
     The virtual root, the device mount, and the history view are
     permanent. The resource is closed only when no remaining mount
@@ -160,6 +160,12 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
         raise ValueError("cannot unmount reserved prefix: '/dev/'")
     if norm == HISTORY_PREFIX + "/":
         raise ValueError(f"cannot unmount history view: {HISTORY_PREFIX!r}")
+    removed = registry.try_mount_for_prefix(prefix)
+    if removed is None:
+        registry.unmount(prefix)
+        return
+    if removed.cache_manager is not None:
+        await removed.cache_manager.drop_prefix()
     removed = registry.unmount(prefix)
     ops.unmount(prefix)
     remaining = registry.mounts()

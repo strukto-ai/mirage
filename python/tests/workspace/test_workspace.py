@@ -2708,6 +2708,78 @@ def test_unmount_closes_resource_when_owned():
     assert closed == ["yes"]
 
 
+def test_unmount_evicts_cached_mount_scope_only():
+    """Removed ownership cannot leak cached bytes into fallback routing."""
+    root = RAMResource()
+    root.caches_reads = True
+    removed = RAMResource()
+    removed.caches_reads = True
+    nested = RAMResource()
+    nested.caches_reads = True
+    root._store.files["/m/x"] = b"root\n"
+    root._store.files["/more/x"] = b"sibling\n"
+    removed._store.files["/x"] = b"child-secret\n"
+    nested._store.files["/y"] = b"nested\n"
+    ws = Workspace({
+        "/": (root, MountMode.WRITE),
+        "/m": (removed, MountMode.WRITE),
+        "/m/n": (nested, MountMode.WRITE),
+    })
+
+    assert _stdout(_exec(ws, "cat /m/x")) == b"child-secret\n"
+    assert _stdout(_exec(ws, "cat /more/x")) == b"sibling\n"
+    assert _stdout(_exec(ws, "cat /m/n/y")) == b"nested\n"
+    asyncio.run(ws.cache.set("/m", b"exact-stale"))
+
+    asyncio.run(ws.unmount("/m"))
+
+    assert asyncio.run(ws.cache.get("/m")) is None
+    assert asyncio.run(ws.cache.get("/m/x")) is None
+    assert asyncio.run(ws.cache.get("/m/n/y")) is None
+    assert asyncio.run(ws.cache.get("/more/x")) == b"sibling\n"
+    assert _stdout(_exec(ws, "cat /m/x")) == b"root\n"
+    assert _stdout(_exec(ws, "cat /m/n/y")) == b"nested\n"
+
+
+def test_unmount_shared_resource_keeps_other_owner_open():
+    """Removing one route does not close a resource another route owns."""
+    closed = []
+
+    class SharedRAM(RAMResource):
+        caches_reads = True
+
+        async def close(self):
+            closed.append("yes")
+
+    shared = SharedRAM()
+    ws = Workspace({
+        "/m": (shared, MountMode.WRITE),
+        "/other": (shared, MountMode.WRITE),
+    })
+    asyncio.run(ws.unmount("/m"))
+
+    assert closed == []
+    assert ws.mount("/other/x").resource is shared
+
+
+def test_unmount_cache_failure_keeps_mount_attached(monkeypatch):
+    """A failed eviction leaves routing intact so unmount can be retried."""
+    resource = RAMResource()
+    resource.caches_reads = True
+    ws = Workspace({"/m": resource})
+    mount = ws.mount("/m")
+    assert mount.cache_manager is not None
+
+    async def fail():
+        raise RuntimeError("cache unavailable")
+
+    monkeypatch.setattr(mount.cache_manager, "drop_prefix", fail)
+    with pytest.raises(RuntimeError, match="cache unavailable"):
+        asyncio.run(ws.unmount("/m"))
+
+    assert ws.mount("/m/x") is mount
+
+
 def test_unmount_rejects_reserved_prefixes():
     """unmount of virtual root / history view / dev / unknown prefix raises."""
     ws = _ws()

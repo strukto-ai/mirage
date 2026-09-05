@@ -39,6 +39,10 @@ class MockResource extends BaseResource implements Resource {
   }
 }
 
+class CachingRAMResource extends RAMResource {
+  override readonly cachesReads = true
+}
+
 describe('Workspace lifecycle', () => {
   it('does not open resources at construction time', () => {
     const ram = new MockResource()
@@ -209,6 +213,70 @@ describe('Workspace.unmount', () => {
     const ws = new Workspace({ '/x': r })
     await ws.unmount('/x')
     expect(r.closes).toBe(0)
+    await ws.close()
+  })
+
+  it('evicts the removed cache scope without touching a slash-adjacent sibling', async () => {
+    const enc = new TextEncoder()
+    const parser = await getTestParser()
+    const ops = new OpsRegistry()
+    const root = new CachingRAMResource()
+    const removed = new CachingRAMResource()
+    const nested = new CachingRAMResource()
+    for (const resource of [root, removed, nested]) ops.registerResource(resource)
+    root.store.files.set('/m/x', enc.encode('root\n'))
+    root.store.files.set('/more/x', enc.encode('sibling\n'))
+    removed.store.files.set('/x', enc.encode('child-secret\n'))
+    nested.store.files.set('/y', enc.encode('nested\n'))
+    const ws = new Workspace(
+      { '/': root, '/m': removed, '/m/n': nested },
+      { mode: MountMode.WRITE, ops, shellParser: parser },
+    )
+
+    expect((await ws.execute('cat /m/x')).stdoutText).toBe('child-secret\n')
+    expect((await ws.execute('cat /more/x')).stdoutText).toBe('sibling\n')
+    expect((await ws.execute('cat /m/n/y')).stdoutText).toBe('nested\n')
+    await ws.cache.set('/m', enc.encode('exact-stale'))
+
+    await ws.unmount('/m')
+
+    expect(await ws.cache.get('/m')).toBeNull()
+    expect(await ws.cache.get('/m/x')).toBeNull()
+    expect(await ws.cache.get('/m/n/y')).toBeNull()
+    expect(await ws.cache.get('/more/x')).toEqual(enc.encode('sibling\n'))
+    expect((await ws.execute('cat /m/x')).stdoutText).toBe('root\n')
+    expect((await ws.execute('cat /m/n/y')).stdoutText).toBe('nested\n')
+    await ws.close()
+  })
+
+  it('keeps a shared resource open while another mount owns it', async () => {
+    class SharedRAM extends CachingRAMResource {
+      closes = 0
+      override close(): Promise<void> {
+        this.closes++
+        return Promise.resolve()
+      }
+    }
+    const shared = new SharedRAM()
+    const ws = new Workspace({ '/m': shared, '/other': shared })
+    await ws.resolve('/m/x')
+
+    await ws.unmount('/m')
+
+    expect(shared.closes).toBe(0)
+    expect(ws.registry.mountFor('/other/x').resource).toBe(shared)
+    await ws.close()
+  })
+
+  it('keeps the mount attached when cache eviction fails', async () => {
+    const ws = new Workspace({ '/m': new CachingRAMResource() })
+    const mount = ws.registry.mountForPrefix('/m')
+    if (mount.cacheManager === null) throw new Error('missing cache manager')
+    mount.cacheManager.dropPrefix = () => Promise.reject(new Error('cache unavailable'))
+
+    await expect(ws.unmount('/m')).rejects.toThrow('cache unavailable')
+
+    expect(ws.registry.mountFor('/m/x')).toBe(mount)
     await ws.close()
   })
 

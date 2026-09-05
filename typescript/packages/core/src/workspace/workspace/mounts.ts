@@ -61,10 +61,10 @@ export interface UnmountDeps {
 }
 
 /**
- * Remove one mount, closing its resource if the workspace had opened it
- * and no other mount still references it. The virtual root, the device
- * mount, and the history view are permanent. Mirrors the Python
- * `unmount` in `workspace/mounts.py`.
+ * Remove one mount and its cached scope, closing its resource if the
+ * workspace had opened it and no other mount still references it. The
+ * virtual root, the device mount, and the history view are permanent.
+ * Mirrors the Python `unmount` in `workspace/mounts.py`.
  */
 export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<void> {
   const stripped = stripSlash(prefix)
@@ -78,6 +78,12 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (norm === HISTORY_PREFIX + '/') {
     throw new Error(`cannot unmount history view: ${HISTORY_PREFIX}`)
   }
+  const mounted = deps.registry.tryMountForPrefix(prefix)
+  if (mounted === null) {
+    deps.registry.unmount(prefix)
+    return
+  }
+  await mounted.cacheManager?.dropPrefix()
   const removed = deps.registry.unmount(prefix)
   const resource = removed.resource
   const stillMounted = deps.registry.allMounts().some((m) => m.resource === resource)
