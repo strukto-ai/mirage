@@ -26,8 +26,10 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ArithError, ReadonlyError
+from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
+from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import finish_statement
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import seed_var, session_view
@@ -53,15 +55,23 @@ async def _execute_body(
     session: Session,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
+    job_table: JobTable | None,
+    agent_id: str | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute a list of body commands sequentially."""
+    """Execute a list of body commands sequentially.
+
+    A statement ending in ``&`` is launched as a job through
+    ``run_statement`` rather than run inline; ``job_table`` and
+    ``agent_id`` are the job plane it needs.
+    """
     all_stdout: list[ByteSource | None] = []
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
     for cmd in body:
         try:
-            stdout, io, last_exec = await execute_node(cmd, session, stdin,
-                                                       call_stack)
+            stdout, io, last_exec = await run_statement(
+                execute_node, cmd, session, stdin, call_stack, job_table,
+                agent_id)
         except BreakSignal as sig:
             if sig.stdout is not None:
                 all_stdout.append(sig.stdout)
@@ -142,6 +152,8 @@ async def handle_if(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     for condition, body in branches:
         cond_stdout, cond_io, _ = await execute_node(condition, session, stdin,
@@ -150,10 +162,10 @@ async def handle_if(
         session.last_exit_code = cond_io.exit_code
         if cond_io.exit_code == 0:
             return await _execute_body(execute_node, body, session, stdin,
-                                       call_stack)
+                                       call_stack, job_table, agent_id)
     if else_body is not None:
         return await _execute_body(execute_node, else_body, session, stdin,
-                                   call_stack)
+                                   call_stack, job_table, agent_id)
     return None, IOResult(), ExecutionNode(exit_code=0)
 
 
@@ -171,6 +183,8 @@ async def handle_for(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
@@ -207,7 +221,8 @@ async def handle_for(
                 break
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
-                                                    session, stdin, call_stack)
+                                                    session, stdin, call_stack,
+                                                    job_table, agent_id)
             except BreakSignal as sig:
                 if sig.stdout is not None:
                     all_stdout.append(sig.stdout)
@@ -246,6 +261,8 @@ async def _condition_loop(
     call_stack: CallStack | None,
     label: str,
     break_on_zero: bool,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
@@ -271,7 +288,8 @@ async def _condition_loop(
                 break
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
-                                                    session, stdin, call_stack)
+                                                    session, stdin, call_stack,
+                                                    job_table, agent_id)
             except BreakSignal as sig:
                 hit_limit = False
                 if sig.stdout is not None:
@@ -314,6 +332,8 @@ async def handle_cfor(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's C-style for: ((init; cond; update)) around a body.
 
@@ -331,6 +351,9 @@ async def handle_cfor(
         stdin (ByteSource | None): input stream, line-buffered across
             iterations like for/while.
         call_stack (CallStack | None): function-call scope, if any.
+        job_table (JobTable | None): the job plane for a body statement
+            ending in ``&``.
+        agent_id (str | None): agent identity for job bookkeeping.
     """
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
@@ -351,7 +374,8 @@ async def handle_cfor(
                     break
                 try:
                     stdout, io, _ = await _execute_body(
-                        execute_node, body, session, stdin, call_stack)
+                        execute_node, body, session, stdin, call_stack,
+                        job_table, agent_id)
                 except BreakSignal as sig:
                     hit_limit = False
                     if sig.stdout is not None:
@@ -411,6 +435,8 @@ async def handle_while(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(execute_node,
                                  condition,
@@ -419,7 +445,9 @@ async def handle_while(
                                  stdin,
                                  call_stack,
                                  "while",
-                                 break_on_zero=False)
+                                 break_on_zero=False,
+                                 job_table=job_table,
+                                 agent_id=agent_id)
 
 
 async def handle_until(
@@ -429,6 +457,8 @@ async def handle_until(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return await _condition_loop(execute_node,
                                  condition,
@@ -437,7 +467,9 @@ async def handle_until(
                                  stdin,
                                  call_stack,
                                  "until",
-                                 break_on_zero=True)
+                                 break_on_zero=True,
+                                 job_table=job_table,
+                                 agent_id=agent_id)
 
 
 async def handle_case(
@@ -447,6 +479,8 @@ async def handle_case(
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     all_stdout: list[ByteSource] = []
     merged_io = IOResult()
@@ -458,8 +492,9 @@ async def handle_case(
             continue
         ran = True
         for stmt in body:
-            stdout, io, last_exec = await execute_node(stmt, session, stdin,
-                                                       call_stack)
+            stdout, io, last_exec = await run_statement(
+                execute_node, stmt, session, stdin, call_stack, job_table,
+                agent_id)
             stdin = None
             stdout = await finish_statement(stdout, io, session)
             if stdout is not None:
@@ -490,6 +525,8 @@ async def handle_select(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
+    job_table: JobTable | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run bash's select loop: menu to stderr, choice read from stdin.
 
@@ -507,6 +544,9 @@ async def handle_select(
         session (Session): shell session state.
         stdin (ByteSource | None): line source for choices.
         call_stack (CallStack | None): function-call scope, if any.
+        job_table (JobTable | None): the job plane for a body statement
+            ending in ``&``.
+        agent_id (str | None): agent identity for job bookkeeping.
     """
     merged_io = IOResult()
     all_stdout: list[ByteSource | None] = []
@@ -562,7 +602,8 @@ async def handle_select(
                 break
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
-                                                    session, None, call_stack)
+                                                    session, None, call_stack,
+                                                    job_table, agent_id)
             except BreakSignal as sig:
                 if sig.stdout is not None:
                     all_stdout.append(sig.stdout)

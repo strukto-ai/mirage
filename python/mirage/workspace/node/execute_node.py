@@ -39,7 +39,7 @@ from mirage.workspace.executor.control import (handle_case, handle_cfor,
                                                handle_for, handle_if,
                                                handle_select, handle_until,
                                                handle_while)
-from mirage.workspace.executor.jobs import pump
+from mirage.workspace.executor.jobs import pump, run_statement
 from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
                                              handle_subshell)
 from mirage.workspace.executor.redirect import handle_redirect
@@ -520,7 +520,8 @@ async def execute_node(
         for child in node.named_children:
             if child.type == NT.COMMENT:
                 continue
-            stdout, io, last_exec = await stream(child, session, stdin, cs)
+            stdout, io, last_exec = await run_statement(
+                stream, child, session, stdin, cs, job_table, agent_id)
             stdout = await finish_statement(stdout, io, session)
             if stdout is not None:
                 all_stdout.append(stdout)
@@ -538,7 +539,14 @@ async def execute_node(
     # ── if ──────────────────────────────────────
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
-        return await handle_if(stream, branches, else_body, session, stdin, cs)
+        return await handle_if(stream,
+                               branches,
+                               else_body,
+                               session,
+                               stdin,
+                               cs,
+                               job_table=job_table,
+                               agent_id=agent_id)
 
     # ── C-style for (for ((init;cond;update))) ──
     if kind == NodeKind.CFOR:
@@ -548,8 +556,15 @@ async def execute_node(
                             execute_fn=execute_fn,
                             call_stack=cs,
                             view=view)
-        return await handle_cfor(stream, exprs, body, eval_expr, session,
-                                 stdin, cs)
+        return await handle_cfor(stream,
+                                 exprs,
+                                 body,
+                                 eval_expr,
+                                 session,
+                                 stdin,
+                                 cs,
+                                 job_table=job_table,
+                                 agent_id=agent_id)
 
     # ── for / select ────────────────────────────
     if kind in (NodeKind.FOR, NodeKind.SELECT):
@@ -577,7 +592,9 @@ async def execute_node(
                                        session,
                                        stdin,
                                        cs,
-                                       policies=namespace.registry.policies)
+                                       policies=namespace.registry.policies,
+                                       job_table=job_table,
+                                       agent_id=agent_id)
         return await handle_for(stream,
                                 var,
                                 classified,
@@ -585,15 +602,30 @@ async def execute_node(
                                 session,
                                 stdin,
                                 cs,
-                                policies=namespace.registry.policies)
+                                policies=namespace.registry.policies,
+                                job_table=job_table,
+                                agent_id=agent_id)
 
     # ── while / until ───────────────────────────
     if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         condition, body = get_while_parts(node)
         if kind == NodeKind.UNTIL:
-            return await handle_until(stream, condition, body, session, stdin,
-                                      cs)
-        return await handle_while(stream, condition, body, session, stdin, cs)
+            return await handle_until(stream,
+                                      condition,
+                                      body,
+                                      session,
+                                      stdin,
+                                      cs,
+                                      job_table=job_table,
+                                      agent_id=agent_id)
+        return await handle_while(stream,
+                                  condition,
+                                  body,
+                                  session,
+                                  stdin,
+                                  cs,
+                                  job_table=job_table,
+                                  agent_id=agent_id)
 
     # ── case ────────────────────────────────────
     if kind == NodeKind.CASE:
@@ -606,7 +638,14 @@ async def execute_node(
                 for p in pattern_nodes
             ]
             case_items.append((patterns, body, terminator))
-        return await handle_case(stream, word, case_items, session, stdin, cs)
+        return await handle_case(stream,
+                                 word,
+                                 case_items,
+                                 session,
+                                 stdin,
+                                 cs,
+                                 job_table=job_table,
+                                 agent_id=agent_id)
 
     # ── function definition ─────────────────────
     if kind == NodeKind.FUNCTION_DEF:

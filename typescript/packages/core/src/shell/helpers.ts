@@ -233,6 +233,20 @@ export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }
 
+/**
+ * Whether a statement's terminator is `&`.
+ *
+ * tree-sitter puts the `&` beside the statement it ends, inside whatever
+ * body holds them both, so a body read as named children (every
+ * extractor above) never sees it. Asking the statement about its own
+ * next sibling is what lets a loop body, an if/case arm, a brace group
+ * and a function body launch the job the program loop launches for a
+ * top-level `cmd &`.
+ */
+export function isBackgrounded(node: TSNodeLike): boolean {
+  return node.nextSibling?.type === NT.BACKGROUND
+}
+
 const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
   NT.HEREDOC_REDIRECT,

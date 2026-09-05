@@ -12,10 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
+import type { ShellParser } from '../../shell/parse/index.ts'
+import { MountMode } from '../../types.ts'
+import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 
@@ -184,5 +189,71 @@ describe('handlePs', () => {
     const jt = new JobTable()
     const [out] = handlePs(jt, ['ps'])
     expect((out as Uint8Array).byteLength).toBe(0)
+  })
+})
+
+// `&` inside a compound body launches a job, as it does at top level.
+
+let parser: ShellParser
+
+beforeAll(async () => {
+  parser = await getTestParser()
+})
+
+function buildWs(): Workspace {
+  return new Workspace(
+    { '/m': [new RAMResource(), MountMode.WRITE] },
+    { mode: MountMode.WRITE, shellParser: parser },
+  )
+}
+
+const BODY_SHAPES = [
+  'for i in 1; do false & done',
+  'for ((k=0;k<1;k++)); do false & done',
+  'n=0; while [ $n -lt 1 ]; do false & n=$((n+1)); done',
+  'n=0; until [ $n -ge 1 ]; do false & n=$((n+1)); done',
+  'if true; then false & fi',
+  'if false; then :; elif true; then false & fi',
+  'if false; then :; else false & fi',
+  'case x in x) false & ;; esac',
+  '{ false & }',
+  'f() { false & }; f',
+]
+
+describe('& inside a compound body', () => {
+  it.each(BODY_SHAPES)('launches a job with launch status 0: %s', async (line) => {
+    const ws = buildWs()
+    const io = await ws.execute(`${line}; echo rc=$?`)
+    expect(stdoutStr(io)).toBe('rc=0\n')
+    const job = ws.jobTable.get(1)
+    expect(job?.command).toBe('false')
+    await ws.jobTable.wait(1)
+    expect(job?.exitCode).toBe(1)
+  })
+
+  it('leaves loop-body jobs running when the loop ends', async () => {
+    const ws = buildWs()
+    const io = await ws.execute('for i in 1 2; do sleep 0.3 & done; jobs')
+    expect(stdoutStr(io)).toBe('[1] running sleep 0.3\n[2] running sleep 0.3\n')
+    await ws.execute('wait')
+    expect(stdoutStr(await ws.execute('jobs'))).toBe('')
+  })
+
+  it('wait adopts loop-body jobs in id order, after the foreground line', async () => {
+    const ws = buildWs()
+    const io = await ws.execute('for i in 1 2; do echo $i & done; echo launched; wait')
+    expect(stdoutStr(io)).toBe('launched\n1\n2\n')
+  })
+
+  it('$! names each loop-body job', async () => {
+    const ws = buildWs()
+    const io = await ws.execute('for i in 1 2; do sleep 0.1 & echo $!; done; wait')
+    expect(stdoutStr(io)).toBe('1\n2\n')
+  })
+
+  it('errexit does not trip on a body launch', async () => {
+    const ws = buildWs()
+    const io = await ws.execute('set -e; for i in 1; do false & done; echo ok; wait')
+    expect(stdoutStr(io)).toBe('ok\n')
   })
 })

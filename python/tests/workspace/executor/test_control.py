@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -19,6 +20,7 @@ import pytest
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.shell.errors import ArithError
+from mirage.shell.job_table import JobStatus, JobTable
 from mirage.workspace.executor.control import (BreakSignal, ContinueSignal,
                                                handle_case, handle_cfor,
                                                handle_for, handle_if,
@@ -32,10 +34,21 @@ from mirage.workspace.types import ExecutionNode
 class FakeNode:
     text: str
     type: str = "command"
+    next_sibling: "FakeNode | None" = None
 
 
 def node(text: str) -> FakeNode:
     return FakeNode(text=text)
+
+
+def bg(text: str) -> FakeNode:
+    """A body statement whose terminator is ``&``.
+
+    Its text is bytes, as a tree-sitter node's is, because the job
+    launcher names the job through ``get_text``.
+    """
+    return FakeNode(text=text.encode(),
+                    next_sibling=FakeNode(text="&", type="&"))
 
 
 def session(**kwargs) -> Session:
@@ -326,3 +339,107 @@ async def test_cfor_aborts_with_status_1_on_a_bad_expression():
     assert io.exit_code == 1
     assert b"bash: ((: x +: syntax error" in await materialize(io.stderr)
     assert await text_of(stdout) == "ran\n"
+
+
+# ── `&` inside a body: the statement becomes a job, the launch answers 0 ──
+
+
+def _parked_executor(gate: asyncio.Event, ran: list[str]):
+    """An executor whose ``slow`` statement blocks until ``gate`` is set.
+
+    Args:
+        gate (asyncio.Event): released by the test once it has asserted
+            the body returned without waiting for the job.
+        ran (list[str]): statement texts in the order they finished.
+    """
+
+    async def execute(n, *_args, **_kw):
+        text = n.text.decode() if isinstance(n.text, bytes) else n.text
+        if text == "slow":
+            await gate.wait()
+        ran.append(text)
+        return result(exit_code=3 if text == "slow" else 0)
+
+    return execute
+
+
+@pytest.mark.asyncio
+async def test_if_body_ampersand_launches_a_job_and_answers_the_launch_status(
+):
+    table = JobTable()
+    gate = asyncio.Event()
+    ran: list[str] = []
+    sess = session()
+    branches = [(node("c"), [bg("slow")])]
+    _, io, _ = await asyncio.wait_for(handle_if(_parked_executor(gate, ran),
+                                                branches,
+                                                None,
+                                                sess,
+                                                job_table=table,
+                                                agent_id="a1"),
+                                      timeout=2)
+    # The body came back while the job is still parked, and its status
+    # is the launch's 0, not the job's eventual 3.
+    assert ran == ["c"]
+    assert io.exit_code == 0
+    assert sess.last_exit_code == 0
+    job = table.get(1)
+    assert job is not None
+    assert job.command == "slow"
+    assert job.status == JobStatus.RUNNING
+    gate.set()
+    await table.wait(1)
+    assert ran == ["c", "slow"]
+    assert job.exit_code == 3
+
+
+@pytest.mark.asyncio
+async def test_case_arm_ampersand_launches_a_job():
+    table = JobTable()
+    gate = asyncio.Event()
+    ran: list[str] = []
+    items = [(["x"], [bg("slow")], ";;")]
+    _, io, _ = await asyncio.wait_for(handle_case(_parked_executor(gate, ran),
+                                                  "x",
+                                                  items,
+                                                  session(),
+                                                  job_table=table,
+                                                  agent_id="a1"),
+                                      timeout=2)
+    assert ran == []
+    assert io.exit_code == 0
+    job = table.get(1)
+    assert job is not None
+    assert job.command == "slow"
+    gate.set()
+    await table.wait(1)
+    assert job.exit_code == 3
+
+
+@pytest.mark.asyncio
+async def test_for_body_ampersand_launches_one_job_per_iteration():
+    table = JobTable()
+    gate = asyncio.Event()
+    ran: list[str] = []
+    _, io, _ = await asyncio.wait_for(handle_for(_parked_executor(gate, ran),
+                                                 "i", ["1", "2"], [bg("slow")],
+                                                 session(),
+                                                 job_table=table,
+                                                 agent_id="a1"),
+                                      timeout=2)
+    assert ran == []
+    assert io.exit_code == 0
+    assert [j.command for j in table.list_jobs()] == ["slow", "slow"]
+    gate.set()
+    await table.wait_all()
+    assert ran == ["slow", "slow"]
+
+
+@pytest.mark.asyncio
+async def test_body_ampersand_without_a_job_table_fails_loud():
+
+    async def execute(n, *_args, **_kw):
+        return result()
+
+    with pytest.raises(RuntimeError, match="job table"):
+        await handle_if(execute, [(node("c"), [bg("x")])], None, session())
