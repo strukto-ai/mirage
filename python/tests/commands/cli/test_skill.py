@@ -159,6 +159,15 @@ def test_skill_for_leaves_the_skill_alone_under_its_own_head():
                      "ntn") == skill_for(cli_spec_for("ntn"))
 
 
+@pytest.mark.parametrize("name", sorted(SKILLED_CLIS))
+def test_aliased_skill_does_not_assume_a_default_mount(name):
+    skill = skill_for(cli_spec_for(name), name + "-customer")
+    assert skill is not None
+    assert not re.search(
+        r"/(linear|slack|discord|notion|gmail|gsheets|gdocs|gcal|gdrive)(?=/|\s|`)",
+        skill.body)
+
+
 def test_skill_for_respells_only_the_bare_word():
     # A longer identifier, a path segment or a dotted name that merely
     # contains the program's name is not a mention of it.

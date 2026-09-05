@@ -15,17 +15,21 @@
 from collections.abc import Mapping
 
 from mirage.commands.cli.skill import skill_for
+from mirage.policy.match import pattern_matches
+from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.types import MountMode
 from mirage.workspace.cli.types import CLIInstall
+from mirage.workspace.lookup import cli_tree_visible, verb_visible
 from mirage.workspace.mount import MountEntry
+from mirage.workspace.session import Session
 
 HELP_HINT = (
     "Tip: run `man` to list every available command grouped by resource, "
     "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
 
 CLI_SECTION_HEADER = (
-    "Installed CLIs (act on a service by name; the mounts above are how "
-    "you find its ids):")
+    "Installed CLIs (choose the intended account; mounts and CLI installs "
+    "are independent):")
 
 
 def _cli_description(head: str, install: CLIInstall) -> str:
@@ -45,26 +49,56 @@ def _cli_description(head: str, install: CLIInstall) -> str:
     return install.spec.description or "(no description)"
 
 
-def _cli_section(clis: Mapping[str, CLIInstall]) -> str:
-    """The "Installed CLIs" section, empty string when nothing is installed.
+def _help_allowed(tokens: tuple[str, ...], session: Session) -> bool:
+    """Match the whole help line, not just a visible head-word prefix.
+
+    Args:
+        tokens (tuple[str, ...]): the concrete help command's words.
+        session (Session): the session reading the prompt.
+    """
+    if (session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
+            and tokens[0] in session.aliases):
+        return False
+    rules = session.commands
+    return rules is None or rules.allow is None or any(
+        pattern_matches(pattern, tokens) for pattern in rules.allow)
+
+
+def _cli_section(clis: Mapping[str, CLIInstall],
+                 session: Session | None) -> str:
+    """The "Installed CLIs" section, empty when no installs are visible.
 
     Args:
         clis (Mapping[str, CLIInstall]): installs keyed by head word.
+        session (Session | None): the default session, absent until hydrated.
     """
-    if not clis:
+    if not clis or session is None:
         return ""
     lines = [CLI_SECTION_HEADER]
     for head in sorted(clis):
-        desc = _cli_description(head, clis[head])
+        if not verb_visible(head, (), session):
+            continue
+        full_tree = cli_tree_visible(head, clis[head].spec, session)
+        desc = (_cli_description(head, clis[head])
+                if full_tree else "CLI with a restricted command set")
         if not desc.endswith("."):
             desc += "."
-        lines.append(f"- {head} — {desc} Guide: man {head}")
-    return "\n".join(lines)
+        guide = ""
+        if _help_allowed(("man", head), session):
+            guide = f" Guide: man {head}"
+        elif (full_tree and head not in session.functions and _help_allowed(
+            (head, "--help"), session)):
+            guide = f" Guide: {head} --help"
+        lines.append(f"- {head} — {desc}{guide}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def build_file_prompt(mounts: list[MountEntry],
-                      clis: Mapping[str, CLIInstall]) -> str:
-    parts: list[str] = [HELP_HINT]
+def build_file_prompt(mounts: list[MountEntry], clis: Mapping[str, CLIInstall],
+                      session: Session | None) -> str:
+    parts: list[str] = []
+    if session is not None:
+        parts.append(HELP_HINT if _help_allowed(("man", ), session) else
+                     "Tip: run `<cmd> --help` for flag details.")
     for m in mounts:
         prompt = m.resource.PROMPT
         if not prompt:
@@ -75,7 +109,7 @@ def build_file_prompt(mounts: list[MountEntry],
             section += "\n" + m.resource.WRITE_PROMPT.replace(
                 "{prefix}", prefix)
         parts.append(section)
-    cli_section = _cli_section(clis)
+    cli_section = _cli_section(clis, session)
     if cli_section:
         parts.append(cli_section)
     return "\n\n".join(parts)

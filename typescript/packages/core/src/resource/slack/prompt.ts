@@ -36,4 +36,5 @@ export const SLACK_PROMPT = `{prefix}
   rg over files/ uses Slack's server-side file content search; works on
   PDFs, Word docs, code snippets that Slack has indexed.`
 
-export const SLACK_WRITE_PROMPT = `  Writes go through the slack CLI when it is installed; run man slack for the guide.`
+export const SLACK_WRITE_PROMPT = `  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.`

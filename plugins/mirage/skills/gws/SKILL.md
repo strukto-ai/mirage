@@ -1,7 +1,7 @@
 ---
 name: gws
-description: Acts on Gmail, Drive, Docs, Sheets, Slides, Calendar and Forms from inside a Mirage workspace by dispatching the `gws` CLI (a typed program tree, not a mount path). Use it whenever a task needs to send mail, edit a spreadsheet or document, or call any Google Workspace API method directly after discovering identifiers on a Mirage mount such as /gmail, /gdrive, /gsheets, /gdocs or /gcal.
-compatibility: Requires a Mirage workspace with the `gws` CLI installed; the matching Google Workspace mounts (Gmail, Drive, Docs, Sheets, Slides, Calendar) are optional but recommended for discovering identifiers.
+description: 'Use when working with Google Workspace through the `gws` CLI: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms and raw API calls.'
+compatibility: Requires a Mirage workspace with the `gws` CLI installed, including under an alias. Mounts are optional and configured independently.
 metadata:
   service: Google Workspace
   mirage-tier: account-cli
@@ -10,24 +10,35 @@ metadata:
 # gws
 
 `gws` is Mirage's Google Workspace API client, installed as a typed program
-tree beside the Google mounts. It is dispatched by name inside the Mirage
+tree independently of the Google mounts. It is dispatched by name inside the Mirage
 shell (an account CLI, not a mount path), mirroring the official Google
 Workspace CLI: one passthrough leaf per Discovery method
 (`gws <service> <resource> <method>`) plus hand-written helper verbs under
 each service (`gws gmail send`). Run `gws --help` for the service list,
 `gws <service> <resource> --help` for that resource's methods.
 
-## Find identifiers on the mount
+## Choose the account and mount
 
-Each service's mount (the mount path your workspace uses, e.g. `/gmail`,
-`/gdrive`, `/gsheets`, `/gdocs`, `/gcal`) encodes the id the CLI needs in a
-file or directory name.
+Use Installed CLIs, or run bare `man` in the Mirage shell and read its
+`# clis` section when the prompt is unavailable, to select the installation for the intended Google Workspace
+account. Examples below use `gws`; substitute the installed name when
+using an alias. A CLI and a mount are configured independently: neither a
+shared service name nor similar paths establishes that they use the same
+account. Before reusing mount IDs or human keys, confirm that association
+from the workspace configuration or the user. If it is unknown, discover
+IDs through the selected CLI's read commands or clarify the account first.
+
+Set `GMAIL_MOUNT`, `GSHEETS_MOUNT` and `GCAL_MOUNT` to the confirmed mount prefixes before
+running the discovery examples. Use `ls` to get the exact sanitized names.
 
 ```bash
-ls /gmail/INBOX/2026-05-03/                 # <subject>__<message-id>.gmail.json
-ls /gsheets/owned/                          # <date>_<title>__<spreadsheet-id>.gsheet.json
-cat /gsheets/owned/2026-05-01_Q3_Plan__sheet0001.gsheet.json | jq -r '.spreadsheetId'
-ls /gcal/primary/2026-08-11/                # <eventId>__<HHMM-HHMM>_<title>.gcal.json
+: "${GMAIL_MOUNT:?Set GMAIL_MOUNT to the confirmed mount prefix}"
+: "${GSHEETS_MOUNT:?Set GSHEETS_MOUNT to the confirmed mount prefix}"
+: "${GCAL_MOUNT:?Set GCAL_MOUNT to the confirmed mount prefix}"
+ls "$GMAIL_MOUNT/INBOX/2026-05-03/"                 # <subject>__<message-id>.gmail.json
+ls "$GSHEETS_MOUNT/owned/"                          # <date>_<title>__<spreadsheet-id>.gsheet.json
+cat "$GSHEETS_MOUNT/owned/2026-05-01_Q3_Plan__sheet0001.gsheet.json" | jq -r '.spreadsheetId'
+ls "$GCAL_MOUNT/primary/2026-08-11/"                # <eventId>__<HHMM-HHMM>_<title>.gcal.json
 ```
 
 For Gmail, Sheets and Docs, the id follows the last `__`; remove the

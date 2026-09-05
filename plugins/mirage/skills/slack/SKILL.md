@@ -1,7 +1,7 @@
 ---
 name: slack
-description: Acts on Slack channels, DMs and messages from inside a Mirage workspace by dispatching the `slack` CLI (a typed program tree, not a mount path). Use it whenever a task needs to send a message, reply in a thread, react, pin, or look up a member after discovering channel, DM, or user identifiers on a Mirage Slack mount such as /slack, since the mount itself is read-only.
-compatibility: Requires a Mirage workspace with the `slack` CLI installed; the matching Slack mount is optional but recommended for discovering identifiers.
+description: 'Use when working with Slack through the `slack` CLI: messages, replies, reactions, pins, channels, DMs and members.'
+compatibility: Requires a Mirage workspace with the `slack` CLI installed, including under an alias. Mounts are optional and configured independently.
 metadata:
   service: Slack
   mirage-tier: account-cli
@@ -10,22 +10,31 @@ metadata:
 # slack
 
 `slack` is Mirage's Slack Web API client, installed as a typed program tree
-beside a Slack mount. It is dispatched by name inside the Mirage shell (an
+independently of Slack mounts. It is dispatched by name inside the Mirage shell (an
 account CLI, not a mount path), with kebab-case verbs (`send-message`,
 `read-messages`, `pin-message`). Run `slack --help` or `man slack` to print every verb and
 flag.
 
-## Find identifiers on the mount
+## Choose the account and mount
 
-The mount (`/slack`, the mount path your workspace uses) renders every id in
-a directory or file name; `ls` the parent directory to see the exact
-sanitized name before using it.
+Use Installed CLIs, or run bare `man` in the Mirage shell and read its
+`# clis` section when the prompt is unavailable, to select the installation for the intended Slack
+account. Examples below use `slack`; substitute the installed name when
+using an alias. A CLI and a mount are configured independently: neither a
+shared service name nor similar paths establishes that they use the same
+account. Before reusing mount IDs or human keys, confirm that association
+from the workspace configuration or the user. If it is unknown, discover
+IDs through the selected CLI's read commands or clarify the account first.
+
+Set `SLACK_MOUNT` to the confirmed mount prefix before
+running the discovery examples. Use `ls` to get the exact sanitized names.
 
 ```bash
-ls /slack/channels/                              # <channel-name>__<channel-id>/
-ls /slack/dms/                                   # <user-name>__<dm-id>/
-ls /slack/users/                                  # <username>__<user-id>.json
-cat /slack/channels/general__C0000000001/2026-08-11/chat.jsonl | jq -r '.ts, .user'
+: "${SLACK_MOUNT:?Set SLACK_MOUNT to the confirmed mount prefix}"
+ls "$SLACK_MOUNT/channels/"                              # <channel-name>__<channel-id>/
+ls "$SLACK_MOUNT/dms/"                                   # <user-name>__<dm-id>/
+ls "$SLACK_MOUNT/users/"                                  # <username>__<user-id>.json
+cat "$SLACK_MOUNT/channels/general__C0000000001/2026-08-11/chat.jsonl" | jq -r '.ts, .user'
 ```
 
 The ID is the last `__`-separated segment of the directory or file name.

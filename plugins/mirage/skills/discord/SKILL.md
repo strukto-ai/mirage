@@ -1,7 +1,7 @@
 ---
 name: discord
-description: Acts on Discord guilds, channels and messages from inside a Mirage workspace by dispatching the `discord` CLI (a typed program tree, not a mount path). Use it whenever a task needs to send a message, reply, react, edit or delete a message, create a thread, post a poll, or look up guild members after discovering guild, channel and message identifiers on a Mirage Discord mount such as /discord.
-compatibility: Requires a Mirage workspace with the `discord` CLI installed; the matching Discord mount is optional but recommended for discovering identifiers.
+description: 'Use when working with Discord through the `discord` CLI: messages, reactions, threads, polls, guilds, channels and members.'
+compatibility: Requires a Mirage workspace with the `discord` CLI installed, including under an alias. Mounts are optional and configured independently.
 metadata:
   service: Discord
   mirage-tier: account-cli
@@ -10,22 +10,31 @@ metadata:
 # discord
 
 `discord` is Mirage's Discord REST API client, installed as a typed program
-tree beside a Discord mount. It is dispatched by name inside the Mirage
+tree independently of Discord mounts. It is dispatched by name inside the Mirage
 shell (an account CLI, not a mount path), with bare verbs (`send`, `read`,
 `edit`, `delete`, `react`).
 Run `discord --help` or `man discord` to print every verb and flag.
 
-## Find identifiers on the mount
+## Choose the account and mount
 
-The mount (`/discord`, the mount path your workspace uses) renders every id
-in a directory name; `ls` the parent directory to see the exact sanitized
-name before using it.
+Use Installed CLIs, or run bare `man` in the Mirage shell and read its
+`# clis` section when the prompt is unavailable, to select the installation for the intended Discord
+account. Examples below use `discord`; substitute the installed name when
+using an alias. A CLI and a mount are configured independently: neither a
+shared service name nor similar paths establishes that they use the same
+account. Before reusing mount IDs or human keys, confirm that association
+from the workspace configuration or the user. If it is unknown, discover
+IDs through the selected CLI's read commands or clarify the account first.
+
+Set `DISCORD_MOUNT` to the confirmed mount prefix before
+running the discovery examples. Use `ls` to get the exact sanitized names.
 
 ```bash
-ls /discord/                                                   # <guild-name>__<guild-id>/
-ls /discord/MyServer__1256522563555819574/channels/            # <channel-name>__<channel-id>/
-ls /discord/MyServer__1256522563555819574/members/             # <username>__<user-id>.json
-cat /discord/MyServer__1256522563555819574/channels/general__1256522563555819574/2026-08-11/chat.jsonl \
+: "${DISCORD_MOUNT:?Set DISCORD_MOUNT to the confirmed mount prefix}"
+ls "$DISCORD_MOUNT/"                                                   # <guild-name>__<guild-id>/
+ls "$DISCORD_MOUNT/MyServer__1256522563555819574/channels/"            # <channel-name>__<channel-id>/
+ls "$DISCORD_MOUNT/MyServer__1256522563555819574/members/"             # <username>__<user-id>.json
+cat "$DISCORD_MOUNT/MyServer__1256522563555819574/channels/general__1256522563555819574/2026-08-11/chat.jsonl" \
   | jq -r '.id, .author.username'
 ```
 

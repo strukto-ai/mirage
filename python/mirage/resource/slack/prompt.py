@@ -38,5 +38,5 @@ PROMPT = """\
   PDFs, Word docs, code snippets that Slack has indexed."""
 
 WRITE_PROMPT = """\
-  Writes go through the slack CLI when it is installed; run man slack \
-for the guide."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""

@@ -29,8 +29,8 @@ describe('GDOCS_PROMPT', () => {
 
 describe('GDOCS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GDOCS_WRITE_PROMPT).toContain('run man gws for the guide')
-    expect(GDOCS_WRITE_PROMPT).toContain('gws docs documents batchUpdate --json')
+    expect(GDOCS_WRITE_PROMPT).toContain('Installed CLIs')
+    expect(GDOCS_WRITE_PROMPT).toContain('--json')
   })
 
   it('documents rm and the newline gotcha', () => {

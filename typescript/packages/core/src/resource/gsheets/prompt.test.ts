@@ -24,13 +24,13 @@ describe('GSHEETS_PROMPT', () => {
     expect(rendered).toContain('still in owned/')
     expect(rendered).toContain('gsheet.json structure')
     expect(rendered).toContain('.sheets[].properties.title')
-    expect(rendered).toContain('gws sheets read')
+    expect(rendered).toContain('Installed CLIs')
   })
 })
 
 describe('GSHEETS_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GSHEETS_WRITE_PROMPT).toContain('run man gws for the guide')
+    expect(GSHEETS_WRITE_PROMPT).toContain('Installed CLIs')
   })
 
   it('documents rm', () => {

@@ -28,8 +28,7 @@ def test_prompt_includes_buckets_and_structure():
 
 
 def test_write_prompt_points_at_the_cli():
-    assert "gws CLI" in WRITE_PROMPT
-    assert "man gws" in WRITE_PROMPT
+    assert "Installed CLIs" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm():

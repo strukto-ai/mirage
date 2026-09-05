@@ -23,12 +23,11 @@ def test_prompt_includes_buckets_and_structure():
     assert "still in owned/" in rendered
     assert "gsheet.json structure" in rendered
     assert ".sheets[].properties.title" in rendered
-    assert "gws sheets read" in rendered
+    assert "Installed CLIs" in rendered
 
 
 def test_write_prompt_points_at_the_cli():
-    assert "gws CLI" in WRITE_PROMPT
-    assert "man gws" in WRITE_PROMPT
+    assert "Installed CLIs" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm():

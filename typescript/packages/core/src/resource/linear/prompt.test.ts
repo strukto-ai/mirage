@@ -28,12 +28,12 @@ describe('LINEAR_PROMPT', () => {
     expect(rendered).toContain('mirage-normalized')
     expect(rendered).toContain('.issue_key')
     expect(rendered).toContain('.label_names[]')
-    expect(rendered).toContain('linear --help')
+    expect(rendered).toContain('Installed CLIs')
   })
 })
 
 describe('LINEAR_WRITE_PROMPT', () => {
-  it('points at the linear CLI', () => {
-    expect(LINEAR_WRITE_PROMPT).toContain('run man linear for the guide')
+  it('points at the Installed CLIs', () => {
+    expect(LINEAR_WRITE_PROMPT).toContain('Installed CLIs')
   })
 })

@@ -65,7 +65,8 @@ export const GSLIDES_PROMPT = `{prefix}
     .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
     .slides[0].objectId`
 
-export const GSLIDES_WRITE_PROMPT = `  Writes go through the gws CLI when it is installed; run man gws for the guide.
+export const GSLIDES_WRITE_PROMPT = `  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.
 
   Delete:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive

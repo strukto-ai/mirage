@@ -29,7 +29,7 @@ describe('GSLIDES_PROMPT', () => {
 
 describe('GSLIDES_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GSLIDES_WRITE_PROMPT).toContain('run man gws for the guide')
+    expect(GSLIDES_WRITE_PROMPT).toContain('Installed CLIs')
   })
 
   it('documents rm', () => {

@@ -267,6 +267,14 @@ describe('generated skills_data is in sync with plugins/mirage/skills', () => {
 
 describe('SKILLED_CLIS', () => {
   for (const name of SKILLED_CLIS) {
+    it(`'${name}' aliases do not assume a default mount`, () => {
+      const skill = skillFor(cliSpecFor(name), `${name}-customer`)
+      expect(skill).not.toBeNull()
+      expect(skill?.body).not.toMatch(
+        /\/(linear|slack|discord|notion|gmail|gsheets|gdocs|gcal|gdrive)(?=\/|\s|`)/,
+      )
+    })
+
     it(`'${name}' ships a skill whose frontmatter matches`, () => {
       const skill = skillFor(cliSpecFor(name))
       expect(skill).not.toBeNull()

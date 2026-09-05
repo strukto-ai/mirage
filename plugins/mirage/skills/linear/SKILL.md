@@ -1,7 +1,7 @@
 ---
 name: linear
-description: Acts on Linear issues, teams, projects, cycles, labels, comments, users and documents from inside a Mirage workspace by dispatching the `linear` CLI (a typed program tree, not a mount path). Use it whenever a task needs to read or write Linear state after discovering identifiers on a Mirage Linear mount such as /linear, for example creating or updating an issue, assigning it, moving it through workflow states, or commenting on it.
-compatibility: Requires a Mirage workspace with the `linear` CLI installed; the matching Linear mount is optional but recommended for discovering identifiers.
+description: 'Use when working with Linear through the `linear` CLI: issues, teams, projects, cycles, labels, comments, users and documents.'
+compatibility: Requires a Mirage workspace with the `linear` CLI installed, including under an alias. Mounts are optional and configured independently.
 metadata:
   service: Linear
   mirage-tier: account-cli
@@ -10,23 +10,32 @@ metadata:
 # linear
 
 `linear` is Mirage's Linear GraphQL API client, installed as a typed program
-tree beside a Linear mount. It is dispatched by name inside the Mirage
+tree independently of Linear mounts. It is dispatched by name inside the Mirage
 shell (an account CLI, not a mount path), speaking a noun/verb grammar
 (`linear issue create`, `linear team list`). Run `linear --help` or
 `man linear` to print every verb, subcommand and flag.
 
-## Find identifiers on the mount
+## Choose the account and mount
 
-The mount (`/linear`, the mount path your workspace uses) renders every id
-in a directory or file name; `ls` the parent directory to see the exact
-sanitized name before using it.
+Use Installed CLIs, or run bare `man` in the Mirage shell and read its
+`# clis` section when the prompt is unavailable, to select the installation for the intended Linear
+account. Examples below use `linear`; substitute the installed name when
+using an alias. A CLI and a mount are configured independently: neither a
+shared service name nor similar paths establishes that they use the same
+account. Before reusing mount IDs or human keys, confirm that association
+from the workspace configuration or the user. If it is unknown, discover
+IDs through the selected CLI's read commands or clarify the account first.
+
+Set `LINEAR_MOUNT` to the confirmed mount prefix before
+running the discovery examples. Use `ls` to get the exact sanitized names.
 
 ```bash
-ls /linear/teams/                                    # PLAT__Platform__<team-id>/
-cat /linear/teams/PLAT__Platform__team-1/team.json | jq -r '.states[].state_name'
-ls /linear/teams/PLAT__Platform__team-1/issues/       # PLAT-1__<issue-id>/
-ls /linear/teams/PLAT__Platform__team-1/members/      # <display-name>__<user-id>.json
-ls /linear/teams/PLAT__Platform__team-1/projects/     # <name>__<project-id>.json
+: "${LINEAR_MOUNT:?Set LINEAR_MOUNT to the confirmed mount prefix}"
+ls "$LINEAR_MOUNT/teams/"                                    # PLAT__Platform__<team-id>/
+cat "$LINEAR_MOUNT/teams/PLAT__Platform__team-1/team.json" | jq -r '.states[].state_name'
+ls "$LINEAR_MOUNT/teams/PLAT__Platform__team-1/issues/"       # PLAT-1__<issue-id>/
+ls "$LINEAR_MOUNT/teams/PLAT__Platform__team-1/members/"      # <display-name>__<user-id>.json
+ls "$LINEAR_MOUNT/teams/PLAT__Platform__team-1/projects/"     # <name>__<project-id>.json
 ```
 
 IDs are the last `__`-separated segment of a directory or file name. Issues

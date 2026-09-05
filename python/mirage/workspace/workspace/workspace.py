@@ -155,6 +155,7 @@ class Workspace:
                                         session_store)
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
+        self._sessions_may_be_stored = store is not None or session_store is not None
         self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
         self._closed = False
         self._async_closed = False
@@ -592,8 +593,12 @@ class Workspace:
 
     @property
     def file_prompt(self) -> str:
+        # A supplied store may replace the provisional default and its rules.
+        session = None if (self._sessions_may_be_stored
+                           and not self._session_mgr.is_loaded
+                           ) else self.get_session(self.default_session_id)
         return build_file_prompt(self._registry.mounts(),
-                                 self._registry.clis.items())
+                                 self._registry.clis.items(), session)
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 

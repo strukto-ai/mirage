@@ -44,15 +44,14 @@ Reading the tree:
 Acting on it:
 
 - \`rm\` an event file to delete that event.
-- Everything else goes through the \`gws calendar\` CLI, which takes the ids
-  the tree renders:
-  \`gws calendar events insert --params '{"calendarId":"primary"}' --json ...\`
-  \`gws calendar events patch --params '{"calendarId":"primary","eventId":"..."}'\`
-  \`gws calendar freebusy query --json '{"timeMin":...,"timeMax":...,"items":[{"id":"primary"}]}'\`
+- For other actions, consult Installed CLIs when listed and choose the
+  intended Google account. Reuse mount IDs only after confirming the CLI
+  uses that account.
 - A written event must carry an explicit UTC offset or timeZone; an
   ambiguous local time is not interpreted for you.
 `
 
 export const GCAL_WRITE_PROMPT = `Deleting an event file removes it from the calendar for
-every attendee. Creating and editing events goes through \`gws calendar\`.
+every attendee. For creation and editing, choose the intended
+Google account in Installed CLIs when listed.
 `

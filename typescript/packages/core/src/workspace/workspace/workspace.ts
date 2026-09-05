@@ -109,6 +109,7 @@ export class Workspace {
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
+  private readonly sessionsMayBeStored: boolean
   private readonly sharedResources = new Set<Resource>()
   private readonly meta: WorkspaceMeta
   private readonly opsRegistry: OpsRegistry
@@ -181,6 +182,7 @@ export class Workspace {
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
+    this.sessionsMayBeStored = options.store !== undefined || options.sessionStore !== undefined
     // The env block, translated once: a literal entry becomes an
     // exported var, a managed one becomes a pointer the fill step
     // resolves at command time. Each managed entry's source is
@@ -886,7 +888,14 @@ export class Workspace {
   }
 
   get filePrompt(): string {
-    return buildFilePrompt(this.registry.allMounts(), this.registry.clis.items())
+    return buildFilePrompt(
+      this.registry.allMounts(),
+      this.registry.clis.items(),
+      // A supplied store may replace the provisional default and its rules.
+      this.sessionsMayBeStored && !this.sessionManager.isLoaded
+        ? null
+        : this.getSession(this.defaultSessionId),
+    )
   }
 
   /**

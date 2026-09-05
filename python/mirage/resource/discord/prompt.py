@@ -39,5 +39,5 @@ PROMPT = """\
   (JPG, PDF) will produce noise."""
 
 WRITE_PROMPT = """\
-  Writes go through the discord CLI when it is installed; run man \
-discord for the guide."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""

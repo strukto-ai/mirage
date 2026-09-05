@@ -14,6 +14,7 @@
 
 from collections.abc import Iterator, Sequence
 
+from mirage.commands.cli.types import CLISpec
 from mirage.policy.match import head_visible, node_visible
 from mirage.workspace.lookup.constants import NAMESPACE_COMMANDS, SHELL_NAMES
 from mirage.workspace.lookup.types import Consumer
@@ -91,6 +92,29 @@ def verb_visible(head: str, path: Sequence[str], session: Session) -> bool:
         session (Session): the shell session running the line.
     """
     return node_visible((head, *path), session.commands)
+
+
+def cli_tree_visible(head: str, spec: CLISpec, session: Session) -> bool:
+    """Whether the session can see every node of an installed tree.
+
+    A skill advertises lines across the whole program, so it leads the
+    manual only when the profile hides none of them: a narrowed manual
+    lists the verbs the session may run, and a skill teaching the rest
+    would be advertising lines that cannot run.
+
+    Args:
+        head (str): installed head word, as typed.
+        spec (CLISpec): the installed program tree.
+        session (Session): the session reading the manual.
+    """
+    stack: list[tuple[CLISpec, tuple[str, ...]]] = [(spec, ())]
+    while stack:
+        node, path = stack.pop()
+        if not verb_visible(head, path, session):
+            return False
+        stack.extend(
+            (child, (*path, child.name)) for child in node.subcommands)
+    return True
 
 
 def _layers(name: str, session: Session,

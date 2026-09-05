@@ -1,7 +1,7 @@
 ---
 name: ntn
-description: Acts on Notion pages, databases and data sources from inside a Mirage workspace by dispatching the `ntn` CLI (a typed program tree matching the official Notion CLI grammar, not a mount path). Use it whenever a task needs to read, create, edit or trash a Notion page, query a database's rows, or call the raw Notion API after discovering page, database and data-source identifiers on a Mirage Notion mount such as /notion.
-compatibility: Requires a Mirage workspace with the `ntn` CLI installed; the matching Notion mount is optional but recommended for discovering identifiers.
+description: 'Use when working with Notion through the `ntn` CLI: pages, databases, data sources and raw API calls.'
+compatibility: Requires a Mirage workspace with the `ntn` CLI installed, including under an alias. Mounts are optional and configured independently.
 metadata:
   service: Notion
   mirage-tier: account-cli
@@ -10,24 +10,34 @@ metadata:
 # ntn
 
 `ntn` is Mirage's Notion API client, installed as a typed program tree
-beside a Notion mount. It is dispatched by name inside the Mirage shell (an
+independently of Notion mounts. It is dispatched by name inside the Mirage shell (an
 account CLI, not a mount path), matching the grammar of the official Notion
 CLI verb for verb, including its clap-style help and refusal wording. Run
 `ntn --help` or `man ntn` to print every verb and flag.
 
-## Find identifiers on the mount
+## Choose the account and mount
 
-The mount (`/notion`, the mount path your workspace uses) nests a database
-as a container plus one or more data sources, since Notion's `2025-09-03`
-API split a database's column schema and rows off the container onto the
-data source. `ls` each level to read
-the exact sanitized name before using it.
+Use Installed CLIs, or run bare `man` in the Mirage shell and read its
+`# clis` section when the prompt is unavailable, to select the installation for the intended Notion
+account. Examples below use `ntn`; substitute the installed name when
+using an alias. A CLI and a mount are configured independently: neither a
+shared service name nor similar paths establishes that they use the same
+account. Before reusing mount IDs or human keys, confirm that association
+from the workspace configuration or the user. If it is unknown, discover
+IDs through the selected CLI's read commands or clarify the account first.
+
+Set `NOTION_MOUNT` to the confirmed mount prefix before
+running the discovery examples. Use `ls` to get the exact sanitized names.
+
+Notion databases contain data sources, which hold the column schema and
+row pages under the `2025-09-03` API. Inspect each directory level.
 
 ```bash
-ls /notion/pages/            # <title>__<page-id>/
-ls /notion/databases/        # <title>__<database-id>/
-ls /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/            # <ds-title>__<data-source-id>/
-ls /notion/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/  # row pages
+: "${NOTION_MOUNT:?Set NOTION_MOUNT to the confirmed mount prefix}"
+ls "$NOTION_MOUNT/pages/"            # <title>__<page-id>/
+ls "$NOTION_MOUNT/databases/"        # <title>__<database-id>/
+ls "$NOTION_MOUNT/databases/Tasks__eeee1111-2222-3333-4444-555566667777/"            # <ds-title>__<data-source-id>/
+ls "$NOTION_MOUNT/databases/Tasks__eeee1111-2222-3333-4444-555566667777/Tasks__d5000000-2222-3333-4444-555566667777/"  # row pages
 ```
 
 **Ids are positional operands, not flags**: `ntn pages get <PAGE_ID>`, not

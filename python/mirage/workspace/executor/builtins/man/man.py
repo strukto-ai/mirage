@@ -25,7 +25,8 @@ from mirage.io.types import ByteSource
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.builtins.man.types import ManEntry
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.lookup import command_visible, verb_visible
+from mirage.workspace.lookup import (cli_tree_visible, command_visible,
+                                     verb_visible)
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -171,29 +172,6 @@ def _child_visible(head: str, path: tuple[str, ...], session: Session,
     return verb_visible(head, (*path, verb), session)
 
 
-def _tree_visible(head: str, spec: CLISpec, session: Session) -> bool:
-    """Whether the session can see every node of an installed tree.
-
-    A skill advertises lines across the whole program, so it leads the
-    manual only when the profile hides none of them: a narrowed manual
-    lists the verbs the session may run, and a skill teaching the rest
-    would be advertising lines that cannot run.
-
-    Args:
-        head (str): installed head word, as typed.
-        spec (CLISpec): the installed program tree.
-        session (Session): the session reading the manual.
-    """
-    stack: list[tuple[CLISpec, tuple[str, ...]]] = [(spec, ())]
-    while stack:
-        node, path = stack.pop()
-        if not verb_visible(head, path, session):
-            return False
-        stack.extend(
-            (child, (*path, child.name)) for child in node.subcommands)
-    return True
-
-
 def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
                       session: Session) -> str | None:
     """The page for one node of an installed CLI, None when verbs miss
@@ -235,7 +213,7 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
     # session that may run every line it teaches. It is respelled for
     # the installed head, so ``man ntn-prod`` teaches ``ntn-prod`` lines
     # and not another install's.
-    if not verbs and _tree_visible(head, spec, session):
+    if not verbs and cli_tree_visible(head, spec, session):
         skill = skill_for(spec, head)
         if skill is not None:
             return skill.body + "\n\n" + help_text

@@ -100,6 +100,11 @@ class SessionManager:
         self._default_profile: CompiledProfile | None = None
 
     @property
+    def is_loaded(self) -> bool:
+        """Whether persisted session fields have been hydrated."""
+        return self._loaded
+
+    @property
     def has_managed_env(self) -> bool:
         """True once any session may hold a managed variable.
 

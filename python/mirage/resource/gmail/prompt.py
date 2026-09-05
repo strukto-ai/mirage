@@ -72,12 +72,12 @@ PROMPT = """\
     .labels[]
     .attachments[] | .filename
 
-  To act on messages (read by id, triage, raw API calls), use the gws
-  CLI if installed: gws gmail --help"""
+  For message actions (read by id, triage, raw API calls), consult
+  Installed CLIs when listed and choose the intended Google account."""
 
 WRITE_PROMPT = """\
-  Sending mail goes through the gws CLI when it is installed; run man \
-gws for the guide.
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.
 
   Body gotcha: bash double-quoted "...\\n..." is NOT a newline.
   Use $'line1\\nline2' (ANSI-C quoting) or "$(printf '...\\n...')"

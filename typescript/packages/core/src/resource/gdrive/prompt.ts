@@ -27,4 +27,4 @@ export const GDRIVE_PROMPT = `{prefix}
   Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
 
   To act on Drive items by id (create, update, export, permissions),
-  use the gws CLI if installed: gws drive --help`
+  consult Installed CLIs when listed and choose the intended Google account.`

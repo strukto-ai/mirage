@@ -27,9 +27,8 @@ def test_prompt_includes_path_anatomy_and_normalized_shapes():
     assert "mirage-normalized" in rendered
     assert ".issue_key" in rendered
     assert ".label_names[]" in rendered
-    assert "linear --help" in rendered
+    assert "Installed CLIs" in rendered
 
 
 def test_write_prompt_points_at_the_cli():
-    assert "linear CLI" in WRITE_PROMPT
-    assert "man linear" in WRITE_PROMPT
+    assert "Installed CLIs" in WRITE_PROMPT

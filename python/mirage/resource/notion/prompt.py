@@ -34,10 +34,9 @@ PROMPT = """\
   schema (not the rows). ls a data source dir to list its row pages.
 
   Titles are sanitized; don't construct paths, ls the parent dir.
-  ntn takes ids as positional operands, not flags: ntn pages get
-  <page-id>, ntn datasources query <data-source-id>, ntn datasources
-  resolve <database-id>."""
+  For page and data-source actions, consult Installed CLIs when listed
+  and choose the intended Notion account."""
 
 WRITE_PROMPT = """\
-  Writes go through the ntn CLI when it is installed; run man ntn for \
-the guide."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""
