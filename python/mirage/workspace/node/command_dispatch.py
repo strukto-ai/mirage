@@ -402,13 +402,13 @@ async def _run_argv(
             return await _route_argv(recurse, dispatch, registry, namespace,
                                      execute_fn, argv, session, stdin,
                                      call_stack, job_table, cancel,
-                                     routing_decision, row)
+                                     routing_decision, row, agent_id)
         token = set_admission(admitted)
         try:
             return await _route_argv(recurse, dispatch, registry, namespace,
                                      execute_fn, argv, session, stdin,
                                      call_stack, job_table, cancel,
-                                     routing_decision, row)
+                                     routing_decision, row, agent_id)
         finally:
             reset_admission(token)
     finally:
@@ -452,6 +452,7 @@ async def _route_argv(
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None,
     row: int,
+    agent_id: str = "",
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one admitted command to its builtin or mount handler.
 
@@ -600,7 +601,8 @@ async def _route_argv(
         call_stack,
         job_table=job_table,
         namespace=namespace,
-        routing_decision=routing_decision)
+        routing_decision=routing_decision,
+        agent_id=agent_id)
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":

@@ -265,6 +265,23 @@ def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return list(node.named_children)
 
 
+def is_backgrounded(node: tree_sitter.Node) -> bool:
+    """Whether a statement's terminator is ``&``.
+
+    tree-sitter puts the ``&`` beside the statement it ends, inside
+    whatever body holds them both, so a body read as named children
+    (every extractor above) never sees it. Asking the statement about
+    its own next sibling is what lets a loop body, an if/case arm, a
+    brace group and a function body launch the job the program loop
+    launches for a top-level ``cmd &``.
+
+    Args:
+        node (tree_sitter.Node): a body statement.
+    """
+    sibling = node.next_sibling
+    return sibling is not None and sibling.type == NT.BACKGROUND
+
+
 _REDIRECT_NODE_TYPES = frozenset({
     NT.FILE_REDIRECT,
     NT.HEREDOC_REDIRECT,

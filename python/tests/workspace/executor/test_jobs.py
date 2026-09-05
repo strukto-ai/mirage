@@ -444,3 +444,64 @@ async def test_wait_p_with_no_operand_leaves_the_variable_unset():
                           "echo \"V=[${V-UNSET}]\"")
     assert (await io.stdout_str()) == "V=[UNSET]\n"
     await ws.close()
+
+
+# ── `&` inside a compound body launches a job, as it does at top level ──
+
+_BODY_SHAPES = [
+    "for i in 1; do false & done",
+    "for ((k=0;k<1;k++)); do false & done",
+    "n=0; while [ $n -lt 1 ]; do false & n=$((n+1)); done",
+    "n=0; until [ $n -ge 1 ]; do false & n=$((n+1)); done",
+    "if true; then false & fi",
+    "if false; then :; elif true; then false & fi",
+    "if false; then :; else false & fi",
+    "case x in x) false & ;; esac",
+    "{ false & }",
+    "f() { false & }; f",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", _BODY_SHAPES)
+async def test_ampersand_inside_a_body_launches_a_job_with_status_zero(line):
+    ws = _workspace()
+    res = await ws.execute(f"{line}; echo rc=$?")
+    assert res.stdout == b"rc=0\n"
+    job = ws.job_table.get(1)
+    assert job is not None
+    assert job.command == "false"
+    await ws.job_table.wait(1)
+    assert job.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
+    ws = _workspace()
+    res = await ws.execute("for i in 1 2; do sleep 0.3 & done; jobs")
+    assert res.stdout == b"[1] running sleep 0.3\n[2] running sleep 0.3\n"
+    await ws.execute("wait")
+    assert (await ws.execute("jobs")).stdout == b""
+
+
+@pytest.mark.asyncio
+async def test_wait_adopts_loop_body_jobs_in_id_order_after_the_foreground():
+    ws = _workspace()
+    res = await ws.execute(
+        "for i in 1 2; do echo $i & done; echo launched; wait")
+    assert res.stdout == b"launched\n1\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_bang_names_each_loop_body_job():
+    ws = _workspace()
+    res = await ws.execute("for i in 1 2; do sleep 0.1 & echo $!; done; wait")
+    assert res.stdout == b"1\n2\n"
+
+
+@pytest.mark.asyncio
+async def test_errexit_does_not_trip_on_a_body_launch():
+    ws = _workspace()
+    line = "set -e; for i in 1; do false & done; echo ok; wait"
+    res = await ws.execute(line)
+    assert res.stdout == b"ok\n"

@@ -15,6 +15,7 @@
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
+import { JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -29,8 +30,13 @@ import {
 } from './control.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
-function node(text: string): TSNodeLike {
-  return { type: 'command', text, children: [], namedChildren: [], isNamed: true }
+function node(text: string, nextSibling: TSNodeLike | null = null): TSNodeLike {
+  return { type: 'command', text, children: [], namedChildren: [], isNamed: true, nextSibling }
+}
+
+/** A body statement whose terminator is `&`. */
+function bg(text: string): TSNodeLike {
+  return node(text, { type: '&', text: '&', children: [], namedChildren: [], isNamed: false })
 }
 
 function encode(s: string): Uint8Array {
@@ -268,5 +274,101 @@ describe('handleCase', () => {
     ]
     await handleCase(execute, 'a', items, new Session({ sessionId: 'test' }))
     expect(ran).toEqual(['A', 'A2'])
+  })
+})
+
+describe('& inside a body', () => {
+  /**
+   * An executor whose `slow` statement blocks until `release` is called,
+   * so a body that returns before then provably did not wait for it.
+   */
+  function parked(ran: string[]): { execute: ExecuteNodeFn; release: () => void } {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const execute: ExecuteNodeFn = async (n) => {
+      if (n.text === 'slow') await gate
+      ran.push(n.text)
+      return [null, new IOResult({ exitCode: n.text === 'slow' ? 3 : 0 }), new ExecutionNode()]
+    }
+    return { execute, release }
+  }
+
+  it('if body: launches the statement as a job and answers the launch status', async () => {
+    const table = new JobTable()
+    const ran: string[] = []
+    const { execute, release } = parked(ran)
+    const s = new Session({ sessionId: 'test' })
+    const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('slow')]]]
+    const [, io] = await handleIf(execute, branches, null, s, null, null, table, 'a1')
+    // The body came back while the job is still parked, and its status
+    // is the launch's 0, not the job's eventual 3.
+    expect(ran).toEqual(['c'])
+    expect(io.exitCode).toBe(0)
+    expect(s.lastExitCode).toBe(0)
+    const job = table.get(1)
+    expect(job?.command).toBe('slow')
+    expect(job?.status).toBe(JobStatus.RUNNING)
+    release()
+    await table.wait(1)
+    expect(ran).toEqual(['c', 'slow'])
+    expect(job?.exitCode).toBe(3)
+  }, 2000)
+
+  it('case arm: launches the statement as a job', async () => {
+    const table = new JobTable()
+    const ran: string[] = []
+    const { execute, release } = parked(ran)
+    const items: [string[], TSNodeLike[], string][] = [[['x'], [bg('slow')], ';;']]
+    const [, io] = await handleCase(
+      execute,
+      'x',
+      items,
+      new Session({ sessionId: 'test' }),
+      null,
+      null,
+      table,
+      'a1',
+    )
+    expect(ran).toEqual([])
+    expect(io.exitCode).toBe(0)
+    expect(table.get(1)?.command).toBe('slow')
+    release()
+    await table.wait(1)
+    expect(table.get(1)?.exitCode).toBe(3)
+  }, 2000)
+
+  it('for body: launches one job per iteration', async () => {
+    const table = new JobTable()
+    const ran: string[] = []
+    const { execute, release } = parked(ran)
+    const [, io] = await handleFor(
+      execute,
+      'i',
+      ['1', '2'],
+      [bg('slow')],
+      new Session({ sessionId: 'test' }),
+      null,
+      null,
+      null,
+      table,
+      'a1',
+    )
+    expect(ran).toEqual([])
+    expect(io.exitCode).toBe(0)
+    expect(table.listJobs().map((j) => j.command)).toEqual(['slow', 'slow'])
+    release()
+    await table.waitAll()
+    expect(ran).toEqual(['slow', 'slow'])
+  }, 2000)
+
+  it('fails loud without a job table', async () => {
+    const execute: ExecuteNodeFn = () =>
+      Promise.resolve([null, new IOResult(), new ExecutionNode()])
+    const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('x')]]]
+    await expect(
+      handleIf(execute, branches, null, new Session({ sessionId: 'test' })),
+    ).rejects.toThrow(/job table/)
   })
 })

@@ -96,6 +96,7 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  agentId: string | null = null,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -126,6 +127,8 @@ export async function handleCommand(
       session,
       stdin,
       callStack,
+      jobTable,
+      agentId,
     )
   }
 

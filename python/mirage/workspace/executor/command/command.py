@@ -83,6 +83,7 @@ async def handle_command(
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
     routing_decision: RouteDecision | None = None,
+    agent_id: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -108,7 +109,7 @@ async def handle_command(
     # Shell functions
     if cmd_name in session.functions:
         return await run_shell_function(execute_node, cmd_name, parts, session,
-                                        stdin, call_stack)
+                                        stdin, call_stack, job_table, agent_id)
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)

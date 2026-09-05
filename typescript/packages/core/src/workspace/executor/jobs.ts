@@ -18,6 +18,7 @@ import { concat } from '../../io/cachable_iterator.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
+import { isBackgrounded } from '../../shell/helpers.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { runWithSession } from '../../context/session_context.ts'
@@ -178,6 +179,34 @@ export async function handleBackground(
     children,
   })
   return [rightStdout, rightIo, tree]
+}
+
+/**
+ * Run one statement of a compound body, as a job when it ends in `&`.
+ *
+ * The program loop and the subshell body read the `&` off the token
+ * stream themselves; a loop body, an if/case arm, a brace group or a
+ * function body holds named nodes only, so the statement is asked about
+ * its own terminator. The launch is a statement in its own right and
+ * answers with status 0, as in bash, so `false &` inside a body trips
+ * neither `$?` nor `set -e`. A null `jobTable` means the caller wired no
+ * job plane, which is a programming error once a `&` shows up, not a
+ * reason to run it inline.
+ */
+export function runStatement(
+  executeNode: ExecuteNodeFn,
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  jobTable: JobTable | null,
+  agentId: string | null,
+): Promise<JobHandlerResult> {
+  if (!isBackgrounded(node)) return executeNode(node, session, stdin, callStack)
+  if (jobTable === null) {
+    throw new Error(`\`${node.text} &\` needs a job table; none was wired`)
+  }
+  return handleBackground(executeNode, node, null, session, jobTable, agentId, stdin, callStack)
 }
 
 const WAIT_USAGE = 'wait: usage: wait [-fn] [-p var] [id ...]'
