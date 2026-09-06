@@ -780,6 +780,7 @@ async function routeArgv(
     runtimeBindings,
     namespace,
     routingDecision,
+    signal,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {

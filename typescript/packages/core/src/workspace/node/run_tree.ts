@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../commands/errors.ts'
+import { isControlFlowError } from '../workspace/failure.ts'
 import { guardOutput } from '../../commands/builtin/utils/limit.ts'
 import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
@@ -35,6 +37,7 @@ export async function runCommandTree(
   try {
     materialized = await applyBarrier(stdout, io, BarrierPolicy.VALUE)
   } catch (err) {
+    if (isControlFlowError(err) || err instanceof CommandTimeoutError) throw err
     // Lazy reads can fail on the first pull (e.g. a backend size guard);
     // surface that as a failed command, not a crash.
     const msg = err instanceof Error ? err.message : String(err)

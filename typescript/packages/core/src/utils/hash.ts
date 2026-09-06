@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Checkpoint } from '../io/cooperative.ts'
 import { toHex } from './hex.ts'
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
@@ -61,17 +62,19 @@ function rotl(x: number, n: number): number {
   return ((x << n) | (x >>> (32 - n))) >>> 0
 }
 
-function md5(bytes: Uint8Array): Uint8Array {
+function* md5Blocks(bytes: Uint8Array): Generator<void, Uint8Array> {
   const len = bytes.byteLength
   const bitLen = len * 8
   const padLen = (len % 64 < 56 ? 56 : 120) - (len % 64)
   const total = len + padLen + 8
-  const buf = new Uint8Array(total)
-  buf.set(bytes)
-  buf[len] = 0x80
-  const view = new DataView(buf.buffer)
-  view.setUint32(total - 8, bitLen >>> 0, true)
-  view.setUint32(total - 4, Math.floor(bitLen / 0x100000000) >>> 0, true)
+  const fullLength = len - (len % 64)
+  const tail = new Uint8Array(total - fullLength)
+  tail.set(bytes.subarray(fullLength))
+  tail[len - fullLength] = 0x80
+  const tailView = new DataView(tail.buffer)
+  tailView.setUint32(tail.length - 8, bitLen >>> 0, true)
+  tailView.setUint32(tail.length - 4, Math.floor(bitLen / 0x100000000) >>> 0, true)
+  const inputView = new DataView(bytes.buffer, bytes.byteOffset, fullLength)
 
   let a0 = 0x67452301
   let b0 = 0xefcdab89
@@ -80,7 +83,10 @@ function md5(bytes: Uint8Array): Uint8Array {
 
   const M = new Uint32Array(16)
   for (let off = 0; off < total; off += 64) {
-    for (let j = 0; j < 16; j++) M[j] = view.getUint32(off + j * 4, true)
+    if (off > 0 && off % 16384 === 0) yield
+    const view = off < fullLength ? inputView : tailView
+    const base = off < fullLength ? off : off - fullLength
+    for (let j = 0; j < 16; j++) M[j] = view.getUint32(base + j * 4, true)
     let A = a0
     let B = b0
     let C = c0
@@ -123,5 +129,21 @@ function md5(bytes: Uint8Array): Uint8Array {
 }
 
 export function md5Hex(bytes: Uint8Array): string {
-  return toHex(md5(bytes))
+  const blocks = md5Blocks(bytes)
+  let result = blocks.next()
+  while (!result.done) result = blocks.next()
+  return toHex(result.value)
+}
+
+/** Same digest as md5Hex, with task-queue checkpoints between block batches. */
+export async function md5HexAsync(bytes: Uint8Array): Promise<string> {
+  const checkpoint = new Checkpoint()
+  const blocks = md5Blocks(bytes)
+  let result = blocks.next()
+  while (!result.done) {
+    const pending = checkpoint.run()
+    if (pending !== undefined) await pending
+    result = blocks.next()
+  }
+  return toHex(result.value)
 }

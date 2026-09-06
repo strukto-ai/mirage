@@ -508,6 +508,7 @@ export class MountEntry {
 
       const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
       const cmdOpts: CommandOpts = {
+        command: cmdName,
         stdin: context.stdin ?? null,
         flags,
         filetypeFns: isFiletypeCmd ? null : filetypeFns,

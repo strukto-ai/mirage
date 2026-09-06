@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.cache.file.utils import (default_fingerprint, glob_escape,
                                      parse_limit)
 
@@ -66,3 +68,15 @@ def test_glob_escape_neutralizes_redis_match_metacharacters():
 
 def test_glob_escape_escapes_the_escape_character():
     assert glob_escape("a\\b") == "a\\\\b"
+
+
+@pytest.mark.asyncio
+async def test_incremental_fingerprint_matches_native():
+    import hashlib
+
+    from mirage.cache.file.utils import default_fingerprint_async
+
+    for size in (0, 55, 56, 64, 65, 16383, 16384, 16385, 100_000):
+        data = b"x" * size
+        assert await default_fingerprint_async(data) == hashlib.md5(
+            data).hexdigest()

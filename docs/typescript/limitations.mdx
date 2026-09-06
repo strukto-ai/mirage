@@ -179,3 +179,11 @@ Those HTTP drivers still need a browser-reachable endpoint with the correct CORS
 | Node-only resources (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
 The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
+
+## CPU-bound builtin processing
+
+Line readers, cache drains, and `wc` processing periodically yield to the event loop. Large RAM files and warm cache reads therefore allow host timers and I/O callbacks to run. `Workspace.execute(command, { signal })` forwards caller cancellation to builtin input processing; Python provides the corresponding `cancel=asyncio.Event()` path and task cancellation.
+
+File-cache fingerprints use incremental MD5: the Node package installs native hashing with 64 KiB updates, while browser/core uses JavaScript block batches. Both yield on a time budget; Python uses incremental `hashlib` updates.
+
+These checkpoints are cooperative, not a hard execution-time bound. A synchronous regex call, native sort, whole-buffer allocation, or individual hash chunk can still occupy the thread until that operation returns. Custom handlers must observe cancellation themselves. Embeddings requiring isolation from arbitrary CPU work should run the workspace in a separate worker or process.

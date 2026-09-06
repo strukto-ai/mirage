@@ -123,3 +123,28 @@ async def test_evict_prefix_reclaims_the_evicted_bytes():
     await cache.evict_prefix("/data/")
     assert cache.cache_size == 2
     assert cache.cache_entries == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_fingerprint_keeps_previous_entry():
+    import asyncio
+
+    cache = RAMFileCacheStore(cache_limit="64MB")
+    await cache.set("/file", b"old")
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(cache.set("/file", b"x" * 20_000_000), .001)
+    assert await cache.get("/file") == b"old"
+    assert cache.cache_size == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["set", "add"])
+async def test_clear_during_fingerprint_discards_pending_write(operation):
+    cache = RAMFileCacheStore()
+    pending = asyncio.create_task(
+        getattr(cache, operation)("/large", b"x" * 20_000_000))
+    await asyncio.sleep(0.001)
+    await cache.clear()
+    await pending
+    assert await cache.get("/large") is None
+    assert cache.cache_size == 0

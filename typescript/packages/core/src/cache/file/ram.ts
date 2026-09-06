@@ -17,13 +17,14 @@ import type { PathSpec } from '../../types.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
-import { defaultFingerprint, parseLimit } from './utils.ts'
+import { defaultFingerprintAsync, parseLimit } from './utils.ts'
 
 export class RAMFileCacheStore extends RAMResource implements FileCache {
   private readonly entries = new Map<string, CacheEntry>()
   private readonly lock = new KeyLock()
   private readonly limit: number
   private size = 0
+  private invalidationVersion = 0
   private maxDrainBytesValue: number | null = null
   // Promises cannot be cancelled; clearing the map makes the drain's
   // completion check fail so the result is discarded instead.
@@ -87,13 +88,16 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
-    await this.lock.withLock(key, () => {
+    await this.lock.withLock(key, async () => {
+      const version = this.invalidationVersion
+      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+      // An invalidation during hashing must not resurrect stale content.
+      if (version !== this.invalidationVersion) return
       const existing = this.entries.get(key)
       if (existing !== undefined) {
         this.size -= existing.size
         this.entries.delete(key)
       }
-      const fp = options.fingerprint ?? defaultFingerprint(data)
       const entry = new CacheEntry({
         size: data.byteLength,
         cachedAt: Math.floor(Date.now() / 1000),
@@ -113,14 +117,16 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<boolean> {
-    const placed = await this.lock.withLock(key, () => {
+    const placed = await this.lock.withLock(key, async () => {
       const existing = this.entries.get(key)
       if (existing !== undefined && !existing.expired) return Promise.resolve(false)
+      const version = this.invalidationVersion
+      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+      if (version !== this.invalidationVersion) return false
       if (existing !== undefined) {
         this.size -= existing.size
         this.entries.delete(key)
       }
-      const fp = options.fingerprint ?? defaultFingerprint(data)
       const entry = new CacheEntry({
         size: data.byteLength,
         cachedAt: Math.floor(Date.now() / 1000),
@@ -137,6 +143,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   async evictPrefix(prefix: string): Promise<void> {
+    this.invalidationVersion++
     // A pending fill may not have installed an entry yet.
     const keys = [...new Set([...this.entries.keys(), ...this.drainTasks.keys()])].filter((k) =>
       k.startsWith(prefix),
@@ -145,6 +152,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   evictPaths(paths: Iterable<string>): void {
+    this.invalidationVersion++
     for (const key of paths) {
       const entry = this.entries.get(key)
       if (entry !== undefined) {
@@ -182,6 +190,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   clear(): Promise<void> {
+    this.invalidationVersion++
     this.drainTasks.clear()
     this.entries.clear()
     this.store.files.clear()

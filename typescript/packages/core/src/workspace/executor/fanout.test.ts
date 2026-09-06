@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
-import { FileStat, FileType, MountMode, type PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Session } from '../session/session.ts'
@@ -548,5 +548,65 @@ describe('ls -R across a mount boundary', () => {
     expect(await runLine(mounts, 'ls -R base')).toBe(
       'base:\ninner\ntop.txt\n\nbase/inner:\nreal.txt\n',
     )
+  })
+})
+
+describe('traversal cancellation', () => {
+  it.each([
+    ['find', '/data'],
+    ['du', '/data', '/other'],
+  ])('forwards cancellation through %j', async (...parts) => {
+    for (const source of ['caller', 'session'] as const) {
+      for (const checksSignal of [false, true]) {
+        const parent = new RAMResource()
+        const child = new RAMResource()
+        const other = new RAMResource()
+        parent.store.files.set('/parent', new Uint8Array([1]))
+        child.store.files.set('/child', new Uint8Array([2]))
+        other.store.files.set('/other', new Uint8Array([3]))
+        const reg = new MountRegistry(
+          {
+            '/data/': parent,
+            '/data/sub/': child,
+            '/other/': other,
+          },
+          MountMode.WRITE,
+        )
+        wireRegistry(reg)
+        const controller = new AbortController()
+        let calls = 0
+        let received: AbortSignal | undefined
+        for (const mount of reg.allMounts()) {
+          mount.executeCmd = (_name, _paths, _texts, _flags, opts) => {
+            calls++
+            received = opts?.signal
+            controller.abort()
+            if (checksSignal) received?.throwIfAborted()
+            return Promise.resolve([null, new IOResult()])
+          }
+        }
+        const session = new Session({ sessionId: 'test', cwd: '/' })
+        if (source === 'session') session.abortSignal = controller.signal
+        await expect(
+          handleCommand(
+            NEVER_EXECUTE,
+            STAT_ONLY_DISPATCH,
+            reg,
+            parts.map((part, index) => (index === 0 ? part : PathSpec.fromStrPath(part))),
+            session,
+            null,
+            null,
+            null,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            source === 'caller' ? controller.signal : undefined,
+          ),
+        ).rejects.toMatchObject({ name: 'AbortError' })
+        expect(received?.aborted).toBe(true)
+        expect(calls).toBe(1)
+      }
+    }
   })
 })

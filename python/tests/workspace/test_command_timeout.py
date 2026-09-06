@@ -391,3 +391,21 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command",
+                         ["wc /big", "grep -c line /big", "cat /big | wc"])
+async def test_large_ram_command_honors_caller_cancel(command):
+    from mirage.workspace.abort import MirageAbortError
+
+    ram = RAMResource()
+    ram.accessor.store.files["/big"] = b"line\n" * 200_000
+    ws = Workspace({"/": ram})
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(.005, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute(command, cancel=cancel)
+    finally:
+        timer.cancel()

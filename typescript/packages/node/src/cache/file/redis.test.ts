@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { applyIo } from '@struktoai/mirage-core/cache/file/io'
-import { defaultFingerprint } from '@struktoai/mirage-core/cache/file/utils'
+import {
+  defaultFingerprint,
+  registerFingerprintHasher,
+} from '@struktoai/mirage-core/cache/file/utils'
 import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterator'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { OpRecord } from '@struktoai/mirage-core/observe/record'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisFileCacheStore } from './redis.ts'
+import { nativeFingerprint } from './utils.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
@@ -47,6 +51,46 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     await cache.clear()
     await cache.close()
   })
+
+  it.each(['set', 'add'] as const)(
+    '%s discards a fill invalidated during hashing',
+    async (method) => {
+      for (const invalidate of [
+        () => cache.clear(),
+        () => cache.remove('pending'),
+        () => cache.evictPrefix('pend'),
+      ]) {
+        let entered!: () => void
+        let release!: () => void
+        const hashing = new Promise<void>((resolve) => {
+          entered = resolve
+        })
+        const gate = new Promise<void>((resolve) => {
+          release = resolve
+        })
+        registerFingerprintHasher(async (data) => {
+          entered()
+          await gate
+          return nativeFingerprint(data)
+        })
+        const pending = cache[method]('pending', new Uint8Array([1, 2, 3]))
+        try {
+          await hashing
+          await invalidate()
+        } finally {
+          release()
+          await pending
+          registerFingerprintHasher(nativeFingerprint)
+        }
+        expect(await cache.get('pending')).toBeNull()
+        expect(await cache.isFresh('pending', defaultFingerprint(new Uint8Array([1, 2, 3])))).toBe(
+          false,
+        )
+        await cache.set('pending', new Uint8Array([4]))
+        expect(await cache.get('pending')).toEqual(new Uint8Array([4]))
+      }
+    },
+  )
 
   it('set + get round-trips binary data', async () => {
     const bytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0xff, 0x10])

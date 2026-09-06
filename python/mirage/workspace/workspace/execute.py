@@ -32,7 +32,7 @@ from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
-from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import admit_line
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
@@ -351,19 +351,20 @@ async def execute_line(
                     sources = await ws._secret_sources()
                     await fill_env(effective_session, names, sources)
                     names = plan_names(nodes)
-        io, _ = await run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            exec_recursion,
-            agent or "",
-            ast,
-            effective_session,
-            stdin,
-            cancel,
-            routing_decision=decision,
-        )
+        io, _ = await run_cancellable(
+            run_command_tree(
+                ws.dispatch,
+                ws._registry,
+                ws._namespace,
+                ws.job_table,
+                exec_recursion,
+                agent or "",
+                ast,
+                effective_session,
+                stdin,
+                cancel,
+                routing_decision=decision,
+            ), cancel)
         # A record a nested line earned is the line's to report when
         # its own tree earned none (see NestedRefusal).
         if io.refusal is None:

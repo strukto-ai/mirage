@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Checkpoint } from './cooperative.ts'
+
 export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> {
   private source: AsyncIterator<Uint8Array>
   private readonly buffer: Uint8Array[] = []
   private exhaustedFlag = false
+  private readonly checkpoint = new Checkpoint()
 
   constructor(source: AsyncIterable<Uint8Array>) {
     this.source = source[Symbol.asyncIterator]()
@@ -44,6 +47,8 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
 
   async next(): Promise<IteratorResult<Uint8Array>> {
     try {
+      const pending = this.checkpoint.run()
+      if (pending !== undefined) await pending
       const result = await this.source.next()
       if (result.done === true) {
         this.exhaustedFlag = true
@@ -60,10 +65,15 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   async drain(): Promise<Uint8Array> {
     try {
       for (;;) {
+        const pending = this.checkpoint.run()
+        if (pending !== undefined) await pending
         const result = await this.source.next()
         if (result.done === true) break
         this.buffer.push(result.value)
       }
+    } catch (error) {
+      await this.closeAndDiscard()
+      throw error
     } finally {
       this.exhaustedFlag = true
     }
@@ -79,6 +89,8 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         return null
       }
       for (;;) {
+        const pending = this.checkpoint.run()
+        if (pending !== undefined) await pending
         const result = await this.source.next()
         if (result.done === true) break
         this.buffer.push(result.value)
@@ -88,6 +100,9 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
           return null
         }
       }
+    } catch (error) {
+      await this.closeAndDiscard()
+      throw error
     } finally {
       this.exhaustedFlag = true
     }

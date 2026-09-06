@@ -33,6 +33,7 @@ import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/ty
 import { buildResource, knownResources } from './resource/registry.ts'
 import type { Resource } from '@struktoai/mirage-core/resource/base'
 import './compression_codecs.ts'
+import './cache/file/utils.ts'
 import './runtime/sandbox/daytona/runtime.ts'
 import './secrets/constants.ts'
 

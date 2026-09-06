@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.cooperative import chunks
 from mirage.types import Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
@@ -33,7 +34,7 @@ async def materialize(stream: ByteSource | None) -> bytes:
         return stream
     if isinstance(stream, CachableAsyncIterator):
         return await stream.drain()
-    return b"".join([chunk async for chunk in stream])
+    return b"".join([chunk async for chunk in chunks(stream)])
 
 
 @dataclass

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../commands/errors.ts'
+import { isControlFlowError } from '../workspace/failure.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -226,6 +228,7 @@ async function runProgram(
       try {
         stdout = await materialize(s)
       } catch (err) {
+        if (isControlFlowError(err) || err instanceof CommandTimeoutError) throw err
         // Lazy reads can fail on the first pull (e.g. a backend size guard);
         // surface that as a failed statement, not a crash. Filesystem
         // errors format as a GNU coreutils line, respelling the path as

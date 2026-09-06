@@ -12,19 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Checkpoint, chunks } from './cooperative.ts'
+
 const NEWLINE = 0x0a
 
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
   private exhausted = false
+  private readonly checkpoint = new Checkpoint()
+  private linesSinceCheck = 0
 
   constructor(source: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
     const s = source as AsyncIterable<Uint8Array>
     if (typeof s[Symbol.asyncIterator] === 'function') {
-      this.source = s[Symbol.asyncIterator]()
+      this.source = chunks(s)
     } else {
-      this.source = source as AsyncIterator<Uint8Array>
+      this.source = chunks({ [Symbol.asyncIterator]: () => source as AsyncIterator<Uint8Array> })
     }
   }
 
@@ -39,26 +43,45 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   async readline(): Promise<Uint8Array | null> {
-    while (indexOf(this.buf, NEWLINE) < 0) {
-      if (this.exhausted) {
-        if (this.buf.byteLength > 0) {
-          const remaining = this.buf
-          this.buf = new Uint8Array(0)
-          return remaining
-        }
-        return null
-      }
-      const result = await this.source.next()
-      if (result.done === true) {
-        this.exhausted = true
-        continue
-      }
-      this.buf = concat2(this.buf, result.value)
+    // Amortize clock reads on short-line workloads; chunk pulls also check.
+    if (++this.linesSinceCheck >= 64) {
+      this.linesSinceCheck = 0
+      const pending = this.checkpoint.run()
+      if (pending !== undefined) await pending
     }
-    const idx = indexOf(this.buf, NEWLINE)
-    const line = this.buf.subarray(0, idx)
-    this.buf = this.buf.subarray(idx + 1)
-    return line
+    const idx = this.buf.indexOf(NEWLINE)
+    if (idx >= 0) {
+      const line = this.buf.subarray(0, idx)
+      this.buf = this.buf.subarray(idx + 1)
+      return line
+    }
+    const [line, found] = await this.readDelimited(NEWLINE)
+    return found || line.byteLength > 0 ? line : null
+  }
+
+  private async readDelimited(delim: number): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    const parts: Uint8Array[] = []
+    try {
+      const pending = this.checkpoint.run()
+      if (pending !== undefined) await pending
+      for (;;) {
+        const idx = this.buf.indexOf(delim)
+        if (idx >= 0) {
+          const tail = this.buf.subarray(0, idx)
+          this.buf = this.buf.subarray(idx + 1)
+          return [parts.length === 0 ? tail : join([...parts, tail]), true]
+        }
+        if (this.buf.byteLength > 0) parts.push(this.buf)
+        this.buf = new Uint8Array(0)
+        if (this.exhausted) return [join(parts), false]
+        const result = await this.source.next()
+        if (result.done === true) this.exhausted = true
+        else this.buf = copyOf(result.value)
+      }
+    } catch (error) {
+      await this.source.return?.()
+      throw error
+    }
   }
 
   /**
@@ -67,23 +90,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * `mapfile` report as status 1).
    */
   async readUntil(delim: number): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    while (indexOf(this.buf, delim) < 0) {
-      if (this.exhausted) {
-        const remaining = copyOf(this.buf)
-        this.buf = new Uint8Array(0)
-        return [remaining, false]
-      }
-      const result = await this.source.next()
-      if (result.done === true) {
-        this.exhausted = true
-        continue
-      }
-      this.buf = concat2(this.buf, result.value)
-    }
-    const idx = indexOf(this.buf, delim)
-    const data = copyOf(this.buf.subarray(0, idx))
-    this.buf = this.buf.subarray(idx + 1)
-    return [data, true]
+    const [data, found] = await this.readDelimited(delim)
+    return [copyOf(data), found]
   }
 
   /**
@@ -105,6 +113,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
     let taken = 0
     while (taken < count) {
+      const pending = this.checkpoint.run()
+      if (pending !== undefined) await pending
       // One pull can split a character across chunks, so top the buffer
       // up to the widest one before reading its first byte as a whole.
       if (this.buf.byteLength < 4 && !this.exhausted) {
@@ -149,11 +159,14 @@ export function charWidth(data: Uint8Array): number {
   return limit
 }
 
-function indexOf(buf: Uint8Array, byte: number): number {
-  for (let i = 0; i < buf.byteLength; i++) {
-    if (buf[i] === byte) return i
+function join(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(parts.reduce((size, part) => size + part.byteLength, 0))
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.byteLength
   }
-  return -1
+  return out
 }
 
 function concat2(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {

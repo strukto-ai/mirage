@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.io.cooperative import Checkpoint
+
 
 class CachableAsyncIterator:
     """Wraps AsyncIterator[bytes], buffers chunks as consumed.
@@ -28,6 +30,7 @@ class CachableAsyncIterator:
         self._source = source
         self._buffer: list[bytes] = []
         self._exhausted = False
+        self._checkpoint = Checkpoint()
 
     @property
     def exhausted(self) -> bool:
@@ -60,6 +63,7 @@ class CachableAsyncIterator:
 
     async def __anext__(self) -> bytes:
         try:
+            await self._checkpoint.run()
             chunk = await self._source.__anext__()
         except StopAsyncIteration:
             self._exhausted = True
@@ -71,7 +75,11 @@ class CachableAsyncIterator:
         """Consume remaining chunks and return all accumulated bytes."""
         try:
             async for chunk in self._source:
+                await self._checkpoint.run()
                 self._buffer.append(chunk)
+        except BaseException:
+            await self._close_and_discard()
+            raise
         finally:
             self._exhausted = True
         return b"".join(self._buffer)
@@ -89,11 +97,15 @@ class CachableAsyncIterator:
                 await self._close_and_discard()
                 return None
             async for chunk in self._source:
+                await self._checkpoint.run()
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
                     await self._close_and_discard()
                     return None
+        except BaseException:
+            await self._close_and_discard()
+            raise
         finally:
             self._exhausted = True
         return b"".join(self._buffer)

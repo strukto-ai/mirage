@@ -201,3 +201,36 @@ async def test_remove_cancels_pending_drain(cache):
     assert "/slow.txt" not in cache._drain_tasks
     await asyncio.sleep(0.05)
     assert await cache.get("/slow.txt") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["set", "add"])
+@pytest.mark.parametrize("invalidation", ["clear", "remove", "evict_prefix"])
+async def test_fill_invalidated_during_hashing(cache, monkeypatch, method,
+                                               invalidation):
+    from mirage.cache.file import redis as redis_cache
+    from mirage.cache.file.utils import default_fingerprint
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_hash(data):
+        entered.set()
+        await release.wait()
+        return default_fingerprint(data)
+
+    monkeypatch.setattr(redis_cache, "default_fingerprint_async", paused_hash)
+    pending = asyncio.create_task(getattr(cache, method)("/pending", b"old"))
+    try:
+        await entered.wait()
+        if invalidation == "clear":
+            await cache.clear()
+        else:
+            await getattr(cache, invalidation)("/pending")
+    finally:
+        release.set()
+        await pending
+    assert await cache.get("/pending") is None
+    assert not await cache.is_fresh("/pending", default_fingerprint(b"old"))
+    await cache.set("/pending", b"new")
+    assert await cache.get("/pending") == b"new"

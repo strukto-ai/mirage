@@ -28,6 +28,7 @@ import { Consumer, JOB_BUILTINS, lookup } from '../lookup/index.ts'
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import type { Session } from '../session/session.ts'
+import { mergeSignals } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
@@ -96,6 +97,7 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
+  signal?: AbortSignal,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -264,6 +266,7 @@ export async function handleCommand(
       csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
     }
     const runCtx: RunOnMountCtx = {
+      ...(signal !== undefined ? { signal } : {}),
       registry,
       session,
       dispatch,
@@ -285,6 +288,7 @@ export async function handleCommand(
       csNs,
       ensureOpen,
       (path: string) => pathStat(dispatch, path, null),
+      mergeSignals(signal, session.abortSignal),
     )
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
@@ -416,6 +420,7 @@ export async function handleCommand(
       ensureOpen,
       namespaceViewOf(registry, namespace ?? null, dispatch),
       (path: string) => pathStat(dispatch, path, null),
+      mergeSignals(signal, session.abortSignal),
     )
     if (warnBytes !== null) {
       const existing = await materialize(fanIo.stderr)
@@ -426,6 +431,7 @@ export async function handleCommand(
   }
 
   const runCtx: RunOnMountCtx = {
+    ...(signal !== undefined ? { signal } : {}),
     registry,
     session,
     dispatch,
