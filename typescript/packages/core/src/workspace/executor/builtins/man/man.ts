@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CLISpec } from '../../../../commands/cli/types.ts'
+import { skillFor } from '../../../../commands/cli/skill.ts'
 import { findNode, nodeHelp } from '../../../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../../../commands/spec/builtins.ts'
 import type { CommandSpec } from '../../../../commands/spec/types.ts'
@@ -20,7 +21,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CLIInstall } from '../../../cli/types.ts'
 import { DEV_PREFIX } from '../../../mount/registry.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import { commandVisible, verbVisible } from '../../../lookup/lookup.ts'
+import { cliTreeVisible, commandVisible, verbVisible } from '../../../lookup/lookup.ts'
 import type { Session } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -180,7 +181,7 @@ function cliMan(
 ): Result {
   const enc = new TextEncoder()
   const head = install.name
-  const entry = renderCliEntry(head, verbs, install.spec, session)
+  let entry = renderCliEntry(head, verbs, install.spec, session)
   if (entry === null) {
     const err = enc.encode(`man: no entry for ${[head, ...verbs].join(' ')}\n`)
     return [
@@ -188,6 +189,15 @@ function cliMan(
       new IOResult({ exitCode: 1, stderr: err }),
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
     ]
+  }
+  // The skill IS the guide when the line asks for the head word bare: its
+  // body goes first, the node's own --help rendering follows so the page
+  // never drifts from the program it documents.
+  if (verbs.length === 0 && cliTreeVisible(head, install.spec, session)) {
+    // Respelled for the installed head, so `man ntn-prod` teaches
+    // `ntn-prod` lines and not another install's.
+    const skill = skillFor(install.spec, head)
+    if (skill !== null) entry = `${skill.body}\n\n${entry}`
   }
   const sections = [entry]
   const command = verbs.length === 0 ? commandEntry(head, registry) : null

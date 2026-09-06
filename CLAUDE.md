@@ -183,6 +183,40 @@ agent discovers state, the CLI is how it acts.
   `file` would promise `type -p` a path that does not exist). `which` prints the
   bare name, never a fabricated path.
 
+- **An invented-grammar CLI ships a skill; a mimicked one does not.** The
+  model already knows `git`, `gh`, `psql` and `redis-cli`; it has to be taught
+  `linear`, `slack`, `discord`, `gws` and `ntn`, and the set is written down
+  once as `SKILLED_CLIS` (`commands/cli/constants.py`, `constants.ts`). A skill
+  is an agentskills.io `SKILL.md` (frontmatter `name`/`description`, Markdown
+  body) and teaches the loop, not the flags: find the identifier on the mount
+  with `ls`, then act with the CLI. `--help` and `man` already list every verb.
+  **`plugins/mirage/skills/<cli>/SKILL.md` is the only source.** Both packages
+  need the same bytes and browser core cannot read a file at import time, so
+  `scripts/gen_skills.py` embeds the text into
+  `commands/cli/generated/skills_data.{py,ts}`; rerun it after editing a skill
+  and commit both outputs, `tests/commands/cli/test_skill.py` and
+  `skill.test.ts` fail when either is stale. The same directory is what the
+  Codex, Grok Build and Claude Code plugin manifests load, so a skill written
+  once reaches every host. Frontmatter is read by a hand-rolled scalar reader
+  (`commands/cli/skill.py`, `skill.ts`), not a YAML parser, because core has
+  none and the two languages must agree on the same two keys.
+  Three surfaces, one text, none of them inlines the body: the system prompt
+  (`build_file_prompt`) lists each installed CLI by its skill description
+  with a `man <head>` pointer, `man <head>` prints the body ahead of the
+  generated verb listing, and the plugin hosts load the file themselves.
+  Every fenced line in a skill that starts with the head word is dry-parsed
+  through `walk` and the leaf parser in CI, so a skill cannot teach a line the
+  program refuses. A skill is bound to the builtin spec itself, so a custom
+  tree with the same name cannot inherit its guide. Two installs of one
+  builtin share it, and `skill_for`/`skillFor`
+  respells the bare program word for the head an install answers to, so
+  `man ntn-prod` teaches `ntn-prod` lines and not another account's. Resource
+  `WRITE_PROMPT`s point at the CLI in one line and teach nothing themselves:
+  the mount is one account's state and the CLI is another install, and a
+  prompt that rendered `ntn`
+  lines whether or not `ntn` was installed was teaching a program that might
+  not exist.
+
 ## Notion data sources
 
 The notion backend speaks **`Notion-Version: 2025-09-03`**, the generation that

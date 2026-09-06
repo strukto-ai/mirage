@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { NTN } from '../commands/cli/builtin/ntn/index.ts'
+import { skillFor } from '../commands/cli/skill.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
@@ -60,10 +62,13 @@ async function makeMultiWs(): Promise<Workspace> {
 
 async function cliWs(): Promise<Workspace> {
   const ws = await makeWs()
+  // The spec's own name, not the installed head word, is what skillFor
+  // keys on; "acmeapi" deliberately is not a real skilled CLI's name so
+  // this fixture never picks up a real skill body.
   ws.registerCli(
     'linear',
     new CLISpec({
-      name: 'linear',
+      name: 'acmeapi',
       description: 'Linear API client',
       subcommands: [
         new CLISpec({
@@ -193,6 +198,58 @@ describe('--help and man through the executor', () => {
     expect(stderrStr(io)).toBe('man: no entry for linear team\n')
     // The host's own view is unnarrowed.
     expect(stdoutStr(await ws.execute('man linear'))).toContain('team')
+  })
+
+  it('man <cli> leads with the skill body for a skilled CLI', async () => {
+    const ws = await makeWs()
+    ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
+    const skill = skillFor(NTN)
+    if (skill === null) throw new Error('ntn ships no skill')
+    const firstHeading = skill.body.split('\n').find((line) => line.startsWith('#'))
+    if (firstHeading === undefined) throw new Error('ntn skill body has no heading')
+    const page = stdoutStr(await ws.execute('man ntn'))
+    expect(page.startsWith(firstHeading)).toBe(true)
+    // The verb listing (the ordinary --help rendering) follows the body.
+    expect(page).toContain('Usage: ntn')
+  })
+
+  it('man <cli> respells the skill for a renamed install', async () => {
+    // The spec is `ntn`; installed as `ntn-prod` the manual must teach
+    // `ntn-prod` lines, not lines that run another install.
+    const ws = await makeWs()
+    ws.registerCli('ntn-prod', NTN, { apiKey: 'secret_fake' })
+    const page = stdoutStr(await ws.execute('man ntn-prod'))
+    expect(page.startsWith('# ntn-prod')).toBe(true)
+    expect(page).toContain('ntn-prod pages get')
+    expect(page).not.toMatch(/(^|[^\w/.-])ntn(?![\w-])/m)
+    expect(page).toContain('Usage: ntn-prod')
+  })
+
+  it('man <cli> <verb> carries no skill body', async () => {
+    const ws = await makeWs()
+    ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
+    const bodyFirstLine = skillFor(NTN)?.body.split('\n')[0] ?? ''
+    expect(bodyFirstLine).not.toBe('')
+    const page = stdoutStr(await ws.execute('man ntn pages'))
+    expect(page).toContain('Usage: ntn pages')
+    expect(page).not.toContain(bodyFirstLine)
+  })
+
+  it('man omits the skill when the profile narrows the tree', async () => {
+    const ws = await makeWs()
+    ws.registerCli('ntn', NTN, { apiKey: 'secret_fake' })
+    const bodyFirstLine = skillFor(NTN)?.body.split('\n')[0] ?? ''
+    expect(bodyFirstLine).not.toBe('')
+    // Unnarrowed, the skill leads the page.
+    expect(stdoutStr(await ws.execute('man ntn')).startsWith(bodyFirstLine)).toBe(true)
+    // A profile reaching only part of the tree gets the verb listing alone:
+    // the skill teaches lines that session cannot run.
+    ws.createSession('narrow', {
+      profile: { commands: { allow: ['man', 'ntn pages'], ask: [], deny: [] } },
+    })
+    const page = stdoutStr(await ws.execute('man ntn', { sessionId: 'narrow' }))
+    expect(page).not.toContain(bodyFirstLine)
+    expect(page).toContain('pages')
   })
 
   it('which reports a missing name through the status only', async () => {

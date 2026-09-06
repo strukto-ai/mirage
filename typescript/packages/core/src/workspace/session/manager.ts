@@ -91,6 +91,11 @@ export class SessionManager {
     )
   }
 
+  /** Whether persisted session fields have been hydrated. */
+  get isLoaded(): boolean {
+    return this.loaded
+  }
+
   /**
    * True once any session may hold a managed variable.
    *

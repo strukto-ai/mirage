@@ -67,9 +67,8 @@ PROMPT = """\
     .slides[0].objectId"""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws slides presentations create --json '{"title": "My Deck"}'
-    See gws slides --help for the raw API passthroughs.
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.
 
   Delete:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive

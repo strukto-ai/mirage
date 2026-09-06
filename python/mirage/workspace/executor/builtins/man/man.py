@@ -15,6 +15,7 @@
 from collections.abc import Sequence
 from functools import partial
 
+from mirage.commands.cli.skill import skill_for
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.spec import SPECS
@@ -24,7 +25,8 @@ from mirage.io.types import ByteSource
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.builtins.man.types import ManEntry
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.lookup import command_visible, verb_visible
+from mirage.workspace.lookup import (cli_tree_visible, command_visible,
+                                     verb_visible)
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -201,10 +203,21 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
         return None
     # The root's dialect, so a manual page reads exactly like the
     # --help it renders from.
-    return node_help(" ".join((head, ) + path),
-                     node,
-                     spec.usage_style,
-                     visible=partial(_child_visible, head, path, session))
+    help_text = node_help(" ".join((head, ) + path),
+                          node,
+                          spec.usage_style,
+                          visible=partial(_child_visible, head, path, session))
+    # A skill teaches an invented grammar the flag table cannot: only
+    # the head-only page (the program's own manual, not one verb's)
+    # leads with it, only when the spec ships one, and only for a
+    # session that may run every line it teaches. It is respelled for
+    # the installed head, so ``man ntn-prod`` teaches ``ntn-prod`` lines
+    # and not another install's.
+    if not verbs and cli_tree_visible(head, spec, session):
+        skill = skill_for(spec, head)
+        if skill is not None:
+            return skill.body + "\n\n" + help_text
+    return help_text
 
 
 def _render_man_index(registry: MountRegistry, session: Session) -> str:

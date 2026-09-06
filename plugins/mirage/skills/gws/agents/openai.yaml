@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Workspace CLI"
+  short_description: "Act on Gmail, Drive, Docs, Sheets and Calendar"
+  default_prompt: "Use $gws to act on Google Workspace data through the gws CLI."

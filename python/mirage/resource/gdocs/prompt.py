@@ -62,15 +62,14 @@ PROMPT = """\
     .revisionId"""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws docs write --document <doc-id> --text "text to append"
-    See gws docs --help for the raw API passthroughs.
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.
 
   Newline gotcha: bash double-quoted "...\\n..." is NOT a newline; the
   literal characters \\ + n end up in the doc. Either:
     --text $'line1\\nline2'                          # ANSI-C quoting
     --text "$(printf 'line1\\nline2')"               # printf interprets
-    gws docs documents batchUpdate --json '{...}'    # JSON handles escapes
+    --json '{...}'                                # JSON handles escapes
 
   Delete:
     rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive

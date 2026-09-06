@@ -448,10 +448,10 @@
       "targets": [
         "cli-linear"
       ],
-      "command": "man linear | head -1",
+      "command": "man linear | head -3",
       "expect": {
         "exit": 0,
-        "stdout": "linear: Linear GraphQL API client\n",
+        "stdout": "# linear\n\n`linear` is Mirage's Linear GraphQL API client, installed as a typed program\n",
         "stderr": ""
       }
     },

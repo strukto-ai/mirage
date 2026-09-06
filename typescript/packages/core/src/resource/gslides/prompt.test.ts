@@ -29,10 +29,7 @@ describe('GSLIDES_PROMPT', () => {
 
 describe('GSLIDES_WRITE_PROMPT', () => {
   it('matches actual command flag signatures', () => {
-    expect(GSLIDES_WRITE_PROMPT).toContain('gws slides presentations create')
-    expect(GSLIDES_WRITE_PROMPT).toContain('--json')
-    expect(GSLIDES_WRITE_PROMPT).toContain('{"title":')
-    expect(GSLIDES_WRITE_PROMPT).toContain('gws slides --help')
+    expect(GSLIDES_WRITE_PROMPT).toContain('Installed CLIs')
   })
 
   it('documents rm', () => {

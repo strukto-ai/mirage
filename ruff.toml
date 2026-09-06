@@ -22,6 +22,8 @@ external = ["E125"]
 
 [lint.per-file-ignores]
 "python/mirage/resource/*/prompt.py" = ["E501"]
+# Skill text is embedded as one JSON string literal per skill by scripts/gen_skills.py.
+"python/mirage/commands/cli/generated/skills_data.py" = ["E501"]
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]

@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import re
 from unittest.mock import MagicMock
 
+from mirage.commands.cli.builtin.ntn import NTN
+from mirage.commands.cli.skill import skill_for
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec.types import CommandSpec, Option
@@ -191,8 +194,11 @@ def test_render_man_index_skips_dev_and_is_empty_with_nothing_to_list():
 
 
 def _cli_tree() -> CLISpec:
+    # The spec's own name, not the installed head word below, is what
+    # skill_for keys on; "acmeapi" is deliberately not a real skilled
+    # CLI's name so this fixture never picks up a real skill body.
     return CLISpec(
-        name="linear",
+        name="acmeapi",
         description="Linear API client",
         subcommands=(
             CLISpec(name="issue",
@@ -287,3 +293,44 @@ def test_render_man_index_lists_installed_clis_after_commands():
 
 def test_render_man_index_omits_the_cli_section_when_none_installed():
     assert "# clis" not in _render_man_index(_mk_registry([]), _SESSION)
+
+
+def _ntn_registry(mounts=None) -> None:
+    reg = _mk_registry(mounts or [])
+    reg.clis.install("ntn", NTN, {"api_key": "secret_fake"})
+    return reg
+
+
+def test_handle_man_leads_with_the_skill_body_for_a_skilled_cli():
+    skill = skill_for(NTN)
+    assert skill is not None
+    first_heading = next(line for line in skill.body.splitlines()
+                         if line.startswith("#"))
+    text = asyncio.run(handle_man(["ntn"], _ntn_registry(),
+                                  _SESSION))[0].decode()
+    assert text.startswith(first_heading)
+    # The verb listing (the ordinary --help rendering) is still there,
+    # right behind the skill body.
+    assert "Usage: ntn" in text
+
+
+def test_handle_man_verb_page_has_no_skill_body():
+    skill = skill_for(NTN)
+    assert skill is not None
+    body_first_line = skill.body.splitlines()[0]
+    text = asyncio.run(handle_man(["ntn", "pages"], _ntn_registry(),
+                                  _SESSION))[0].decode()
+    assert "Usage: ntn pages" in text
+    assert body_first_line not in text
+
+
+def test_handle_man_respells_the_skill_for_a_renamed_install():
+    # The spec is ``ntn``; installed as ``ntn-prod`` the manual must
+    # teach ``ntn-prod`` lines, not lines that run another install.
+    reg = _mk_registry([])
+    reg.clis.install("ntn-prod", NTN, {"api_key": "secret_fake"})
+    text = asyncio.run(handle_man(["ntn-prod"], reg, _SESSION))[0].decode()
+    assert text.startswith("# ntn-prod")
+    assert "ntn-prod pages get" in text
+    assert re.search(r"(?:^|[^\w/.-])ntn(?![\w-])", text, re.MULTILINE) is None
+    assert "Usage: ntn-prod" in text

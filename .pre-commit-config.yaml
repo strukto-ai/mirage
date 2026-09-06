@@ -74,7 +74,8 @@ repos:
         # `**/generated/**`.
         exclude: |
           (?x)^(
-              python/mirage/utils/generated/.*
+              python/mirage/utils/generated/.*|
+              python/mirage/commands/cli/generated/.*
           )$
 
   - repo: https://github.com/pycqa/isort
@@ -84,7 +85,8 @@ repos:
         name: Sort imports
         exclude: |
           (?x)^(
-              python/mirage/utils/generated/.*
+              python/mirage/utils/generated/.*|
+              python/mirage/commands/cli/generated/.*
           )$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit

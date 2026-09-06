@@ -63,15 +63,12 @@ PROMPT = """\
     .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
     .namedRanges[]
 
-  For range-scoped reads and writes, use the gws CLI if installed:
-    gws sheets read --spreadsheet <id> --range Sheet1!A1:C10"""
+  For range-scoped reads and writes, consult Installed CLIs when listed
+  and choose the intended Google account."""
 
 WRITE_PROMPT = """\
-  Writes go through the gws CLI if installed:
-    gws sheets write --spreadsheet <id> --range Sheet1!A1:B2 \\
-      --json-values '[["Name", "Score"], ["Alice", 42]]'
-    gws sheets append --spreadsheet <id> --values "Bob,37"
-    See gws sheets --help for the raw API passthroughs.
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.
 
   Delete:
     rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive

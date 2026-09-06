@@ -17,7 +17,7 @@ See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDepen
 ## Usage
 
 ```ts
-import { Mount, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountBackend, MountMode, RAMResource, S3Resource, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
   '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
@@ -31,6 +31,25 @@ await ws.close() // auto-unmounts
 ```
 
 The mountpoint behaves like a regular directory. `claude` reads, writes, runs `bash`, and patches files just like it would on a normal disk, every operation goes through Mirage's ops layer, so writes to `/s3/...` hit S3, writes to `/` stay in RAM.
+
+## Install as a plugin
+
+The same directory that backs the [Codex](/typescript/agents/codex) plugin is a
+Claude Code plugin. Add the repository as a marketplace and install it:
+
+```bash
+claude plugin marketplace add strukto-ai/mirage
+claude plugin install mirage@mirage
+```
+
+The plugin carries the Mirage MCP tools and one skill per virtualized CLI
+(`linear`, `slack`, `discord`, `gws`, `ntn`) under `plugins/mirage/skills/`.
+Each skill teaches the loop the CLI relies on: find an identifier on the
+mount with `ls` after confirming it uses the selected CLI account, then act
+with that installed CLI name. That loop runs through the plugin's
+MCP tools, not through the FUSE mount above: a CLI is dispatched by
+`ws.execute()` inside the Mirage shell, so `man <cli>` only works there, not
+as a real host command over a FUSE-mounted directory.
 
 ## Why FUSE instead of an SDK integration?
 

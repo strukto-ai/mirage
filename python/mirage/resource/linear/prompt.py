@@ -121,12 +121,9 @@ PROMPT = """\
       "created_at": "...", "updated_at": "...", "url": "..."
     }}
 
-  To act on issues (list/get/create/update/assign/transition,
-  comments, projects, cycles, labels, users, documents, search), use
-  the linear CLI if installed: linear --help"""
+  For issue actions, consult Installed CLIs when listed and choose the
+  Linear account intended for the task; this mount does not select it."""
 
 WRITE_PROMPT = """\
-  Writes go through the linear CLI if installed:
-    linear issue create --team STR --title "Title" --description "Body"
-    linear comment add STR-42 --body "comment"
-  See linear --help for every verb."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""

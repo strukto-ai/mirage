@@ -28,3 +28,10 @@ CLAP_EXIT = 2
 # script CLI that shells back into mirage must not find a config blob
 # where a path belongs.
 CLI_CONFIG_ENV = "MIRAGE_CLI_CONFIG"
+
+# The invented-grammar CLIs: each one's command line is mirage's own
+# design, not a real program's, so an agent has nowhere else to learn
+# it and each must ship a skill (plugins/mirage/skills/<name>/). git,
+# gh, psql and redis-cli mirror a real program and deliberately do not.
+SKILLED_CLIS: frozenset[str] = frozenset(
+    {"discord", "gws", "linear", "ntn", "slack"})

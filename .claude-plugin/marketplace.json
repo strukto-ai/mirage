@@ -1,0 +1,15 @@
+{
+  "name": "mirage",
+  "owner": {
+    "name": "Strukto.AI",
+    "url": "https://github.com/strukto-ai"
+  },
+  "plugins": [
+    {
+      "name": "mirage",
+      "source": "./plugins/mirage",
+      "description": "Mirage filesystem tools plus one skill per virtualized CLI (linear, slack, discord, gws, ntn).",
+      "category": "Developer Tools"
+    }
+  ]
+}

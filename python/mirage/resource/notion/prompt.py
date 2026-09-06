@@ -34,19 +34,9 @@ PROMPT = """\
   schema (not the rows). ls a data source dir to list its row pages.
 
   Titles are sanitized; don't construct paths, ls the parent dir.
-  ntn takes ids as positional operands, not flags: ntn pages get
-  <page-id>, ntn datasources query <data-source-id>, ntn datasources
-  resolve <database-id>."""
+  For page and data-source actions, consult Installed CLIs when listed
+  and choose the intended Notion account."""
 
 WRITE_PROMPT = """\
-  Writes go through the ntn CLI if installed:
-    ntn pages create --parent data-source:<data-source-id> \
---content '# Title'
-    ntn pages edit <page-id> --content '## Notes'
-    ntn pages trash <page-id> --yes
-  --parent takes page:<id>, database:<id> or data-source:<id>, and
-  --content also reads stdin. Blocks, comments and search have no typed
-  verb; reach them through ntn api:
-    ntn api v1/blocks/<block-id>/children -X PATCH \
--d '{"children":[...]}'
-  See ntn --help: api, auth, datasources, pages, whoami."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""

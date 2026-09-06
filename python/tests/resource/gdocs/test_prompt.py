@@ -25,12 +25,10 @@ def test_prompt_includes_buckets_and_structure():
     assert ".body.content[].paragraph.elements[].textRun.content" in rendered
 
 
-def test_write_prompt_examples_match_actual_signatures():
-    assert "gws docs write" in WRITE_PROMPT
-    assert "--document" in WRITE_PROMPT
+def test_write_prompt_points_at_the_cli():
+    assert "Installed CLIs" in WRITE_PROMPT
     assert "--text" in WRITE_PROMPT
-    assert "gws docs --help" in WRITE_PROMPT
-    assert "gws docs documents batchUpdate --json" in WRITE_PROMPT
+    assert "--json" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm_and_newline_gotcha():

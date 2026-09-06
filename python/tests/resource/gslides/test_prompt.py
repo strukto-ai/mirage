@@ -27,11 +27,8 @@ def test_prompt_includes_buckets_and_structure():
     assert text_path in rendered
 
 
-def test_write_prompt_examples_match_actual_signatures():
-    assert "gws slides presentations create" in WRITE_PROMPT
-    assert "--json" in WRITE_PROMPT
-    assert '{"title":' in WRITE_PROMPT
-    assert "gws slides --help" in WRITE_PROMPT
+def test_write_prompt_points_at_the_cli():
+    assert "Installed CLIs" in WRITE_PROMPT
 
 
 def test_write_prompt_documents_rm():

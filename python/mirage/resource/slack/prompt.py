@@ -38,7 +38,5 @@ PROMPT = """\
   PDFs, Word docs, code snippets that Slack has indexed."""
 
 WRITE_PROMPT = """\
-  Writes go through the slack CLI if installed:
-    slack send-message --channel <channel-id> --text "message"
-    slack send-message --channel <channel-id> --thread-ts <ts> --text "reply"
-  See slack --help for every verb (react, pins, member-info, search)."""
+  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account."""

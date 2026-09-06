@@ -28,3 +28,14 @@ export const CLI_CONFIG_ENV = 'MIRAGE_CLI_CONFIG'
 // beside the refusal renderers because the walk reads it too, and the walk
 // cannot import a module that reaches the workspace.
 export const CLAP_EXIT = 2
+
+// The invented-grammar CLIs: the ones whose grammar is not in the model, so
+// each must ship a skill (plugins/mirage/skills/<name>/SKILL.md). git, gh,
+// psql and redis-cli mirror a real program and deliberately do not.
+export const SKILLED_CLIS: ReadonlySet<string> = new Set([
+  'discord',
+  'gws',
+  'linear',
+  'ntn',
+  'slack',
+])

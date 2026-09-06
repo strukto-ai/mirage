@@ -19,7 +19,7 @@ import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
 const ws = new Workspace({ '/mail': new EmailResource(config) })
 ws.registerCli('himalaya', HIMALAYA, config)
 
-await ws.execute('himalaya envelope list --unseen --max 5')
+await ws.execute('himalaya envelope list --mailbox INBOX --page-size 5')
 ```
 
 In YAML the same install rides the `clis:` section:
@@ -65,5 +65,33 @@ the programs it was given but cannot uninstall them.
 | [git](/typescript/cli/git)               | git repositories | git (`status`, `log`, `add`, `commit`)      |
 
 Reading stays on the mount (`cat`, `grep`, `jq` over the virtual
-files); acting goes through the CLI. The mounted tree's
-`<name>__<id>` path segments supply the IDs the CLI flags take.
+files); acting goes through the CLI. After confirming a mount and the selected CLI use the same account, its
+`<name>__<id>` path segments supply the IDs the CLI flags take. Mounts and
+CLI installs are independent; neither a path nor an alias binds their accounts.
+
+## Skills
+
+A CLI whose grammar is mirage's own invention (`discord`, `gws`,
+`linear`, `ntn`, `slack`) ships an [agentskills.io](https://agentskills.io)
+`SKILL.md` under `plugins/mirage/skills/<cli>/`. The model has never
+seen these programs, so nothing in its training says how to use them;
+the skill is that missing knowledge. `git`, `gh`, `psql` and `redis-cli`
+imitate real programs the model already knows, so they ship no skill.
+Only the bundled spec receives its skill; a custom CLI with the same spec
+name keeps its own description and help. Once a CLI is installed, the
+workspace's system prompt lists visible installs using the default session's
+command allow list. A fully visible CLI uses its skill's frontmatter
+`description`; a restricted tree gets a neutral description. `man <cli>`
+(no verb) leads with the skill body only when the whole tree is visible;
+otherwise it shows filtered command help. Descriptions and guides are respelled for
+the head word the install answers to, so `man ntn-prod` teaches
+`ntn-prod` lines. The same `plugins/mirage/skills/` directory is what
+the Codex, Grok Build and Claude Code plugins load, so a skill is
+written once and read from five places.
+
+When `man` is hidden, fully visible CLIs point to `<head> --help` instead.
+Resource prompts refer to Installed CLIs for the actual installed name and guide.
+
+With an external state or session store, await `ws.ensureSessionsLoaded()`
+before reading the workspace prompt. CLI discovery is omitted until the
+persisted default session and its command rules have loaded.

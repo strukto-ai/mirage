@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CLISpec } from '../../commands/cli/types.ts'
 import { headVisible, nodeVisible } from '../../policy/match/allow.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -140,4 +141,21 @@ export function lookup(name: string, session: Session, registry: MountRegistry):
  */
 export function lookupAll(name: string, session: Session, registry: MountRegistry): Consumer[] {
   return [...layers(name, session, registry)]
+}
+
+/**
+ * Whether the session can see every node of an installed tree. A skill
+ * advertises lines across the whole program, so it leads the manual only
+ * when the profile hides none of them: a narrowed manual lists the verbs
+ * the session may run, and a skill teaching the rest would be advertising
+ * lines that cannot run.
+ */
+export function cliTreeVisible(head: string, spec: CLISpec, session: Session): boolean {
+  const stack: [CLISpec, readonly string[]][] = [[spec, []]]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [node, path] = next
+    if (!verbVisible(head, path, session)) return false
+    for (const child of node.subcommands) stack.push([child, [...path, child.name]])
+  }
+  return true
 }

@@ -94,6 +94,16 @@ def unregister_cli_spec(name: str) -> None:
     del CLI_SPECS[name]
 
 
+def builtin_spec_for(name: str) -> CLISpec | None:
+    """Resolve a bundled tree without consulting user registrations.
+
+    Args:
+        name (str): the builtin program name.
+    """
+    ref = BUILTIN_CLI_SPECS.get(name)
+    return _load_ref(ref) if ref is not None else None
+
+
 def cli_spec_for(name: str) -> CLISpec:
     """Resolve a YAML ``cli:`` value to its program tree, fail loud.
 

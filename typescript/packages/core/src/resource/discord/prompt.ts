@@ -37,7 +37,5 @@ export const DISCORD_PROMPT = `{prefix}
   so grep falls back to per-file scan via CDN download. Binary attachments
   (JPG, PDF) will produce noise.`
 
-export const DISCORD_WRITE_PROMPT = `  Writes go through the discord CLI if installed:
-    discord send --channel <channel-id> --text "message"
-    discord react --channel <channel-id> --message <id> --emoji "✅"
-  See discord --help for every verb (edit, delete, threads, polls).`
+export const DISCORD_WRITE_PROMPT = `  Service writes require a CLI for the intended account. When listed, consult
+  Installed CLIs for its name and guide; a mount does not select a CLI account.`

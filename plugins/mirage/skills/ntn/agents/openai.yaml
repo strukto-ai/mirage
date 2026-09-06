@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notion CLI"
+  short_description: "Act on Notion pages and databases"
+  default_prompt: "Use $ntn to read and write Notion state through the ntn CLI."

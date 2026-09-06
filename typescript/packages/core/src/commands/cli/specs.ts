@@ -29,9 +29,15 @@ import { compareCodePoints } from '../../utils/sort.ts'
 // existed depended on what the caller happened to pull in. Runtime
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
-const CLI_SPECS = new Map<string, CLISpec>(
+const BUILTIN_CLI_SPECS: ReadonlyMap<string, CLISpec> = new Map(
   [DISCORD, GH, GIT, GWS, LINEAR, NTN, SLACK].map((spec) => [spec.name, spec]),
 )
+const CLI_SPECS = new Map(BUILTIN_CLI_SPECS)
+
+/** Resolve a bundled tree without consulting user registrations. */
+export function builtinSpecFor(name: string): CLISpec | null {
+  return BUILTIN_CLI_SPECS.get(name) ?? null
+}
 
 /** Make a CLISpec resolvable by name from YAML; its root name is the key. */
 export function registerCliSpec(spec: CLISpec): void {

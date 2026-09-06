@@ -218,6 +218,23 @@ class CLISpec(CommandSpec):
         validate_cli(self)
 
 
+@dataclass(frozen=True, slots=True)
+class Skill:
+    """One agent skill: the frontmatter facts a host reads before loading
+    and the body it loads.
+
+    Args:
+        name (str): frontmatter ``name``, the skill directory name.
+        description (str): frontmatter ``description``, one line.
+        body (str): Markdown after the closing ``---``, stripped.
+        text (str): the whole SKILL.md verbatim.
+    """
+    name: str
+    description: str
+    body: str
+    text: str
+
+
 @dataclass(frozen=True)
 class WalkResult:
     """Outcome of walking a CLI tree with one command line.
