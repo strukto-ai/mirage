@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +24,7 @@ from mirage.core.google.config import GoogleConfig
 from mirage.ops.gdrive import OPS
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
 def _op(name: str):
@@ -76,16 +77,11 @@ async def test_stat_indexed_file(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
+async def test_stat_not_found(accessor, index, monkeypatch):
     await index.set_dir("/", [])
-    with patch(
-            "mirage.core.gdrive.resolve.list_files",
-            new_callable=AsyncMock,
-            return_value=[],
-    ), patch(
-            "mirage.core.gdrive.resolve.list_shared_drives",
-            new_callable=AsyncMock,
-            return_value=[],
-    ):
-        with pytest.raises(FileNotFoundError):
-            await stat(accessor, _scope("/nonexistent.txt"), index=index)
+    install_drive(
+        monkeypatch,
+        StubDrive(list_files=AsyncMock(return_value=[]),
+                  list_shared_drives=AsyncMock(return_value=[])))
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor, _scope("/nonexistent.txt"), index=index)

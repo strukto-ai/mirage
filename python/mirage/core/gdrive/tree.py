@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import resolve_dir
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, list_files
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.types import PathSpec
 
 
@@ -51,9 +51,7 @@ async def iter_tree(
     stack: list[tuple[str, str, str | None]] = [(base, folder_id, drive_id)]
     while stack:
         rel, fid, did = stack.pop(0)
-        children = await list_files(accessor.token_manager,
-                                    folder_id=fid,
-                                    drive_id=did)
+        children = await accessor.drive.list_files(folder_id=fid, drive_id=did)
         children.sort(key=vfs_name)
         for item in children:
             name = vfs_name(item)

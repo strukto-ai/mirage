@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
-import { deleteFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
 
 async function unlinkImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
@@ -25,7 +24,7 @@ async function unlinkImpl(accessor: GDriveAccessor, path: PathSpec): Promise<voi
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)
   if (isFolder(node)) throw eisdir(path)
-  await deleteFile(accessor.tokenManager, node.id)
+  await accessor.drive.deleteFile(node.id)
   await invalidateAfterUnlink(path)
 }
 

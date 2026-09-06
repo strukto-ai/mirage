@@ -20,6 +20,7 @@ from mirage.core.gdrive.read import read_file_versioned
 from mirage.core.gdrive.versions import (capture_file_metadata,
                                          download_revision, list_revisions)
 from mirage.observe.context import push_revisions, reset_revisions
+from tests.fixtures.gdrive_stub import StubDrive
 
 
 @pytest.mark.asyncio
@@ -88,38 +89,25 @@ async def test_capture_falls_back_to_head_revision(gdrive_accessor):
 
 @pytest.mark.asyncio
 async def test_read_file_versioned_pinned(gdrive_accessor):
+    pinned_read = AsyncMock(return_value=b"pinned")
+    live_read = AsyncMock()
+    drive = StubDrive(download_revision=pinned_read, download_file=live_read)
     token = push_revisions({"/data/f.txt": "r1"})
     try:
-        with patch(
-                "mirage.core.gdrive.read.download_revision",
-                new_callable=AsyncMock,
-                return_value=b"pinned",
-        ) as pinned_read, patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-        ) as live_read:
-            data = await read_file_versioned(gdrive_accessor.token_manager,
-                                             "f1", "/data/f.txt", "f.txt")
+        data = await read_file_versioned(drive, "f1", "/data/f.txt", "f.txt")
     finally:
         reset_revisions(token)
     assert data == b"pinned"
-    pinned_read.assert_awaited_once_with(gdrive_accessor.token_manager, "f1",
-                                         "r1", None)
+    pinned_read.assert_awaited_once_with("f1", "r1", None)
     live_read.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_read_file_versioned_unpinned_reads_live(gdrive_accessor):
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=b"live",
-    ), patch(
-            "mirage.core.gdrive.read.capture_file_metadata",
-            new_callable=AsyncMock,
-    ) as capture:
-        data = await read_file_versioned(gdrive_accessor.token_manager, "f1",
-                                         "/data/f.txt", "f.txt")
+    capture = AsyncMock()
+    drive = StubDrive(download_file=AsyncMock(return_value=b"live"),
+                      capture_file_metadata=capture)
+    data = await read_file_versioned(drive, "f1", "/data/f.txt", "f.txt")
     assert data == b"live"
     # No active recorder: the extra metadata call is skipped.
     capture.assert_not_awaited()

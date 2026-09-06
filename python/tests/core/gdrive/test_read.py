@@ -24,13 +24,14 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
 from mirage.utils.ranges import ByteWindow
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
-async def fail_list_files(_tm, folder_id, drive_id=None):
+async def fail_list_files(folder_id, drive_id=None):
     raise RuntimeError("drive unavailable")
 
 
-async def empty_list_files(_tm, folder_id, drive_id=None):
+async def empty_list_files(folder_id, drive_id=None):
     return []
 
 
@@ -63,7 +64,7 @@ def index():
 
 
 @pytest.mark.asyncio
-async def test_read_file(accessor, index):
+async def test_read_file(accessor, index, monkeypatch):
     await index.put(
         "/Team Drive/report.pdf",
         IndexEntry(
@@ -75,43 +76,36 @@ async def test_read_file(accessor, index):
             extra={"drive_id": "drive1"},
         ))
     content = b"pdf content here"
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=content,
-    ):
-        result = await read(
-            accessor,
-            PathSpec(resource_path="Team Drive/report.pdf",
-                     virtual="/Team Drive/report.pdf",
-                     directory="/Team Drive/report.pdf"), index)
-        assert result == content
+    install_drive(monkeypatch,
+                  StubDrive(download_file=AsyncMock(return_value=content)))
+    result = await read(
+        accessor,
+        PathSpec(resource_path="Team Drive/report.pdf",
+                 virtual="/Team Drive/report.pdf",
+                 directory="/Team Drive/report.pdf"), index)
+    assert result == content
 
 
 @pytest.mark.asyncio
 async def test_a_ranged_read_of_a_binary_file_asks_drive_for_the_range(
-        accessor, index):
+        accessor, index, monkeypatch):
     await index.put(
         "/report.pdf",
         IndexEntry(id="file123",
                    name="report",
                    resource_type="gdrive/file",
                    vfs_name="report.pdf"))
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=b"tent",
-    ) as mock_download:
-        result = await read(accessor,
-                            PathSpec(resource_path="report.pdf",
-                                     virtual="/report.pdf",
-                                     directory="/report.pdf"),
-                            index,
-                            offset=3,
-                            size=4)
+    mock_download = AsyncMock(return_value=b"tent")
+    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    result = await read(accessor,
+                        PathSpec(resource_path="report.pdf",
+                                 virtual="/report.pdf",
+                                 directory="/report.pdf"),
+                        index,
+                        offset=3,
+                        size=4)
     assert result == b"tent"
-    mock_download.assert_awaited_once_with(accessor.token_manager, "file123",
-                                           ByteWindow(3, 4))
+    mock_download.assert_awaited_once_with("file123", ByteWindow(3, 4))
 
 
 @pytest.mark.asyncio
@@ -142,7 +136,8 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
 
 
 @pytest.mark.asyncio
-async def test_read_shared_drive_raises_is_a_directory(accessor, index):
+async def test_read_shared_drive_raises_is_a_directory(accessor, index,
+                                                       monkeypatch):
     await index.put(
         "/Team Drive",
         IndexEntry(
@@ -152,40 +147,39 @@ async def test_read_shared_drive_raises_is_a_directory(accessor, index):
             vfs_name="Team Drive",
             extra={"drive_id": "drive1"},
         ))
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-    ) as mock_download:
-        # The message is the bare operand, which is what the shell renders
-        # ("cat: /Team Drive: Is a directory"). The TS twin asserts the same
-        # string through the stamped virtualPath.
-        with pytest.raises(IsADirectoryError) as excinfo:
-            await read(
-                accessor,
-                PathSpec(resource_path="Team Drive",
-                         virtual="/Team Drive",
-                         directory="/Team Drive"),
-                index,
-            )
-        assert str(excinfo.value) == "/Team Drive"
+    mock_download = AsyncMock()
+    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    # The message is the bare operand, which is what the shell renders
+    # ("cat: /Team Drive: Is a directory"). The TS twin asserts the same
+    # string through the stamped virtualPath.
+    with pytest.raises(IsADirectoryError) as excinfo:
+        await read(
+            accessor,
+            PathSpec(resource_path="Team Drive",
+                     virtual="/Team Drive",
+                     directory="/Team Drive"),
+            index,
+        )
+    assert str(excinfo.value) == "/Team Drive"
     mock_download.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_read_not_found(accessor, index):
-    with patch("mirage.core.gdrive.readdir.list_files", new=empty_list_files):
-        with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
-                PathSpec(resource_path="missing/file.txt",
-                         virtual="/missing/file.txt",
-                         directory="/missing/file.txt"), index)
+async def test_read_not_found(accessor, index, monkeypatch):
+    install_drive(monkeypatch, StubDrive(list_files=empty_list_files))
+    with pytest.raises(FileNotFoundError):
+        await read(
+            accessor,
+            PathSpec(resource_path="missing/file.txt",
+                     virtual="/missing/file.txt",
+                     directory="/missing/file.txt"), index)
 
 
 @pytest.mark.asyncio
-async def test_read_auto_bootstraps_from_empty_index(accessor, index):
+async def test_read_auto_bootstraps_from_empty_index(accessor, index,
+                                                     monkeypatch):
 
-    async def fake_list_files(_tm, folder_id, drive_id=None):
+    async def fake_list_files(folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",
@@ -197,31 +191,25 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             }]
         raise AssertionError(f"unexpected folder_id={folder_id}")
 
-    with (
-            patch(
-                "mirage.core.gdrive.readdir.list_files",
-                new=fake_list_files,
-            ),
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                return_value=b"pdf-bytes",
-            ),
-    ):
-        result = await read(
-            accessor,
-            PathSpec(resource_path="report.pdf",
-                     virtual="/report.pdf",
-                     directory="/report.pdf"),
-            index,
-        )
-        assert result == b"pdf-bytes"
+    install_drive(
+        monkeypatch,
+        StubDrive(list_files=fake_list_files,
+                  download_file=AsyncMock(return_value=b"pdf-bytes")))
+    result = await read(
+        accessor,
+        PathSpec(resource_path="report.pdf",
+                 virtual="/report.pdf",
+                 directory="/report.pdf"),
+        index,
+    )
+    assert result == b"pdf-bytes"
 
 
 @pytest.mark.asyncio
-async def test_read_missing_file_raises_after_recursion(accessor, index):
+async def test_read_missing_file_raises_after_recursion(
+        accessor, index, monkeypatch):
 
-    async def fake_list_files(_tm, folder_id, drive_id=None):
+    async def fake_list_files(folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",
@@ -233,35 +221,31 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             }]
         raise AssertionError(f"unexpected folder_id={folder_id}")
 
-    with (
-            patch(
-                "mirage.core.gdrive.readdir.list_files",
-                new=fake_list_files,
-            ),
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                side_effect=AssertionError("should not call download_file"),
-            ),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
-                PathSpec(resource_path="missing.txt",
-                         virtual="/missing.txt",
-                         directory="/missing.txt"),
-                index,
-            )
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            list_files=fake_list_files,
+            download_file=AsyncMock(
+                side_effect=AssertionError("should not call download_file"))))
+    with pytest.raises(FileNotFoundError):
+        await read(
+            accessor,
+            PathSpec(resource_path="missing.txt",
+                     virtual="/missing.txt",
+                     directory="/missing.txt"),
+            index,
+        )
 
 
 @pytest.mark.asyncio
-async def test_read_propagates_parent_refresh_failure(accessor, index):
-    with patch("mirage.core.gdrive.readdir.list_files", new=fail_list_files):
-        with pytest.raises(RuntimeError, match="drive unavailable"):
-            await read(
-                accessor,
-                PathSpec(resource_path="missing.txt",
-                         virtual="/missing.txt",
-                         directory="/missing.txt"),
-                index,
-            )
+async def test_read_propagates_parent_refresh_failure(accessor, index,
+                                                      monkeypatch):
+    install_drive(monkeypatch, StubDrive(list_files=fail_list_files))
+    with pytest.raises(RuntimeError, match="drive unavailable"):
+        await read(
+            accessor,
+            PathSpec(resource_path="missing.txt",
+                     virtual="/missing.txt",
+                     directory="/missing.txt"),
+            index,
+        )

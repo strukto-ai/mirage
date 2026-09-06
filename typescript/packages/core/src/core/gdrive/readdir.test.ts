@@ -12,38 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn(), listSharedDrives: vi.fn() }
-})
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
-import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
+import type { StubDrive } from './_test_util.ts'
+import { makeGDriveAccessor, stubDrive } from './_test_util.ts'
 import { readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+let drive: StubDrive
 
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return makeGDriveAccessor(drive)
 }
 
 beforeEach(() => {
-  vi.mocked(drive.listSharedDrives).mockResolvedValue([])
+  drive = stubDrive()
+  drive.listSharedDrives.mockResolvedValue([])
 })
 
 describe('readdir parent recursion', () => {
   it('repopulates evicted subfolder entry by refetching parent', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
           {
@@ -78,7 +70,7 @@ describe('readdir parent recursion', () => {
   })
 
   it('raises ENOENT when subfolder missing even after recursion', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
           {
@@ -107,7 +99,7 @@ describe('readdir parent recursion', () => {
     // Listing a file's own id answers with an empty child set rather than an
     // error, so the recursion has to refuse at the file itself or `/a.txt/x`
     // comes back ENOENT where opendir(2) says ENOTDIR.
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
           {
@@ -133,7 +125,7 @@ describe('readdir parent recursion', () => {
 
 describe('readdir shared drives', () => {
   it('surfaces shared drives as top-level directories', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       {
         id: 'f1',
         name: 'readme.txt',
@@ -141,7 +133,7 @@ describe('readdir shared drives', () => {
         modifiedTime: '2026-04-01T00:00:00.000Z',
       },
     ])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -158,8 +150,8 @@ describe('readdir shared drives', () => {
   })
 
   it('uniquifies duplicate shared drive names', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([])
+    drive.listSharedDrives.mockResolvedValue([
       { id: 'drive1', name: 'Team' },
       { id: 'drive2', name: 'Team' },
       { id: 'drive3', name: 'Team' },
@@ -179,7 +171,7 @@ describe('readdir shared drives', () => {
   })
 
   it('still lists My Drive when shared drive enumeration fails', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       {
         id: 'f1',
         name: 'readme.txt',
@@ -187,7 +179,7 @@ describe('readdir shared drives', () => {
         modifiedTime: '2026-04-01T00:00:00.000Z',
       },
     ])
-    vi.mocked(drive.listSharedDrives).mockRejectedValue(new Error('no scope'))
+    drive.listSharedDrives.mockRejectedValue(new Error('no scope'))
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -212,8 +204,8 @@ describe('readdir shared drives', () => {
         modifiedTime: '2026-04-01T00:00:00.000Z',
       },
     ]
-    vi.mocked(drive.listFiles).mockResolvedValue(files)
-    vi.mocked(drive.listSharedDrives).mockRejectedValue(new Error('no scope'))
+    drive.listFiles.mockResolvedValue(files)
+    drive.listSharedDrives.mockRejectedValue(new Error('no scope'))
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -222,16 +214,16 @@ describe('readdir shared drives', () => {
     expect((await index.listDir('/')).entries).toBeUndefined()
     expect((await index.get('/readme.txt')).entry?.id).toBe('f1')
 
-    vi.mocked(drive.listFiles).mockResolvedValue(files)
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team' }])
+    drive.listFiles.mockResolvedValue(files)
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team' }])
     const out = await readdir(accessor, root, index)
     expect(out).toContain('/Team/')
     expect((await index.listDir('/')).entries).toBeDefined()
   })
 
   it('passes drive_id from the cached entry when listing inside a shared drive', async () => {
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') return Promise.resolve([])
       if (opts?.folderId === 'drive1') {
         return Promise.resolve([
@@ -260,14 +252,14 @@ describe('readdir shared drives', () => {
       index,
     )
     expect(out).toContain('/Team Drive/spec.pdf')
-    const innerCall = vi.mocked(drive.listFiles).mock.calls.find((c) => c[1]?.folderId === 'drive1')
-    expect(innerCall?.[1]?.driveId).toBe('drive1')
+    const innerCall = drive.listFiles.mock.calls.find((c) => c[0]?.folderId === 'drive1')
+    expect(innerCall?.[0]?.driveId).toBe('drive1')
   })
 })
 
 describe('readdir sizes', () => {
   it('keeps Drive size for binaries, moves google-apps source size to extra', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       {
         id: 'f1',
         name: 'report.pdf',

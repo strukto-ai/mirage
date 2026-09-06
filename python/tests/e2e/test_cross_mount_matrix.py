@@ -35,7 +35,10 @@ from tests.e2e.s3_mock import patch_s3_multi
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 
-WRITABLE = {"ram", "disk", "redis", "s3"}
+# gdrive joined this set with the single-seam fake (#684): the old
+# mock patched read calls only, so a write reached the live Drive API
+# and the matrix recorded the resulting failure as "read-only".
+WRITABLE = {"ram", "disk", "redis", "s3", "gdrive"}
 
 _PAIRS = [
     ("ram", "s3"),

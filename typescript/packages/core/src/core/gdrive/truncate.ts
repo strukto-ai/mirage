@@ -15,7 +15,6 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir } from '../../utils/errors.ts'
-import { downloadFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey } from './resolve.ts'
 import { write } from './write.ts'
 
@@ -30,7 +29,7 @@ async function truncateImpl(
   if (node === null || isNative(node)) {
     data = new Uint8Array(0)
   } else {
-    data = await downloadFile(accessor.tokenManager, node.id)
+    data = await accessor.drive.downloadFile(node.id)
   }
   let out: Uint8Array
   if (length <= data.length) {

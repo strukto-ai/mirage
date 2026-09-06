@@ -17,7 +17,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
+import { MIME_TO_EXT } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -107,7 +107,7 @@ export async function readdir(
     driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
 
-  const files = await listFiles(accessor.tokenManager, { folderId, driveId })
+  const files = await accessor.drive.listFiles({ folderId, driveId })
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const f of files) {
     const mime = f.mimeType ?? ''
@@ -149,7 +149,7 @@ export async function readdir(
     // drives never surface there.
     let sharedDrives: { id: string; name: string }[] = []
     try {
-      sharedDrives = await listSharedDrives(accessor.tokenManager)
+      sharedDrives = await accessor.drive.listSharedDrives()
     } catch {
       sharedDrives = []
       complete = false

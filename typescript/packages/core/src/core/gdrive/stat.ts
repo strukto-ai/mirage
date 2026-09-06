@@ -19,7 +19,7 @@ import { entryOrWarm } from '../../cache/index/warm.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { resolveKey } from './resolve.ts'
 
@@ -39,7 +39,7 @@ async function statFromApi(
 ): Promise<FileStat> {
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(virtual)
-  const item = await getFile(accessor.tokenManager, node.id)
+  const item = await accessor.drive.getFile(node.id)
   const modified = item.modifiedTime ?? ''
   if (node.mimeType === FOLDER_MIME) {
     return new FileStat({

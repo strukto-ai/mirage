@@ -16,28 +16,23 @@ import itertools
 
 import pytest
 
-import mirage.core.gdrive.copy as copy_mod
-import mirage.core.gdrive.mkdir as mkdir_mod
-import mirage.core.gdrive.readdir as readdir_mod
-import mirage.core.gdrive.rename as rename_mod
-import mirage.core.gdrive.resolve as resolve_mod
-import mirage.core.gdrive.rm as rm_mod
-import mirage.core.gdrive.rmdir as rmdir_mod
-import mirage.core.gdrive.stat as stat_mod
-import mirage.core.gdrive.tree as tree_mod
-import mirage.core.gdrive.truncate as truncate_mod
-import mirage.core.gdrive.unlink as unlink_mod
-import mirage.core.gdrive.write as write_mod
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import FOLDER_MIME
+from mirage.utils.ranges import ByteWindow, slice_window
+from tests.fixtures.gdrive_stub import install_drive
 
 FILE_MIME = "application/octet-stream"
 
 
 class FakeDrive:
-    """In-memory Drive: id-addressed items with parent links."""
+    """In-memory Drive: id-addressed items with parent links.
+
+    Implements the ``DriveApi`` protocol, so a test installs the whole
+    backend by handing this to the accessor's one seam instead of
+    rebinding a function inside every core module (#684).
+    """
 
     def __init__(self) -> None:
         self.items: dict[str, dict] = {}
@@ -77,7 +72,6 @@ class FakeDrive:
         return out
 
     async def list_files(self,
-                         token_manager,
                          folder_id: str = "root",
                          drive_id: str | None = None,
                          mime_type: str | None = None,
@@ -101,17 +95,13 @@ class FakeDrive:
                 break
         return out
 
-    async def list_shared_drives(self,
-                                 token_manager,
-                                 page_size: int = 100) -> list[dict]:
+    async def list_shared_drives(self, page_size: int = 100) -> list[dict]:
         return []
 
-    async def create_folder(self, token_manager, name: str,
-                            parent_id: str) -> dict:
+    async def create_folder(self, name: str, parent_id: str) -> dict:
         return self.public(self.folder(name, parent=parent_id))
 
     async def upload_file(self,
-                          token_manager,
                           name: str,
                           parent_id: str,
                           data: bytes,
@@ -120,14 +110,13 @@ class FakeDrive:
             self.add(name, parent=parent_id, mime=mime_type, content=data))
 
     async def update_file_content(self,
-                                  token_manager,
                                   file_id: str,
                                   data: bytes,
                                   mime_type: str = FILE_MIME) -> dict:
         self.items[file_id]["content"] = data
         return self.public(file_id)
 
-    async def delete_file(self, token_manager, file_id: str) -> None:
+    async def delete_file(self, file_id: str) -> None:
         stack = [file_id]
         while stack:
             current = stack.pop()
@@ -136,7 +125,6 @@ class FakeDrive:
             self.items.pop(current, None)
 
     async def patch_file(self,
-                         token_manager,
                          file_id: str,
                          body: dict | None = None,
                          add_parents: str | None = None,
@@ -150,8 +138,7 @@ class FakeDrive:
             item["parents"].remove(remove_parents)
         return self.public(file_id)
 
-    async def copy_file(self, token_manager, file_id: str, name: str,
-                        parent_id: str) -> dict:
+    async def copy_file(self, file_id: str, name: str, parent_id: str) -> dict:
         src = self.items[file_id]
         return self.public(
             self.add(name,
@@ -159,11 +146,29 @@ class FakeDrive:
                      mime=src["mimeType"],
                      content=src["content"]))
 
-    async def download_file(self, token_manager, file_id: str) -> bytes:
-        return self.items[file_id]["content"]
+    async def download_file(self,
+                            file_id: str,
+                            window: ByteWindow | None = None) -> bytes:
+        data = self.items[file_id]["content"]
+        if window is None:
+            return data
+        return slice_window(data, window.offset, window.size)
 
-    async def get_file(self, token_manager, file_id: str) -> dict:
+    async def get_file(self, file_id: str) -> dict:
         return self.public(file_id)
+
+    async def list_revisions(self, file_id: str) -> list[dict]:
+        return []
+
+    async def download_revision(self,
+                                file_id: str,
+                                revision_id: str,
+                                window: ByteWindow | None = None) -> bytes:
+        return await self.download_file(file_id, window)
+
+    async def capture_file_metadata(
+            self, file_id: str) -> tuple[str | None, str | None]:
+        return None, None
 
     def find(self, name: str) -> dict | None:
         for item in self.items.values():
@@ -172,29 +177,12 @@ class FakeDrive:
         return None
 
 
-_PATCH_TARGETS = {
-    resolve_mod: ("list_files", "list_shared_drives", "get_file"),
-    readdir_mod: ("list_files", "list_shared_drives"),
-    write_mod: ("update_file_content", "upload_file"),
-    mkdir_mod: ("create_folder", ),
-    unlink_mod: ("delete_file", ),
-    rmdir_mod: ("delete_file", "list_files"),
-    rm_mod: ("delete_file", ),
-    rename_mod: ("delete_file", "list_files", "patch_file"),
-    tree_mod: ("list_files", ),
-    stat_mod: ("get_file", ),
-    copy_mod: ("copy_file", "create_folder", "delete_file", "list_files"),
-    truncate_mod: ("download_file", ),
-}
-
-
 @pytest.fixture
 def fake_drive(monkeypatch):
-    fake = FakeDrive()
-    for mod, names in _PATCH_TARGETS.items():
-        for fn_name in names:
-            monkeypatch.setattr(mod, fn_name, getattr(fake, fn_name))
-    return fake
+    # One target: the factory the accessor builds its Drive door with.
+    # Every core op reaches Drive through that door, so nothing can slip
+    # past this and reach the live API.
+    return install_drive(monkeypatch, FakeDrive())
 
 
 @pytest.fixture

@@ -18,8 +18,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.resolve import root_context
-from mirage.core.google.drive import (MIME_TO_EXT, list_files,
-                                      list_shared_drives)
+from mirage.core.google.drive import MIME_TO_EXT
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -80,9 +79,8 @@ async def readdir(
         folder_id = result.entry.id
         drive_id = result.entry.extra.get("drive_id")
 
-    files = await list_files(accessor.token_manager,
-                             folder_id=folder_id,
-                             drive_id=drive_id)
+    files = await accessor.drive.list_files(folder_id=folder_id,
+                                            drive_id=drive_id)
     entries = []
     for f in files:
         mime = f.get("mimeType", "")
@@ -134,7 +132,7 @@ async def readdir(
         # A folder-scoped mount lists only the folder's children, so shared
         # drives never surface there.
         try:
-            shared_drives = await list_shared_drives(accessor.token_manager)
+            shared_drives = await accessor.drive.list_shared_drives()
         except Exception:
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []

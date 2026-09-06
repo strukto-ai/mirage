@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
+from mirage.core.gdrive.api import DriveApi, drive_api
 from mirage.core.google.client import TokenManager
 
 
@@ -26,3 +27,16 @@ class GDriveAccessor(Accessor):
     def __init__(self, config, token_manager: TokenManager) -> None:
         self.config = config
         self.token_manager = token_manager
+
+    @property
+    def drive(self) -> DriveApi:
+        """The single door every gdrive core op reaches Drive through.
+
+        Built per read rather than memoized in ``__init__``: an embedding
+        program constructs the resource (and with it this accessor) before
+        a test installs a fake, and a door built once at construction time
+        would already point at the live API by then. Building one is a
+        frozen dataclass holding the token manager, so it costs nothing
+        beside the request it is about to make.
+        """
+        return drive_api(self.token_manager)

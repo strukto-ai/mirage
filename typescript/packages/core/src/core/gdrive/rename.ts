@@ -16,11 +16,10 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
-import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
 import { driveTargetName, eaccesOnDenied, isFolder, resolveKey, resolveParent } from './resolve.ts'
 
 async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const srcNode = await resolveKey(accessor, src.resourcePath)
   if (srcNode === null) throw enoent(src)
   const dstNode = await resolveKey(accessor, dst.resourcePath)
@@ -29,14 +28,14 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
     // folder) before the move. A non-empty folder conflict is mv's
     // "Directory not empty", mirroring the msgraph rename_replace.
     if (isFolder(dstNode)) {
-      const children = await listFiles(tm, {
+      const children = await drive.listFiles({
         folderId: dstNode.id,
         driveId: dstNode.driveId,
         limit: 1,
       })
       if (children.length > 0) throw enotempty(dst)
     }
-    await deleteFile(tm, dstNode.id)
+    await drive.deleteFile(dstNode.id)
   }
   const [srcParentId] = await resolveParent(accessor, src)
   const [dstParentId] = await resolveParent(accessor, dst)
@@ -44,7 +43,7 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   const name = driveTargetName(basename, srcNode)
   const move = dstParentId !== srcParentId
-  await patchFile(tm, srcNode.id, {
+  await drive.patchFile(srcNode.id, {
     body: { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
