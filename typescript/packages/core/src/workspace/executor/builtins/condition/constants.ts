@@ -23,6 +23,9 @@ export const INT_COMPARATORS: ReadonlyMap<string, (li: bigint, ri: bigint) => bo
 
 const STRING_BINARY = new Set(['=', '==', '!='])
 const NUMERIC_BINARY = new Set(INT_COMPARATORS.keys())
+// `-nt`/`-ot` compare modification times; `-ef` asks for the same file,
+// which mirage answers as the same resolved path (a mount has no device or
+// inode to compare, and one path names one entry).
 export const FILE_PAIR_BINARY = new Set(['-nt', '-ot', '-ef'])
 const STRING_UNARY = new Set(['-n', '-z'])
 // `-v NAME` asks whether the variable (or the `NAME[sub]` element) is

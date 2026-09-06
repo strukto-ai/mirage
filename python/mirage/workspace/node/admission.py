@@ -459,7 +459,7 @@ def _word_hints(
     if not spec:
         return None, None
     extra: list[ValueType | None] = ["str"] * (consumed - 1)
-    word_kinds = extra + spec_word_kinds(spec, line[consumed:])
+    word_kinds = extra + spec_word_kinds(spec, line[consumed:], joined)
     bases = spec_word_bases(spec, line[consumed:], session.cwd)
     head: list[str | None] = [None] * (consumed - 1)
     word_bases = None if bases is None else head + bases
@@ -737,5 +737,6 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     return tuple(
         Word(str(r.target), literal_word(r.target_node, home))
         for r in redirects
-        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
+        if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING,
+                          RedirectKind.AMBIGUOUS)
         and not isinstance(r.target, int) and r.target_node is not None)

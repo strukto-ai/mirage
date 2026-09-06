@@ -24,7 +24,7 @@ from mirage.policy.types import (AdmissionRules, Decision, HideReason,
                                  ProfileScript)
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
-from mirage.shell.constants import SHELL_ARGV0
+from mirage.shell.constants import RANDOM, RANDOM_UNSET, SHELL_ARGV0
 from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
                                    attrs_from_letters, stored_attrs,
@@ -232,6 +232,13 @@ class Session:
     # voice.
     readonly_functions: set[str] = field(default_factory=set)
     last_exit_code: int = 0
+    # `${PIPESTATUS[@]}`: the exit status of every segment of the last
+    # pipeline, where a simple command is a one-segment pipeline. Written
+    # only through `record_status` (`executor/statement.py`), the one
+    # door `$?` goes through as well, so the two can never disagree.
+    # Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
+    # expands to nothing until a statement records one.
+    pipe_status: tuple[int, ...] = ()
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set
@@ -305,6 +312,10 @@ class Session:
     _local_frames: list[dict[str,
                              ShellVar | None]] = field(default_factory=list,
                                                        repr=False)
+    # The caller's `RANDOM` marker for every frame that shadows the
+    # name, innermost last: a local `RANDOM` is an ordinary variable for
+    # the function's extent, and the generator resumes when it returns.
+    _local_random: list[str | None] = field(default_factory=list, repr=False)
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,
@@ -319,6 +330,18 @@ class Session:
     # `x=abc` exits 0).
     _cmdsub_seq: int = field(default=0, repr=False)
     _cmdsub_status: int = field(default=0, repr=False)
+    # A pipeline's per-segment statuses, parked by `handle_pipe` for the
+    # statement boundary that closes it to claim. None between them.
+    _pipe_status_pending: tuple[int, ...] | None = field(default=None,
+                                                         repr=False)
+    # `$RANDOM`'s generator state and the seed word it last consumed
+    # (`session/rng.py`). A child shell reseeds, as bash's does, and the
+    # parent gets its own state back (`snapshot` / `restore`).
+    _random_state: int | None = field(default=None, repr=False)
+    _random_seed: str | None = field(default=None, repr=False)
+    _random_last: int = field(default=0, repr=False)
+    # Scoped by the executing node so diagnostics follow its redirections.
+    _diagnostics: list[str | bytes] = field(default_factory=list, repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -339,6 +362,13 @@ class Session:
     exec_stderr: str | None = None
     exec_stderr_append: bool = False
     exec_stdin: bytes | None = None
+    exec_stdin_unreadable: bool = False
+    # What fd 0 holds when it is not its own read end: `CLOSED` after
+    # `exec <&-`, a writing stream's identity after `exec 0<&1`, so a
+    # later dup from fd 0 copies that (`exec 2<&0` then writes to
+    # stdout) or is refused (`0: Bad file descriptor`); None for the
+    # read end itself.
+    exec_stdin_identity: str | None = None
     _exec_opened: set[str] = field(default_factory=set, repr=False)
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)
@@ -605,10 +635,21 @@ class Session:
         Args:
             None
         """
-        return {
+        saved = {
             name: copy_state(getattr(self, name))
             for name in CHILD_SHELL_FIELDS
         }
+        # A child shell reseeds `$RANDOM`, as bash's does: the generator
+        # starts fresh, and the seed word follows the stored value so an
+        # assignment the parent made is not replayed as a reseed. `unset
+        # RANDOM` stays unset.
+        if self._random_seed != RANDOM_UNSET:
+            var = self.vars.get(RANDOM)
+            self._random_seed = (var.value if var is not None
+                                 and isinstance(var.value, str) else None)
+            self._random_state = None
+            self._random_last = 0
+        return saved
 
     def restore(self, state: dict[str, Any]) -> None:
         """Put back a snapshot, ending a child shell.

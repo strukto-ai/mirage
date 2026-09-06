@@ -26,9 +26,11 @@ from mirage.workspace.session import Session
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import (element_index, env_snapshot,
-                                            seed_var, session_elements,
-                                            session_view, set_attr,
-                                            strip_key_quotes, visible_env)
+                                            next_random, seed_var,
+                                            session_elements, session_view,
+                                            set_attr, set_var,
+                                            strip_key_quotes, subscript_index,
+                                            visible_env)
 
 
 class DenySecrets(Policy):
@@ -324,6 +326,35 @@ def test_element_index_int_arith_and_error():
     assert element_index("$bad", {}) == 0
 
 
+def test_subscript_index_lands_its_assignments_and_seeds_random():
+    session = Session(session_id="s", cwd="/")
+    seed_var(session, "i", "1")
+    session.vars["RANDOM"] = ShellVar("1")
+
+    async def run():
+        assert await subscript_index(session, "3") == 3
+        assert await subscript_index(session, "i+1") == 2
+        # The subscript's assignment lands, bash's `a[x=3]`.
+        assert await subscript_index(session, "x=3") == 3
+        assert session.vars["x"].value == "3"
+        # One that fails lands what it assigned before failing, then
+        # raises in bash's words rather than reading element 0.
+        with pytest.raises(ArithError, match=r"^y=4, 1/0: "):
+            await subscript_index(session, "y=4, 1/0")
+        assert session.vars["y"].value == "4"
+        # A seed reaches the generator, and the draw after it advances
+        # the session past it.
+        assert await subscript_index(session, "RANDOM=42, RANDOM") == 17772
+        assert next_random(session, session.vars["RANDOM"].value) == 26794
+        # Through a door, a refusal is the gate's.
+        view = session_view(session, Policies([DenySecrets()]))
+        with pytest.raises(PolicyDenied):
+            await subscript_index(session, "SECRET_N=1", view)
+        assert "SECRET_N" not in session.env
+
+    asyncio.run(run())
+
+
 def test_resolve_assoc_is_literal():
     session = _element_session()
     ops = session_elements(session)
@@ -405,3 +436,24 @@ def test_profile_reads_the_session_profile():
     assert view.profile() is None
     session.profile = "admin"
     assert view.profile() == "admin"
+
+
+def test_a_failing_coercion_lands_what_it_assigned():
+    # bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
+    # leaves y at 5, and a RANDOM seed in the expression seeds.
+    session = Session(session_id="s", cwd="/")
+    session.vars["RANDOM"] = ShellVar("1")
+    set_attr(session, "n", VarAttr.INTEGER)
+    seed_var(session, "x", "y=5,1/0")
+
+    async def run():
+        with pytest.raises(ArithError):
+            await set_var(session, None, "n", "x")
+        assert session.vars["y"].value == "5"
+        assert "n" not in session.env
+        seed_var(session, "x", "RANDOM=42,1/0")
+        with pytest.raises(ArithError):
+            await set_var(session, None, "n", "x")
+        assert next_random(session, session.vars["RANDOM"].value) == 17772
+
+    asyncio.run(run())

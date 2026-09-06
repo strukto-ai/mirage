@@ -87,7 +87,7 @@ async function expandStringWithArray(
   for (const child of node.children) {
     if (child.type === NT.DQUOTE) continue
     if (isMultiwordAt(child)) {
-      const words = await expandArrayAt(child, session, callStack, expandChild)
+      const words = await expandArrayAt(child, session, callStack, expandChild, view)
       // The separating whitespace is folded into this node, and survives
       // even when the array is empty: bash renders "$x ${empty[@]}" as
       // the single word "a ".

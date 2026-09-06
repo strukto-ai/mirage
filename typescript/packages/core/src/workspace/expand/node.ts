@@ -17,16 +17,16 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
-import { sessionElements, visibleEnv } from '../session/state.ts'
+import { randomReader, sessionElements, visibleEnv } from '../session/state.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { evaluateArith } from '../../shell/arith.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
-import { ArithError } from '../../shell/errors.ts'
+import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { expandBraces, expansionWrite, lookupVar } from './variable.ts'
+import { expandBraces, landArithWrites, lookupVar } from './variable.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 
@@ -85,12 +85,12 @@ async function expandBacktickRegion(
     }
     // Each pair is its own place on the line: the node holds every
     // touching pair, so the span within it says which one runs.
-    const io = await executeFn(segment.text, {
-      sessionId: session.sessionId,
-      node,
-      span: [offset + segment.start, offset + segment.end],
-    })
+    const io = await childLine(session, executeFn, segment.text, node, [
+      offset + segment.start,
+      offset + segment.end,
+    ])
     out += (await io.stdoutStr()).replace(/\n+$/, '')
+    session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
   }
@@ -99,6 +99,36 @@ async function expandBacktickRegion(
 
 // Unquoted-heredoc escapes: \$, \`, \\, \<newline> only.
 // Unlike double quotes, \" stays literal in heredoc bodies.
+/**
+ * Run a substitution's line in a child shell.
+ *
+ * bash forks for `$(...)` and backticks, so what the line assigns, `cd`s
+ * or seeds (`RANDOM`) never reaches the parent: the session is restored
+ * around the run, as `handleSubshell` restores it around a `( )` body.
+ * The line reaches the executor unwrapped, under the node that named it,
+ * so the pass places its commands where they were typed rather than
+ * under a subshell of their own. `span` is the pair's span within the
+ * node, for a backtick region holding several.
+ */
+async function childLine(
+  session: Session,
+  executeFn: ExecuteFn,
+  text: string,
+  node: TSNodeLike,
+  span?: [number, number],
+): Promise<IOResult> {
+  const saved = session.snapshot()
+  try {
+    return await executeFn(text, {
+      sessionId: session.sessionId,
+      node,
+      ...(span === undefined ? {} : { span }),
+    })
+  } finally {
+    session.restore(saved)
+  }
+}
+
 export function unescapeHeredoc(text: string): string {
   if (!text.includes('\\')) return text
   const NUL = String.fromCharCode(0)
@@ -155,6 +185,27 @@ async function substituteDollarRefs(
 // arithmetic evaluation), while bare variable names stay as names so the
 // evaluator can resolve and assign them (`$(( y = 3 ))` needs `y`, not
 // its value).
+/**
+ * The fatal shape of an arithmetic expansion error.
+ *
+ * bash aborts the whole line on a bad `$((...))` in a non-interactive
+ * shell, exactly as it does for `${var:?}`: the command never runs, the
+ * line exits 1, and a subshell or pipeline segment containing it reports
+ * 1. The old return of the expansion's own text printed `$((1/0))` with
+ * exit 0, the silent wrong answer the fail-loud rule forbids. The
+ * diagnostic is the expression as typed, trimmed, in the house style that
+ * drops bash's `line N:` prefix and its `(error token is ...)` suffix, the
+ * same shape `(( ))` reports.
+ */
+export function arithExit(expr: string, err: ArithError): ExitSignal {
+  return new ExitSignal(
+    1,
+    new TextEncoder().encode(`bash: ${expr.trim()}: ${err.message}\n`),
+    null,
+    1,
+  )
+}
+
 export async function expandArith(
   tsNode: TSNodeLike,
   session: Session,
@@ -163,7 +214,12 @@ export async function expandArith(
   view?: SessionView,
 ): Promise<string> {
   const parts: string[] = []
+  const base = tsNode.startIndex ?? 0
+  let end = 0
   for (const child of tsNode.children) {
+    const start = (child.startIndex ?? base + end) - base
+    parts.push(tsNode.text.slice(end, start))
+    end = (child.endIndex ?? base + start + child.text.length) - base
     if (ARITH_DELIMITERS.has(child.type)) continue
     if (
       child.type === NT.BINARY_EXPRESSION ||
@@ -191,7 +247,8 @@ export async function expandArith(
       parts.push(await expandNode(child, session, executeFn, callStack, view))
     }
   }
-  return parts.join(' ')
+  parts.push(tsNode.text.slice(end))
+  return parts.join('').trim()
 }
 
 /**
@@ -323,19 +380,28 @@ export async function expandNodeMarked(
         const parenExpr = await substituteDollarRefs(only, session, executeFn, callStack, view)
         const expr = parenExpr.slice(1, -1)
         let arith: ArithResult
+        const reader = randomReader(session)
         try {
           // Reads resolve against the visible env, so a hidden name
           // counts as unset; the write-back below lands on the raw env
           // (policy-ungated until expansion goes async), with the
           // hidden gate applied inside expansionWrite.
-          arith = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+          arith = evaluateArith(
+            expr,
+            visibleEnv(session),
+            0,
+            sessionElements(session, reader),
+            reader.read,
+            reader.wrote,
+          )
         } catch (err) {
           if (!(err instanceof ArithError)) throw err
-          return prefix + rawSub
+          // bash bound the assignments made before the error, RANDOM's
+          // seed included; they land before the line dies.
+          await landArithWrites(session, view, err.writes, reader)
+          throw arithExit(expr, err)
         }
-        for (const write of arith.writes) {
-          await expansionWrite(session, view, write.name, write.key, write.value)
-        }
+        await landArithWrites(session, view, arith.writes, reader)
         return prefix + arith.value.toString()
       }
     }
@@ -347,11 +413,12 @@ export async function expandNodeMarked(
     if (inner.trim() === '') return prefix
     // The substitution names its own node: the nested line's commands
     // stand under it, which is where the pass placed them.
-    const io = await executeFn(inner, { sessionId: session.sessionId, node: tsNode })
+    const io = await childLine(session, executeFn, inner, tsNode)
     const text = (await io.stdoutStr()).replace(/\n+$/, '')
     // Record the substitution's status: an assignment-only statement
     // whose value ran substitutions reports the last one's status as
     // its own (see assignmentStatus).
+    session.diagnostics.push(await io.materializeStderr())
     session.cmdsubSeq += 1
     session.cmdsubStatus = io.exitCode
     return prefix + text
@@ -361,15 +428,22 @@ export async function expandNodeMarked(
     const prefix = foldedWhitespace(tsNode)
     const expr = await expandArith(tsNode, session, executeFn, callStack, view)
     let result: ArithResult
+    const reader = randomReader(session)
     try {
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      result = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session, reader),
+        reader.read,
+        reader.wrote,
+      )
     } catch (err) {
-      if (err instanceof ArithError) return tsNode.text
-      throw err
+      if (!(err instanceof ArithError)) throw err
+      await landArithWrites(session, view, err.writes, reader)
+      throw arithExit(expr, err)
     }
-    for (const write of result.writes) {
-      await expansionWrite(session, view, write.name, write.key, write.value)
-    }
+    await landArithWrites(session, view, result.writes, reader)
     return prefix + result.value.toString()
   }
 

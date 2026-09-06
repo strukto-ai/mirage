@@ -14,13 +14,15 @@
 
 import pytest
 
+from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import ShellVar
-from mirage.workspace.expand.variable import (_arith_int, _case_mod,
+from mirage.workspace.expand.variable import (_ArithOperand, _case_mod,
                                               _glob_replace, _glob_strip,
                                               _lookup_var, _pattern_text,
                                               _slice_array)
 from mirage.workspace.session import Session
 from mirage.workspace.session.session import vars_from_env
+from mirage.workspace.session.state import seed_var
 
 
 @pytest.mark.parametrize("value,pattern,replacement,all_,anchor,expected", [
@@ -93,15 +95,31 @@ def test_lookup_var_array_first_element():
     (["1", "2"], ["2", "3"]),
     (["-2"], ["3", "4"]),
     (["1", "-1"], ["2", "3"]),
-    (["notanum;"], ["1", "2", "3", "4"]),
 ])
 def test_slice_array(groups, expected):
-    assert _slice_array(["1", "2", "3", "4"], groups, {}) == expected
+    operand = _ArithOperand(Session(session_id="s", cwd="/"))
+    assert _slice_array(["1", "2", "3", "4"], groups, operand) == expected
 
 
-def test_arith_int_resolves_expressions():
-    assert _arith_int("3", {}) == 3
-    assert _arith_int(" -2 ", {}) == -2
-    assert _arith_int("1+1", {}) == 2
-    assert _arith_int("i+1", {"i": "1"}) == 2
-    assert _arith_int("o", {"o": "2"}) == 2
+def test_arith_operand_resolves_expressions_and_records_writes():
+    session = Session(session_id="s", cwd="/")
+    seed_var(session, "i", "1")
+    seed_var(session, "o", "2")
+    operand = _ArithOperand(session)
+    assert operand.value("3") == 3
+    assert operand.value(" -2 ") == -2
+    assert operand.value("1+1") == 2
+    assert operand.value("i+1") == 2
+    assert operand.value("o") == 2
+    # An operand that does not evaluate ends the line in bash's words,
+    # the reference leading.
+    operand.ref = "v"
+    with pytest.raises(ExitSignal) as caught:
+        operand.value("notanum;")
+    assert caught.value.stderr.startswith(b"bash: v: notanum;: ")
+    # An assignment is recorded for the door and seen by the operands
+    # after it, which is bash binding `${v:x=1:y=x+1}` left to right.
+    assert operand.value("x=1") == 1
+    assert operand.value("x+1") == 2
+    assert [(w.name, w.value) for w in operand.writes] == [("x", "1")]
+    assert "x" not in session.env

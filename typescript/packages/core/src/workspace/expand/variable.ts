@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { nextRandom } from '../session/state.ts'
 import { evaluateArith } from '../../shell/arith.ts'
+import type { ArithWrite } from '../../shell/types.ts'
+import type { RandomReader } from '../session/state.ts'
 import {
   type ShellArray,
   arrayExtent,
@@ -23,6 +26,7 @@ import {
   arrayValues,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { RANDOM } from '../../shell/constants.ts'
 import { ArithError, ExitSignal } from '../../shell/errors.ts'
 import { NodeType as NT, type ElementOps, type TSNodeLike } from '../../shell/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -33,12 +37,14 @@ import { assignElement } from '../session/elements.ts'
 import { ReadonlyVariableError } from '../session/errors.ts'
 import {
   ensureVarVisible,
-  sessionElements,
   visibleArrays,
   visibleAssocs,
   visibleEnv,
   deref,
   namerefTarget,
+  randomReader,
+  sessionElements,
+  subscriptIndex,
 } from '../session/state.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { decodeAnsiC } from '../../shell/escapes.ts'
@@ -193,6 +199,10 @@ export function lookupVar(
   if (callStack) {
     const localVal = callStack.getLocal(name)
     if (localVal !== null) return localVal
+  }
+  if (name === RANDOM) {
+    const drawn = nextRandom(session, env[RANDOM])
+    if (drawn !== null) return String(drawn)
   }
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name
@@ -550,35 +560,92 @@ function caseMod(op: string, val: string, pattern: string): string {
   return out
 }
 
-// bash evaluates substring offsets and array subscripts as arithmetic
-// (${v:1+1}, ${a[i+1]}); `elements` lets the operand itself reference
-// an array element (`a[b[0]]`).
-function arithInt(
-  text: string,
-  env: Record<string, string>,
-  elements: ElementOps | null = null,
-): number | null {
-  if (/^\s*-?\d+\s*$/.test(text)) return Number.parseInt(text.trim(), 10)
-  try {
-    const { value } = evaluateArith(text, env, 0, elements)
-    return Number(value)
-  } catch (err) {
-    if (err instanceof ArithError) return null
-    throw err
+/**
+ * The arithmetic operands of one expansion, evaluated in one record.
+ *
+ * A substring offset, a length and a slice bound are arithmetic
+ * (`${v:1+1}`, `${a[@]:i:n}`), so each may assign and seed. bash binds
+ * an assignment as it makes it, so the second operand sees the first's
+ * (`${v:x=1:y=x+1}` leaves y at 2) and draws from a `RANDOM` the first
+ * seeded; the writes themselves land through the door once the word has
+ * expanded (`landArithWrites`), so a refusal never leaves the word
+ * half-applied. Element references resolve through the session, so an
+ * operand may name one (`${v:a[0]}`).
+ */
+class ArithOperand {
+  readonly reader: RandomReader
+  readonly writes: ArithWrite[] = []
+  // The reference the operands belong to (`v`, `a[@]`), which bash names
+  // ahead of a failing operand.
+  ref = ''
+  private readonly pending: Record<string, string> = {}
+  private readonly pendingElems = new Map<string, string>()
+
+  constructor(private readonly session: Session) {
+    this.reader = randomReader(session)
+  }
+
+  /**
+   * The session's element callbacks, the pending element writes laid
+   * over their reads, so `${v:(a[0]=2):(a[0])}` reads the 2 the first
+   * operand assigned.
+   */
+  private elements(): ElementOps {
+    const inner = sessionElements(this.session, this.reader)
+    const pending = this.pendingElems
+    return {
+      resolve: (name, subscript, env) => inner.resolve(name, subscript, env),
+      read: (name, key) => pending.get(`${name}\0${key}`) ?? inner.read(name, key),
+      isAssoc: (name) => inner.isAssoc?.(name) ?? false,
+    }
+  }
+
+  /**
+   * The operand's value. An operand that does not evaluate ends the line,
+   * as bash's does (`${v:1/0}` is `v: 1/0: division by 0`), once what it
+   * assigned before failing is recorded for the door.
+   */
+  value(text: string): number {
+    if (/^\s*-?\d+\s*$/.test(text)) return Number.parseInt(text.trim(), 10)
+    const env = { ...visibleEnv(this.session), ...this.pending }
+    try {
+      const result = evaluateArith(
+        text,
+        env,
+        0,
+        this.elements(),
+        this.reader.read,
+        this.reader.wrote,
+      )
+      this.record(result.writes)
+      return Number(result.value)
+    } catch (err) {
+      if (!(err instanceof ArithError)) throw err
+      this.record(err.writes)
+      throw new ExitSignal(
+        1,
+        new TextEncoder().encode(`bash: ${this.ref}: ${text.trim()}: ${err.message}\n`),
+        null,
+        1,
+      )
+    }
+  }
+
+  private record(writes: readonly ArithWrite[]): void {
+    this.writes.push(...writes)
+    for (const write of writes) {
+      if (write.key === null) this.pending[write.name] = write.value
+      else this.pendingElems.set(`${write.name}\0${write.key}`, write.value)
+    }
   }
 }
 
-function substring(val: string, groups: string[], env: Record<string, string>): string {
+function substring(val: string, groups: string[], operand: ArithOperand): string {
   const offsetRaw = groups[0]
   if (offsetRaw === undefined) return val
-  let offset = arithInt(offsetRaw, env)
-  if (offset === null) return val
-  let length: number | null = null
+  let offset = operand.value(offsetRaw)
   const lengthRaw = groups[1]
-  if (lengthRaw !== undefined) {
-    length = arithInt(lengthRaw, env)
-    if (length === null) return val
-  }
+  const length = lengthRaw === undefined ? null : operand.value(lengthRaw)
   if (offset < 0) offset = Math.max(0, val.length + offset)
   if (length === null) return val.slice(offset)
   if (length < 0) return val.slice(offset, Math.max(offset, val.length + length))
@@ -586,17 +653,12 @@ function substring(val: string, groups: string[], env: Record<string, string>): 
 }
 
 /** Resolve `${a[@]:offset:length}` against a shell array. */
-function sliceArray(arr: ShellArray, groups: string[], env: Record<string, string>): string[] {
+function sliceArray(arr: ShellArray, groups: string[], operand: ArithOperand): string[] {
   const offsetRaw = groups[0]
   if (offsetRaw === undefined) return arrayValues(arr)
-  const offset = arithInt(offsetRaw, env)
-  if (offset === null) return arrayValues(arr)
-  let length: number | null = null
+  const offset = operand.value(offsetRaw)
   const lengthRaw = groups[1]
-  if (lengthRaw !== undefined) {
-    length = arithInt(lengthRaw, env)
-    if (length === null) return arrayValues(arr)
-  }
+  const length = lengthRaw === undefined ? null : operand.value(lengthRaw)
   return arraySlice(arr, offset, length)
 }
 
@@ -638,15 +700,40 @@ export function isMultiwordAt(node: TSNodeLike): boolean {
 
 // Resolve a multi-word "${a[@]...}" splat to its word list. Only call
 // when isMultiwordAt is true; the caller word-splits (or stitches
-// prefix/suffix onto) the words, matching bash's quoted-splat rule.
+// prefix/suffix onto) the words, matching bash's quoted-splat rule. A
+// slice bound is arithmetic and may assign (`${a[@]:x=1:y=x+1}`); those
+// land through the door once the words are known, as expandBraces lands
+// its own.
 export async function expandArrayAt(
   node: TSNodeLike,
   session: Session,
   callStack: CallStack | null,
   expandChild: ExpandChild,
+  view?: SessionView,
+): Promise<string[]> {
+  const operand = new ArithOperand(session)
+  let words: string[]
+  try {
+    words = await expandArrayAtIn(node, session, callStack, expandChild, operand)
+  } catch (err) {
+    if (err instanceof ExitSignal)
+      await landArithWrites(session, view, operand.writes, operand.reader)
+    throw err
+  }
+  await landArithWrites(session, view, operand.writes, operand.reader)
+  return words
+}
+
+async function expandArrayAtIn(
+  node: TSNodeLike,
+  session: Session,
+  callStack: CallStack | null,
+  expandChild: ExpandChild,
+  operand: ArithOperand,
 ): Promise<string[]> {
   if (node.type === NT.SIMPLE_EXPANSION) return positionalArgs(session, callStack)
   const p = parseBraces(node)
+  operand.ref = (p.varName ?? '') + (p.subscript === null ? '' : `[${p.subscript}]`)
   const env = visibleEnv(session)
   let arr: ShellArray | undefined
   if (p.subscript === null && p.varName === '@') {
@@ -689,22 +776,27 @@ export async function expandArrayAt(
     const patternMode = gi === 0 && PATTERN_OPS.has(op)
     groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
   }
-  if (op === ':') return sliceArray(arr, groups, env)
-  return values.map((el) => valueOp(op, el, groups, env))
-}
-
-// bash evaluates subscripts in arithmetic context (${a[i+1]});
-// unresolvable expressions index element 0, mirroring bash's
-// unset-name-is-zero arithmetic rule.
-export function arrayIndex(
-  idxText: string,
-  env: Record<string, string>,
-  elements: ElementOps | null = null,
-): number {
-  return arithInt(idxText, env, elements) ?? 0
+  if (op === ':') return sliceArray(arr, groups, operand)
+  return values.map((el) => valueOp(op, el, groups, operand))
 }
 
 const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, NT.ERROR])
+
+// The operators whose word bash expands only once the parameter's state
+// selects it (a default, an alternate, an assignment, a message).
+const LAZY_OPS: ReadonlySet<string> = new Set(['?', ':?', '=', ':=', ':-', '-', ':+', '+'])
+
+/** The word of a conditional operator, expanded now that it is needed. */
+async function operatorWord(
+  p: BraceParse,
+  expandChild: ExpandChild,
+  session: Session,
+  callStack: CallStack | null,
+): Promise<string> {
+  const group = p.groups[0]
+  if (group === undefined) return ''
+  return expandGroup(group, expandChild, false, session, callStack)
+}
 
 /**
  * The associative key one subscript spells.
@@ -724,7 +816,7 @@ async function expandSubscriptKey(p: BraceParse, expandChild: ExpandChild): Prom
   return parts.join('')
 }
 
-function valueOp(op: string, val: string, groups: string[], env: Record<string, string>): string {
+function valueOp(op: string, val: string, groups: string[], operand: ArithOperand): string {
   if (STRIP_OPS.has(op)) {
     const pattern = groups[0] ?? ''
     return globStrip(val, pattern, op === '##' || op === '%%', op === '#' || op === '##')
@@ -741,7 +833,7 @@ function valueOp(op: string, val: string, groups: string[], env: Record<string, 
     return caseMod(op, val, groups[0] ?? '')
   }
   if (op === ':') {
-    return substring(val, groups, env)
+    return substring(val, groups, operand)
   }
   return val
 }
@@ -770,6 +862,53 @@ function valueOp(op: string, val: string, groups: string[], env: Record<string, 
  * shape `${var:?}` uses); ReadonlyVariableError when the name is
  * readonly, the same refusal a plain assignment raises through the door.
  */
+/**
+ * Land an arithmetic expansion's assignments and settle its draws. Each
+ * write goes through `expansionWrite` in evaluation order; then the
+ * `RANDOM` reader replays the draws the expression made after it seeded
+ * the generator, now that the door holds the seed. One door for a
+ * completed expression and for one that failed partway, since bash
+ * binds each assignment as it is made.
+ */
+/**
+ * The line's death for a refused expansion-time write: the gate's own
+ * reason, or the `-i` coercion refusing the text; status 1, the shape
+ * `${var:?}` uses.
+ */
+function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
+  return new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+}
+
+/**
+ * `subscriptIndex` in the expansion's voice: the subscript's assignments
+ * land as the index resolves (`${a[x=3]}` leaves x at 3, `${a[RANDOM=42]}`
+ * seeds), and a refused one dies the way `expansionWrite`'s does.
+ */
+async function expansionIndex(
+  session: Session,
+  view: SessionView | undefined,
+  subscript: string,
+): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view ?? null)
+  } catch (err) {
+    if (err instanceof PolicyDenied || err instanceof ArithError) throw writeRefusal(err)
+    throw err
+  }
+}
+
+export async function landArithWrites(
+  session: Session,
+  view: SessionView | undefined,
+  writes: readonly ArithWrite[],
+  reader: RandomReader,
+): Promise<void> {
+  for (const write of writes) {
+    await expansionWrite(session, view, write.name, write.key, write.value)
+  }
+  reader.settle()
+}
+
 export async function expansionWrite(
   session: Session,
   view: SessionView | undefined,
@@ -785,7 +924,7 @@ export async function expansionWrite(
     // A PolicyDenied is the gate; an ArithError is the name carrying
     // `-i` refusing the text. Both die as `n=1+` does, in that voice.
     if (!(err instanceof PolicyDenied) && !(err instanceof ArithError)) throw err
-    throw new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+    throw writeRefusal(err)
   }
   if (status === 'readonly') throw new ReadonlyVariableError(name)
   if (status !== 'ok') {
@@ -798,12 +937,43 @@ export async function expansionWrite(
   }
 }
 
+/**
+ * Expand `${VAR}`, `${VAR<op>...}`, `${a[i]}`, `${#a[@]}`, etc.
+ *
+ * An offset, length or slice bound is arithmetic and may assign
+ * (`${v:x=1:y=2}`) or seed (`${v:RANDOM%10:1}`); those land through the
+ * door once the word has expanded, then the `RANDOM` reader settles, so
+ * the line ends where bash's does.
+ */
 export async function expandBraces(
   node: TSNodeLike,
   session: Session,
   callStack: CallStack | null,
   expandChild: ExpandChild,
   view?: SessionView,
+): Promise<string> {
+  const operand = new ArithOperand(session)
+  let value: string
+  try {
+    value = await expandBracesIn(node, session, callStack, expandChild, view, operand)
+  } catch (err) {
+    // bash bound what an operand assigned before the one that failed;
+    // they land before the line dies.
+    if (err instanceof ExitSignal)
+      await landArithWrites(session, view, operand.writes, operand.reader)
+    throw err
+  }
+  await landArithWrites(session, view, operand.writes, operand.reader)
+  return value
+}
+
+async function expandBracesIn(
+  node: TSNodeLike,
+  session: Session,
+  callStack: CallStack | null,
+  expandChild: ExpandChild,
+  view: SessionView | undefined,
+  operand: ArithOperand,
 ): Promise<string> {
   const p = parseBraces(node)
   if (node.children.some((c) => c.type === '}' && c.isMissing)) {
@@ -822,11 +992,20 @@ export async function expandBraces(
   }
   const env = visibleEnv(session)
   const arrays = visibleArrays(session)
+  operand.ref = (p.varName ?? '') + (p.subscript === null ? '' : `[${p.subscript}]`)
 
+  // A conditional operator's word expands only if the parameter's state
+  // selects it, as bash's does: `${RANDOM:-$RANDOM}` draws once and
+  // `${x:-$(cmd)}` runs cmd only when x is unset. Every other operator's
+  // words are needed whatever the value, and expand here.
   const groups: string[] = []
-  for (let gi = 0; gi < p.groups.length; gi++) {
-    const patternMode = gi === 0 && p.op !== null && PATTERN_OPS.has(p.op)
-    groups.push(await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack))
+  if (p.op === null || !LAZY_OPS.has(p.op)) {
+    for (let gi = 0; gi < p.groups.length; gi++) {
+      const patternMode = gi === 0 && p.op !== null && PATTERN_OPS.has(p.op)
+      groups.push(
+        await expandGroup(p.groups[gi] ?? [], expandChild, patternMode, session, callStack),
+      )
+    }
   }
 
   let val = ''
@@ -851,11 +1030,11 @@ export async function expandBraces(
       if (p.indirectOp) return keys.join(' ')
       if (p.lengthOp) return String(values.length)
       if (p.op === ':') {
-        return sliceArray(values, groups, env).join(' ')
+        return sliceArray(values, groups, operand).join(' ')
       }
       if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
         const op = p.op
-        return values.map((el) => valueOp(op, el, groups, env)).join(' ')
+        return values.map((el) => valueOp(op, el, groups, operand)).join(' ')
       }
       val = values.join(' ')
       varInEnv = keys.length > 0
@@ -890,16 +1069,16 @@ export async function expandBraces(
       }
       if (p.lengthOp) return String(values.length)
       if (p.op === ':') {
-        return sliceArray(arr, groups, env).join(' ')
+        return sliceArray(arr, groups, operand).join(' ')
       }
       if (p.op !== null && (STRIP_OPS.has(p.op) || REPLACE_OPS.has(p.op) || CASE_OPS.has(p.op))) {
         const op = p.op
-        return values.map((el) => valueOp(op, el, groups, env)).join(' ')
+        return values.map((el) => valueOp(op, el, groups, operand)).join(' ')
       }
       val = values.join(' ')
     } else {
       const subText = await expandSubscriptKey(p, expandChild)
-      let idx = arrayIndex(subText, env, sessionElements(session))
+      let idx = await expansionIndex(session, view, subText)
       if (idx < 0) idx += arrayExtent(arr)
       val = arrayGet(arr, idx)
       varInEnv = arrayHas(arr, idx)
@@ -922,6 +1101,15 @@ export async function expandBraces(
       // literal key, exactly as bash reads it.
       val = amap['0'] ?? ''
       varInEnv = amap['0'] !== undefined
+    }
+    if (!varInEnv && p.varName === RANDOM) {
+      // `${RANDOM}` draws as `$RANDOM` does: the env holds the last word,
+      // which a read must not hand back unchanged.
+      const drawn = nextRandom(session, env[RANDOM])
+      if (drawn !== null) {
+        val = String(drawn)
+        varInEnv = true
+      }
     }
     if (!varInEnv && p.varName in env) {
       val = env[p.varName] ?? ''
@@ -947,12 +1135,9 @@ export async function expandBraces(
   if (p.op === '?' || p.op === ':?') {
     const triggered = p.op === '?' ? !varInEnv : val === ''
     if (!triggered) return val
+    const word = await operatorWord(p, expandChild, session, callStack)
     const message =
-      groups[0] !== undefined && groups[0] !== ''
-        ? groups[0]
-        : p.op === '?'
-          ? 'parameter not set'
-          : 'parameter null or not set'
+      word !== '' ? word : p.op === '?' ? 'parameter not set' : 'parameter null or not set'
     // GNU: fatal at top level with status 127; a containing
     // subshell/pipeline segment reports 1. A subscripted reference is
     // named whole: `bash: m[zz]: nope`.
@@ -962,7 +1147,7 @@ export async function expandBraces(
   if (p.op === '=' || p.op === ':=') {
     const triggered = p.op === '=' ? !varInEnv : val === ''
     if (!triggered) return val
-    const defaultVal = groups[0] ?? ''
+    const defaultVal = await operatorWord(p, expandChild, session, callStack)
     if (p.varName !== null && p.subscript !== null) {
       // The default lands on the element the reference named, never on
       // element 0: `${m[k]:=v}` writes key k and `${a[3]:=v}` writes
@@ -984,12 +1169,10 @@ export async function expandBraces(
     }
     return defaultVal
   }
-  if (p.op === ':-') return val !== '' ? val : (groups[0] ?? '')
-  if (p.op === '-') {
-    if (varInEnv) return val
-    return groups[0] ?? ''
-  }
-  if (p.op === ':+') return val !== '' ? (groups[0] ?? '') : ''
-  if (p.op === '+') return varInEnv ? (groups[0] ?? '') : ''
-  return valueOp(p.op, val, groups, env)
+  if (p.op === ':-')
+    return val !== '' ? val : await operatorWord(p, expandChild, session, callStack)
+  if (p.op === '-') return varInEnv ? val : await operatorWord(p, expandChild, session, callStack)
+  if (p.op === ':+') return val !== '' ? await operatorWord(p, expandChild, session, callStack) : ''
+  if (p.op === '+') return varInEnv ? await operatorWord(p, expandChild, session, callStack) : ''
+  return valueOp(p.op, val, groups, operand)
 }

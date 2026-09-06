@@ -69,8 +69,11 @@ async def _expand_string_with_array(
         if child.type == NT.DQUOTE:
             continue
         if is_multiword_at(child):
-            words = await expand_array_at(child, session, call_stack,
-                                          expand_child)
+            words = await expand_array_at(child,
+                                          session,
+                                          call_stack,
+                                          expand_child,
+                                          view=view)
             # The separating whitespace is folded into this node, and
             # survives even when the array is empty: bash renders
             # "$x ${empty[@]}" as the single word "a ".

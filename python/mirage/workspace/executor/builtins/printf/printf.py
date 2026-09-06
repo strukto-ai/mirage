@@ -14,6 +14,7 @@
 
 import re
 
+from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
@@ -80,10 +81,12 @@ async def handle_printf(
 
     With ``-v NAME`` the formatted text is stored in the shell variable
     ``NAME`` (or the array element ``NAME[idx]``) instead of written to
-    stdout, matching GNU printf. An unusable ``NAME`` is rejected before
-    the format runs (status 2); a readonly name or an out-of-range
-    subscript still reports the format's own errors first, then fails
-    with status 1 and leaves the variable untouched.
+    stdout, matching bash's builtin. An unusable ``NAME`` is rejected
+    before the format runs (status 2); a readonly name or an
+    out-of-range subscript still reports the format's own errors first,
+    then fails with status 1 and leaves the variable untouched. ``-v``
+    is the builtin's alone: run as a program (``find -exec printf``,
+    which execvp answers with coreutils printf) the word is the format.
 
     Args:
         args (list[str]): the format followed by its arguments, optionally
@@ -92,7 +95,7 @@ async def handle_printf(
     """
     target: str | None = None
     parsed: re.Match[str] | None = None
-    if len(args) >= 2 and args[0] == "-v":
+    if len(args) >= 2 and args[0] == "-v" and not program_invocation(session):
         target = args[1]
         args = args[2:]
         parsed = TARGET_RE.match(target)

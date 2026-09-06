@@ -55,6 +55,42 @@ export const ARITH_ASSIGN_OPS = new Set([
 // mirroring bash's expression recursion limit.
 export const ARITH_MAX_DEPTH = 16
 
+// The descriptors the shell models: stdin, stdout and stderr, and no
+// table above them. A redirect naming any other number is refused before
+// it does anything (`shell/descriptors.ts`), because the old fall-through
+// aliased fd 3 onto stdout and `exec 3>&-` closed the session's stdout.
+// FD_BOTH is `Redirect.fd` for `&>`; FD_CLOSE is `Redirect.target` for
+// `>&-`.
+export const FD_STDIN = 0
+export const FD_STDOUT = 1
+export const FD_STDERR = 2
+export const FD_BOTH = -1
+export const FD_CLOSE = -1
+export const SHELL_FDS: ReadonlySet<number> = new Set([FD_STDIN, FD_STDOUT, FD_STDERR])
+
+// The two dynamic variables the shell answers itself: PIPESTATUS reads the
+// session's record of the last pipeline (`Session.pipeStatus`) and RANDOM
+// steps a generator (`session/rng.ts`). Neither lives in the variable
+// store.
+export const PIPESTATUS = 'PIPESTATUS'
+export const RANDOM = 'RANDOM'
+// bash 5.2's generator (lib/sh/random.c): a Park-Miller minimal-standard
+// step through Schrage's method, the value folding the state's two halves
+// and keeping 15 bits, and a draw that never repeats the value before it.
+// A seed is the assigned integer truncated to 32 bits, and a zero state
+// steps from ZERO_SEED. Identical in both languages, so `RANDOM=42` is the
+// same sequence everywhere, and bash's.
+export const RANDOM_A = 16807
+export const RANDOM_Q = 127773
+export const RANDOM_R = 2836
+export const RANDOM_M = 0x7fffffff
+export const RANDOM_ZERO_SEED = 123459876
+export const RANDOM_MODULUS = 2 ** 32
+export const RANDOM_MAX = 32767
+// What `Session.randomSeed` holds once `unset RANDOM` has stripped the name
+// of its meaning: no generated word is ever empty.
+export const RANDOM_UNSET = ''
+
 // What the shell calls itself when no script is running, bash's "bash".
 // A nested `bash`/`sh` overrides it through Session.scriptName, and
 // `Session.argv0` is the one place the two are folded together.

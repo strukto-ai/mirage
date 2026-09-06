@@ -27,7 +27,8 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import (env_get, session_view,
-                                            visible_arrays, visible_assocs)
+                                            shadow_local, visible_arrays,
+                                            visible_assocs)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -112,8 +113,8 @@ async def handle_local(
                     continue
             if view.is_readonly(key):
                 return readonly_refusal(cmd, key)
-            if local_vars is not None and key not in local_vars:
-                local_vars[key] = session.vars.get(key)
+            if local_vars is not None:
+                shadow_local(session, local_vars, key)
             try:
                 await premark(view, key, shaping)
                 if global_scope:
@@ -127,8 +128,8 @@ async def handle_local(
             if stored is not None:
                 stored.append(key)
         else:
-            if local_vars is not None and assign not in local_vars:
-                local_vars[assign] = session.vars.get(assign)
+            if local_vars is not None:
+                shadow_local(session, local_vars, assign)
             if (env_get(session, assign) is None
                     and assign not in visible_arrays(session)
                     and assign not in visible_assocs(session)):

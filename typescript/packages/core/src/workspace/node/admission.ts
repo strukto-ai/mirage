@@ -485,7 +485,7 @@ function wordHints(
   const spec = specForCommand(joined, registry, session.cwd)
   if (spec === null) return [null, null]
   const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-  const wordKinds = [...extra, ...specWordKinds(spec, [...line.slice(consumed)])]
+  const wordKinds = [...extra, ...specWordKinds(spec, [...line.slice(consumed)], joined)]
   const bases = specWordBases(spec, [...line.slice(consumed)], session.cwd)
   const wordBases =
     bases === null ? null : [...new Array<string | null>(consumed - 1).fill(null), ...bases]
@@ -717,7 +717,12 @@ export function statementRedirects(node: TSNodeLike, home: string | null): Word[
   const [, redirects] = getRedirects(parent)
   const words: Word[] = []
   for (const r of redirects) {
-    if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) continue
+    if (
+      r.kind === RedirectKind.HEREDOC ||
+      r.kind === RedirectKind.HERESTRING ||
+      r.kind === RedirectKind.AMBIGUOUS
+    )
+      continue
     if (typeof r.target === 'number' || r.targetNode === null) continue
     const target = r.targetNode as TSNodeLike
     words.push({ raw: String(r.target), text: literalWord(target, home) })

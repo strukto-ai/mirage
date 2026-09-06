@@ -441,6 +441,11 @@ def test_c_style_for():
         ("n=2; for ((i=n;i<4;i++)); do echo $i; done", b"2\n3\n"),
         ("for ((i=0;i<2;i++)); do echo a; done; echo i=$i", b"a\na\ni=2\n"),
         ("for ((i=0;i<1;i++)); do false; echo s=$?; done", b"s=1\n"),
+            # Each slot is one comma expression: bash 5.2 keeps every part
+            # (only the last child of a slot used to survive).
+        ("for ((a=5, i=1; i>0; i=0)); do echo $a$i; done", b"51\n"),
+        ("for ((i=0; i<1, i<2; i++, i++)); do echo $i; done; echo $i",
+         b"0\n2\n"),
     ]:
         io = _exec(ws, cmd)
         assert _stdout(io) == want, cmd

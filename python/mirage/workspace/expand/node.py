@@ -18,11 +18,12 @@ from typing import Any
 
 import tree_sitter
 
+from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.backticks import split_backtick_region
 from mirage.shell.call_stack import CallStack
-from mirage.shell.errors import ArithError
+from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
 from mirage.shell.helpers import byte_offset, get_text
@@ -32,10 +33,10 @@ from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import (_lookup_var, expand_braces,
-                                              expansion_write)
+                                              land_arith_writes)
 from mirage.workspace.session import Session, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import session_elements
+from mirage.workspace.session.state import random_reader, session_elements
 
 
 def _folded_whitespace(node: tree_sitter.Node) -> str:
@@ -80,15 +81,47 @@ async def _expand_backtick_region(
         # Each pair is its own place on the line: the node holds every
         # touching pair, so the span within it says which one runs,
         # measured as the parser measures the node.
-        io = await execute_fn(segment.text,
-                              session_id=session.session_id,
-                              node=node,
-                              span=(offset + byte_offset(raw, segment.start),
-                                    offset + byte_offset(raw, segment.end)))
+        io = await child_line(session, execute_fn, segment.text, node,
+                              (offset + byte_offset(raw, segment.start),
+                               offset + byte_offset(raw, segment.end)))
         parts.append((await io.stdout_str()).rstrip("\n"))
+        session._diagnostics.append(await io.materialize_stderr())
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
     return "".join(parts)
+
+
+async def child_line(session: Session,
+                     execute_fn: Callable[..., Any],
+                     text: str,
+                     node: Any,
+                     span: tuple[int, int] | None = None) -> IOResult:
+    """Run a substitution's line in a child shell.
+
+    bash forks for ``$(...)`` and backticks, so what the line assigns,
+    ``cd``s or seeds (``RANDOM``) never reaches the parent: the session
+    is restored around the run, as ``handle_subshell`` restores it
+    around a ``( )`` body. The line reaches the executor unwrapped,
+    under the node that named it, so the pass places its commands
+    where they were typed rather than under a subshell of their own.
+
+    Args:
+        session (Session): the parent shell's session.
+        execute_fn (Callable[..., Any]): the workspace's nested-line
+            executor.
+        text (str): the line the substitution holds.
+        node (Any): the tree-sitter node the substitution stands under.
+        span (tuple[int, int] | None): the pair's byte span within the
+            node, for a backtick region holding several.
+    """
+    saved = session.snapshot()
+    try:
+        return await execute_fn(text,
+                                session_id=session.session_id,
+                                node=node,
+                                span=span)
+    finally:
+        session.restore(saved)
 
 
 def unescape_heredoc(text: str) -> str:
@@ -115,6 +148,28 @@ def _find_first(node: tree_sitter.Node, ntype: str) -> tree_sitter.Node | None:
     return None
 
 
+def arith_exit(expr: str, exc: ArithError) -> ExitSignal:
+    """The fatal shape of an arithmetic expansion error.
+
+    bash aborts the whole line on a bad ``$((...))`` in a
+    non-interactive shell, exactly as it does for ``${var:?}``: the
+    command never runs, the line exits 1, and a subshell or pipeline
+    segment containing it reports 1. The old return of the expansion's
+    own text printed ``$((1/0))`` with exit 0, the silent wrong answer
+    the fail-loud rule forbids. The diagnostic is the expression as
+    expanded (``1/0`` for ``$((1/$x))`` with ``x=0``), trimmed, in the
+    house style that drops bash's ``line N:`` prefix and its
+    ``(error token is ...)`` suffix, the same shape ``(( ))`` reports.
+
+    Args:
+        expr (str): the expression text handed to the evaluator.
+        exc (ArithError): what the evaluator refused.
+    """
+    return ExitSignal(1,
+                      stderr=f"bash: {expr.strip()}: {exc}\n".encode(),
+                      contained_code=1)
+
+
 async def expand_arith(
     ts_node: tree_sitter.Node,
     session: Session,
@@ -130,7 +185,12 @@ async def expand_arith(
     (``$(( y = 3 ))`` needs ``y``, not its value).
     """
     parts = []
+    raw = ts_node.text or b""
+    end = 0
     for child in ts_node.children:
+        start = child.start_byte - ts_node.start_byte
+        parts.append(raw[end:start].decode("utf-8"))
+        end = child.end_byte - ts_node.start_byte
         if child.type in ARITH_DELIMITERS:
             continue
         if child.type in (NT.BINARY_EXPRESSION, NT.UNARY_EXPRESSION,
@@ -163,7 +223,8 @@ async def expand_arith(
                                            execute_fn,
                                            call_stack,
                                            view=view))
-    return " ".join(parts)
+    parts.append(raw[end:].decode("utf-8"))
+    return "".join(parts).strip()
 
 
 async def _arith_subscript(
@@ -331,13 +392,12 @@ async def expand_node_marked(
             return prefix
         # The substitution names its own node: the nested line's
         # commands stand under it, which is where the pass placed them.
-        io = await execute_fn(inner,
-                              session_id=session.session_id,
-                              node=ts_node)
+        io = await child_line(session, execute_fn, inner, ts_node)
         text = (await io.stdout_str()).rstrip("\n")
         # Record the substitution's status: an assignment-only
         # statement whose value ran substitutions reports the last
         # one's status as its own (see assignment_status).
+        session._diagnostics.append(await io.materialize_stderr())
         session._cmdsub_seq += 1
         session._cmdsub_status = io.exit_code
         return prefix + text
@@ -354,14 +414,18 @@ async def expand_node_marked(
             # counts as unset; the write-back below goes through the
             # session plane's door, so a pre_session rule governs
             # `$((X=5))` exactly as it governs `X=5`.
+            reader = random_reader(session)
             result = evaluate_arith(expr,
                                     visible_env(session),
-                                    elements=session_elements(session))
-        except ArithError:
-            return get_text(ts_node)
-        for write in result.writes:
-            await expansion_write(session, view, write.name, write.key,
-                                  write.value)
+                                    elements=session_elements(session, reader),
+                                    read_var=reader.read,
+                                    wrote_var=reader.wrote)
+        except ArithError as exc:
+            # bash bound the assignments made before the error, RANDOM's
+            # seed included; they land before the line dies.
+            await land_arith_writes(session, view, exc.writes, reader)
+            raise arith_exit(expr, exc) from exc
+        await land_arith_writes(session, view, result.writes, reader)
         return prefix + str(result.value)
 
     if ntype == NT.CONCATENATION:

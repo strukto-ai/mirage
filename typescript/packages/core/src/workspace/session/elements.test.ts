@@ -29,26 +29,29 @@ function makeSession(): Session {
 }
 
 describe('elementIsSet', () => {
-  it('answers key membership, index presence, and bare element 0', () => {
+  it('answers key membership, index presence, and bare element 0', async () => {
     const session = makeSession()
-    expect(elementIsSet(session, 'm[a]')).toBe(true)
-    expect(elementIsSet(session, 'm[zz]')).toBe(false)
+    expect(await elementIsSet(session, 'm[a]')).toBe(true)
+    expect(await elementIsSet(session, 'm[zz]')).toBe(false)
     // The subscript is the key verbatim, never arithmetic.
-    expect(elementIsSet(session, 'm[1+1]')).toBe(false)
+    expect(await elementIsSet(session, 'm[1+1]')).toBe(false)
     // A quoted subscript asks after the unquoted key, as bash does.
-    expect(elementIsSet(session, 'm["a"]')).toBe(true)
-    expect(elementIsSet(session, "m['a']")).toBe(true)
-    expect(elementIsSet(session, 'm[@]')).toBe(true)
-    expect(elementIsSet(session, 'arr[2]')).toBe(true)
-    expect(elementIsSet(session, 'arr[9]')).toBe(false)
-    expect(elementIsSet(session, 'arr[@]')).toBe(true)
+    expect(await elementIsSet(session, 'm["a"]')).toBe(true)
+    expect(await elementIsSet(session, "m['a']")).toBe(true)
+    expect(await elementIsSet(session, 'm[@]')).toBe(true)
+    expect(await elementIsSet(session, 'arr[2]')).toBe(true)
+    expect(await elementIsSet(session, 'arr[9]')).toBe(false)
+    expect(await elementIsSet(session, 'arr[@]')).toBe(true)
+    // An indexed subscript is arithmetic, and what it assigns lands.
+    expect(await elementIsSet(session, 'arr[j=2]')).toBe(true)
+    expect(session.vars.j?.value).toBe('2')
     // A bare name over an array checks element 0 (the literal key "0"
     // for an associative one).
-    expect(elementIsSet(session, 'm')).toBe(true)
-    expect(elementIsSet(session, 'arr')).toBe(true)
-    expect(elementIsSet(session, 's5')).toBe(true)
-    expect(elementIsSet(session, 'missing')).toBe(false)
-    expect(elementIsSet(session, 'not a ref')).toBe(false)
+    expect(await elementIsSet(session, 'm')).toBe(true)
+    expect(await elementIsSet(session, 'arr')).toBe(true)
+    expect(await elementIsSet(session, 's5')).toBe(true)
+    expect(await elementIsSet(session, 'missing')).toBe(false)
+    expect(await elementIsSet(session, 'not a ref')).toBe(false)
   })
 })
 

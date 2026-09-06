@@ -28,7 +28,7 @@
       "command": "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 - - 6 Jan  2 15:30 g.txt\n-rw-r--r-- 1 - - 0 Jan  2 15:30 new.txt\n",
+        "stdout": "-rw-r--r-- 1 - - 6 Jan  2  2026 g.txt\n-rw-r--r-- 1 - - 0 Jan  2  2026 new.txt\n",
         "stderr": ""
       }
     }

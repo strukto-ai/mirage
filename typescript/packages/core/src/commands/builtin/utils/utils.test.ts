@@ -74,7 +74,7 @@ describe('formatLsLong', () => {
       modified: '2026-01-01T00:00:00Z',
     })
     const [line] = formatLsLong([stat])
-    expect(line).toBe('-rw-r--r-- 1 - - 5 Jan  1 00:00 file.txt')
+    expect(line).toBe('-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt')
   })
 
   it('renders the owner as the user and the group as the profile', () => {
@@ -87,16 +87,16 @@ describe('formatLsLong', () => {
     })
     const identity = { user: 'alice', profile: 'admin' }
     expect(formatLsLong([stat], { identity })[0]).toBe(
-      '-rw-r--r-- 1 alice admin 5 Jan  1 00:00 file.txt',
+      '-rw-r--r-- 1 alice admin 5 Jan  1  2026 file.txt',
     )
     // A reported uid/gid (disk, or a chown in the overlay) wins over both.
     const owned = stat.with({ uid: 501, gid: 'staff' })
     expect(formatLsLong([owned], { identity })[0]).toBe(
-      '-rw-r--r-- 1 501 staff 5 Jan  1 00:00 file.txt',
+      '-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt',
     )
     // Half an identity fills half the columns.
     expect(formatLsLong([stat], { identity: { user: null, profile: 'admin' } })[0]).toBe(
-      '-rw-r--r-- 1 - admin 5 Jan  1 00:00 file.txt',
+      '-rw-r--r-- 1 - admin 5 Jan  1  2026 file.txt',
     )
   })
 
@@ -152,8 +152,8 @@ describe('formatLsLong', () => {
       }),
     ]
     const lines = formatLsLong(stats)
-    expect(lines[0]).toContain('    5 Jan  1 00:00 a')
-    expect(lines[1]).toContain(' 1234 Jan  1 00:00 b')
+    expect(lines[0]).toContain('    5 Jan  1  2026 a')
+    expect(lines[1]).toContain(' 1234 Jan  1  2026 b')
   })
 
   it('uses humanSize when human=true', () => {

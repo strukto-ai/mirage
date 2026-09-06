@@ -55,3 +55,25 @@ export const DEFAULT_MODES: Partial<Record<FileType, number>> = {
 }
 
 export const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
+
+// GNU ls's window of "recent" times: half a Gregorian year of 365.2425
+// days, in seconds (ls.c). findutils draws its own line (listfile.c):
+// old past 180 days, future past an hour.
+export const LS_RECENT_SECONDS = Math.floor(31556952 / 2)
+export const FIND_OLD_SECONDS = 180 * 24 * 60 * 60
+export const FIND_FUTURE_SECONDS = 60 * 60
+
+// How `find -ls` spells a name: findutils escapes these so the row stays
+// one line and re-parseable.
+export const FIND_LS_ESCAPES: Readonly<Record<string, string>> = {
+  '\\': '\\\\',
+  ' ': '\\ ',
+  '"': '\\"',
+  '\n': '\\n',
+  '\t': '\\t',
+  '\r': '\\r',
+  '\x07': '\\a',
+  '\b': '\\b',
+  '\f': '\\f',
+  '\v': '\\v',
+}

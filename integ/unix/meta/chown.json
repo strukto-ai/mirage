@@ -30,7 +30,7 @@
       "command": "chown 500:dev /data/metad/f.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt\n",
+        "stdout": "-rwx-----x 1 500 dev 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },
@@ -64,7 +64,7 @@
       "command": "chown alice /data/metad/f.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt\n",
+        "stdout": "-rwx-----x 1 alice dev 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },

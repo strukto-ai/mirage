@@ -33,7 +33,13 @@ import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { ensureVarVisible, seedVar, sessionView, setAttr } from '../session/state.ts'
+import {
+  conversionScalar,
+  ensureVarVisible,
+  seedVar,
+  sessionView,
+  setAttr,
+} from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
 
@@ -461,11 +467,11 @@ export async function executeDeclaration(
         // At top level an existing scalar becomes the value at the
         // literal key "0" (GNU allows scalar-to-associative
         // conversion, unlike indexed).
-        const scalar = session.env[bare]
+        const scalar = conversionScalar(session, bare)
         seedVar(session, bare, scalar === undefined ? {} : { '0': scalar })
       } else if (!wantAssoc && !Object.hasOwn(session.arrays, bare)) {
         // At top level an existing scalar becomes element 0.
-        const scalar = session.env[bare]
+        const scalar = conversionScalar(session, bare)
         seedVar(session, bare, scalar === undefined ? [] : [scalar])
       }
     }

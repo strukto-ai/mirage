@@ -250,6 +250,16 @@ describe('traversal fan-out — find', () => {
     await ws.close()
   })
 
+  it('holds a synthesized mount row to the time window', async () => {
+    // -newermt lives beside the predicate tree; a mount point is held to
+    // it like every real row, so a future cutoff drops it.
+    const ws = await twoMountWs()
+    const future = await ws.execute('find / -maxdepth 1 -mindepth 1 -type d -newermt 2099-01-01')
+    expect(future.exitCode).toBe(0)
+    expect(future.stdoutText).toBe('')
+    await ws.close()
+  })
+
   it('find inside one mount does not leak entries from siblings', async () => {
     const ws = await twoMountWs()
     await ws.execute('touch /r2/only-a')

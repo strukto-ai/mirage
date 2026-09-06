@@ -81,6 +81,12 @@ describe('parseFindExpression', () => {
     expect(evalPredicate(e.tree, { key: '/y', name: 'y', kind: 'f', depth: 1 })).toBe(false)
   })
 
+  it('depthFirst is -depth or -delete', () => {
+    expect(parseFindExpression(['-depth']).depthFirst).toBe(true)
+    expect(parseFindExpression(['-delete']).depthFirst).toBe(true)
+    expect(parseFindExpression(['-print']).depthFirst).toBe(false)
+  })
+
   it('size extracted as global', () => {
     const e = parseFindExpression(['-size', '+50c'])
     expect(e.minSize).toBe(51)
@@ -94,6 +100,28 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual([null, 1])
     e = parseFindExpression(['-size', '2c'])
     expect([e.minSize, e.maxSize]).toEqual([2, 2])
+  })
+
+  it('intersects top-level windows and widens them under -o', () => {
+    // GNU: every test in the implicit -a chain must hold, so `-newermt a
+    // -newermt b` keeps what is newer than both and `-mtime +2 -mtime -1`
+    // keeps nothing; under -o the flat window can only widen.
+    const later = parseFindExpression(['-newermt', '2021-06-01']).mtimeMin
+    for (const order of [
+      ['2020-06-01', '2021-06-01'],
+      ['2021-06-01', '2020-06-01'],
+    ]) {
+      const e = parseFindExpression(['-newermt', order[0] ?? '', '-newermt', order[1] ?? ''])
+      expect([e.mtimeMin, e.mtimeMax]).toEqual([later, null])
+    }
+    const empty = parseFindExpression(['-mtime', '+2', '-mtime', '-1'])
+    expect(empty.mtimeMin).not.toBeNull()
+    expect(empty.mtimeMax).not.toBeNull()
+    expect(empty.mtimeMin ?? 0).toBeGreaterThan(empty.mtimeMax ?? 0)
+    const both = parseFindExpression(['-mtime', '-1', '-mtime', '-3'])
+    const either = parseFindExpression(['-mtime', '-1', '-o', '-mtime', '-3'])
+    expect((both.mtimeMin ?? 0) - (either.mtimeMin ?? 0)).toBeCloseTo(2 * 86400, 0)
+    expect([both.mtimeMax, either.mtimeMax]).toEqual([null, null])
   })
 
   it('repeated -mtime windows merge to their union', () => {
@@ -130,6 +158,20 @@ describe('parseFindExpression', () => {
     expect(() => parseFindExpression(['(', '-name', 'a'])).toThrow(FindParseError)
   })
 
+  it('refuses -exec outside a top-level -a chain, on either side of -o', () => {
+    const placement =
+      'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
+    for (const tokens of [
+      ['-name', 'a', '-o', '-exec', 'echo', '{}', ';'],
+      ['-exec', 'false', '{}', ';', '-o', '-print'],
+      ['!', '-exec', 'false', ';'],
+      ['(', '-exec', 'false', ';', ')'],
+    ]) {
+      expect(() => parseFindExpression(tokens)).toThrow(placement)
+    }
+    expect(parseFindExpression(['-type', 'f', '-exec', 'echo', '{}', ';']).actions).toHaveLength(1)
+  })
+
   it('throws FindParseError on invalid numeric / size args', () => {
     expect(() => parseFindExpression(['-maxdepth', 'abc'])).toThrow(FindParseError)
     expect(() => parseFindExpression(['-mindepth', 'x'])).toThrow(FindParseError)
@@ -146,7 +188,7 @@ describe('parseFindExpression', () => {
   })
 
   it('throws on unsupported predicates', () => {
-    for (const toks of [['-regex', '.*'], ['-newer', 'a'], ['-prune'], ['-nam', 'x']]) {
+    for (const toks of [['-regex', '.*'], ['-perm', '644'], ['-prune'], ['-nam', 'x']]) {
       expect(() => parseFindExpression(toks)).toThrow(FindParseError)
     }
   })
@@ -219,4 +261,131 @@ describe('find -printf parsing', () => {
     const expr = parseFindExpression(['-name', '*.txt', '-printf', '%f\\n'])
     expect(expr.printf).toBe('%f\\n')
   })
+})
+
+describe('-newermt GNU dates', () => {
+  it.each([
+    ['yesterday', 86400],
+    ['24 hours ago', 86400],
+    ['now', 0],
+  ] as const)('accepts %s', (operand, seconds) => {
+    const before = Date.now() / 1000
+    const expr = parseFindExpression(['-newermt', operand])
+    expect(expr.mtimeMin).toBeGreaterThanOrEqual(before - seconds)
+    expect(expr.mtimeMin).toBeLessThanOrEqual(Date.now() / 1000 - seconds + 0.001)
+  })
+  it('accepts epoch timestamps', () => {
+    const expr = parseFindExpression(['-newermt', '@1700000000'])
+    expect(expr.mtimeMin).toBeGreaterThan(1700000000)
+    expect(expr.mtimeMin).toBeLessThan(1700000000.001)
+  })
+})
+
+describe('tests after actions', () => {
+  for (const action of [
+    ['-exec', 'echo', '{}', ';'],
+    ['-exec', 'echo', '{}', '+'],
+    ['-print'],
+    ['-delete'],
+    ['-printf', '%p'],
+  ]) {
+    it.each(
+      [
+        ['-name', '*.txt'],
+        ['-type', 'f'],
+        ['-size', '+1c'],
+        ['-newermt', 'yesterday'],
+        ['-newer', 'ref'],
+        ['-empty'],
+        ['!', '-name', '*.txt'],
+        ['(', '-name', '*.txt', ')'],
+      ].map((test) => [test]),
+    )(`refuses a later test after ${action.join(' ')}`, (test) => {
+      expect(() => parseFindExpression([...action, ...test])).toThrow(
+        'tests after actions are not supported',
+      )
+    })
+  }
+})
+
+describe('action placement', () => {
+  for (const action of [['-print'], ['-print0'], ['-ls'], ['-delete'], ['-printf', '%p']]) {
+    it.each([
+      [...action, '-o', '-print'],
+      ['-name', 'keep', '-o', ...action],
+      ['!', ...action],
+      ['(', ...action, ')'],
+    ])(`refuses detached ${action[0] ?? ''}: %j`, (...tokens) => {
+      expect(() => parseFindExpression(tokens)).toThrow('supported only in a top-level')
+    })
+    it(`allows ${action[0] ?? ''} after grouped tests`, () => {
+      expect(() =>
+        parseFindExpression(['(', '-name', 'a', '-o', '-name', 'b', ')', ...action]),
+      ).not.toThrow()
+    })
+  }
+})
+
+it.each([
+  '2026-02-31',
+  '2025-02-29',
+  '2026-04-31',
+  '2026-00-01',
+  '2026-13-01',
+  '2026-01-00',
+  '2026-01-32',
+  '2026-02-31T12:00:00Z',
+  '2026-02-31 1 day',
+  '2026-01-01T24:00:00',
+  '2026-01-01T12:60:00',
+])('rejects invalid calendar fields: %s', (value) => {
+  expect(() => parseFindExpression(['-newermt', value])).toThrow('I cannot figure out')
+})
+
+it.each([
+  [
+    ['-newer', 'ref', '-o', '-name', 'keep'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-name', 'keep', '-o', '-newer', 'ref'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['!', '-newer', 'ref'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['(', '-newer', 'ref', ')'],
+    'find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-newermt', '2000-01-01', '-o', '-name', 'keep'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['-name', 'keep', '-o', '-newermt', '2000-01-01'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['!', '-newermt', '2000-01-01'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [
+    ['(', '-newermt', '2000-01-01', ')'],
+    'find: -newermt is supported only in a top-level -a chain, not under -o, ! or parentheses',
+  ],
+  [['-printf', '%p\\n', '-exec', 'true', '{}', ';'], 'find: -exec cannot be combined with -printf'],
+  [['-exec', 'true', '{}', ';', '-printf', '%p\\n'], 'find: -exec cannot be combined with -printf'],
+  [['-printf', '%p\\n', '-print'], 'find: -printf cannot be combined with other actions'],
+  [['-print', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-print0'], 'find: -printf cannot be combined with other actions'],
+  [['-print0', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-ls'], 'find: -printf cannot be combined with other actions'],
+  [['-ls', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p\\n', '-delete'], 'find: -printf cannot be combined with other actions'],
+  [['-delete', '-printf', '%p\\n'], 'find: -printf cannot be combined with other actions'],
+  [['-printf', '%p', '-printf', '%f'], 'find: multiple -printf actions are not supported'],
+])('refuses detached newer tests and mixed printf: %s', (tokens, message) => {
+  expect(() => parseFindExpression(tokens)).toThrow(message)
 })

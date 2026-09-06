@@ -522,12 +522,35 @@ export async function findGeneric(
     return renderPrintfRows(printfPairs, printfFmt, stat, opts, missing)
   }
   // Start points print in operand order (GNU); each root's rows were
-  // sorted above, and a global sort here would interleave them.
+  // sorted above, and a global sort here would interleave them. The
+  // rows ride out as one run per root, so the action layer can order
+  // and act on each traversal on its own.
+  const matchedRuns: PathSpec[][] = []
+  let lastRoot: PathSpec | null = null
+  for (const [row, root] of printfPairs) {
+    if (root !== lastRoot) {
+      matchedRuns.push([])
+      lastRoot = root
+    }
+    const virtual = unrespellRaw(row, root.virtual, root.rawPath || root.virtual)
+    matchedRuns[matchedRuns.length - 1]?.push(
+      new PathSpec({
+        virtual,
+        directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+        resourcePath: mountKey(virtual, mountPrefixOf(root.virtual, root.resourcePath)),
+        rawPath: row,
+        resolved: true,
+      }),
+    )
+  }
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
   if (missing.length > 0) {
-    return [out, new IOResult({ stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 })]
+    return [
+      out,
+      new IOResult({ matchedRuns, stderr: ENC.encode(missing.join('\n') + '\n'), exitCode: 1 }),
+    ]
   }
-  return [out, new IOResult()]
+  return [out, new IOResult({ matchedRuns })]
 }
 
 async function printfStat(

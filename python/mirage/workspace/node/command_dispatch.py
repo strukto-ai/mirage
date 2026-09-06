@@ -634,7 +634,8 @@ async def _route_argv(
         call_stack,
         job_table=job_table,
         namespace=namespace,
-        routing_decision=routing_decision)
+        routing_decision=routing_decision,
+        execute_fn=execute_fn)
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":

@@ -14,20 +14,25 @@
 
 import errno
 import functools
-from collections.abc import Iterator, Mapping
+import time
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import replace
 
 from mirage.ops.types import SessionView
 from mirage.policy import Policies, PolicyDenied, pre_session_gate
 from mirage.policy.types import SessionContext
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
-                                array_values)
+                                array_values, array_with, make_array)
+from mirage.shell.constants import (PIPESTATUS, RANDOM, RANDOM_MODULUS,
+                                    RANDOM_UNSET)
 from mirage.shell.errors import ArithError
-from mirage.shell.types import ElementOps
+from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.variable import (ShellValue, ShellVar, VarAttr, coerce_value,
                                    detach, with_attr, with_value)
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.session.errors import ReadonlyVariableError
+from mirage.workspace.session.rng import draw
 from mirage.workspace.session.session import Session
 
 
@@ -223,12 +228,18 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         name = deref(self._session, name)
         if var_hidden(self._session.hidden_vars, name):
             raise KeyError(name)
+        if name == PIPESTATUS:
+            return [str(code) for code in self._session.pipe_status]
         var = self._session.vars[name]
         if not isinstance(var.value, list):
             raise KeyError(name)
         return var.value
 
     def __iter__(self) -> Iterator[str]:
+        # PIPESTATUS answers a lookup (and so `in`, which Mapping derives
+        # from the lookup) and never lists: bash's `declare -p PIPESTATUS`
+        # is `not found`, and an assignment to it is ignored, which this
+        # view honors by answering the session's record before the store.
         hidden = self._session.hidden_vars
         for name, var in self._session.vars.items():
             if isinstance(var.value, list) and not var_hidden(hidden, name):
@@ -307,7 +318,9 @@ def strip_key_quotes(text: str) -> str:
 
 def element_index(subscript: str,
                   env: Mapping[str, str],
-                  elements: ElementOps | None = None) -> int:
+                  elements: ElementOps | None = None,
+                  read_var: Callable[[str], str | None] | None = None,
+                  wrote_var: Callable[[str, str], None] | None = None) -> int:
     """Resolve an indexed subscript in arithmetic context.
 
     bash evaluates indexed subscripts as arithmetic (``a[i+1]``); an
@@ -319,15 +332,100 @@ def element_index(subscript: str,
         env (Mapping[str, str]): environment for name resolution.
         elements (ElementOps | None): element callbacks, so a nested
             reference (``a[b[0]]``) resolves too.
+        read_var (Callable[[str], str | None] | None): dynamic reads,
+            the same ones the enclosing expression makes, so
+            ``a[RANDOM]`` draws.
+        wrote_var (Callable[[str, str], None] | None): told of the
+            subscript's assignments, as the enclosing expression is.
     """
     try:
         return int(subscript.strip())
     except ValueError:
         pass
     try:
-        return evaluate_arith(subscript, env, elements=elements).value
+        return evaluate_arith(subscript,
+                              env,
+                              elements=elements,
+                              read_var=read_var,
+                              wrote_var=wrote_var).value
     except ArithError:
         return 0
+
+
+def _written_value(session: Session, write: ArithWrite) -> ShellValue:
+    """The whole variable one arithmetic write produces.
+
+    A scalar is itself; an element is the array it lands in, the way
+    ``assign_element`` lands one, so a refusal never leaves a write
+    half-applied.
+
+    Args:
+        session (Session): the session the write reads.
+        write (ArithWrite): the assignment.
+    """
+    if write.key is None:
+        return write.value
+    assoc = visible_assocs(session).get(write.name)
+    if assoc is not None:
+        return {**assoc, write.key: write.value}
+    arr = visible_arrays(session).get(write.name)
+    return array_with(arr if arr is not None else make_array([]),
+                      int(write.key), write.value)
+
+
+async def subscript_index(session: Session,
+                          subscript: str,
+                          view: SessionView | None = None) -> int:
+    """An indexed subscript resolved outside an arithmetic expression:
+    ``${a[i]}``, ``a[i]=v``, ``unset 'a[i]'``, ``[[ -v a[i] ]]``.
+
+    The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
+    (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
+    lands through the door once the index is known, then the ``RANDOM``
+    reader replays the draws made after the seed. A subscript that
+    fails to evaluate lands what it assigned before failing and then
+    raises, the subscript text leading the message, since bash aborts
+    the line on it (``${a[1/0]}`` is ``1/0: division by 0``) rather
+    than reading element 0.
+
+    Args:
+        session (Session): the session the subscript reads.
+        subscript (str): the raw subscript text.
+        view (SessionView | None): the gated door the assignments land
+            through; None lands them ungated, outside a workspace.
+
+    Raises:
+        PolicyDenied: the door refused an assignment.
+        ReadonlyVariableError: an assignment named a readonly variable.
+        ArithError: the subscript does not evaluate, or an assigned name
+            carries ``-i`` and the value does not evaluate.
+    """
+    try:
+        return int(subscript.strip())
+    except ValueError:
+        pass
+    reader = random_reader(session)
+    error: ArithError | None = None
+    idx = 0
+    try:
+        result = evaluate_arith(subscript,
+                                visible_env(session),
+                                elements=session_elements(session, reader),
+                                read_var=reader.read,
+                                wrote_var=reader.wrote)
+        idx, writes = result.value, result.writes
+    except ArithError as exc:
+        error, writes = exc, exc.writes
+    for write in writes:
+        value = _written_value(session, write)
+        if view is not None:
+            await view.set(write.name, value)
+        else:
+            await set_var(session, None, write.name, value)
+    reader.settle()
+    if error is not None:
+        raise ArithError(f"{subscript.strip()}: {error}") from error
+    return idx
 
 
 class _SessionElements:
@@ -342,10 +440,13 @@ class _SessionElements:
     imported the door would close a cycle.
     """
 
-    __slots__ = ("_session", )
+    __slots__ = ("_session", "_reader")
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self,
+                 session: Session,
+                 reader: "RandomReader | None" = None) -> None:
         self._session = session
+        self._reader = reader
 
     def resolve(self, name: str, subscript: str, env: Mapping[str,
                                                               str]) -> str:
@@ -359,7 +460,11 @@ class _SessionElements:
         """
         if name in visible_assocs(self._session):
             return strip_key_quotes(subscript)
-        idx = element_index(subscript, env, session_elements(self._session))
+        reader = self._reader
+        idx = element_index(subscript, env,
+                            session_elements(self._session, reader),
+                            reader.read if reader is not None else None,
+                            reader.wrote if reader is not None else None)
         if idx < 0:
             arr = visible_arrays(self._session).get(name)
             if arr is not None:
@@ -369,6 +474,14 @@ class _SessionElements:
             if idx < 0:
                 raise ArithError(f"{name}[{subscript}]: bad array subscript")
         return str(idx)
+
+    def is_assoc(self, name: str) -> bool:
+        """Whether the name holds an associative array.
+
+        Args:
+            name (str): the array variable's name.
+        """
+        return name in visible_assocs(self._session)
 
     def read(self, name: str, key: str) -> str | None:
         """The element's stored text, None when unset.
@@ -391,41 +504,256 @@ class _SessionElements:
         return array_get(arr, idx) if array_has(arr, idx) else None
 
 
-def session_elements(session: Session) -> ElementOps:
+def session_elements(session: Session,
+                     reader: "RandomReader | None" = None) -> ElementOps:
     """Element callbacks bound to one session, for ``evaluate_arith``.
 
     Args:
         session (Session): the session references resolve against.
+        reader (RandomReader | None): the expression's ``RANDOM``
+            reader, so a subscript draws from the same generator as the
+            expression around it; None where nothing draws.
     """
-    bound = _SessionElements(session)
-    return ElementOps(resolve=bound.resolve, read=bound.read)
+    bound = _SessionElements(session, reader)
+    return ElementOps(resolve=bound.resolve,
+                      read=bound.read,
+                      is_assoc=bound.is_assoc)
 
 
-def _integer_text(session: Session, text: str) -> str:
-    """The `-i` coercion: evaluate the incoming text as arithmetic.
+def seed_from(word: str, session: Session) -> int:
+    """Evaluate a host-supplied seed; invalid arithmetic propagates.
 
-    Reads resolve against the visible env, so `n=x+1` sees `x`, and
-    element references resolve through the session's resolver, so
-    `n=a[1]+1` and `n=m[k]+1` see the element; an unresolvable name is
-    0 (`n=abc` stores `0`), which is the arithmetic rule, not a
-    refusal. A malformed expression raises ArithError, and the caller
-    decides how to voice it (bash aborts the line with the evaluator's
-    own message).
+    Read without the generator on offer: a host word naming ``RANDOM``
+    would otherwise draw, and the draw reseed, without end.
+
+    Args:
+        word (str): the seed expression.
+        session (Session): the session the expression reads.
+    """
+    value = evaluate_arith(word,
+                           visible_env(session),
+                           elements=session_elements(session)).value
+    return value % RANDOM_MODULUS
+
+
+def next_random(session: Session, stored: str | None) -> int | None:
+    """Draw from the session generator, or None after RANDOM is unset.
+
+    Shell assignments validate and seed at the session door. A host-seeded
+    variable is consumed here on its first read. The last draw is separate
+    from the stored word because a reseed resets repeat suppression to zero.
+
+    Args:
+        session (Session): generator and variable state.
+        stored (str | None): the visible RANDOM value.
+    """
+    if session._random_seed == RANDOM_UNSET or (
+            stored is None and session._random_seed is not None):
+        return None
+    seed = (seed_from(stored, session)
+            if stored is not None and stored != session._random_seed else None)
+    if seed is not None:
+        state = seed
+        last = 0
+    elif session._random_state is None:
+        state = time.time_ns() % RANDOM_MODULUS
+        last = 0
+    else:
+        state = session._random_state
+        last = session._random_last
+    state, value = draw(state, last)
+    session._random_state = state
+    session._random_last = value
+    word = str(value)
+    existing = session.vars.get(RANDOM)
+    session.vars[RANDOM] = (replace(existing, value=word)
+                            if existing is not None else ShellVar(word))
+    session._random_seed = word
+    return value
+
+
+def note_random_kind(session: Session, name: str, value: ShellValue) -> None:
+    """End ``RANDOM``'s special meaning when a non-string lands on it.
+
+    bash's ``convert_var_to_array`` drops the dynamic value and the
+    assign hook, so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
+    ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
+    ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
+    Every store door calls this, gated or not, since a host seeding an
+    array onto the name means the same thing.
+
+    Args:
+        session (Session): the session the store landed in.
+        name (str): the variable stored.
+        value (ShellValue): what it now holds.
+    """
+    if name == RANDOM and not isinstance(value, str):
+        session._random_seed = RANDOM_UNSET
+
+
+def conversion_scalar(session: Session, name: str) -> str | None:
+    """The scalar an array conversion keeps as element 0.
+
+    bash's ``convert_var_to_array`` copies the variable's current value
+    into element 0, and for a live ``RANDOM`` looking the name up is
+    what draws: ``RANDOM[1]=5`` leaves ``[0]`` holding one draw and
+    ``declare -a RANDOM`` one alone, after which the array is ordinary.
+
+    Args:
+        session (Session): the session the conversion happens in.
+        name (str): the variable turning into an array.
+    """
+    if name == RANDOM:
+        drawn = next_random(session, visible_env(session).get(RANDOM))
+        if drawn is not None:
+            return str(drawn)
+    return session.env.get(name)
+
+
+class RandomReader:
+    """Arithmetic's reads of ``$RANDOM``, bound to one session.
+
+    A read before the expression assigns ``RANDOM`` draws from the
+    session generator. bash seeds at the instant of an assignment and
+    every later read draws from the new seed (``$((RANDOM=42, RANDOM))``
+    is the first draw after seeding with 42). Here the assignment is
+    still pending at the session door, which lands it gated after
+    evaluation, so the evaluator tells the reader of each assignment as
+    it is made (``wrote``), the reader seeds a scratch generator the way
+    the door will and draws from that, and ``settle`` replays the draws
+    on the session once the door has seeded it: the session ends where
+    bash's does, seeded and advanced by every read since the last
+    assignment, and the write still reaches the gate as the assignment
+    it is. Each assignment restarts the scratch generator and the count,
+    since the door lands only the last value written, and the draws are
+    replayed only if the door did land it: an assignment the caller
+    never applied leaves the session as it was.
+
+    Lives beside the door rather than with the generator because the
+    door needs it too: ``RANDOM=RANDOM`` draws once while the seed is
+    evaluated, then seeds with the draw, as bash's ``assign_random``
+    does through ``evalexp``.
+
+    Args:
+        session (Session): generator and visibility state.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.seeded: str | None = None
+        self.state = 0
+        self.last = 0
+        self.draws = 0
+
+    def _special(self, name: str) -> bool:
+        session = self.session
+        return (name == RANDOM and not var_hidden(session.hidden_vars, name)
+                and session._random_seed != RANDOM_UNSET)
+
+    def read(self, name: str) -> str | None:
+        """The dynamic value of a name, None for a name that has none.
+
+        Args:
+            name (str): the variable the expression reads.
+        """
+        if not self._special(name):
+            return None
+        if self.seeded is None:
+            value = next_random(self.session,
+                                visible_env(self.session).get(name))
+            return None if value is None else str(value)
+        self.state, value = draw(self.state, self.last)
+        self.last = value
+        self.draws += 1
+        return str(value)
+
+    def wrote(self, name: str, value: str) -> None:
+        """Note an assignment the expression made.
+
+        Args:
+            name (str): the variable assigned.
+            value (str): the value, an integer's text.
+        """
+        if not self._special(name):
+            return
+        self.seeded = value
+        self.state = int(value) % RANDOM_MODULUS
+        self.last = 0
+        self.draws = 0
+
+    def settle(self) -> None:
+        """Replay the scratch draws on the session generator, once the
+        door has seeded it with the value the expression assigned."""
+        if self.seeded is None or self.session._random_seed != self.seeded:
+            return
+        for _ in range(self.draws):
+            next_random(self.session, visible_env(self.session).get(RANDOM))
+        self.draws = 0
+
+
+def random_reader(session: Session) -> RandomReader:
+    """Bind arithmetic ``$RANDOM`` reads to a session.
+
+    Args:
+        session (Session): generator and visibility state.
+    """
+    return RandomReader(session)
+
+
+class _IntegerCoercion:
+    """The `-i` coercion and the ``RANDOM`` seed, as one evaluation.
+
+    The incoming text evaluates as arithmetic against the visible env,
+    element references resolving through the session's resolver, so
+    `n=x+1` sees `x` and `n=a[1]+1` the element; an unresolvable name
+    is 0 (`n=abc` stores `0`), the arithmetic rule, not a refusal.
+    ``RANDOM`` draws, as in every other arithmetic context, so `n=RANDOM`
+    and a `RANDOM=RANDOM` seed both advance the generator. The
+    assignments the expression makes are kept for the door to land
+    (``_land_coercion``): bash binds `x` in `n='x=5'` and in
+    `RANDOM='x=5'`, before the error too if the expression then fails.
+    A malformed expression raises ArithError with the offending text
+    leading, the way every caller voices it.
 
     Args:
         session (Session): the session the expression reads.
-        text (str): the incoming value.
     """
-    try:
-        return str(
-            evaluate_arith(text,
-                           visible_env(session),
-                           elements=session_elements(session)).value)
-    except ArithError as exc:
-        # The offending text leads, which is how every caller voices it
-        # (`bash: 1+: syntax error: operand expected`), so it is spelled
-        # once here rather than at each of the sites that catch it.
-        raise ArithError(f"{text}: {exc}") from exc
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.reader = random_reader(session)
+        self.writes: list[ArithWrite] = []
+
+    def __call__(self, text: str) -> str:
+        session = self.session
+        try:
+            result = evaluate_arith(text,
+                                    visible_env(session),
+                                    elements=session_elements(
+                                        session, self.reader),
+                                    read_var=self.reader.read,
+                                    wrote_var=self.reader.wrote)
+        except ArithError as exc:
+            self.writes.extend(exc.writes)
+            raise ArithError(f"{text}: {exc}") from exc
+        self.writes.extend(result.writes)
+        return str(result.value)
+
+
+async def _land_coercion(session: Session, policies: Policies | None,
+                         coercion: _IntegerCoercion) -> None:
+    """Land the assignments a coercion made, each through the door, then
+    settle its ``RANDOM`` draws.
+
+    Args:
+        session (Session): the shell session.
+        policies (Policies | None): the session plane's gate.
+        coercion (_IntegerCoercion): the evaluation that made the writes.
+    """
+    for write in coercion.writes:
+        await set_var(session, policies, write.name,
+                      _written_value(session, write))
+    coercion.reader.settle()
 
 
 def ensure_var_visible(session: Session, name: str) -> None:
@@ -506,9 +834,17 @@ async def set_var(session: Session,
     # Coercion runs before the gate so a rule judges the value that
     # will land: `declare -l profile; profile=ADMIN` stores `admin`, and a
     # rule refusing `admin` must see that, not the raw text.
+    coercion = _IntegerCoercion(session)
     if existing is not None and existing.attrs:
-        value = coerce_value(value, existing.attrs,
-                             functools.partial(_integer_text, session))
+        try:
+            value = coerce_value(value, existing.attrs, coercion)
+        except ArithError:
+            # bash bound what the expression assigned before it failed
+            # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
+            # RANDOM seed in it seeds); they land, gated, before the
+            # refusal reports.
+            await _land_coercion(session, policies, coercion)
+            raise
     if isinstance(value, str):
         rendered = value
     elif isinstance(value, dict):
@@ -522,6 +858,21 @@ async def set_var(session: Session,
                        key=name,
                        value=rendered,
                        session_id=session.session_id))
+    if name == RANDOM and session._random_seed != RANDOM_UNSET and isinstance(
+            value, str):
+        try:
+            seed = int(coercion(value)) % RANDOM_MODULUS
+        except ArithError as exc:
+            session._diagnostics.append(str(exc))
+            await _land_coercion(session, policies, coercion)
+            return
+        session._random_state = seed
+        session._random_seed = value
+        session._random_last = 0
+    note_random_kind(session, name, value)
+    # The assignments the coercion or the seed made land now, gated
+    # each, before the name they were made for.
+    await _land_coercion(session, policies, coercion)
     stored = ShellVar(value) if existing is None else with_value(
         existing, value)
     # An agent write to a managed name shadows session-locally: the
@@ -577,6 +928,54 @@ async def unset_var(session: Session,
                        value=None,
                        session_id=session.session_id))
     session.vars.pop(name, None)
+    if name == RANDOM:
+        # bash: unsetting RANDOM strips its special meaning for good.
+        session._random_seed = RANDOM_UNSET
+
+
+def shadow_local(session: Session, local_vars: dict[str, ShellVar | None],
+                 name: str) -> None:
+    """Record the caller's record before a ``local`` shadows it, once
+    per frame.
+
+    ``RANDOM`` parks its generator marker too: a local ``RANDOM`` is an
+    ordinary variable for the function's extent (``local RANDOM=5; echo
+    $RANDOM`` prints 5, and ``local RANDOM=(7)`` leaves the caller's
+    generator alone), and ``restore_locals`` hands the marker back.
+
+    Args:
+        session (Session): the session the function runs in.
+        local_vars (dict[str, ShellVar | None]): the running frame.
+        name (str): the variable being declared local.
+    """
+    if name in local_vars:
+        return
+    local_vars[name] = session.vars.get(name)
+    if name == RANDOM:
+        session._local_random.append(session._random_seed)
+        session._random_seed = RANDOM_UNSET
+
+
+def restore_locals(session: Session,
+                   local_vars: dict[str, ShellVar | None]) -> None:
+    """Put a returning function's shadowed records back.
+
+    Deliberate divergence: bash reseeds the global generator when a
+    local ``RANDOM`` is popped (``RANDOM=42; f(){ local RANDOM; }; f;
+    echo $RANDOM`` prints 11074 where 17772 was next); mirage resumes
+    the caller's sequence where it left off.
+
+    Args:
+        session (Session): the session the function ran in.
+        local_vars (dict[str, ShellVar | None]): the frame being popped.
+    """
+    for key, old in local_vars.items():
+        if old is None:
+            session.vars.pop(key, None)
+        else:
+            session.vars[key] = old
+    if RANDOM in local_vars:
+        session._random_seed = session._local_random.pop()
 
 
 def seed_var(session: Session, name: str, value: ShellValue) -> None:
@@ -612,6 +1011,7 @@ def seed_var(session: Session, name: str, value: ShellValue) -> None:
     existing = session.vars.get(name)
     session.vars[name] = (ShellVar(value) if existing is None else with_value(
         existing, value))
+    note_random_kind(session, name, value)
 
 
 def set_attr(session: Session,

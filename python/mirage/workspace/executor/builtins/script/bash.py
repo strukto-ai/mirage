@@ -15,6 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.context import clear_program_invocation, reset_program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -149,11 +150,15 @@ async def handle_bash(
     session.source_depth = 0
     for option, enable in parsed.settings:
         session.shell_options[option] = enable
+    # A nested shell is a program of its own: the builtins it runs are
+    # its builtins again, whatever `find -exec` marked the outer line.
+    token = clear_program_invocation()
     try:
         io = await execute_fn(script,
                               session_id=session.session_id,
                               stdin=stdin)
     finally:
+        reset_program_invocation(token)
         session.restore(saved)
     label = f"{name} {parsed.path}" if parsed.path else f"{name} -c {script}"
     return io.stdout, io, ExecutionNode(command=label, exit_code=io.exit_code)

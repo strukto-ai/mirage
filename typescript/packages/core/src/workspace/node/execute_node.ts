@@ -20,7 +20,7 @@ import type { Resource } from '../../resource/base.ts'
 import { makeAbortError } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { assignmentStatus, finishStatement } from '../executor/statement.ts'
+import { assignmentStatus, finishStatement, recordStatus } from '../executor/statement.ts'
 import {
   getCaseItems,
   getCaseWord,
@@ -34,18 +34,20 @@ import {
   getPipelineCommands,
   getRedirects,
   getText,
+  getParts,
   getUnsetArgs,
   getWhileParts,
 } from '../../shell/helpers.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT, Redirect, RedirectKind } from '../../shell/types.ts'
-import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
+import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { evaluateArith } from '../../shell/arith.ts'
-import { ArithError, ReadonlyError } from '../../shell/errors.ts'
+import type { ArithWrite } from '../../shell/types.ts'
+import { ExitSignal, ArithError, ReadonlyError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { assignElement } from '../session/elements.ts'
 import type { ArithResult, TSNodeLike } from '../../shell/types.ts'
@@ -77,7 +79,13 @@ import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { SessionView } from '../../ops/types.ts'
-import { ensureVarVisible, sessionElements, sessionView, visibleEnv } from '../session/state.ts'
+import {
+  ensureVarVisible,
+  randomReader,
+  sessionElements,
+  sessionView,
+  visibleEnv,
+} from '../session/state.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { type ExecuteNodeOpts, pump } from '../executor/jobs.ts'
 
@@ -150,36 +158,57 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
  * expression assigns to a readonly variable.
  */
 async function evalCforExpr(
-  expr: TSNodeLike | null,
+  exprs: readonly TSNodeLike[],
   dflt: number,
   session: Session,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
 ): Promise<number> {
-  if (expr === null) return dflt
-  const text = await expandArith(expr, session, executeFn, callStack, view)
-  let result: ArithResult
+  if (exprs.length === 0) return dflt
+  // One comma expression, evaluated once, so an assignment early in the
+  // slot is seen by the expressions after it.
+  const parts: string[] = []
+  for (const expr of exprs) parts.push(await expandArith(expr, session, executeFn, callStack, view))
+  const text = parts.join(', ')
+  const reader = randomReader(session)
+  let error: ArithError | null = null
+  let writes: readonly ArithWrite[] = []
+  let value = 0n
   try {
     // Reads resolve against the visible env so a hidden name counts as
     // unset; a hidden write refuses through the session door
     // (ensureVarVisible), caught by the loop beside ReadonlyError.
-    result = evaluateArith(text, visibleEnv(session), 0, sessionElements(session))
+    const result: ArithResult = evaluateArith(
+      text,
+      visibleEnv(session),
+      0,
+      sessionElements(session, reader),
+      reader.read,
+      reader.wrote,
+    )
+    writes = result.writes
+    value = result.value
   } catch (err) {
     if (!(err instanceof ArithError)) throw err
-    throw new ArithError(`${text}: ${err.message}`)
+    // bash bound the assignments made before the error; they land
+    // before the error is reported.
+    error = err
+    writes = err.writes
   }
-  for (const write of result.writes) {
+  for (const write of writes) {
     ensureVarVisible(session, write.name)
     if (session.readonlyVars.has(write.name)) throw new ReadonlyError(write.name)
   }
   // Through the door, so a preSession rule governs an arithmetic assignment
   // exactly as it governs `X=1`; in evaluation order, so a bare name and
   // its element 0 land as the expression wrote them.
-  for (const write of result.writes) {
+  for (const write of writes) {
     await assignElement(session, view ?? null, write.name, write.key, write.value)
   }
-  return Number(result.value)
+  reader.settle()
+  if (error !== null) throw new ArithError(`${text}: ${error.message}`)
+  return Number(value)
 }
 
 async function recurseReassociated(
@@ -308,11 +337,64 @@ export interface ExecuteNodeDeps {
  */
 function isBareExec(command: TSNodeLike | null): boolean {
   if (command?.type !== NT.COMMAND) return false
-  const named = command.namedChildren
+  const named = getParts(command)
   return named.length === 1 && named[0]?.type === NT.COMMAND_NAME && getText(named[0]) === 'exec'
 }
 
 export async function executeNode(
+  deps: ExecuteNodeDeps,
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null = null,
+  callStack: CallStack | null = null,
+): Promise<Result> {
+  const outer = session.diagnostics
+  session.diagnostics = []
+  try {
+    const [stdout, io, execNode] = await executeNodeBody(deps, node, session, stdin, callStack)
+    if (session.diagnostics.length > 0) {
+      const err = diagnosticStderr(node, session)
+      const existing = await io.materializeStderr()
+      const merged = new Uint8Array(err.length + existing.length)
+      merged.set(err)
+      merged.set(existing, err.length)
+      io.stderr = merged
+      execNode.stderr = merged
+    }
+    return [stdout, io, execNode]
+  } catch (err) {
+    if (err instanceof ExitSignal) {
+      const extra = diagnosticStderr(node, session)
+      const merged = new Uint8Array(extra.length + err.stderr.length)
+      merged.set(extra)
+      merged.set(err.stderr, extra.length)
+      err.stderr = merged
+    }
+    throw err
+  } finally {
+    session.diagnostics = outer
+  }
+}
+
+function diagnosticStderr(node: TSNodeLike, session: Session): Uint8Array {
+  const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
+  const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
+    ? head
+    : ''
+  const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
+  const parts = session.diagnostics.map((message) =>
+    typeof message === 'string' ? new TextEncoder().encode(prefix + message + '\n') : message,
+  )
+  const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    result.set(part, offset)
+    offset += part.length
+  }
+  return result
+}
+
+async function executeNodeBody(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
   session: Session,
@@ -570,22 +652,32 @@ export async function executeNode(
       callStack,
       sessionView(session, registry.policies),
     )
-    let result: ArithResult
+    const reader = randomReader(session)
+    let error: ArithError | null = null
+    let writes: readonly ArithWrite[] = []
+    let value = 0n
     try {
       // Reads resolve against the visible env so a hidden name counts
       // as unset; a hidden write refuses below, in this command's own
       // voice like the readonly refusal.
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      const result: ArithResult = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session, reader),
+        reader.read,
+        reader.wrote,
+      )
+      writes = result.writes
+      value = result.value
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
-      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
-      ]
+      // bash bound the assignments made before the error; they land
+      // before the error is reported.
+      error = err
+      writes = err.writes
     }
-    for (const write of result.writes) {
+    for (const write of writes) {
       const name = write.name
       try {
         ensureVarVisible(session, name)
@@ -608,7 +700,7 @@ export async function executeNode(
       }
     }
     try {
-      for (const write of result.writes) {
+      for (const write of writes) {
         await assignElement(
           session,
           sessionView(session, registry.policies),
@@ -617,6 +709,7 @@ export async function executeNode(
           write.value,
         )
       }
+      reader.settle()
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       const errBytes = new TextEncoder().encode(`bash: ${err.message}\n`)
@@ -626,7 +719,15 @@ export async function executeNode(
         new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
       ]
     }
-    const code = result.value !== 0n ? 0 : 1
+    if (error !== null) {
+      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${error.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    const code = value !== 0n ? 0 : 1
     return [
       null,
       new IOResult({ exitCode: code }),
@@ -642,7 +743,7 @@ export async function executeNode(
       if (child.type === NT.COMMENT) continue
       const [rawStdout, io, execNode] = await stream(child, session, stdin, callStack)
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, child)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (
@@ -782,7 +883,14 @@ export async function executeNode(
         callStack,
         sessionView(session, registry.policies),
       )
-      return handleTest(dispatch, deps.namespace, tree, session, '[[')
+      return handleTest(
+        dispatch,
+        deps.namespace,
+        tree,
+        session,
+        '[[',
+        sessionView(session, registry.policies),
+      )
     }
     const expanded = await expandTestExpr(
       node,
@@ -791,7 +899,14 @@ export async function executeNode(
       callStack,
       sessionView(session, registry.policies),
     )
-    return handleTest(dispatch, deps.namespace, expanded, session, '[')
+    return handleTest(
+      dispatch,
+      deps.namespace,
+      expanded,
+      session,
+      '[',
+      sessionView(session, registry.policies),
+    )
   }
 
   if (kind === NodeKind.NEGATED) {
@@ -800,6 +915,10 @@ export async function executeNode(
     // Lazy exit codes (exitOnEmpty in grep) must be final before
     // inverting, or `! grep miss f` negates the provisional 0.
     const stdout = await applyBarrier(rawStdout, io, BarrierPolicy.VALUE)
+    // bash reports the negated pipeline's own statuses in PIPESTATUS
+    // (`! false` leaves `1`), so what `!` wraps is closed as a statement
+    // of its own before `$?` inverts.
+    recordStatus(session, io.exitCode, pipelineTransparent(inner))
     const flipped = new IOResult({
       exitCode: io.exitCode !== 0 ? 0 : 1,
       stderr: io.stderr,

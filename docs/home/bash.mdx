@@ -212,6 +212,40 @@ again), `-L` (no module system, so `include` has nothing to search),
 `--stream-errors` (it reports truncated-parse errors, which whole-value
 reads never produce), and `--build-configuration`.
 
+`find -exec` runs each invocation in an isolated child shell, and it looks
+the head word up the way findutils' `execvp` does: only an installed program
+runs there (`echo`, `printf`, `true`, a registered CLI), so a shell function
+or a shell-only builtin such as `cd` or `export` is refused with
+`find: 'name': No such file or directory`, and a function or alias that
+shadows a program name is bypassed, the program running as it would under
+`command`, and a builtin that doubles as a program answers as the program
+(`printf -v` is a format string there, as under coreutils printf). Changes
+to variables, working directory, arguments, and shell options stay in the
+child. `-ls` renders the stat find already holds, as GNU's does: a start
+point, or a row a `-size`, `-mtime`, `-newer` or `-empty` test statted,
+still lists after `-delete`, while a row only `-name` or `-type` selected is
+reported gone.
+Predicates must precede actions: `find d -name '*.txt' -exec echo {} \;`
+works, while a test following `-exec`, `-print`, `-delete`, or another action
+is refused because backend filtering cannot preserve that evaluation order.
+All actions (`-exec`, `-print`, `-print0`, `-printf`, `-ls`, and `-delete`)
+refuse placement under `-o`, negation, or parentheses. Tests may be grouped
+before a trailing action. Action operands retain whole filenames, including
+embedded newlines, across mount boundaries. `-printf` must be the only action;
+combining it with other actions or repeating it is refused.
+`-delete` runs where it is written, so a later `-exec` sees the row gone, and
+it turns on `-depth`, which lists a directory after its contents. `-newer FILE`
+reads a symlink reference itself under the default `-P` and its target under
+`-H` or `-L`, as GNU find does.
+`-newermt` accepts GNU date expressions such as `yesterday`, `24 hours ago`,
+and `@1700000000`, with unzoned dates interpreted as UTC. Invalid calendar
+dates are refused. `-newer` and `-newermt` must be in a top-level AND chain;
+placing them under OR, negation, or parentheses is refused. Repeated time
+tests in that chain intersect, so `-newer old -newer new` keeps only what is
+newer than both; `-mtime` tests under `-o` widen to the union of their
+windows, which can match more than GNU. A repeated `-print` prints each row
+once per occurrence, as in GNU.
+
 ## Supported bash syntax
 
 Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements the constructs LLMs reach for most often. What is not supported returns a clear, parseable error so an agent can self-correct on its next turn.
@@ -219,20 +253,21 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 ### Supported
 
 - **Operators:** pipes `|`, `|&`; lists `&&`, `||`, `;`; background `&`.
-- **Redirects:** `>`, `>>`, `<`, `2>`, `2>&1`, `&>`, `&>>`, heredoc `<<`, herestring `<<<`.
-- **Substitutions:** command substitution `` `cmd` `` and `$(cmd)`; arithmetic `$((expr))`; parameter expansion `${VAR}`, `${VAR:-default}`, `${VAR%suffix}`, etc.; input-direction process substitution `<(cmd)`.
+- **Redirects:** `>`, `>>`, `>|`, `<`, `2>`, `2>&1`, `>&2`, `&>`, `&>>`, `>&-` (a closed stdout fails the write, as GNU echo reports), heredoc `<<`, herestring `<<<`. The shell models descriptors 0, 1 and 2 only: a redirect naming any other (`3>f`, `>&3`, `exec 3>&-`) is refused with `3: Bad file descriptor` and exit `1`, the line continuing as it would after any redirect error. Duplications involving fd 0 follow the same left-to-right rules. Writing to a read-only descriptor fails with `write error: Bad file descriptor`, and reading a closed or write-only one fails with `Bad file descriptor` once the command reads (`cat 0<&1` exits `1`; `true 0<&1` is untouched). A standard descriptor may be opened in the other direction, as bash allows: `exec 0>file` makes fd 0 the file's write end (a read is refused, and `>&0` writes there), and `exec 1<file` makes fd 1 its read end (`exec 0<&1` and `<&1` read the file, a write to it fails). Mirage keeps no offset on a descriptor, so every read through a read-open stream starts at the file's beginning and every write through a write-open one appends.
+- **Substitutions:** command substitution `` `cmd` `` and `$(cmd)`; arithmetic `$((expr))` (an invalid expression such as `$((1/0))` aborts the line with exit `1` and `bash: 1/0: division by 0`, as a non-interactive bash does); parameter expansion `${VAR}`, `${VAR:-default}`, `${VAR%suffix}`, etc.; input-direction process substitution `<(cmd)`.
+- **Shell variables:** `$?`, `$#`, `$@`, `$*`, `$0`..`$9`, `$$`, `$!`, `$RANDOM` (bash 5.2's generator, so `RANDOM=42` draws bash's own sequence; bare `RANDOM` in arithmetic draws lazily too; assigning seeds it immediately; invalid arithmetic seeds emit a diagnostic without changing the sequence or failing the assignment; `unset RANDOM` strips it, as in bash) and `${PIPESTATUS[@]}` (the per-segment statuses of the last pipeline).
 - **Control flow:** `if`/`elif`/`else`/`fi`, `for`, `while`, `until`, `case`, `select`, `function name() {}`, `break`, `continue`, `return`.
 - **Grouping:** subshells `(cmd)`, compound `{ cmd; }`, negation `! cmd`.
-- **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `set`, `shift`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`, `man`, `command`, `type`, `which`.
-- **Builtin options (GNU semantics):** `echo -n/-e/-E` (leading-word option rule: `echo hi -n` prints `hi -n`), `read -r`, `xargs -n/-0/-d/-r/--` (batching, GNU exit codes: `123` when an invocation fails, `126`/`127` stop the run), `timeout DURATION` with `s`/`m`/`h`/`d` suffixes (kills at the deadline with exit `124`, usage errors exit `125`). `shift` and `return` report bash's `numeric argument required` errors.
+- **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `declare` (including `-A`), `let`, `set`, `shopt`, `alias`, `umask`, `mapfile`, `shift`, `exec` (redirect-only form), `disown`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`, `man`, `command`, `type`, `which`.
+- **Builtin options (GNU semantics):** `echo -n/-e/-E` (leading-word option rule: `echo hi -n` prints `hi -n`), `read -r`, `xargs -n/-0/-d/-r/--` (batching, GNU exit codes: `123` when an invocation fails, `126`/`127` stop the run), `timeout DURATION` with `s`/`m`/`h`/`d` suffixes (kills at the deadline with exit `124`, usage errors exit `125`). `shift` and `return` report bash's `numeric argument required` errors, and `shift` past `$#` is bash's silent exit `1`. `test`/`[`/`[[` support the file-pair operators `-nt`, `-ot` and `-ef` (`-ef` means the same resolved path: a mount has no device or inode).
 - **Name lookup:** `type name` reports what a name resolves to (`type -t` prints one of `keyword`, `function`, `cli`, `builtin`; `type -a` lists every layer holding the name), `which name` prints the name of anything runnable (there is no PATH, so there is no path to print) and reports a miss through exit `1` alone, and `man name` renders a page: a command's spec, or an installed CLI's own `--help` tree (`man linear issue create`).
 - **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the resource.
 - **Comments:** `#`.
 
 ### Unsupported (returns clear error)
 
-- **Job control:** `bg`, `disown`. (`fg`, `jobs`, `wait`, `kill`, `ps` work; use the `--background` flag and `mirage job` CLI for long-running work.)
-- **Shell internals:** `exec`, `complete`, `compgen`, `ulimit`.
+- **Job control:** `bg`. (`fg`, `jobs`, `wait`, `kill`, `disown`, `ps` work; use the `--background` flag and `mirage job` CLI for long-running work.)
+- **Shell internals:** `exec CMD` (process replacement; the redirect-only `exec > file` works), `complete`, `compgen`, `ulimit`, file descriptors above 2.
 - **Output process substitution:** `>(cmd)` (the `<(cmd)` direction works).
 - **Builtin options with no process backing:** `xargs -I`/`-P` (exit `1`) and `timeout -s`/`-k`/`--preserve-status` (exit `125`) return an `unsupported option` error: commands run as coroutines inside the workspace, so there is no process to signal or parallelize.
 

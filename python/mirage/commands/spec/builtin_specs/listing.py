@@ -64,6 +64,12 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-path", type="str", multiple=True),
             Option(short="-mindepth", type="str", multiple=True),
             Option(short="-printf", type="str", multiple=True),
+            Option(short="-newer", type="str", multiple=True),
+            Option(short="-newermt", type="str", multiple=True),
+            # `-exec CMD ARGS... ;` is consumed by the expression parser,
+            # never by this spec: the classifier keeps its words as text
+            # (`exec_spans`), and there is no argparse shape for an
+            # option whose argument is a program.
             # GNU find's link policy: -P (no follow) is the default, -H
             # follows only the start point, -L follows everything.
             Option(short="-P"),

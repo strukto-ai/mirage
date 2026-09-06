@@ -15,6 +15,7 @@
 import dataclasses
 from collections.abc import Sequence
 
+from mirage.commands.builtin.find_parse import find_expr_tail
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.io.types import ByteSource
@@ -59,6 +60,10 @@ def default_cwd_operand(parts: list[str | PathSpec], cmd_name: str,
     if spec is None:
         return None
     argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
+    if cmd_name == "find":
+        # Only the words before the expression can be start points: an
+        # `-exec` command word or a `-newer` reference is the parser's.
+        argv = argv[:len(argv) - len(find_expr_tail(argv))]
     parsed = parse_command(spec, argv, cwd)
     if parsed.paths():
         return None

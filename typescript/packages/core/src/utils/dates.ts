@@ -65,7 +65,10 @@ function dateUnit(word: string): string | null {
 }
 
 function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+  return makeDate(
+    { year, month: month + 1, day: 0, hour: 0, minute: 0, second: 0, ms: 0 },
+    true,
+  ).getUTCDate()
 }
 
 interface DateParts {
@@ -90,9 +93,25 @@ function partsOf(dt: Date, utc: boolean): DateParts {
   }
 }
 
+/**
+ * A Date from its parts. `Date.UTC` and the `Date` constructor read a
+ * year below 100 as 1900 plus that year; the setters do not, so a year
+ * GNU and Python accept as itself (`0042-01-01`) lands where it belongs.
+ */
+function makeDate(p: DateParts, utc: boolean): Date {
+  const d = new Date(0)
+  if (utc) {
+    d.setUTCFullYear(p.year, p.month, p.day)
+    d.setUTCHours(p.hour, p.minute, p.second, p.ms)
+  } else {
+    d.setFullYear(p.year, p.month, p.day)
+    d.setHours(p.hour, p.minute, p.second, p.ms)
+  }
+  return d
+}
+
 function dateFrom(p: DateParts, utc: boolean): Date {
-  if (utc) return new Date(Date.UTC(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms))
-  return new Date(p.year, p.month, p.day, p.hour, p.minute, p.second, p.ms)
+  return makeDate(p, utc)
 }
 
 function addMonthsGnu(dt: Date, count: number, utc: boolean): Date {
@@ -130,6 +149,17 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
   const hour = m[4] !== undefined ? Number(m[4]) : 0
   const minute = m[5] !== undefined ? Number(m[5]) : 0
   const second = m[6] !== undefined ? Number(m[6]) : 0
+  if (
+    year < 1 ||
+    month < 0 ||
+    month > 11 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  )
+    return null
   // Truncate, never round: `.9999` must stay inside its own second, as
   // it does for `new Date(iso)` and for Python's microsecond field.
   const ms = m[7] !== undefined ? Number(`${m[7]}000`.slice(0, 3)) : 0
@@ -139,9 +169,18 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
     if (zone !== 'Z' && zone !== 'z') {
       const zm = /^([+-])(\d{2}):?(\d{2})$/.exec(zone)
       if (zm === null) return null
-      offsetMin = (zm[1] === '-' ? -1 : 1) * (Number(zm[2]) * 60 + Number(zm[3]))
+      const zoneHours = Number(zm[2])
+      const zoneMinutes = Number(zm[3])
+      // A zone past 23:59 is refused, as Python's datetime refuses it
+      // (an offset there is strictly inside a day) and as GNU refuses
+      // `+99:99`. gnulib alone takes exactly +-24:00 and folds a minute
+      // field past 59 into hours; that corner is where the two hosts
+      // part from GNU, and they part the same way.
+      if (zoneHours > 23 || zoneMinutes > 59) return null
+      offsetMin = (zm[1] === '-' ? -1 : 1) * (zoneHours * 60 + zoneMinutes)
     }
-    return new Date(Date.UTC(year, month, day, hour, minute, second, ms) - offsetMin * 60_000)
+    const wall = makeDate({ year, month, day, hour, minute, second, ms }, true)
+    return new Date(wall.getTime() - offsetMin * 60_000)
   }
   return dateFrom({ year, month, day, hour, minute, second, ms }, utc)
 }
@@ -222,6 +261,21 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
   return result
 }
 
+// Whether an epoch-seconds timestamp sits inside an inclusive mtime window.
+// An unbounded window keeps everything; an unknown timestamp fails any
+// bounded one. Mirrors the Python in_mtime_window.
+export function inMtimeWindow(
+  timestamp: number | null | undefined,
+  mtimeMin: number | null | undefined,
+  mtimeMax: number | null | undefined,
+): boolean {
+  if (mtimeMin == null && mtimeMax == null) return true
+  if (timestamp == null) return false
+  if (mtimeMin != null && timestamp < mtimeMin) return false
+  if (mtimeMax != null && timestamp > mtimeMax) return false
+  return true
+}
+
 // Parse a GNU `date -d` expression, or null when it is invalid. Covers the
 // forms agents actually type: ISO 8601 dates and datetimes (with or without
 // zone), `@epoch`, and gnulib's relative grammar (`24 hours ago`,
@@ -229,13 +283,18 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
 // displacements). A null return is the caller's cue for GNU's
 // `date: invalid date '...'` refusal, never a NaN render. Mirrors the
 // Python parse_date_expr.
+const EPOCH_RE = /^@\s*[+-]?\d+(?:\.\d+)?$/
+
 export function parseDateExpr(text: string, utc: boolean, now?: Date): Date | null {
   const raw = text.trim()
   if (raw === '') return null
   if (raw.startsWith('@')) {
-    const epoch = Number(raw.slice(1))
-    if (Number.isNaN(epoch)) return null
-    return new Date(epoch * 1000)
+    // gnulib's epoch grammar (findutils 4.10): blanks, a sign, a decimal
+    // count of seconds and a fraction with digits on both sides; `@0x1`,
+    // `@1e2`, `@1.` and `@.5` are not dates, however readily Number()
+    // would take them.
+    if (!EPOCH_RE.test(raw)) return null
+    return new Date(Number(raw.slice(1)) * 1000)
   }
   const whole = parseIsoWords(raw, utc)
   if (whole !== null) return whole

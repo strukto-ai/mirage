@@ -190,6 +190,20 @@ def test_get_parts_excludes_redirect():
     assert "out.txt" not in texts
 
 
+def test_get_parts_drops_a_bare_zero_descriptor():
+    stmt = _first("cat a 0>&-")
+    parts = get_parts(stmt.named_children[0])
+    assert [get_text(p) for p in parts] == ["cat", "a"]
+    _, redirects = get_redirects(stmt)
+    assert [(r.fd, r.target) for r in redirects] == [(0, -1)]
+    spaced = _first("cat a 0 >&-")
+    assert [get_text(p)
+            for p in get_parts(spaced.named_children[0])] == ["cat", "a", "0"]
+    assert [r.fd for r in get_redirects(spaced)[1]] == [1]
+    _, chained = get_redirects(_first("cat 0<a >b"))
+    assert [(r.fd, r.target) for r in chained] == [(0, "a"), (1, "b")]
+
+
 def test_semicolon_is_program_level():
     """Semicolon creates separate commands, not a list node."""
     root = _parse("echo a; echo b")

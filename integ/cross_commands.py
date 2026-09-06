@@ -445,7 +445,7 @@ async def check_metadata(ws: Workspace, dst: str, label: str,
         out, _, _ = await run(ws, f"ls -l {dst}/copied")
         check(f"{label}: ls -l renders overlay bits", "-rw-rw-r--" in out)
         check(f"{label}: ls -l renders overlay owner", " 500 dev " in out)
-        check(f"{label}: ls -l renders touched mtime", "Mar  4 12:00" in out)
+        check(f"{label}: ls -l renders touched mtime", "Mar  4  2026" in out)
     await run(ws, f"touch -r {dst}/copied/n.txt /ram/tref.txt")
     st = await stat_of(ws, "/ram/tref.txt")
     check(f"{label}: touch -r copies mtime across mounts",

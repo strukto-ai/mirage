@@ -149,20 +149,21 @@ export function keyedWord(word: string): [string, string] | null {
  * word continues from the cursor, and a repeated index keeps the last
  * value, which is GNU's `([3]=x y [1]=z)` giving
  * `([1]="z" [3]="x" [4]="y")`. `+=` starts the cursor at the extent
- * instead of replacing.
+ * instead of replacing. `indexOf` is async because a subscript may
+ * assign, and the assignment lands through the session door.
  */
-export function buildIndexedLiteral(
+export async function buildIndexedLiteral(
   base: ShellArray | null,
   words: readonly string[],
   append: boolean,
-  indexOf: (subscript: string) => number,
-): ShellArray {
+  indexOf: (subscript: string) => Promise<number>,
+): Promise<ShellArray> {
   const arr: ShellArray = append && base !== null ? [...base] : []
   let cursor = append ? arrayExtent(arr) : 0
   for (const word of words) {
     const keyed = keyedWord(word)
     if (keyed !== null) {
-      let idx = indexOf(keyed[0])
+      let idx = await indexOf(keyed[0])
       if (idx < 0) idx += arrayExtent(arr)
       if (idx < 0) continue
       arraySet(arr, idx, keyed[1])

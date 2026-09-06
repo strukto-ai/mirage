@@ -121,6 +121,19 @@ describe('core/ssh/find', () => {
     expect(dirs).toContain('/sub')
   })
 
+  it('judges the start directory by the mtime window like its descendants', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map([['/sub/c.json', { data: new Uint8Array(), attrs: { mtime: 100 } }]]),
+      dirs: new Map([
+        ['/', {}],
+        ['/sub', { mtime: 100 }],
+      ]),
+    })
+    expect(await find(accessor, spec('/sub'), { mtimeMin: 200 })).toEqual([])
+    expect(await find(accessor, spec('/sub'), { mtimeMin: 50 })).toEqual(['/sub', '/sub/c.json'])
+    expect(await find(accessor, spec('/sub'), { mtimeMax: 50 })).toEqual([])
+  })
+
   it('returns empty for missing root', async () => {
     const accessor = makeFakeAccessor({
       files: new Map(),

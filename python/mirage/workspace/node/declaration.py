@@ -27,7 +27,8 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (ensure_var_visible, seed_var,
+from mirage.workspace.session.state import (conversion_scalar,
+                                            ensure_var_visible, seed_var,
                                             session_view, set_attr)
 from mirage.workspace.types import ExecutionNode
 
@@ -463,12 +464,12 @@ async def execute_declaration(
                 # At top level an existing scalar becomes the value
                 # at the literal key "0" (GNU allows scalar-to-
                 # associative conversion, unlike indexed).
-                scalar = session.env.get(bare)
+                scalar = conversion_scalar(session, bare)
                 seed_var(session, bare,
                          {} if scalar is None else {"0": scalar})
             elif not want_assoc and bare not in session.arrays:
                 # At top level an existing scalar becomes element 0.
-                scalar = session.env.get(bare)
+                scalar = conversion_scalar(session, bare)
                 seed_var(session, bare, [] if scalar is None else [scalar])
     # Array literals travel as data: the handler stores them through
     # the session door and owns both refusal voices, so the executor

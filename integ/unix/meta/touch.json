@@ -30,7 +30,7 @@
       "command": "touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt\n-rw-r--r-- 1 - - 0 Jan  2 15:30 new.txt\n",
+        "stdout": "-rwx-----x 1 alice dev 6 Jan  2  2026 f.txt\n-rw-r--r-- 1 - - 0 Jan  2  2026 new.txt\n",
         "stderr": ""
       }
     },
@@ -98,7 +98,7 @@
       "command": "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rwx-----x 1 alice dev 6 Mar  4 12:00 f.txt\n-rw-r--r-- 1 - - 0 Jan  2 15:30 new.txt\n",
+        "stdout": "-rwx-----x 1 alice dev 6 Mar  4  2026 f.txt\n-rw-r--r-- 1 - - 0 Jan  2  2026 new.txt\n",
         "stderr": ""
       }
     },

@@ -166,7 +166,7 @@
       "command": "ls -l /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r----- 1 mirage-agent ops 49 Jan  2 15:30 /vfs/settings.json\n",
+        "stdout": "-rw-r----- 1 mirage-agent ops 49 Jan  2  2026 /vfs/settings.json\n",
         "stderr": ""
       }
     },
@@ -180,7 +180,7 @@
       "command": "ls -l /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r----- 1 mirage-agent auditor 49 Jan  2 15:30 /vfs/settings.json\n",
+        "stdout": "-rw-r----- 1 mirage-agent auditor 49 Jan  2  2026 /vfs/settings.json\n",
         "stderr": ""
       }
     },

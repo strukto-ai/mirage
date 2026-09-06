@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { execSpans } from '../../commands/builtin/find_parse.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
@@ -47,8 +48,22 @@ export function specForCommand(
 // which was both redundant and position-blind: it matched an option's
 // value as readily as a grammar token, so `find /d -name '!'` lost the
 // TEXT the parser had correctly given the pattern.
-export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (ValueType | null)[] {
-  return [...parseCommand(spec, [...argv], '/').wordKinds]
+// find's `-exec` is the one grammar a spec cannot state (an option whose
+// argument is a program, up to a terminator), so its words are overridden
+// to TEXT here: the rest slot would otherwise read `echo`, `{}` and `;` as
+// start points. The command name is what says the words are find's.
+export function specWordKinds(
+  spec: CommandSpec,
+  argv: readonly string[],
+  name = '',
+): (ValueType | null)[] {
+  const kinds = [...parseCommand(spec, [...argv], '/').wordKinds]
+  if (name === 'find') {
+    for (const [start, end] of execSpans(argv)) {
+      for (let i = start; i <= end; i++) kinds[i] = 'str'
+    }
+  }
+  return kinds
 }
 
 // Per-position base directories for a spec that declares one. tar's -C

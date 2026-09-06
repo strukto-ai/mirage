@@ -26,12 +26,16 @@ import { Session } from './session.ts'
 import {
   elementIndex,
   envSnapshot,
+  nextRandom,
   seedVar,
   sessionElements,
   sessionView,
   stripKeyQuotes,
+  subscriptIndex,
   visibleEnv,
 } from './state.ts'
+import { RANDOM } from '../../shell/constants.ts'
+import { makeVar } from '../../shell/variable.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -303,6 +307,32 @@ describe('elementIndex', () => {
   })
 })
 
+describe('subscriptIndex', () => {
+  it('lands the assignments a subscript makes and seeds RANDOM', async () => {
+    const s = new Session({ sessionId: 's' })
+    seedVar(s, 'i', '1')
+    s.vars[RANDOM] = makeVar('1')
+    expect(await subscriptIndex(s, '3')).toBe(3)
+    expect(await subscriptIndex(s, 'i+1')).toBe(2)
+    // The subscript's assignment lands, bash's `a[x=3]`.
+    expect(await subscriptIndex(s, 'x=3')).toBe(3)
+    expect(s.vars.x?.value).toBe('3')
+    // One that fails lands what it assigned before failing, then throws
+    // in bash's words rather than reading element 0.
+    await expect(subscriptIndex(s, 'y=4, 1/0')).rejects.toThrow(/^y=4, 1\/0: /)
+    expect(s.vars.y?.value).toBe('4')
+    // A seed reaches the generator, and the draw after it advances the
+    // session past it.
+    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
+    const drawn = s.vars[RANDOM].value
+    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
+    // Through a door, a refusal is the gate's.
+    const view = sessionView(s, new Policies([new DenySecrets()]))
+    await expect(subscriptIndex(s, 'SECRET_N=1', view)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(s.env.SECRET_N).toBeUndefined()
+  })
+})
+
 describe('sessionElements', () => {
   it('resolves associative subscripts literally', () => {
     const ops = sessionElements(elementSession())
@@ -365,5 +395,25 @@ describe('managed variables through the session door', () => {
     session.vars.TOKEN = managedVar('s3cr3t')
     await view.unset('TOKEN')
     expect('TOKEN' in session.vars).toBe(false)
+  })
+})
+
+describe('a failing coercion', () => {
+  it('lands what it assigned before the error', async () => {
+    // bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
+    // leaves y at 5, and a RANDOM seed in the expression seeds.
+    const [view, s] = makeView()
+    s.vars[RANDOM] = makeVar('1')
+    seedVar(s, 'n', '0')
+    setAttr(s, 'n', VarAttr.Integer)
+    seedVar(s, 'x', 'y=5,1/0')
+    await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
+    expect(s.vars.y?.value).toBe('5')
+    // The refused assignment left n as it was.
+    expect(s.env.n).toBe('0')
+    seedVar(s, 'x', 'RANDOM=42,1/0')
+    await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
+    const drawn = s.vars[RANDOM].value
+    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(17772)
   })
 })

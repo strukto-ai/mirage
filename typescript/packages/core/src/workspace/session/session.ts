@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHELL_ARGV0 } from '../../shell/constants.ts'
+import { RANDOM, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
@@ -64,7 +64,13 @@ export interface ChildShellState {
   execStderr: string | null
   execStderrAppend: boolean
   execStdin: Uint8Array | null
+  execStdinUnreadable: boolean
+  execStdinIdentity: string | null
   execOpened: Set<string>
+  randomState: number | null
+  randomSeed: string | null
+  randomLast: number
+  pipeStatus: readonly number[]
 }
 
 /**
@@ -376,6 +382,24 @@ export class Session {
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
   lastExitCode: number
+  // `${PIPESTATUS[@]}`: the exit status of every segment of the last
+  // pipeline, where a simple command is a one-segment pipeline. Written
+  // only through `recordStatus` (`executor/statement.ts`), the one door
+  // `$?` goes through as well, so the two can never disagree.
+  // Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
+  // expands to nothing until a statement records one.
+  pipeStatus: readonly number[] = []
+  // A pipeline's per-segment statuses, parked by `handlePipe` for the
+  // statement boundary that closes it to claim. Null between them.
+  pipeStatusPending: readonly number[] | null = null
+  // `$RANDOM`'s generator state and the seed word it last consumed
+  // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
+  // parent gets its own state back (`snapshot` / `restore`).
+  randomState: number | null = null
+  randomSeed: string | null = null
+  randomLast = 0
+  // Scoped by the executing node so diagnostics follow its redirections.
+  diagnostics: (string | Uint8Array)[] = []
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -439,8 +463,18 @@ export class Session {
   execStderr: string | null = null
   execStderrAppend = false
   execStdin: Uint8Array | null = null
+  execStdinUnreadable = false
+  // What fd 0 holds when it is not its own read end: CLOSED after `exec
+  // <&-`, a writing stream's identity after `exec 0<&1`, so a later dup
+  // from fd 0 copies that (`exec 2<&0` then writes to stdout) or is
+  // refused (`0: Bad file descriptor`); null for the read end itself.
+  execStdinIdentity: string | null = null
   execOpened = new Set<string>()
   localFrames: Map<string, ShellVar | null>[] = []
+  // The caller's `RANDOM` marker for every frame that shadows the name,
+  // innermost last: a local `RANDOM` is an ordinary variable for the
+  // function's extent, and the generator resumes when it returns.
+  localRandom: (string | null)[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   hiddenPaths: HiddenPaths | null
   shownPaths: ShownPaths | null
@@ -536,6 +570,7 @@ export class Session {
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.pipeStatus = [...this.pipeStatus]
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
     forked.abortSignal = this.abortSignal
@@ -550,6 +585,8 @@ export class Session {
     forked.execStderr = this.execStderr
     forked.execStderrAppend = this.execStderrAppend
     forked.execStdin = this.execStdin
+    forked.execStdinUnreadable = this.execStdinUnreadable
+    forked.execStdinIdentity = this.execStdinIdentity
     forked.execOpened = new Set(this.execOpened)
     return forked
   }
@@ -618,7 +655,7 @@ export class Session {
    * their null prototype across the round trip.
    */
   snapshot(): ChildShellState {
-    return {
+    const saved: ChildShellState = {
       cwd: this.cwd,
       logicalCwd: this.logicalCwd,
       sourceDepth: this.sourceDepth,
@@ -639,8 +676,27 @@ export class Session {
       execStderr: this.execStderr,
       execStderrAppend: this.execStderrAppend,
       execStdin: this.execStdin,
+      execStdinUnreadable: this.execStdinUnreadable,
+      execStdinIdentity: this.execStdinIdentity,
       execOpened: new Set(this.execOpened),
+      randomState: this.randomState,
+      randomSeed: this.randomSeed,
+      randomLast: this.randomLast,
+      // Every pipeline segment sees the statuses of the pipeline before
+      // this one, however many statements of its own it runs.
+      pipeStatus: [...this.pipeStatus],
     }
+    // A child shell reseeds `$RANDOM`, as bash's does: the generator
+    // starts fresh, and the seed word follows the stored value so an
+    // assignment the parent made is not replayed as a reseed. `unset
+    // RANDOM` stays unset.
+    if (this.randomSeed !== RANDOM_UNSET) {
+      const word = this.vars[RANDOM]?.value
+      this.randomSeed = typeof word === 'string' ? word : null
+      this.randomState = null
+      this.randomLast = 0
+    }
+    return saved
   }
 
   /** Put back a snapshot, ending a child shell. */
@@ -665,6 +721,12 @@ export class Session {
     this.execStderr = state.execStderr
     this.execStderrAppend = state.execStderrAppend
     this.execStdin = state.execStdin
+    this.execStdinUnreadable = state.execStdinUnreadable
+    this.execStdinIdentity = state.execStdinIdentity
+    this.randomState = state.randomState
+    this.randomSeed = state.randomSeed
+    this.randomLast = state.randomLast
+    this.pipeStatus = state.pipeStatus
     this.execOpened = state.execOpened
   }
 

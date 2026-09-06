@@ -18,6 +18,7 @@ import { asyncChain } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
+import { isFsError } from '../../../../utils/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { Session } from '../../../session/session.ts'
@@ -265,7 +266,13 @@ export async function handleRead(
   let complete = false
   let line = ''
   if (buffer !== null) {
-    ;[line, complete] = await readRaw(buffer, raw, delim, nchars, exact)
+    try {
+      ;[line, complete] = await readRaw(buffer, raw, delim, nchars, exact)
+    } catch (err) {
+      if (!isFsError(err) || (err as { code?: string }).code !== 'EBADF') throw err
+      // stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
+      return readRefusal('bash: read: read error: 0: Bad file descriptor\n')
+    }
   }
   if (!raw) line = unescapeRead(line)
   const ifs = visibleEnv(session).IFS ?? ' \t\n'

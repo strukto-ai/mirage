@@ -30,7 +30,7 @@
       "command": "mkdir -p /data/relc/sub && echo x > /data/relc/sub/f.txt && chmod 644 /data/relc/sub/f.txt && touch -t 202601021530 /data/relc/sub/f.txt && cd /data/relc/sub && chgrp staff f.txt && cd / && ls -l /data/relc/sub",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 - staff 2 Jan  2 15:30 f.txt\n",
+        "stdout": "-rw-r--r-- 1 - staff 2 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     }

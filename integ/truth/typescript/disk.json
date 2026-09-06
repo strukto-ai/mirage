@@ -87,7 +87,7 @@
     "$ touch -t 202601021530 /data/mirage_hello.txt",
     "",
     "$ ls -l /data/mirage_hello.txt",
-    "-rw-r----- 1 500 staff 16 Jan  2 15:30 /data/mirage_hello.txt",
+    "-rw-r----- 1 500 staff 16 Jan  2  2026 /data/mirage_hello.txt",
     "real inode mode: 640, mtime: 2026-01-02T15:30:00.000Z",
     "",
     "━━━ fs-monkey routes /data/ through workspace ━━━",

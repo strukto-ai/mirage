@@ -20,14 +20,18 @@ from mirage.io.stream import async_chain, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.descriptors import unreadable_stdin
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
+from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.utils.errors import format_fs_error
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (divert_statement,
+                                                     stdout_to_stderr)
 from mirage.workspace.executor.control import (BreakSignal, ContinueSignal,
                                                ReturnSignal)
 from mirage.workspace.executor.jobs import handle_background
+from mirage.workspace.executor.statement import record_status
 from mirage.workspace.types import ExecutionNode
 
 
@@ -141,11 +145,15 @@ async def _run_program(
                 call_stack, handed, decisions)
             # Launching a job is itself a statement: bash sets $? to 0
             # (the launch status), so `false; cmd & echo $?` prints 0.
-            session.last_exit_code = io.exit_code
+            record_status(session, io.exit_code)
             i += 2
         else:
             child_stdin = stdin
-            if child_stdin is None and session.exec_stdin is not None:
+            if child_stdin is None and session.exec_stdin_unreadable:
+                # `exec <&-` or `exec 0<&1` left nothing to read: a
+                # reader gets EBADF, as bash's does.
+                child_stdin = unreadable_stdin()
+            elif child_stdin is None and session.exec_stdin is not None:
                 # `exec < file` feeds the shell's stdin: a later `read`
                 # or `while read` sees it. The same bytes reach each
                 # statement, and the identity-keyed line buffer advances
@@ -163,7 +171,7 @@ async def _run_program(
                                   stderr=sig.stderr or None)
                 merged_io = await merged_io.merge(sig_io)
                 merged_io.exit_code = sig.exit_code
-                session.last_exit_code = sig.exit_code
+                record_status(session, sig.exit_code)
                 last_exec = ExecutionNode(command="exit",
                                           exit_code=sig.exit_code,
                                           stderr=sig.stderr)
@@ -178,7 +186,7 @@ async def _run_program(
                     merged_io = await merged_io.merge(
                         IOResult(stderr=sig.stderr))
                 merged_io.exit_code = sig.exit_code
-                session.last_exit_code = sig.exit_code
+                record_status(session, sig.exit_code)
                 last_exec = ExecutionNode(command="return",
                                           exit_code=sig.exit_code)
                 break
@@ -190,7 +198,7 @@ async def _run_program(
                 if sig.stdout is not None:
                     all_stdout.append(sig.stdout)
                 merged_io = await merged_io.merge(sig.io)
-                session.last_exit_code = sig.io.exit_code
+                record_status(session, sig.io.exit_code)
                 i += 1
                 continue
             # Materialize stdout so lazy exit codes (e.g. from
@@ -219,7 +227,9 @@ async def _run_program(
                 existing = await materialize(io.stderr) or b""
                 io.stderr = existing + drain_err
                 io.exit_code = drain_exit
-            session.last_exit_code = io.exit_code
+            record_status(session,
+                          io.exit_code,
+                          transparent=pipeline_transparent(child))
             i += 1
 
         # An `exec` redirect sends the shell's own output to a file:
@@ -228,8 +238,14 @@ async def _run_program(
         if dispatch is not None and (session.exec_stdout is not None
                                      or session.exec_stderr is not None):
             materialized = await materialize(stdout)
+            before_divert = io.exit_code
             stdout = await divert_statement(dispatch, session, materialized,
-                                            io)
+                                            io, last_exec.command or "",
+                                            stdout_to_stderr(child))
+            if io.exit_code != before_divert:
+                # A write the binding refused is the statement's failure,
+                # which `$?` has to show.
+                record_status(session, io.exit_code)
         if stdout is not None:
             all_stdout.append(stdout)
         merged_io = await merged_io.merge(io)

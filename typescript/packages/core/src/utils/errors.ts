@@ -49,6 +49,12 @@ export function enoent(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOENT')
 }
 
+/** EBADF for a read of standard input that is closed or write-only;
+ * python's BadDescriptorError, with `-` as the operand cat would name. */
+export function ebadfStdin(): FsError {
+  return fsError('-', 'EBADF')
+}
+
 export function ebusy(path: string | { virtual: string }): FsError {
   return fsError(path, 'EBUSY')
 }
@@ -265,6 +271,9 @@ export function erofsReadOnly(
 // to ELOOP or EIO) would widen isFsError's swallow set, which mirrors
 // python's typed FS_ERRORS tuple, not the whole condition enum.
 const STRERROR: Record<string, string> = {
+  // A read from a closed or write-only descriptor (`cat 0<&1`), raised
+  // only by the shell's own unreadable stdin, not by any backend.
+  EBADF: 'Bad file descriptor',
   ENOENT: gnuPhrase('ENOENT'),
   ENOTDIR: gnuPhrase('ENOTDIR'),
   EISDIR: gnuPhrase('EISDIR'),

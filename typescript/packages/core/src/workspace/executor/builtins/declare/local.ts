@@ -15,10 +15,9 @@
 import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { sessionEntry } from '../../../session/session.ts'
 import type { VarAttr } from '../../../../shell/variable.ts'
 import type { Session } from '../../../session/session.ts'
-import { envGet, visibleArrays, visibleAssocs } from '../../../session/state.ts'
+import { envGet, shadowLocal, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, readonlyRefusal, refusal, requireView } from '../shared.ts'
@@ -96,9 +95,7 @@ export async function handleLocal(
         }
       }
       if (view.isReadonly(key)) return readonlyRefusal(cmd, key)
-      if (locals !== null && !locals.has(key)) {
-        locals.set(key, sessionEntry(session.vars, key) ?? null)
-      }
+      if (locals !== null) shadowLocal(session, locals, key)
       try {
         await premark(view, key, shaping)
         if (globalScope) await writeGlobal(session, view, key, val)
@@ -110,9 +107,7 @@ export async function handleLocal(
       }
       if (stored !== null) stored.push(key)
     } else {
-      if (locals !== null && !locals.has(assign)) {
-        locals.set(assign, sessionEntry(session.vars, assign) ?? null)
-      }
+      if (locals !== null) shadowLocal(session, locals, assign)
       if (
         envGet(session, assign) === null &&
         !(assign in visibleArrays(session)) &&

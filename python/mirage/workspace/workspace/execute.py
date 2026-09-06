@@ -33,6 +33,7 @@ from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.executor.statement import record_status
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
@@ -310,7 +311,7 @@ async def execute_line(
                     io = IOResult(exit_code=refused.exit_code,
                                   stderr=refused.stderr,
                                   refusal=refused.refusal)
-                    session.last_exit_code = io.exit_code
+                    record_status(session, io.exit_code)
                     return io
                 if ws._has_managed_env:
                     # Filled only after the line is admitted (a refused
@@ -336,7 +337,7 @@ async def execute_line(
                     line_runtime, command, stdin, effective_session,
                     ws._registry.mounts(), ws._registry.policies,
                     ws._dispatcher.invalidate_all_after_remote)
-                session.last_exit_code = io.exit_code
+                record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is
             # judged before any of it runs. Nothing here replaces the
@@ -360,7 +361,7 @@ async def execute_line(
                 io = IOResult(exit_code=refused.exit_code,
                               stderr=refused.stderr,
                               refusal=refused.refusal)
-                session.last_exit_code = io.exit_code
+                record_status(session, io.exit_code)
                 return io
             if ws._has_managed_env:
                 # Filled only after the line-tier admission and before the
@@ -459,7 +460,9 @@ async def execute_line(
             else:
                 await ws._registry.decisions.revoke(
                     effective_session.session_id, handed)
-        session.last_exit_code = io.exit_code
+        # The program loop stamped each statement; the line as a whole
+        # is a wrapper around them, like a group.
+        record_status(session, io.exit_code, transparent=True)
         await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
         return io
     except CommandTimeoutError as exc:
@@ -468,11 +471,11 @@ async def execute_line(
         if cancel is not None:
             cancel.set()
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     except RouteDeny as exc:
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     except (MirageAbortError, ContentDriftError, RouteError):
         # The caller's problem, not the line's: an abort it requested,
@@ -482,7 +485,7 @@ async def execute_line(
         # The fold is a failed command like any other (a SecretsError
         # folds here), so $? must report it, mirroring the TS catch.
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     finally:
         # One rule on every path: an op that happened is always

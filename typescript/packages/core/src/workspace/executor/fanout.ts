@@ -20,7 +20,6 @@ import { FileType, PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
-import { applyFindActions } from './find_action_dispatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { keep } from '../../commands/builtin/find_eval.ts'
@@ -29,6 +28,8 @@ import { FindParseError } from '../../commands/errors.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/types.ts'
 import type { NamespaceView, StatPath } from '../../ops/types.ts'
+import { inMtimeWindow } from '../../utils/dates.ts'
+import { modifiedTs } from '../../core/generic/find.ts'
 import { mergeDuBlocks } from '../../commands/builtin/generic/crossmount/fanout/du.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -194,17 +195,18 @@ function adjustDepthTexts(
 // start and each mount root (`/ghost` above a mount at `/ghost/deep`)
 // get a row too: no backend walk covers them, yet `ls` lists them
 // through the door's structure merge, so find must agree.
-function synthesizeFindMountEntries(
+async function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
   texts: readonly string[],
   raw: string,
-): string {
+  statPath: StatPath | null,
+): Promise<PathSpec[]> {
   let expr: FindExpr
   try {
     expr = parseFindExpression([...texts])
   } catch (err) {
-    if (err instanceof FindParseError) return ''
+    if (err instanceof FindParseError) return []
     throw err
   }
   const tree = expr.tree
@@ -213,7 +215,7 @@ function synthesizeFindMountEntries(
   const parentDepth = pathSegments(targetPath).length
   const parentBase = rstripSlash(targetPath)
   const seen = new Set<string>()
-  const out: string[] = []
+  const out: PathSpec[] = []
   for (const m of descendants) {
     const prefixNoSlash = rstripSlash(m.prefix)
     const ancestors: string[] = []
@@ -230,10 +232,27 @@ function synthesizeFindMountEntries(
       const segs = pathSegments(candidate)
       const base = segs[segs.length - 1] ?? candidate
       if (!keep({ key: candidate, name: base, kind: 'd', depth }, tree, minDepth)) continue
-      out.push(respellOne(candidate, targetPath, raw))
+      // A time window (-newermt, -newer) lives beside the tree: the
+      // candidate is statted and held to it the way the generic holds every
+      // real row, a future cutoff excluding the mount points too.
+      if ((expr.mtimeMin !== null || expr.mtimeMax !== null) && statPath !== null) {
+        const st = await statPath(candidate)
+        if (st === null || !inMtimeWindow(modifiedTs(st.modified), expr.mtimeMin, expr.mtimeMax)) {
+          continue
+        }
+      }
+      out.push(
+        new PathSpec({
+          virtual: candidate,
+          directory: candidate,
+          resourcePath: '',
+          resolved: true,
+          rawPath: respellOne(candidate, targetPath, raw),
+        }),
+      )
     }
   }
-  return out.join('\n')
+  return out
 }
 
 // Drop whole `ls -R` groups whose header names a nested mount.
@@ -316,14 +335,6 @@ export async function filterUnderPrefixes(
   return new TextEncoder().encode(outLines.join('\n') + '\n')
 }
 
-async function dropMountRootLine(stdout: ByteSource, mountRoot: string): Promise<Uint8Array> {
-  const data = await materialize(stdout)
-  const text = new TextDecoder().decode(data)
-  const outLines = text.split('\n').filter((line) => line !== '' && line !== mountRoot)
-  if (outLines.length === 0) return new Uint8Array()
-  return new TextEncoder().encode(outLines.join('\n') + '\n')
-}
-
 export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -377,6 +388,8 @@ export async function fanOutTraversal(
   }
 
   const allStdout: Uint8Array[] = []
+  let findMatches: PathSpec[][] = []
+  let findMatchesComplete = true
   let mergedIo = new IOResult()
   let finalExit = 0
   let successSeen = false
@@ -457,16 +470,38 @@ export async function fanOutTraversal(
       // a tree holding a view mount without a du op).
       continue
     }
-    if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
+    if (cmdName === 'find' && io.matchedRuns !== null) {
+      if (mount === primaryMount) {
+        // One run per operand, minus the rows a descendant mount
+        // answers for.
+        for (const run of io.matchedRuns) {
+          findMatches.push(
+            run.filter(
+              (p) =>
+                !descendantPrefixes.some(
+                  (pre) => p.virtual === pre || p.virtual.startsWith(pre + '/'),
+                ),
+            ),
+          )
+        }
+      } else {
+        // A descendant walks under the first operand, so its rows join
+        // that operand's run.
+        const rows = io.matchedRuns.flat().filter((p) => p.virtual !== rstripSlash(mount.prefix))
+        const first = findMatches[0]
+        if (first === undefined) findMatches.push(rows)
+        else first.push(...rows)
+      }
+      stdout = null
+    } else if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
       stdout = await filterUnderPrefixes(stdout, descendantPrefixes, cmdName)
-    } else if (mount !== primaryMount && cmdName === 'find' && stdout !== null) {
-      // The child's own root line arrives respelled with the operand's
-      // typed base, so drop that spelling, not the absolute prefix.
-      stdout = await dropMountRootLine(stdout, subPaths[0]?.rawPath ?? '')
     }
     if (stdout !== null) {
       const data = await materialize(stdout)
-      if (data.length > 0) allStdout.push(data)
+      if (data.length > 0) {
+        if (cmdName === 'find') findMatchesComplete = false
+        allStdout.push(data)
+      }
     }
     if (io.exitCode === 0) {
       successSeen = true
@@ -476,43 +511,45 @@ export async function fanOutTraversal(
     mergedIo = await mergedIo.merge(io)
   }
 
+  let rows: PathSpec[] = []
   if (cmdName === 'find') {
-    const synthetic = synthesizeFindMountEntries(
+    const synthetic = await synthesizeFindMountEntries(
       targetPath,
       descendants,
       texts,
       paths[0]?.rawPath ?? targetPath,
+      statPath,
     )
-    if (synthetic !== '') allStdout.push(new TextEncoder().encode(synthetic))
+    // The mount points a walk cannot see belong to the first operand's
+    // run, the one that holds them.
+    if (synthetic.length > 0) {
+      const first = findMatches[0]
+      if (first === undefined) findMatches.push(synthetic)
+      else first.push(...synthetic)
+    }
+    rows = findMatches.flat()
+    if (!findMatchesComplete && rows.length > 0) {
+      allStdout.push(
+        new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n'),
+      )
+    }
   }
 
-  let finalIoExit = successSeen ? 0 : finalExit
+  const finalIoExit = successSeen ? 0 : finalExit
   let combined: ByteSource | null = null
   if (duMerge && allStdout.length > 0) {
     combined = mergeDuBlocks(allStdout, targetPath, paths[0]?.rawPath ?? targetPath, {
       ...duOpts,
       mountRoots: await mountDirs(descendants, statPath),
     })
-  } else if (allStdout.length > 0 && cmdName === 'find' && paths.length === 1) {
-    // GNU lists a directory before its contents, and the per-mount
-    // blocks land here as separate chunks, so plain concatenation
-    // printed a mount root after its own descendants. Every find line
-    // is a bare path at this stage (actions render later), and a path
-    // always sorts before its extensions, so one path sort restores
-    // GNU's invariant and matches the per-mount emit order. A
-    // single-operand walk never visits a path twice, so the set
-    // collapses a synthesized ancestor row against a primary backend
-    // that happens to hold a real directory at the same path. Multiple
-    // operands keep the concatenation: GNU walks operands in
-    // command-line order, which a global sort would not honor.
-    const lines = [
-      ...new Set(
-        allStdout
-          .flatMap((d) => new TextDecoder().decode(d).split('\n'))
-          .filter((line) => line !== ''),
-      ),
-    ].sort(compareCodePoints)
-    combined = new TextEncoder().encode(lines.join('\n') + '\n')
+  } else if (cmdName === 'find' && rows.length > 0 && findMatchesComplete) {
+    if (paths.length === 1) {
+      rows = [...new Map(rows.map((p) => [p.virtual, p])).values()].sort((a, b) =>
+        compareCodePoints(a.rawPath, b.rawPath),
+      )
+      findMatches = [rows]
+    }
+    combined = new TextEncoder().encode(rows.map((p) => p.rawPath || p.virtual).join('\n') + '\n')
   } else if (allStdout.length > 0) {
     const parts = allStdout.map((d) => {
       const s = new TextDecoder().decode(d).replace(/\n+$/, '')
@@ -526,23 +563,9 @@ export async function fanOutTraversal(
   }
 
   if (cmdName === 'find') {
-    const [newCombined, actionErr] = await applyFindActions(
-      combined,
-      flags,
-      registry,
-      cwd,
-      ns?.childMounts ?? null,
-      statPath,
-    )
-    combined = newCombined
-    if (actionErr.length > 0) {
-      const existing = await materialize(mergedIo.stderr)
-      const merged = new Uint8Array(existing.length + actionErr.length)
-      merged.set(existing, 0)
-      merged.set(actionErr, existing.length)
-      mergedIo.stderr = merged
-      if (finalIoExit === 0) finalIoExit = 1
-    }
+    // The structured rows ride out for the command boundary, which
+    // applies find's actions once over every operand's matches.
+    mergedIo.matchedRuns = findMatchesComplete ? findMatches : null
   }
 
   mergedIo.exitCode = finalIoExit

@@ -1,3 +1,5 @@
+import asyncio
+
 from mirage.shell.array import (array_count, array_extent, array_get,
                                 array_has, array_indices, array_set,
                                 array_slice, array_unset, array_values,
@@ -113,13 +115,17 @@ def test_keyed_word():
     assert keyed_word("[a]=x]=y") == ("a", "x]=y")
 
 
+async def _int_of(text: str) -> int:
+    return int(text)
+
+
 def test_build_indexed_literal_places_and_continues():
-    built = build_indexed_literal(None, ["[3]=x", "y", "[1]=z"], False,
-                                  lambda t: int(t))
+    built = asyncio.run(
+        build_indexed_literal(None, ["[3]=x", "y", "[1]=z"], False, _int_of))
     assert built == [None, "z", None, "x", "y"]
     # `+=` starts the cursor at the extent; last index wins.
-    appended = build_indexed_literal(["a"], ["b", "[0]=A"], True,
-                                     lambda t: int(t))
+    appended = asyncio.run(
+        build_indexed_literal(["a"], ["b", "[0]=A"], True, _int_of))
     assert appended == ["A", "b"]
 
 

@@ -21,6 +21,7 @@ import {
 } from '@struktoai/mirage-core/commands/builtin/find_eval'
 import type { PredNode } from '@struktoai/mirage-core/commands/builtin/find_eval'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { inMtimeWindow } from '@struktoai/mirage-core/utils/dates'
 import { norm } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -85,15 +86,7 @@ function matches(
     if (opts.minSize != null && size < opts.minSize) return false
     if (opts.maxSize != null && size > opts.maxSize) return false
   }
-  if (
-    (opts.mtimeMin !== null && opts.mtimeMin !== undefined) ||
-    (opts.mtimeMax !== null && opts.mtimeMax !== undefined)
-  ) {
-    const mtime = entry.attrs.mtime
-    if (opts.mtimeMin !== null && opts.mtimeMin !== undefined && mtime < opts.mtimeMin) return false
-    if (opts.mtimeMax !== null && opts.mtimeMax !== undefined && mtime > opts.mtimeMax) return false
-  }
-  return true
+  return inMtimeWindow(entry.attrs.mtime, opts.mtimeMin, opts.mtimeMax)
 }
 
 async function readRemoteDir(
@@ -120,22 +113,24 @@ async function readRemoteDir(
 async function statRemote(
   accessor: SSHAccessor,
   remote: string,
-): Promise<{ isDir: boolean; size: number } | null> {
+): Promise<{ isDir: boolean; size: number; mtime: number } | null> {
   const sftp = await accessor.sftp()
-  return new Promise<{ isDir: boolean; size: number } | null>((resolveFn, rejectFn) => {
-    sftp.stat(remote, (err, stats) => {
-      if (err !== undefined) {
-        const code = (err as { code?: unknown }).code
-        if (code === 2) {
-          resolveFn(null)
+  return new Promise<{ isDir: boolean; size: number; mtime: number } | null>(
+    (resolveFn, rejectFn) => {
+      sftp.stat(remote, (err, stats) => {
+        if (err !== undefined) {
+          const code = (err as { code?: unknown }).code
+          if (code === 2) {
+            resolveFn(null)
+            return
+          }
+          rejectFn(err)
           return
         }
-        rejectFn(err)
-        return
-      }
-      resolveFn({ isDir: stats.isDirectory(), size: stats.size })
-    })
-  })
+        resolveFn({ isDir: stats.isDirectory(), size: stats.size, mtime: stats.mtime })
+      })
+    },
+  )
 }
 
 async function walk(ctx: WalkCtx, virtual: string, depth: number): Promise<void> {
@@ -183,17 +178,21 @@ export async function find(
     })
   if (options.maxDepth == null || options.maxDepth >= 0) {
     const st = await statRemote(accessor, joinRoot(accessor.config.root ?? '/', virtual))
-    emitStartPath(results, virtual, startName, {
-      kind: st?.isDir ? 'd' : 'f',
-      isEmpty: st === null ? null : st.isDir ? false : st.size === 0,
-      exists: st !== null,
-      tree,
-      maxDepth: options.maxDepth,
-      minDepth: options.minDepth,
-      size: st === null || st.isDir ? null : st.size,
-      minSize: options.minSize,
-      maxSize: options.maxSize,
-    })
+    // The start row is this op's to judge when the window was pushed down,
+    // so it faces the same mtime test as every descendant (as in Python).
+    if (st !== null && inMtimeWindow(st.mtime, options.mtimeMin, options.mtimeMax)) {
+      emitStartPath(results, virtual, startName, {
+        kind: st.isDir ? 'd' : 'f',
+        isEmpty: st.isDir ? false : st.size === 0,
+        exists: true,
+        tree,
+        maxDepth: options.maxDepth,
+        minDepth: options.minDepth,
+        size: st.isDir ? null : st.size,
+        minSize: options.minSize,
+        maxSize: options.maxSize,
+      })
+    }
   }
   await walk({ accessor, options, results, baseDepth, tree }, virtual, 0)
   results.sort(compareCodePoints)

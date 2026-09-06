@@ -31,6 +31,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "functions",
     "readonly_functions",
     "last_exit_code",
+    "pipe_status",
     "shell_options",
     "shopts",
     "aliases",
@@ -54,6 +55,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "exec_stderr",
     "exec_stderr_append",
     "exec_stdin",
+    "exec_stdin_unreadable",
+    "exec_stdin_identity",
     "_exec_opened",
     "_getopts_pos",
     "_getopts_optind",
@@ -69,8 +72,14 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_stdin_source",
     "_local_vars",
     "_local_frames",
+    "_local_random",
     "_cmdsub_seq",
     "_cmdsub_status",
+    "_diagnostics",
+    "_pipe_status_pending",
+    "_random_state",
+    "_random_seed",
+    "_random_last",
     "_parse_seq",
     "_parse_current",
     "_alias_marks",
@@ -78,11 +87,13 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
 )
 
 # What a child shell gets its own copy of, and the parent gets back
-# afterwards. A `( … )` subshell and a nested `bash`/`sh` are both child
-# shells and both read this list, so neither can drift into isolating a
-# field the other leaks. `last_exit_code` is deliberately absent: `$?`
-# after a child shell is the child's status, which is the one thing it
-# reports back.
+# afterwards. A `( … )` subshell, a nested `bash`/`sh` and each segment
+# of a pipeline are all child shells and all read this list, so none can
+# drift into isolating a field the others leak. `last_exit_code` is
+# deliberately absent: `$?` after a child shell is the child's status,
+# which is the one thing it reports back. `pipe_status` is present for
+# the pipeline case: every segment sees the statuses of the pipeline
+# before this one, however many its own statements run.
 CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "cwd",
     "logical_cwd",
@@ -102,7 +113,13 @@ CHILD_SHELL_FIELDS: tuple[str, ...] = (
     "exec_stderr",
     "exec_stderr_append",
     "exec_stdin",
+    "exec_stdin_unreadable",
+    "exec_stdin_identity",
     "_exec_opened",
     "_getopts_pos",
     "_getopts_optind",
+    "_random_state",
+    "_random_seed",
+    "_random_last",
+    "pipe_status",
 )

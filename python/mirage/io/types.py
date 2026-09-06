@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.types import Producer, Refusal
+from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
 
@@ -101,6 +101,12 @@ class IOResult:
     before treating the status as final.
 
     Args:
+        matched_runs (list[list[PathSpec]] | None): Structured selection
+            before display rendering, for commands whose matches feed
+            later actions: one list of rows per start point, in operand
+            order, so a nested or repeated start point stays its own
+            traversal (GNU walks each to completion before the next).
+            None means the command supplied no structured selection.
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
@@ -139,8 +145,10 @@ class IOResult:
                  cache: list[str] | None = None,
                  producer: Producer | None = None,
                  mutated: bool | None = None,
-                 refusal: Refusal | None = None) -> None:
+                 refusal: Refusal | None = None,
+                 matched_runs: list[list[PathSpec]] | None = None) -> None:
         self.stdout = stdout
+        self.matched_runs = matched_runs
         self.stderr = stderr
         self._exit_code = exit_code
         self.reads: dict[str, ByteSource] = reads if reads is not None else {}
@@ -189,6 +197,7 @@ class IOResult:
         # (exit_on_empty firing at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
+            matched_runs=other.matched_runs,
             stderr=merged_stderr,
             reads={
                 **self.reads,

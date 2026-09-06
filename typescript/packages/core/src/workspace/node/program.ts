@@ -19,17 +19,20 @@ import { ExitSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText } from '../../shell/helpers.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
+import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
+import { recordStatus } from '../executor/statement.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { ReturnSignal } from '../executor/command.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
-import { divertStatement } from '../executor/builtins/exec/index.ts'
+import { divertStatement, stdoutToStderr } from '../executor/builtins/exec/index.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
+import { unreadableStdin } from '../../shell/descriptors.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 
@@ -184,7 +187,7 @@ async function runProgram(
       lastExec = bgExec
       // Launching a job is itself a statement: bash sets $? to 0
       // (the launch status), so `false; cmd & echo $?` prints 0.
-      session.lastExitCode = bgIo.exitCode
+      recordStatus(session, bgIo.exitCode)
       i += 2
     } else {
       let s: ByteSource | null
@@ -195,7 +198,10 @@ async function runProgram(
         // `while read` sees it. The same bytes reach each statement, and
         // the identity-keyed line buffer advances a sequence of reads
         // through them.
-        const childStdin = stdin ?? session.execStdin
+        // `exec <&-` or `exec 0<&1` left nothing to read: a reader gets
+        // EBADF, as bash's does.
+        const childStdin =
+          stdin ?? (session.execStdinUnreadable ? unreadableStdin() : session.execStdin)
         ;[s, ioResult, execNode] = await recurse(child, session, childStdin, callStack)
       } catch (err) {
         if (err instanceof ExitSignal) {
@@ -205,7 +211,7 @@ async function runProgram(
           const sigIo = new IOResult({ exitCode: err.exitCode, stderr: err.stderr })
           mergedIo = await mergedIo.merge(sigIo)
           mergedIo.exitCode = err.exitCode
-          session.lastExitCode = err.exitCode
+          recordStatus(session, err.exitCode)
           lastExec = new ExecutionNode({
             command: 'exit',
             exitCode: err.exitCode,
@@ -222,7 +228,7 @@ async function runProgram(
             mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
           }
           mergedIo.exitCode = err.exitCode
-          session.lastExitCode = err.exitCode
+          recordStatus(session, err.exitCode)
           lastExec = new ExecutionNode({ command: 'return', exitCode: err.exitCode })
           break
         }
@@ -232,7 +238,7 @@ async function runProgram(
           // statement, like bash (which clamps the level to the depth).
           if (err.stdout !== null) allStdout.push(err.stdout)
           mergedIo = await mergedIo.merge(err.io)
-          session.lastExitCode = err.io.exitCode
+          recordStatus(session, err.io.exitCode)
           i += 1
           continue
         }
@@ -273,7 +279,7 @@ async function runProgram(
         ioResult.exitCode = drainExit
         execNode.exitCode = drainExit
       }
-      session.lastExitCode = ioResult.exitCode
+      recordStatus(session, ioResult.exitCode, pipelineTransparent(child))
       io = ioResult
       lastExec = execNode
       i += 1
@@ -284,7 +290,18 @@ async function runProgram(
     // terminal and stderr lands in its own target.
     if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
       const bytes = stdout === null ? null : await materialize(stdout)
-      stdout = await divertStatement(dispatch, session, bytes, io)
+      const beforeDivert = io.exitCode
+      stdout = await divertStatement(
+        dispatch,
+        session,
+        bytes,
+        io,
+        lastExec.command ?? '',
+        stdoutToStderr(child),
+      )
+      // A write the binding refused is the statement's failure, which
+      // `$?` has to show.
+      if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)
     }
     if (stdout !== null) allStdout.push(stdout)
     mergedIo = await mergedIo.merge(io)

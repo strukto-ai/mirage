@@ -64,7 +64,7 @@ def test_format_ls_long_regular_file():
                     content=ContentType.TEXT,
                     modified="2026-01-01T00:00:00Z")
     [line] = format_ls_long([stat])
-    assert line == "-rw-r--r-- 1 - - 5 Jan  1 00:00 file.txt"
+    assert line == "-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt"
 
 
 def test_format_ls_long_owner_is_user_and_group_is_profile():
@@ -74,14 +74,14 @@ def test_format_ls_long_owner_is_user_and_group_is_profile():
                     modified="2026-01-01T00:00:00Z")
     identity = Identity(user="alice", profile="admin")
     [line] = format_ls_long([stat], identity=identity)
-    assert line == "-rw-r--r-- 1 alice admin 5 Jan  1 00:00 file.txt"
+    assert line == "-rw-r--r-- 1 alice admin 5 Jan  1  2026 file.txt"
     # A reported uid/gid (disk, or a chown in the overlay) wins over both.
     owned = stat.model_copy(update={"uid": 501, "gid": "staff"})
     [line] = format_ls_long([owned], identity=identity)
-    assert line == "-rw-r--r-- 1 501 staff 5 Jan  1 00:00 file.txt"
+    assert line == "-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt"
     # Half an identity fills half the columns.
     [line] = format_ls_long([stat], identity=Identity(profile="admin"))
-    assert line == "-rw-r--r-- 1 - admin 5 Jan  1 00:00 file.txt"
+    assert line == "-rw-r--r-- 1 - admin 5 Jan  1  2026 file.txt"
 
 
 def test_format_ls_long_metadata_less_row_keeps_the_owner_columns():
@@ -127,8 +127,8 @@ def test_format_ls_long_size_alignment():
                  modified="2026-01-01T00:00:00Z"),
     ]
     lines = format_ls_long(stats)
-    assert "    5 Jan  1 00:00 a" in lines[0]
-    assert " 1234 Jan  1 00:00 b" in lines[1]
+    assert "    5 Jan  1  2026 a" in lines[0]
+    assert " 1234 Jan  1  2026 b" in lines[1]
 
 
 def test_format_ls_long_human_size():

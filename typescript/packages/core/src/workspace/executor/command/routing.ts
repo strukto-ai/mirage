@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { findExprTail } from '../../../commands/builtin/find_parse.ts'
 import { walk } from '../../../commands/cli/walk.ts'
 import { SPECS } from '../../../commands/spec/index.ts'
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
@@ -49,7 +50,12 @@ export function defaultCwdOperand(
 ): PathSpec | null {
   const spec = SPECS[cmdName]
   if (spec === undefined) return null
-  const argv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
+  let argv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
+  if (cmdName === 'find') {
+    // Only the words before the expression can be start points: an
+    // `-exec` command word or a `-newer` reference is the parser's.
+    argv = argv.slice(0, argv.length - findExprTail(argv).length)
+  }
   const parsed = parseCommand(spec, argv, cwd)
   if (parsed.paths().length > 0) return null
   if (cmdName === 'grep') {

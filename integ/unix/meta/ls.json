@@ -30,7 +30,7 @@
       "command": "ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 - - 6 Jan  2 15:30 f.txt\n",
+        "stdout": "-rw-r--r-- 1 - - 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     }

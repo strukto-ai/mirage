@@ -16,6 +16,9 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.resource.ram import RAMResource
+from mirage.types import MountMode
+from mirage.workspace import Workspace
 from mirage.workspace.executor.pipes import handle_pipe, handle_subshell
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -99,3 +102,39 @@ async def test_handle_subshell_seeds_last_exit_code_between_children():
     )
     assert seen == [0, 7]
     assert session.last_exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_each_segment_sees_the_status_the_pipeline_started_with():
+    session = Session(session_id="t")
+    session.last_exit_code = 1
+    seen: list[int] = []
+
+    async def execute_node(nd, sess, _stdin, _call_stack=None):
+        seen.append(sess.last_exit_code)
+        # An inner statement of a compound segment lands its own status.
+        sess.last_exit_code = 0
+        return (b"", IOResult(exit_code=0),
+                ExecutionNode(command=nd.text, exit_code=0))
+
+    await handle_pipe(execute_node,
+                      [FakeNode("a"), FakeNode("b")], [False], session, None)
+    assert seen == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_segment_expands_the_pre_pipeline_status():
+    # bash 5.2: each segment is a child of the shell as it stood before
+    # the pipeline, so `$?` is the pre-pipeline status even after a
+    # sibling segment ran a compound command or a function.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        for line in ("false; { true; } | echo $?",
+                     "f() { true; }; false; f | echo $?",
+                     "false; true | echo $?"):
+            io = await ws.execute(line)
+            assert (await io.stdout_str(), io.exit_code) == ("1\n", 0), line
+        io = await ws.execute("false; { false; } | true; echo $?")
+        assert await io.stdout_str() == "0\n"
+    finally:
+        await ws.close()

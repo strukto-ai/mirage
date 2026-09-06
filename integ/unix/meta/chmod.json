@@ -30,7 +30,7 @@
       "command": "chmod 601 /data/metad/f.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rw------x 1 - - 6 Jan  2 15:30 f.txt\n",
+        "stdout": "-rw------x 1 - - 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },
@@ -64,7 +64,7 @@
       "command": "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad",
       "expect": {
         "exit": 0,
-        "stdout": "-rwx-----x 1 - - 6 Jan  2 15:30 f.txt\n",
+        "stdout": "-rwx-----x 1 - - 6 Jan  2  2026 f.txt\n",
         "stderr": ""
       }
     },

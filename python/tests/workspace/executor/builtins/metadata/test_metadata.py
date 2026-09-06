@@ -182,7 +182,7 @@ async def test_overlay_attrs_render_in_ls_long():
     _, out, _ = await _run(ws, "ls -l /data")
     assert "-rw-rw-r--" in out
     assert " 500 dev " in out
-    assert "Mar  4 12:00" in out
+    assert "Mar  4  2026" in out
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.types import Strategy
 from mirage.commands.builtin.generic.tar.mode import is_create_mode
+from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.config import version_request
 from mirage.commands.errors import FindParseError
@@ -28,6 +29,7 @@ from mirage.commands.spec import SPECS
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.ops.types import NamespaceView, StatPath
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
@@ -45,21 +47,24 @@ from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out, run_with_fanout)
+from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
+from mirage.workspace.executor.find_refs import resolve_newer_refs
 from mirage.workspace.executor.jobs import (handle_disown, handle_fg,
                                             handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.lookup import JOB_BUILTINS, Consumer, lookup
+from mirage.workspace.lookup import (JOB_BUILTINS, Consumer, dereferences,
+                                     lookup)
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import session_view
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, namespace_view_of, run_on_mount,
-    scalar_find_flags)
+    drop_service_caches, exec_node, find_start_points, namespace_view_of,
+    run_on_mount, scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; lookup already narrowed the name.
 JOB_HANDLERS = {
@@ -70,6 +75,69 @@ JOB_HANDLERS = {
     "disown": handle_disown,
     "ps": handle_ps,
 }
+
+
+async def _finish_find(
+        stdout: ByteSource | None,
+        io: IOResult,
+        texts: list[str],
+        registry: MountRegistry,
+        session: Session,
+        execute_fn: ExecuteLine | None,
+        ns: NamespaceView | None,
+        stat_path: StatPath | None,
+        dispatch: DispatchFn,
+        namespace: Namespace | None = None,
+        stdin: ByteSource | None = None,
+        starts: list[PathSpec] | None = None) -> ByteSource | None:
+    """Apply find's actions once, at the command boundary.
+
+    Every runner below this point (one mount, a fan-out over nested
+    mounts, one native run per cross-mount operand) only selects rows
+    and hands them back as ``io.matched_runs``; the actions run here
+    over all of them together, so a batched ``-exec {} +`` is one
+    invocation across every start point, as GNU's is, and a per-match
+    action runs in start-point order.
+
+    Args:
+        stdout (ByteSource | None): the rendered rows.
+        io (IOResult): the selection's result, amended in place.
+        texts (list[str]): the expression tokens.
+        registry (MountRegistry): used to route per-match dispatch.
+        session (Session): the session the line runs under.
+        execute_fn (ExecuteLine | None): runs an ``-exec`` line.
+        ns (NamespaceView | None): the name plane's facts.
+        stat_path (StatPath | None): dispatcher stat.
+        dispatch (DispatchFn): the op dispatcher a symlink row is
+            deleted through.
+        namespace (Namespace | None): the node table a deleted row's
+            meta is dropped from.
+        stdin (ByteSource | None): find's own input, for its ``-exec``
+            children.
+        starts (list[PathSpec] | None): the start operands, for the
+            stat ``-ls`` renders after a ``-delete``.
+    """
+    stdout, action_err, action_exit = await _apply_find_actions(
+        stdout,
+        io.matched_runs,
+        texts,
+        registry,
+        session.cwd,
+        execute_fn=execute_fn,
+        session_id=session.session_id,
+        ns=ns,
+        stat_path=stat_path,
+        dispatch=dispatch,
+        identity=identity_from(ns, session_view(session, registry.policies)),
+        namespace=namespace,
+        stdin=stdin,
+        starts=starts)
+    if action_err:
+        existing = await materialize(io.stderr) if io.stderr else b""
+        io.stderr = existing + action_err
+    if io.exit_code == 0:
+        io.exit_code = action_exit
+    return stdout
 
 
 async def handle_command(
@@ -83,11 +151,14 @@ async def handle_command(
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
     routing_decision: RouteDecision | None = None,
+    execute_fn: ExecuteLine | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
     Parts are already classified: strings for text,
-    PathSpec for paths. Dispatches to mount.execute_cmd.
+    PathSpec for paths. Dispatches to mount.execute_cmd. ``execute_fn``
+    runs a line in the session, which is how find's ``-exec`` runs its
+    command.
     """
     if not parts:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
@@ -187,7 +258,7 @@ async def handle_command(
     if cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
-            parse_find_expression(find_expr_tokens)
+            find_expr = parse_find_expression(find_expr_tokens)
         except FindParseError as exc:
             msg = f"{exc}\n"
             return None, IOResult(exit_code=1,
@@ -195,6 +266,19 @@ async def handle_command(
                                       command=cmd_str,
                                       exit_code=1,
                                       stderr=msg.encode())
+        if find_expr.newer and dispatch is not None:
+            # Every -newer reference is statted through the dispatcher
+            # here, once, before any backend parses the expression.
+            find_expr_tokens, ref_err = await resolve_newer_refs(
+                find_expr_tokens, find_expr.newer, registry, session.cwd,
+                functools.partial(path_stat, dispatch), namespace,
+                dereferences(cmd_name, parts))
+            if ref_err is not None:
+                return None, IOResult(exit_code=1,
+                                      stderr=ref_err), ExecutionNode(
+                                          command=cmd_str,
+                                          exit_code=1,
+                                          stderr=ref_err)
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would. A create-mode tar is
@@ -244,10 +328,10 @@ async def handle_command(
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
-        run_operand = functools.partial(
-            run_with_fanout, run_single, registry, session.cwd, cross_ns,
-            functools.partial(path_stat, dispatch)
-            if dispatch is not None else None)
+        cross_stat = (functools.partial(path_stat, dispatch)
+                      if dispatch is not None else None)
+        run_operand = functools.partial(run_with_fanout, run_single, registry,
+                                        session.cwd, cross_ns, cross_stat)
         stdout, io = await handle_cross_mount(
             cmd_name,
             cross_scopes,
@@ -259,6 +343,19 @@ async def handle_command(
             storage_key=make_storage_key(registry),
             ns=cross_ns,
             session_view=session_view(session, registry.policies))
+        if cmd_name == "find":
+            stdout = await _finish_find(stdout,
+                                        io,
+                                        cross_texts,
+                                        registry,
+                                        session,
+                                        execute_fn,
+                                        cross_ns,
+                                        cross_stat,
+                                        dispatch,
+                                        namespace=namespace,
+                                        stdin=stdin,
+                                        starts=cross_scopes)
         if cross_parsed.warnings:
             warn = "".join(f"{cmd_name}: {w}\n"
                            for w in cross_parsed.warnings).encode()
@@ -332,29 +429,49 @@ async def handle_command(
     if find_expr_tokens is not None:
         texts = find_expr_tokens
         flag_kwargs = scalar_find_flags(flag_kwargs)
+        # The start points are the path words before the expression;
+        # the spec's rest slot would otherwise read an -exec word as one.
+        paths = find_start_points(parts[1:], find_expr_tokens,
+                                  mount.spec_for(cmd_name), session.cwd)
 
     warn_bytes = ("".join(
         f"{cmd_name}: {w}\n"
         for w in parse_warnings).encode() if parse_warnings else b"")
 
+    single_ns = namespace_view_of(registry, namespace, dispatch)
+    single_stat = (functools.partial(path_stat, dispatch)
+                   if dispatch is not None else None)
     if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the
         # primary run reports the operand missing.
-        stdout, io, node = await _fan_out_traversal(
-            cmd_name,
-            paths,
-            texts,
-            flag_kwargs,
-            registry,
-            mount,
-            session.cwd,
-            cmd_str,
-            stdin,
-            ns=namespace_view_of(registry, namespace, dispatch),
-            stat_path=(functools.partial(path_stat, dispatch)
-                       if dispatch is not None else None))
+        stdout, io, node = await _fan_out_traversal(cmd_name,
+                                                    paths,
+                                                    texts,
+                                                    flag_kwargs,
+                                                    registry,
+                                                    mount,
+                                                    session.cwd,
+                                                    cmd_str,
+                                                    stdin,
+                                                    ns=single_ns,
+                                                    stat_path=single_stat)
+        if cmd_name == "find":
+            stdout = await _finish_find(stdout,
+                                        io,
+                                        texts,
+                                        registry,
+                                        session,
+                                        execute_fn,
+                                        single_ns,
+                                        single_stat,
+                                        dispatch,
+                                        namespace=namespace,
+                                        stdin=stdin,
+                                        starts=paths)
+            node.exit_code = io.exit_code
+            node.stderr = await materialize(io.stderr) if io.stderr else b""
         if warn_bytes:
             existing = await materialize(io.stderr) if io.stderr else b""
             io.stderr = warn_bytes + existing
@@ -372,6 +489,19 @@ async def handle_command(
                                     stdin=stdin,
                                     mount=mount,
                                     routing_decision=routing_decision)
+    if cmd_name == "find":
+        stdout = await _finish_find(stdout,
+                                    io,
+                                    texts,
+                                    registry,
+                                    session,
+                                    execute_fn,
+                                    single_ns,
+                                    single_stat,
+                                    dispatch,
+                                    namespace=namespace,
+                                    stdin=stdin,
+                                    starts=paths)
 
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""

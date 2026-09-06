@@ -159,7 +159,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain('Mar  4 12:00')
+    expect(out).toContain('Mar  4  2026')
     await ws.close()
   })
 
@@ -223,7 +223,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [, out] = await run(ws, 'ls -l /data')
     expect(out).toContain('-rw-rw-r--')
     expect(out).toContain(' 500 dev ')
-    expect(out).toContain('Mar  4 12:00')
+    expect(out).toContain('Mar  4  2026')
     await ws.close()
   })
 
@@ -260,7 +260,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code, , err] = await run(ws, 'cd /data && touch -r f.txt new.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out.split('Mar  4 12:00').length - 1).toBe(2)
+    expect(out.split('Mar  4  2026').length - 1).toBe(2)
     await ws.close()
   })
 

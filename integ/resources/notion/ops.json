@@ -35,7 +35,7 @@
       "command": "ls -l /notion/pages/",
       "expect": {
         "exit": 0,
-        "stdout": "drwxr-xr-x 1 - - 0 Jan  2 00:00 Notes__bbbb2222-3333-4444-5555-666677778888\ndrwxr-xr-x 1 - - 0 Jan  2 00:00 Project_Roadmap__aaaa1111-2222-3333-4444-555566667777\n",
+        "stdout": "drwxr-xr-x 1 - - 0 Jan  2  2026 Notes__bbbb2222-3333-4444-5555-666677778888\ndrwxr-xr-x 1 - - 0 Jan  2  2026 Project_Roadmap__aaaa1111-2222-3333-4444-555566667777\n",
         "stderr": ""
       }
     },

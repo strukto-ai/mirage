@@ -19,7 +19,12 @@ import { ExecutionNode } from '../../../types.ts'
 import { isCountWord } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 
-/** Shift positional parameters, with bash's argument checks. */
+/**
+ * Shift positional parameters, with bash's argument checks: a count past
+ * `$#` shifts nothing and exits 1 with no message, a negative count is
+ * `shift count out of range`, and a non-numeric word is `numeric argument
+ * required`; every other case exits 0.
+ */
 export function handleShift(
   args: readonly string[],
   callStack: CallStack | null,
@@ -43,12 +48,25 @@ export function handleShift(
     ]
   }
   const n = first !== undefined ? Number(first) : 1
-  let shifted = false
-  if (callStack !== null && callStack.getAllPositional().length > 0) {
-    callStack.shift(n)
-    shifted = true
+  if (n < 0) {
+    const err = new TextEncoder().encode(`shift: ${first ?? ''}: shift count out of range\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: 'shift', exitCode: 1 }),
+    ]
   }
-  if (!shifted && session !== null) {
+  // bash: a count past `$#` shifts nothing and returns 1, silently.
+  const silentOne: Result = [
+    null,
+    new IOResult({ exitCode: 1 }),
+    new ExecutionNode({ command: 'shift', exitCode: 1 }),
+  ]
+  if (callStack !== null && callStack.getAllPositional().length > 0) {
+    if (n > callStack.getPositionalCount()) return silentOne
+    callStack.shift(n)
+  } else if (session !== null) {
+    if (n > session.positionalArgs.length) return silentOne
     session.positionalArgs = session.positionalArgs.slice(n)
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'shift', exitCode: 0 })]

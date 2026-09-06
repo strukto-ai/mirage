@@ -57,7 +57,14 @@ class NoMountError(ValueError):
     """
 
 
+class BadDescriptorError(OSError):
+    """EBADF: a read from a descriptor that is closed or open for
+    writing only, which is what ``cat 0<&1`` and ``cat <&-`` attempt.
+    """
+
+
 _FS_STRERROR: list[tuple[type[OSError], str]] = [
+    (BadDescriptorError, "Bad file descriptor"),
     (FileNotFoundError, "No such file or directory"),
     (NotADirectoryError, "Not a directory"),
     (IsADirectoryError, "Is a directory"),

@@ -28,6 +28,10 @@ async def handle_shift(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Shift positional parameters, with bash's argument checks.
 
+    A count past ``$#`` shifts nothing and exits 1 with no message, a
+    negative count is ``shift count out of range``, and a non-numeric
+    word is ``numeric argument required``; every other case exits 0.
+
     Args:
         args (list[str]): words after the command name; at most one,
             the shift count.
@@ -45,14 +49,22 @@ async def handle_shift(
                               stderr=err), ExecutionNode(command="shift",
                                                          exit_code=1)
     n = int(args[0]) if args else 1
-    shifted = False
+    if n < 0:
+        err = f"shift: {args[0]}: shift count out of range\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command="shift",
+                                                         exit_code=1)
+    # bash: a count past `$#` shifts nothing and returns 1, silently.
     if call_stack is not None and call_stack.get_all_positional():
+        if n > call_stack.get_positional_count():
+            return None, IOResult(exit_code=1), ExecutionNode(command="shift",
+                                                              exit_code=1)
         call_stack.shift(n)
-        shifted = True
-    if not shifted and session is not None:
-        pos = getattr(session, "positional_args", None)
-        if pos is not None:
-            session.positional_args = pos[n:]
+    elif session is not None:
+        if n > len(session.positional_args):
+            return None, IOResult(exit_code=1), ExecutionNode(command="shift",
+                                                              exit_code=1)
+        session.positional_args = session.positional_args[n:]
     return None, IOResult(), ExecutionNode(command="shift", exit_code=0)
 
 

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 import tree_sitter
@@ -24,10 +24,11 @@ from mirage.shell.arith import evaluate_arith
 from mirage.shell.array import (ShellArray, array_extent, array_get, array_has,
                                 array_indices, array_slice, array_values)
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import RANDOM
 from mirage.shell.errors import ArithError, ExitSignal
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
-from mirage.shell.types import ElementOps
+from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.types import NodeType as NT
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
@@ -36,7 +37,9 @@ from mirage.workspace.session import (Session, ensure_var_visible,
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.shell_dirs import home_dir
-from mirage.workspace.session.state import (nameref_target, session_elements,
+from mirage.workspace.session.state import (RandomReader, nameref_target,
+                                            next_random, random_reader,
+                                            session_elements, subscript_index,
                                             visible_assocs)
 
 ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
@@ -105,6 +108,63 @@ def guard_expansion_write(session: Session, *names: str) -> None:
                              contained_code=1) from exc
 
 
+def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
+    """The line's death for a refused expansion-time write.
+
+    The gate's own reason, or the ``-i`` coercion refusing the text;
+    status 1, the shape ``${var:?}`` uses.
+
+    Args:
+        exc (PolicyDenied | ArithError): the refusal.
+    """
+    why = exc.strerror if isinstance(exc, PolicyDenied) else str(exc)
+    return ExitSignal(1, stderr=f"bash: {why}\n".encode(), contained_code=1)
+
+
+async def _expansion_index(session: Session, view: SessionView | None,
+                           subscript: str) -> int:
+    """``subscript_index`` in the expansion's voice.
+
+    The subscript's assignments land as the index resolves
+    (``${a[x=3]}`` leaves x at 3, ``${a[RANDOM=42]}`` seeds), and a
+    refused one dies the way ``expansion_write``'s does.
+
+    Args:
+        session (Session): the session the subscript reads.
+        view (SessionView | None): the gated door; None outside a
+            workspace.
+        subscript (str): the raw subscript text.
+    """
+    try:
+        return await subscript_index(session, subscript, view)
+    except (PolicyDenied, ArithError) as exc:
+        raise _write_refusal(exc) from exc
+
+
+async def land_arith_writes(session: Session, view: SessionView | None,
+                            writes: tuple[ArithWrite,
+                                          ...], reader: RandomReader) -> None:
+    """Land an arithmetic expansion's assignments and settle its draws.
+
+    Each write goes through ``expansion_write`` in evaluation order; then
+    the ``RANDOM`` reader replays the draws the expression made after it
+    seeded the generator, now that the door holds the seed. One door for
+    a completed expression and for one that failed partway, since bash
+    binds each assignment as it is made.
+
+    Args:
+        session (Session): the shell session.
+        view (SessionView | None): the gated door; None outside a
+            workspace.
+        writes (tuple[ArithWrite, ...]): the assignments, in order.
+        reader (RandomReader): the expression's ``RANDOM`` reader.
+    """
+    for write in writes:
+        await expansion_write(session, view, write.name, write.key,
+                              write.value)
+    reader.settle()
+
+
 async def expansion_write(session: Session, view: SessionView | None,
                           name: str, key: str | None, value: str) -> None:
     """One expansion-time write, through the session plane's door.
@@ -147,15 +207,8 @@ async def expansion_write(session: Session, view: SessionView | None,
     guard_expansion_write(session, name)
     try:
         status = await assign_element(session, view, name, key, value)
-    except PolicyDenied as exc:
-        raise ExitSignal(1,
-                         stderr=f"bash: {exc.strerror}\n".encode(),
-                         contained_code=1) from exc
-    except ArithError as exc:
-        # The name carries `-i` and the text does not evaluate. The
-        # line dies as it does for `n=1+`, in the evaluator's voice.
-        raise ExitSignal(1, stderr=f"bash: {exc}\n".encode(),
-                         contained_code=1) from exc
+    except (PolicyDenied, ArithError) as exc:
+        raise _write_refusal(exc) from exc
     if status == "readonly":
         raise ReadonlyVariableError(name)
     if status != "ok":
@@ -220,6 +273,10 @@ def _lookup_var(var: str,
         local_val = call_stack.get_local(var)
         if local_val is not None:
             return local_val
+    if var == RANDOM:
+        drawn = next_random(session, env.get(RANDOM))
+        if drawn is not None:
+            return str(drawn)
     arrays = visible_arrays(session)
     if var in arrays:
         return array_get(arrays[var], 0)
@@ -582,45 +639,135 @@ def _case_mod(op: str, val: str, pattern: str) -> str:
     return "".join(chars)
 
 
-def _arith_int(text: str,
-               env: Mapping[str, str],
-               elements: ElementOps | None = None) -> int | None:
-    """Resolve an arithmetic-context operand (offsets, subscripts).
+class _PendingEnv(Mapping[str, str]):
+    """The visible env with an expansion's pending scalar writes laid over.
 
-    bash evaluates substring offsets and array subscripts as
-    arithmetic (``${v:1+1}``, ``${a[i+1]}``).
+    A view, not a merged dict: the visible env is itself a view whose
+    ``__getitem__`` refuses a name it cannot serve (a name reference to
+    an array), so spreading it into a dict raised where the evaluator's
+    own ``get`` merely skips the name.
 
     Args:
-        text (str): the raw operand text.
-        env (Mapping[str, str]): session environment for name resolution.
-        elements (ElementOps | None): element callbacks, so the operand
-            may itself reference an array element.
+        pending (Mapping[str, str]): the writes made so far.
+        base (Mapping[str, str]): the session's visible env.
     """
-    try:
-        return int(text.strip())
-    except ValueError:
-        pass
-    try:
-        value = evaluate_arith(text, env, elements=elements).value
-    except ArithError:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+
+    __slots__ = ("_pending", "_base")
+
+    def __init__(self, pending: Mapping[str, str], base: Mapping[str,
+                                                                 str]) -> None:
+        self._pending = pending
+        self._base = base
+
+    def __getitem__(self, name: str) -> str:
+        value = self._pending.get(name)
+        return value if value is not None else self._base[name]
+
+    def __iter__(self) -> Iterator[str]:
+        seen = set(self._pending)
+        yield from self._pending
+        for name in self._base:
+            if name not in seen:
+                yield name
+
+    def __len__(self) -> int:
+        return len(set(self._pending) | set(self._base))
 
 
-def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
+class _ArithOperand:
+    """The arithmetic operands of one expansion, evaluated in one record.
+
+    A substring offset, a length and a slice bound are arithmetic
+    (``${v:1+1}``, ``${a[@]:i:n}``), so each may assign and seed. bash
+    binds an assignment as it makes it, so the second operand sees the
+    first's (``${v:x=1:y=x+1}`` leaves y at 2) and draws from a
+    ``RANDOM`` the first seeded; the writes themselves land through the
+    door once the word has expanded (``land_arith_writes``), so a
+    refusal never leaves the word half-applied. Element references
+    resolve through the session, so an operand may name one
+    (``${v:a[0]}``).
+
+    Args:
+        session (Session): the session the operands read.
+    """
+
+    __slots__ = ("session", "reader", "writes", "ref", "_pending",
+                 "_pending_elems")
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self.reader = random_reader(session)
+        self.writes: list[ArithWrite] = []
+        # The reference the operands belong to (`v`, `a[@]`), which
+        # bash names ahead of a failing operand.
+        self.ref = ""
+        self._pending: dict[str, str] = {}
+        self._pending_elems: dict[tuple[str, str], str] = {}
+
+    def _elements(self) -> ElementOps:
+        """The session's element callbacks, the pending element writes
+        laid over their reads, so ``${v:(a[0]=2):(a[0])}`` reads the 2
+        the first operand assigned."""
+        inner = session_elements(self.session, self.reader)
+        pending = self._pending_elems
+
+        def read(name: str,
+                 key: str,
+                 _inner: ElementOps = inner) -> str | None:
+            value = pending.get((name, key))
+            return value if value is not None else _inner.read(name, key)
+
+        return ElementOps(resolve=inner.resolve,
+                          read=read,
+                          is_assoc=inner.is_assoc)
+
+    def value(self, text: str) -> int:
+        """The operand's value.
+
+        An operand that does not evaluate ends the line, as bash's does
+        (``${v:1/0}`` is ``v: 1/0: division by 0``), once what it
+        assigned before failing is recorded for the door.
+
+        Args:
+            text (str): the raw operand text.
+
+        Raises:
+            ExitSignal: the operand does not evaluate.
+        """
+        try:
+            return int(text.strip())
+        except ValueError:
+            pass
+        env = _PendingEnv(self._pending, visible_env(self.session))
+        try:
+            result = evaluate_arith(text,
+                                    env,
+                                    elements=self._elements(),
+                                    read_var=self.reader.read,
+                                    wrote_var=self.reader.wrote)
+        except ArithError as exc:
+            self._record(exc.writes)
+            raise ExitSignal(1,
+                             stderr=(f"bash: {self.ref}: {text.strip()}: "
+                                     f"{exc}\n").encode(),
+                             contained_code=1) from exc
+        self._record(result.writes)
+        return result.value
+
+    def _record(self, writes: tuple[ArithWrite, ...]) -> None:
+        self.writes.extend(writes)
+        for write in writes:
+            if write.key is None:
+                self._pending[write.name] = write.value
+            else:
+                self._pending_elems[(write.name, write.key)] = write.value
+
+
+def _substring(val: str, groups: list[str], operand: _ArithOperand) -> str:
     if not groups:
         return val
-    offset = _arith_int(groups[0], env)
-    if offset is None:
-        return val
-    length = None
-    if len(groups) > 1:
-        length = _arith_int(groups[1], env)
-        if length is None:
-            return val
+    offset = operand.value(groups[0])
+    length = operand.value(groups[1]) if len(groups) > 1 else None
     if offset < 0:
         offset = max(0, len(val) + offset)
     if length is None:
@@ -630,26 +777,28 @@ def _substring(val: str, groups: list[str], env: Mapping[str, str]) -> str:
     return val[offset:offset + length]
 
 
-def _array_index(idx_text: str,
-                 env: Mapping[str, str],
-                 elements: ElementOps | None = None) -> int:
-    """Resolve a numeric or arithmetic array subscript.
+_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
 
-    bash evaluates subscripts in arithmetic context (``${a[i+1]}``);
-    unresolvable expressions index element 0, mirroring bash's
-    unset-name-is-zero arithmetic rule.
+# The operators whose word bash expands only once the parameter's state
+# selects it (a default, an alternate, an assignment, a message).
+_LAZY_OPS = frozenset({"?", ":?", "=", ":=", ":-", "-", ":+", "+"})
+
+
+async def _operator_word(p: _BraceParse, expand_child: ExpandChild,
+                         session: Session,
+                         call_stack: CallStack | None) -> str:
+    """The word of a conditional operator, expanded now that it is needed.
 
     Args:
-        idx_text (str): the raw subscript text.
-        env (Mapping[str, str]): session environment for name resolution.
-        elements (ElementOps | None): element callbacks, so a nested
-            reference (``a[b[0]]``) resolves too.
+        p (_BraceParse): the parsed expansion.
+        expand_child (ExpandChild): nested-node expander.
+        session (Session): shell session.
+        call_stack (CallStack | None): function-call scope, if any.
     """
-    resolved = _arith_int(idx_text, env, elements)
-    return resolved if resolved is not None else 0
-
-
-_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
+    if not p.groups:
+        return ""
+    return await _expand_group(p.groups[0], expand_child, False, session,
+                               call_stack)
 
 
 async def _expand_subscript_key(p: _BraceParse,
@@ -672,8 +821,8 @@ async def _expand_subscript_key(p: _BraceParse,
     return "".join(parts)
 
 
-def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
-                                                                 str]) -> str:
+def _value_op(op: str, val: str, groups: list[str],
+              operand: _ArithOperand) -> str:
     if op in _STRIP_OPS:
         pattern = groups[0] if groups else ""
         return _glob_strip(val, pattern, op in ("##", "%%"), op in ("#", "##"))
@@ -685,7 +834,7 @@ def _value_op(op: str, val: str, groups: list[str], env: Mapping[str,
     if op in _CASE_OPS:
         return _case_mod(op, val, groups[0] if groups else "")
     if op == ":":
-        return _substring(val, groups, env)
+        return _substring(val, groups, operand)
     return val
 
 
@@ -696,13 +845,39 @@ async def expand_braces(node: tree_sitter.Node,
                         view: SessionView | None = None) -> str:
     """Expand ${VAR}, ${VAR<op>...}, ${a[i]}, ${#a[@]}, etc.
 
+    An offset, length or slice bound is arithmetic and may assign
+    (``${v:x=1:y=2}``) or seed (``${v:RANDOM%10:1}``); those land
+    through the door once the word has expanded, then the ``RANDOM``
+    reader settles, so the line ends where bash's does.
+
     Args:
         node (tree_sitter.Node): the ``expansion`` tree-sitter node.
         session (Session): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node
             (dependency-injected to avoid a cycle with ``expand_node``).
+        view (SessionView | None): the gated door the expansion's
+            writes land through; None outside a workspace.
     """
+    operand = _ArithOperand(session)
+    try:
+        value = await _expand_braces(node, session, call_stack, expand_child,
+                                     view, operand)
+    except ExitSignal:
+        # bash bound what an operand assigned before the one that
+        # failed; they land before the line dies.
+        await land_arith_writes(session, view, tuple(operand.writes),
+                                operand.reader)
+        raise
+    await land_arith_writes(session, view, tuple(operand.writes),
+                            operand.reader)
+    return value
+
+
+async def _expand_braces(node: tree_sitter.Node, session: Session,
+                         call_stack: CallStack | None,
+                         expand_child: ExpandChild, view: SessionView | None,
+                         operand: _ArithOperand) -> str:
     p = _parse_braces(node)
     if any(c.type == "}" and c.is_missing for c in node.children):
         # tree-sitter-bash cannot parse a $-spelled substring offset
@@ -716,12 +891,20 @@ async def expand_braces(node: tree_sitter.Node,
     env = visible_env(session)
     arrays = visible_arrays(session)
     assocs = visible_assocs(session)
+    operand.ref = (p.var_name or "") + (f"[{p.subscript}]"
+                                        if p.subscript is not None else "")
 
+    # A conditional operator's word expands only if the parameter's
+    # state selects it, as bash's does: `${RANDOM:-$RANDOM}` draws once
+    # and `${x:-$(cmd)}` runs cmd only when x is unset. Every other
+    # operator's words are needed whatever the value, and expand here.
     groups: list[str] = []
-    for gi, group in enumerate(p.groups):
-        pattern_mode = gi == 0 and p.op in _PATTERN_OPS
-        groups.append(await _expand_group(group, expand_child, pattern_mode,
-                                          session, call_stack))
+    if p.op not in _LAZY_OPS:
+        for gi, group in enumerate(p.groups):
+            pattern_mode = gi == 0 and p.op in _PATTERN_OPS
+            groups.append(await
+                          _expand_group(group, expand_child, pattern_mode,
+                                        session, call_stack))
 
     val = ""
     var_in_env = False
@@ -743,10 +926,10 @@ async def expand_braces(node: tree_sitter.Node,
             if p.length_op:
                 return str(len(values))
             if p.op == ":":
-                return " ".join(_slice_array(list(values), groups, env))
+                return " ".join(_slice_array(list(values), groups, operand))
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
                 return " ".join(
-                    _value_op(p.op, el, groups, env) for el in values)
+                    _value_op(p.op, el, groups, operand) for el in values)
             val = " ".join(values)
             var_in_env = bool(amap)
         else:
@@ -776,17 +959,17 @@ async def expand_braces(node: tree_sitter.Node,
             if p.length_op:
                 return str(len(values))
             if p.op == ":":
-                sliced = _slice_array(arr, groups, env)
+                sliced = _slice_array(arr, groups, operand)
                 return " ".join(sliced)
             if p.op in _STRIP_OPS | _REPLACE_OPS | _CASE_OPS:
                 return " ".join(
-                    _value_op(p.op, el, groups, env) for el in values)
+                    _value_op(p.op, el, groups, operand) for el in values)
             val = " ".join(values)
         else:
             # Expanded first (`${a[$k]}` resolves $k, `${a[i+1]}` stays
             # arithmetic), then evaluated as an index.
             sub_text = await _expand_subscript_key(p, expand_child)
-            idx = _array_index(sub_text, env, session_elements(session))
+            idx = await _expansion_index(session, view, sub_text)
             if idx < 0:
                 idx += array_extent(arr)
             val = array_get(arr, idx)
@@ -807,6 +990,13 @@ async def expand_braces(node: tree_sitter.Node,
             # literal key, exactly as bash reads it.
             val = amap.get("0", "")
             var_in_env = "0" in amap
+        if not var_in_env and p.var_name == RANDOM:
+            # `${RANDOM}` draws as `$RANDOM` does: the env holds the
+            # last word, which a read must not hand back unchanged.
+            drawn = next_random(session, env.get(RANDOM))
+            if drawn is not None:
+                val = str(drawn)
+                var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
             var_in_env = True
@@ -835,12 +1025,10 @@ async def expand_braces(node: tree_sitter.Node,
         triggered = (not var_in_env) if p.op == "?" else (not val)
         if not triggered:
             return val
-        if groups and groups[0]:
-            message = groups[0]
-        elif p.op == "?":
-            message = "parameter not set"
-        else:
-            message = "parameter null or not set"
+        message = await _operator_word(p, expand_child, session, call_stack)
+        if not message:
+            message = ("parameter not set"
+                       if p.op == "?" else "parameter null or not set")
         # GNU: fatal at top level with status 127; a containing
         # subshell/pipeline segment reports 1. A subscripted reference
         # is named whole: `bash: m[zz]: nope`.
@@ -853,7 +1041,7 @@ async def expand_braces(node: tree_sitter.Node,
         triggered = (not var_in_env) if p.op == "=" else (not val)
         if not triggered:
             return val
-        default = groups[0] if groups else ""
+        default = await _operator_word(p, expand_child, session, call_stack)
         if p.var_name is not None and p.subscript is not None:
             # The default lands on the element the reference named,
             # never on element 0: `${m[k]:=v}` writes key k and
@@ -875,37 +1063,37 @@ async def expand_braces(node: tree_sitter.Node,
                 await expansion_write(session, view, p.var_name, None, default)
         return default
     if p.op == ":-":
-        return val if val else (groups[0] if groups else "")
+        if val:
+            return val
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == "-":
         if var_in_env:
             return val
-        return groups[0] if groups else ""
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == ":+":
-        return (groups[0] if groups else "") if val else ""
+        if not val:
+            return ""
+        return await _operator_word(p, expand_child, session, call_stack)
     if p.op == "+":
-        return (groups[0] if groups else "") if var_in_env else ""
-    return _value_op(p.op, val, groups, env)
+        if not var_in_env:
+            return ""
+        return await _operator_word(p, expand_child, session, call_stack)
+    return _value_op(p.op, val, groups, operand)
 
 
 def _slice_array(arr: ShellArray, groups: list[str],
-                 env: Mapping[str, str]) -> list[str]:
+                 operand: _ArithOperand) -> list[str]:
     """Resolve ``${a[@]:offset:length}`` against a shell array.
 
     Args:
         arr (ShellArray): the array being sliced.
         groups (list[str]): the raw offset and length words.
-        env (Mapping[str, str]): environment for the arithmetic context.
+        operand (_ArithOperand): the expansion's arithmetic record.
     """
     if not groups:
         return array_values(arr)
-    offset = _arith_int(groups[0], env)
-    if offset is None:
-        return array_values(arr)
-    length = None
-    if len(groups) > 1:
-        length = _arith_int(groups[1], env)
-        if length is None:
-            return array_values(arr)
+    offset = operand.value(groups[0])
+    length = operand.value(groups[1]) if len(groups) > 1 else None
     return array_slice(arr, offset, length)
 
 
@@ -965,21 +1153,44 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     return p.op in _MULTIWORD_AT_OPS
 
 
-async def expand_array_at(node: tree_sitter.Node, session: Session,
+async def expand_array_at(node: tree_sitter.Node,
+                          session: Session,
                           call_stack: CallStack | None,
-                          expand_child: ExpandChild) -> list[str]:
+                          expand_child: ExpandChild,
+                          view: SessionView | None = None) -> list[str]:
     """Resolve a multi-word "${a[@]...}" splat to its word list.
 
     Only call when ``is_multiword_at`` is True; the caller word-splits
     (or stitches prefix/suffix onto) the returned words, matching bash's
-    quoted-splat semantics.
+    quoted-splat semantics. A slice bound is arithmetic and may assign
+    (``${a[@]:x=1:y=x+1}``); those land through the door once the
+    words are known, as ``expand_braces`` lands its own.
 
     Args:
         node (tree_sitter.Node): the ``expansion`` node.
         session (Session): shell session (arrays, env).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
+        view (SessionView | None): the gated door the slice's writes
+            land through; None outside a workspace.
     """
+    operand = _ArithOperand(session)
+    try:
+        words = await _expand_array_at(node, session, call_stack, expand_child,
+                                       operand)
+    except ExitSignal:
+        await land_arith_writes(session, view, tuple(operand.writes),
+                                operand.reader)
+        raise
+    await land_arith_writes(session, view, tuple(operand.writes),
+                            operand.reader)
+    return words
+
+
+async def _expand_array_at(node: tree_sitter.Node, session: Session,
+                           call_stack: CallStack | None,
+                           expand_child: ExpandChild,
+                           operand: _ArithOperand) -> list[str]:
     if node.type == NT.SIMPLE_EXPANSION:
         return _positional_args(session, call_stack)
     p = _parse_braces(node)
@@ -1004,6 +1215,8 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
                 # walk of an associative array answers in.
                 return sorted(amap)
             arr = [amap[k] for k in sorted(amap)]
+    operand.ref = (p.var_name or "") + (f"[{p.subscript}]"
+                                        if p.subscript is not None else "")
     env = visible_env(session)
     if arr is None:
         name = p.var_name or ""
@@ -1019,5 +1232,5 @@ async def expand_array_at(node: tree_sitter.Node, session: Session,
         groups.append(await _expand_group(group, expand_child, pattern_mode,
                                           session, call_stack))
     if p.op == ":":
-        return _slice_array(arr, groups, env)
-    return [_value_op(p.op, el, groups, env) for el in values]
+        return _slice_array(arr, groups, operand)
+    return [_value_op(p.op, el, groups, operand) for el in values]

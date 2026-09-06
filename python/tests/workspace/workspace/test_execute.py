@@ -103,14 +103,12 @@ async def test_cmdsub_keeps_the_named_sessions_hides():
 
 
 @pytest.mark.asyncio
-async def test_cmdsub_cd_on_the_live_session_persists():
-    # Documented divergence: bash runs $() in a subshell, mirage runs it
-    # in the live session, so a cd inside one persists when no per-call
-    # fork is in play. Pinned so the fork-containment fix is never
-    # "improved" into forking every substitution.
+async def test_cmdsub_cd_is_isolated_from_the_live_session():
     ws = _make_ws()
-    await ws.execute("echo $(cd /ram/subdir)")
-    assert ws.get_session(ws.default_session_id).cwd == "/ram/subdir"
+    before = ws.get_session(ws.default_session_id).cwd
+    io = await ws.execute("echo $(cd /ram/subdir; pwd)")
+    assert await io.stdout_str() == "/ram/subdir\n"
+    assert ws.get_session(ws.default_session_id).cwd == before
 
 
 # A background job forks the session, so it is the one mid-line point
