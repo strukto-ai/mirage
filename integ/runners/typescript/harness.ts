@@ -735,25 +735,184 @@ export function compare(
   return diffs
 }
 
+export interface Sample {
+  target: string
+  id: string
+  elapsed: number
+  verb: string
+}
+
+// The first real word of a command, ignoring leading `VAR=value` assignments.
+// Only groups the profile, so a wrong guess costs a mislabeled row.
+// A leading `NAME=value` assignment, where the value may be quoted or a
+// parenthesised array. Splitting on whitespace instead cut `v='a b'` in half
+// and recorded the fragment as the command.
+const LEADING_ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\([^)]*\)|\S*)\s*/
+const LEADING_SEP = /^(?:;|&&|\|\||&)\s*/
+// `out=$(cat <<END` is the command `cat`, but LEADING_ASSIGN ends at the space
+// and leaves `<<END` as the first word. Tried before it, so its `\S*` arm
+// never gets to swallow `$(cat`.
+const LEADING_CMDSUB = /^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*/
+// A subshell or brace group is a wrapper, not the command: `(cd d && grep x)`
+// was recorded as `(cd`. Stripping the delimiter re-enters the loop, so
+// `((echo a); echo b)` peels both. It does NOT make the row `grep`: knowing
+// that `cd` is a prelude is shell semantics, and this labels a row rather
+// than parsing a line.
+const LEADING_GROUP = /^[({]\s*/
+
+export function commandVerb(command: string): string {
+  let rest = command.trim()
+  for (;;) {
+    const match =
+      LEADING_CMDSUB.exec(rest) ??
+      LEADING_GROUP.exec(rest) ??
+      LEADING_ASSIGN.exec(rest) ??
+      LEADING_SEP.exec(rest)
+    if (match === null || match[0].length === 0) break
+    rest = rest.slice(match[0].length)
+  }
+  const first = rest.split(/\s+/).filter((w) => w.length > 0)[0]
+  return first === undefined ? '?' : first.replace(/^.*\//, '')
+}
+
+// A consistency case carries no `command`: its commands live in the scenario
+// steps. Reading the field straight off it handed `commandVerb` undefined,
+// which threw on `.trim()` and took the whole battery down.
+export const SCENARIO_VERB = 'scenario'
+
+// A scenario case is charged as `scenario`, not as its first step. The
+// interval is the whole case, and a scenario spends it on out-of-band remote
+// writes and more than one invocation, so billing it to the first verb made
+// `cat` and `find` carry time no `cat` or `find` spent. A row of its own says
+// what the time is; the slowest-cases table above it names an expensive one.
+export function scenarioVerb(c: Case): string {
+  if (typeof c.command === 'string') return c.command
+  for (const step of c.scenario ?? []) {
+    if ('command' in step) return SCENARIO_VERB
+  }
+  return ''
+}
+
 export class Report {
   passed = 0
   failed = 0
   failures: string[] = []
+  // Held rather than printed when the run is concurrent, so lines can be
+  // replayed in target order and a parallel run reads like a serial one.
+  readonly held: string[] = []
+  readonly samples: Sample[] = []
+  // Wall time for the whole target, which the per-case samples cannot see:
+  // opening it, seeding fixtures and cleaning up all sit outside `runCase`,
+  // and on nextcloud the fixture seed alone is dozens of remote writes.
+  readonly targetWall = new Map<string, number>()
 
-  record(target: string, caseId: string, diffs: string[]): void {
+  constructor(readonly stream: boolean = true) {}
+
+  private say(line: string): void {
+    if (this.stream) process.stdout.write(line)
+    else this.held.push(line)
+  }
+
+  record(target: string, caseId: string, diffs: string[], elapsed = 0, command = ''): void {
+    this.samples.push({ target, id: caseId, elapsed, verb: commandVerb(command) })
     if (diffs.length) {
       this.failed++
       const joined = diffs.join('; ')
       this.failures.push(`[${target}] ${caseId}: ${joined}`)
-      process.stdout.write(`FAIL [${target}] ${caseId}: ${joined}\n`)
+      this.say(`FAIL [${target}] ${caseId}: ${joined}\n`)
     } else {
       this.passed++
-      process.stdout.write(`ok   [${target}] ${caseId}\n`)
+      this.say(`ok   [${target}] ${caseId}\n`)
     }
+  }
+
+  noteTargetWall(target: string, seconds: number): void {
+    this.targetWall.set(target, (this.targetWall.get(target) ?? 0) + seconds)
+  }
+
+  absorb(other: Report): void {
+    this.passed += other.passed
+    this.failed += other.failed
+    this.failures.push(...other.failures)
+    this.samples.push(...other.samples)
+    for (const [target, seconds] of other.targetWall) this.noteTargetWall(target, seconds)
+    for (const line of other.held) process.stdout.write(line)
   }
 
   summary(): string {
     return `${String(this.passed)} passed, ${String(this.failed)} failed`
+  }
+
+  // Where the battery's wall clock goes. Local timings do not carry to CI
+  // (docker on macOS is far slower per request), so this reports from inside
+  // the CI job itself.
+  profile(top = 15): string {
+    if (this.samples.length === 0) return ''
+    const secs = (n: number): string => (n >= 1 ? `${n.toFixed(1)}s` : `${(n * 1000).toFixed(0)}ms`)
+    const at = (sorted: number[], q: number): number =>
+      sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))]
+    const byTarget = new Map<string, number[]>()
+    for (const s of this.samples) {
+      const bucket = byTarget.get(s.target)
+      if (bucket === undefined) byTarget.set(s.target, [s.elapsed])
+      else bucket.push(s.elapsed)
+    }
+    // `wall` is the whole target, `cases` is only what the cases spent inside
+    // it. The gap between them is setup and teardown: opening the target,
+    // seeding its fixtures, hydrating sessions, and cleaning up.
+    const out: string[] = ['', '=== profile: per target ===']
+    out.push(
+      [
+        'target'.padEnd(22),
+        'cases'.padStart(6),
+        'wall'.padStart(9),
+        'in cases'.padStart(9),
+        'p50'.padStart(8),
+        'p90'.padStart(8),
+        'max'.padStart(9),
+      ].join(' '),
+    )
+    const total = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
+    // Ranked on wall, the column this table exists to show. Ranking on the
+    // case total instead buried a target whose cost is setup: 100s of setup
+    // and 1s of cases sorted below a target with 2s of cases.
+    const wallOf = (t: string, raw: number[]): number => this.targetWall.get(t) ?? total(raw)
+    for (const [target, raw] of [...byTarget.entries()].sort(
+      (a, b) => wallOf(b[0], b[1]) - wallOf(a[0], a[1]),
+    )) {
+      const sorted = [...raw].sort((a, b) => a - b)
+      out.push(
+        [
+          target.padEnd(22),
+          String(raw.length).padStart(6),
+          secs(this.targetWall.get(target) ?? total(raw)).padStart(9),
+          secs(total(raw)).padStart(9),
+          secs(at(sorted, 0.5)).padStart(8),
+          secs(at(sorted, 0.9)).padStart(8),
+          secs(sorted[sorted.length - 1]).padStart(9),
+        ].join(' '),
+      )
+    }
+    out.push('', `=== profile: ${String(top)} slowest cases ===`)
+    for (const s of [...this.samples].sort((a, b) => b.elapsed - a.elapsed).slice(0, top)) {
+      out.push(`  ${secs(s.elapsed).padStart(9)}  [${s.target}] ${s.id}`)
+    }
+    out.push('', `=== profile: ${String(top)} costliest commands ===`)
+    const byVerb = new Map<string, { total: number; n: number }>()
+    for (const s of this.samples) {
+      const v = byVerb.get(s.verb) ?? { total: 0, n: 0 }
+      v.total += s.elapsed
+      v.n += 1
+      byVerb.set(s.verb, v)
+    }
+    const ranked = [...byVerb.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, top)
+    for (const [verb, v] of ranked) {
+      out.push(
+        `  ${secs(v.total).padStart(9)}  x${String(v.n).padEnd(5)} ` +
+          `mean ${secs(v.total / v.n).padStart(8)}  ${verb}`,
+      )
+    }
+    return out.join('\n')
   }
 }
 

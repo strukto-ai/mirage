@@ -19,6 +19,7 @@ import { ADAPTERS, openConsistency } from './adapters/index.ts'
 import type { Case, Target } from './harness.ts'
 import {
   Report,
+  bindMount,
   compare,
   integRoot,
   loadCases,
@@ -26,10 +27,10 @@ import {
   loadTargets,
   missingEnv,
   parseAllowSkip,
-  bindMount,
   ruleReasons,
   runCase,
   runScenario,
+  scenarioVerb,
   seedFixture,
   seedMountRoot,
 } from './harness.ts'
@@ -51,12 +52,16 @@ function parseArgs(): {
   facet: string | undefined
   strict: boolean
   allowSkip: string
+  targetJobs: number
+  profile: boolean
 } {
   const targets: string[] = []
   let emit: string | undefined
   let facet: string | undefined
   let strict = false
   let allowSkip = ''
+  let targetJobs = 1
+  let profile = false
   const argv = process.argv.slice(2)
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
@@ -64,8 +69,20 @@ function parseArgs(): {
     else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
+    else if (argv[i] === '--profile') profile = true
+    // Recognised before its operand is checked: gated on `i + 1 < argv.length`
+    // a trailing `--target-jobs` fell through every arm and ran serially in
+    // silence, where the argparse runner refuses the same line.
+    else if (argv[i] === '--target-jobs') {
+      const n = i + 1 < argv.length ? Number(argv[++i]) : Number.NaN
+      if (!Number.isInteger(n) || n < 1) {
+        process.stderr.write('--target-jobs takes an integer >= 1\n')
+        process.exit(2)
+      }
+      targetJobs = n
+    }
   }
-  return { targets, emit, facet, strict, allowSkip }
+  return { targets, emit, facet, strict, allowSkip, targetJobs, profile }
 }
 
 async function runTarget(
@@ -145,7 +162,15 @@ async function runTarget(
       if (!c.targets.includes(target.id)) continue
       if (c.consistency !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
+      const caseStarted = performance.now()
       const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(ws, bound, reasons)
+      // Two durations, deliberately. `elapsed` is the command alone and is what
+      // a case's `expect.elapsed` bounds are asserted against, so it cannot
+      // grow. `whole` is the whole case, which for the 34 cases carrying a
+      // `check` includes a second backend read the command-only figure left
+      // out; without it that work fell into the wall-minus-cases gap and read
+      // as setup.
+      const whole = (performance.now() - caseStarted) / 1000
       if (emit !== null) {
         emit.push({
           target: target.id,
@@ -160,6 +185,8 @@ async function runTarget(
           target.id,
           bound.id,
           compare(bound, exitCode, out, err, elapsed, checkOut, notes),
+          whole,
+          bound.command,
         )
       }
     }
@@ -185,11 +212,22 @@ async function runTarget(
       // every workspace a case can run against, or a consistency scenario would
       // silently run under a different one.
       opened.ws.env = { ...opened.ws.env, ...(target.env ?? {}) }
+      const started = performance.now()
       const { exitCode, out } = await runScenario(opened.ws, opened.mutate, c.scenario)
+      // Measured, not zero: a consistency scenario on s3 or gridfs runs
+      // several remote mutations, and recording it as free dragged the
+      // profile's totals and percentiles down.
+      const elapsed = (performance.now() - started) / 1000
       if (emit !== null) {
         emit.push({ target: target.id, id: c.id, exit: exitCode, stdout: out, stderr: '' })
       } else if (report !== null) {
-        report.record(target.id, c.id, compare(c, exitCode, out, '', 0))
+        report.record(
+          target.id,
+          c.id,
+          compare(c, exitCode, out, '', elapsed),
+          elapsed,
+          scenarioVerb(c),
+        )
       }
     } finally {
       await opened.cleanup()
@@ -203,7 +241,7 @@ async function main(): Promise<void> {
   const services = loadServices(root)
   const cases = loadCases(root)
 
-  const { targets, emit: emitPath, facet, strict, allowSkip } = parseArgs()
+  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs, profile } = parseArgs()
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
@@ -225,6 +263,7 @@ async function main(): Promise<void> {
   // broken job, which is the whole point of --strict.
   const allowed = parseAllowSkip(services, allowSkip)
   const envSkipped: string[] = []
+  const eligible: Target[] = []
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -244,8 +283,74 @@ async function main(): Promise<void> {
       }
       continue
     }
-    await runTarget(target, cases, root, report, emit)
+    eligible.push(target)
     ran += 1
+  }
+
+  // Targets own separate workspaces, so they overlap safely -- except when two
+  // speak to the SAME fake (cli-gh and github, cli-ntn and notion, qdrant and
+  // qdrant-window). Those share a lane and stay sequential; the rest are bound
+  // only by the overall width.
+  // One worker means the old loop, unchanged. The lane scheduler below cannot
+  // stand in for it: a target waiting on a busy lane lets a later one from
+  // another lane take the worker first, and with `s3` carrying three targets
+  // and `gws` four, the default run would quietly reorder itself.
+  if (targetJobs <= 1) {
+    for (const target of eligible) {
+      const started = performance.now()
+      await runTarget(target, cases, root, report, emit)
+      report?.noteTargetWall(target.id, (performance.now() - started) / 1000)
+    }
+  } else {
+    const lanes = new Map<string, Promise<void>>()
+    const errors: unknown[] = []
+    const waiters: (() => void)[] = []
+    let active = 0
+    const acquire = async (): Promise<void> => {
+      if (active >= targetJobs) await new Promise<void>((resolve) => waiters.push(resolve))
+      active += 1
+    }
+    const release = (): void => {
+      active -= 1
+      const next = waiters.shift()
+      if (next !== undefined) next()
+    }
+    // One slot per invocation, not per target id. `--target x --target x` is
+    // two runs, and keying by id made the merge below read the second slot
+    // twice and drop the first.
+    const slots: { report: Report | null; emit: EmitRow[] | null }[] = []
+    const chain: Promise<void>[] = []
+    for (const target of eligible) {
+      const slot = {
+        report: report === null ? null : new Report(false),
+        emit: emit === null ? null : ([] as EmitRow[]),
+      }
+      slots.push(slot)
+      const lane = target.service ?? `solo:${target.id}`
+      const prev = lanes.get(lane) ?? Promise.resolve()
+      const next = prev.then(async () => {
+        await acquire()
+        const started = performance.now()
+        try {
+          await runTarget(target, cases, root, slot.report, slot.emit)
+        } catch (err) {
+          errors.push(err)
+        } finally {
+          slot.report?.noteTargetWall(target.id, (performance.now() - started) / 1000)
+          release()
+        }
+      })
+      lanes.set(lane, next)
+      chain.push(next)
+    }
+    await Promise.all(chain)
+    // Merged in declared target order, so a concurrent run prints what a serial
+    // run printed.
+    for (const slot of slots) {
+      if (report !== null && slot.report !== null) report.absorb(slot.report)
+      if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
+    }
+    if (errors.length > 0) throw errors[0]
   }
 
   // A skip is one line on stderr and exit 0, so a facet whose service
@@ -273,6 +378,7 @@ async function main(): Promise<void> {
     return
   }
   if (report === null) return
+  if (profile) process.stdout.write(`${report.profile()}\n`)
   process.stdout.write(`\n${report.summary()}\n`)
   if (report.failed) process.exit(1)
 }

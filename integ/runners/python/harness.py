@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import math
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -572,21 +574,209 @@ def compare(case: dict,
     return diffs
 
 
+def _secs(value: float) -> str:
+    return f"{value:.1f}s" if value >= 1 else f"{value * 1000:.0f}ms"
+
+
+def _at(ordered: list[float], quantile: float) -> float:
+    """Pick the sample at a quantile, the same way the TypeScript host does.
+
+    ``floor(x + 0.5)`` rather than ``round``: python rounds a half to even
+    and JS ``Math.round`` rounds it up, so an even sample count made the two
+    hosts choose different indexes and report different percentiles for the
+    same ordered data.
+
+    Args:
+        ordered (list[float]): samples, ascending.
+        quantile (float): 0 to 1.
+
+    Returns:
+        float: the chosen sample.
+    """
+    index = math.floor(quantile * (len(ordered) - 1) + 0.5)
+    return ordered[min(len(ordered) - 1, max(0, index))]
+
+
+SCENARIO_VERB = "scenario"
+
+
+def scenario_verb(case: dict) -> str:
+    """Name the command a case runs, scenario cases included.
+
+    A consistency case carries no ``command``: its commands live in the
+    scenario steps, so reading the field straight off it labelled every one
+    of them as unknown.
+
+    Such a case is charged as ``scenario``, not as its first step. The
+    interval is the whole case, and a scenario spends it on out-of-band
+    remote writes and more than one invocation, so billing it to the first
+    verb made ``cat`` and ``find`` carry time no ``cat`` or ``find`` spent.
+    A row of its own says what the time is; the slowest-cases table above it
+    is where an expensive one is named.
+
+    Args:
+        case (dict): the case being recorded.
+
+    Returns:
+        str: the command line to take a verb from, "scenario" for a scenario
+            case, or "" when it has neither.
+    """
+    command = case.get("command")
+    if isinstance(command, str):
+        return command
+    for step in case.get("scenario") or []:
+        if isinstance(step, dict) and isinstance(step.get("command"), str):
+            return SCENARIO_VERB
+    return ""
+
+
+# A leading `NAME=value` assignment, where the value may be quoted or a
+# parenthesised array. Splitting on whitespace instead cut `v='a b'` in half
+# and recorded the fragment as the command.
+_LEADING_ASSIGN = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|\"[^\"]*\"|\([^)]*\)|\S*)\s*")
+_LEADING_SEP = re.compile(r"^(?:;|&&|\|\||&)\s*")
+# `out=$(cat <<END` is the command `cat`, but the assignment above ends at the
+# space and leaves `<<END` as the first word. Tried before it, so the `\S*`
+# arm never gets to swallow `$(cat`.
+_LEADING_CMDSUB = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=)?\$\(\s*")
+# A subshell or brace group is a wrapper, not the command: `(cd d && grep x)`
+# was recorded as `(cd`. Stripping the delimiter re-enters the loop, so
+# `((echo a); echo b)` peels both. It does NOT make the row `grep`: knowing
+# that `cd` is a prelude is shell semantics, and this labels a row rather
+# than parsing a line.
+_LEADING_GROUP = re.compile(r"^[({]\s*")
+
+
+def command_verb(command: str) -> str:
+    """Name the command a line runs, for grouping the profile.
+
+    Not a shell parser, and it does not need to be: this only labels a row,
+    so the cost of a wrong guess is a mislabelled row rather than a wrong
+    measurement. It does handle the two shapes the corpus actually uses,
+    a quoted assignment and a leading separator.
+
+    Args:
+        command (str): the case's shell line.
+
+    Returns:
+        str: the command name, or "?" when the line has none.
+    """
+    rest = command.strip()
+    while rest:
+        match = (_LEADING_CMDSUB.match(rest) or _LEADING_GROUP.match(rest)
+                 or _LEADING_ASSIGN.match(rest) or _LEADING_SEP.match(rest))
+        if match is None or match.end() == 0:
+            break
+        rest = rest[match.end():]
+    words = rest.split()
+    return words[0].rsplit("/", 1)[-1] if words else "?"
+
+
 @dataclass
 class Report:
     passed: int = 0
     failed: int = 0
     failures: list[str] = field(default_factory=list)
+    stream: bool = True
+    held: list[str] = field(default_factory=list)
+    samples: list[tuple[str, str, float, str]] = field(default_factory=list)
+    # Wall time for the whole target, which the per-case samples cannot see:
+    # opening it, seeding fixtures and cleaning up all sit outside
+    # ``run_case``, and on nextcloud the fixture seed alone is dozens of
+    # remote writes.
+    target_wall: dict[str, float] = field(default_factory=dict)
 
-    def record(self, target: str, case_id: str, diffs: list[str]) -> None:
+    def _say(self, line: str) -> None:
+        if self.stream:
+            print(line)
+        else:
+            self.held.append(line)
+
+    def record(self,
+               target: str,
+               case_id: str,
+               diffs: list[str],
+               elapsed: float = 0.0,
+               command: str = "") -> None:
+        self.samples.append((target, case_id, elapsed, command_verb(command)))
         if diffs:
             self.failed += 1
             joined = "; ".join(diffs)
             self.failures.append(f"[{target}] {case_id}: {joined}")
-            print(f"FAIL [{target}] {case_id}: {joined}")
+            self._say(f"FAIL [{target}] {case_id}: {joined}")
         else:
             self.passed += 1
-            print(f"ok   [{target}] {case_id}")
+            self._say(f"ok   [{target}] {case_id}")
+
+    def note_target_wall(self, target: str, seconds: float) -> None:
+        """Add a target's whole-run wall time.
+
+        Args:
+            target (str): target id.
+            seconds (float): wall time for opening, running and cleaning it up.
+        """
+        self.target_wall[target] = self.target_wall.get(target, 0.0) + seconds
+
+    def absorb(self, other: "Report") -> None:
+        self.passed += other.passed
+        self.failed += other.failed
+        self.failures.extend(other.failures)
+        self.samples.extend(other.samples)
+        for target, seconds in other.target_wall.items():
+            self.note_target_wall(target, seconds)
+        for line in other.held:
+            print(line)
 
     def summary(self) -> str:
         return f"{self.passed} passed, {self.failed} failed"
+
+    def profile(self, top: int = 15) -> str:
+        """Where the battery's wall clock goes.
+
+        Local timings do not carry to CI, so this reports from inside the
+        CI job itself.
+
+        Args:
+            top (int): how many rows each ranked section prints.
+
+        Returns:
+            str: the formatted profile, empty when nothing was recorded.
+        """
+        if not self.samples:
+            return ""
+        # ``wall`` is the whole target, ``in cases`` is only what the cases
+        # spent inside it. The gap between them is setup and teardown.
+        out = ["", "=== profile: per target ==="]
+        out.append(f"{'target':<22} {'cases':>6} {'wall':>9} {'in cases':>9} "
+                   f"{'p50':>8} {'p90':>8} {'max':>9}")
+        by_target: dict[str, list[float]] = {}
+        for target, _case_id, elapsed, _verb in self.samples:
+            by_target.setdefault(target, []).append(elapsed)
+        # Ranked on ``wall``, the column this table exists to show. Ranking
+        # on the case total instead buried a target whose cost is setup: 100s
+        # of setup and 1s of cases sorted below a target with 2s of cases.
+        for target, raw in sorted(
+                by_target.items(),
+                key=lambda kv: -self.target_wall.get(kv[0], sum(kv[1]))):
+            ordered = sorted(raw)
+            wall = self.target_wall.get(target, sum(raw))
+            out.append(f"{target:<22} {len(raw):>6} {_secs(wall):>9} "
+                       f"{_secs(sum(raw)):>9} "
+                       f"{_secs(_at(ordered, 0.5)):>8} "
+                       f"{_secs(_at(ordered, 0.9)):>8} "
+                       f"{_secs(ordered[-1]):>9}")
+        out += ["", f"=== profile: {top} slowest cases ==="]
+        for target, case_id, elapsed, _verb in sorted(
+                self.samples, key=lambda s: -s[2])[:top]:
+            out.append(f"  {_secs(elapsed):>9}  [{target}] {case_id}")
+        out += ["", f"=== profile: {top} costliest commands ==="]
+        by_verb: dict[str, list[float]] = {}
+        for _target, _case_id, elapsed, verb in self.samples:
+            by_verb.setdefault(verb, []).append(elapsed)
+        for verb, times in sorted(by_verb.items(),
+                                  key=lambda kv: -sum(kv[1]))[:top]:
+            mean = sum(times) / len(times)
+            out.append(f"  {_secs(sum(times)):>9}  x{len(times):<5} "
+                       f"mean {_secs(mean):>8}  {verb}")
+        return "\n".join(out)

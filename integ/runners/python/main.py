@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,7 +38,8 @@ def _emit_or_record(emit: list[dict] | None,
                     err: str,
                     elapsed: float,
                     check_out: str | None = None,
-                    notes: list[str] | None = None) -> None:
+                    notes: list[str] | None = None,
+                    sample: float | None = None) -> None:
     if emit is not None:
         emit.append({
             "target": target_id,
@@ -48,10 +50,17 @@ def _emit_or_record(emit: list[dict] | None,
             "check": check_out,
         })
     elif report is not None:
+        # Two durations, deliberately. ``elapsed`` is the command alone and is
+        # what a case's ``expect.elapsed`` bounds are asserted against, so it
+        # cannot grow. ``sample`` is the whole case, which for the 34 cases
+        # carrying a ``check`` includes a second backend read the command-only
+        # figure left out; without it that work fell into the wall-minus-cases
+        # gap and read as setup.
         report.record(
             target_id, case["id"],
             harness.compare(case, exit_code, out, err, elapsed, check_out,
-                            notes))
+                            notes), elapsed if sample is None else sample,
+            harness.scenario_verb(case))
 
 
 async def run_consistency_case(target: dict, case: dict,
@@ -60,10 +69,15 @@ async def run_consistency_case(target: dict, case: dict,
     policy = ConsistencyPolicy(case["consistency"])
     read_ws, mutate, cleanup = await adapters.open_consistency(target, policy)
     try:
+        started = time.monotonic()
         exit_code, out = await harness.run_scenario(read_ws, mutate,
                                                     case["scenario"])
+        # Measured, not zero: a consistency scenario on s3 or gridfs runs
+        # several remote mutations, and recording it as free dragged the
+        # profile's totals and percentiles down.
+        elapsed = time.monotonic() - started
         _emit_or_record(emit, report, target["id"], case, exit_code, out, "",
-                        0.0)
+                        elapsed)
     finally:
         await cleanup()
 
@@ -110,10 +124,21 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             if "consistency" in case:
                 continue
             bound = harness.bind_mount(case, primary)
+            started = time.monotonic()
             ran = await harness.run_case(ws, bound, reasons)
+            whole = time.monotonic() - started
             exit_code, out, err, elapsed, check_out, notes = ran
-            _emit_or_record(emit, report, target["id"], bound, exit_code, out,
-                            err, elapsed, check_out, notes)
+            _emit_or_record(emit,
+                            report,
+                            target["id"],
+                            bound,
+                            exit_code,
+                            out,
+                            err,
+                            elapsed,
+                            check_out,
+                            notes,
+                            sample=whole)
     finally:
         await cleanup()
     for case in selected:
@@ -132,6 +157,11 @@ async def main() -> None:
     # services it knowingly does not provision. Anything skipping outside
     # this list is a broken job, which is the whole point of --strict.
     parser.add_argument("--allow-skip", dest="allow_skip", default="")
+    parser.add_argument("--target-jobs",
+                        dest="target_jobs",
+                        type=int,
+                        default=1)
+    parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
 
     root = harness.integ_root()
@@ -156,6 +186,7 @@ async def main() -> None:
     ran = 0
     allow_skip = harness.parse_allow_skip(services, args.allow_skip)
     env_skipped: list[str] = []
+    eligible: list[dict] = []
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -171,8 +202,76 @@ async def main() -> None:
             if target.get("service") not in allow_skip:
                 env_skipped.append(f"{target_id} ({', '.join(missing)})")
             continue
-        await run_target(target, cases, root, report, emit)
+        eligible.append(target)
         ran += 1
+
+    # Targets own separate workspaces, so they overlap safely -- except when
+    # two speak to the SAME fake (cli-gh and github, cli-ntn and notion,
+    # qdrant and qdrant-window). Those share a lane and stay sequential; the
+    # rest are bound only by the overall width.
+    if args.target_jobs < 1:
+        print("--target-jobs takes an integer >= 1", file=sys.stderr)
+        sys.exit(2)
+
+    # One worker means the old loop, unchanged. The lane scheduler below
+    # cannot stand in for it: a target waiting on a busy lane lets a later
+    # one from another lane take the worker first, and with `s3` carrying
+    # three targets and `gws` four, the default run would quietly reorder
+    # itself.
+    if args.target_jobs == 1:
+        for target in eligible:
+            started = time.monotonic()
+            await run_target(target, cases, root, report, emit)
+            if report is not None:
+                report.note_target_wall(target["id"],
+                                        time.monotonic() - started)
+    else:
+        semaphore = asyncio.Semaphore(args.target_jobs)
+        lane_locks: dict[str, asyncio.Lock] = {}
+        # One slot per invocation, not per target id. `--target x --target x`
+        # is two runs, and keying by id made both of them write the second
+        # slot and then merged that slot twice, so two runs reported as four.
+        slots: list[tuple[harness.Report | None, list[dict] | None]] = []
+        errors: list[BaseException] = []
+
+        async def run_one(
+                target: dict, lane: str,
+                slot: tuple[harness.Report | None, list[dict] | None]) -> None:
+            slot_report, slot_emit = slot
+            async with lane_locks[lane], semaphore:
+                started = time.monotonic()
+                try:
+                    await run_target(target, cases, root, slot_report,
+                                     slot_emit)
+                except Exception as exc:  # reported once every target is done
+                    errors.append(exc)
+                finally:
+                    if slot_report is not None:
+                        slot_report.note_target_wall(
+                            target["id"],
+                            time.monotonic() - started)
+
+        tasks = []
+        for target in eligible:
+            slot = (
+                None if report is None else harness.Report(stream=False),
+                None if emit is None else [],
+            )
+            slots.append(slot)
+            lane = target.get("service") or f"solo:{target['id']}"
+            lane_locks.setdefault(lane, asyncio.Lock())
+            tasks.append(asyncio.create_task(run_one(target, lane, slot)))
+        if tasks:
+            await asyncio.gather(*tasks)
+        # Merged in declared target order, so a concurrent run prints what a
+        # serial run printed.
+        for slot_report, slot_emit in slots:
+            if report is not None and slot_report is not None:
+                report.absorb(slot_report)
+            if emit is not None and slot_emit is not None:
+                emit.extend(slot_emit)
+        if errors:
+            raise errors[0]
 
     # A skip is one line on stderr and exit 0, so a facet whose service
     # never came up (or whose env var got renamed in the workflow)
@@ -197,6 +296,8 @@ async def main() -> None:
         Path(args.emit).write_text(json.dumps(emit))
         return
     assert report is not None
+    if args.profile:
+        print(report.profile())
     print(f"\n{report.summary()}")
     if report.failed:
         sys.exit(1)
