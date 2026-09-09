@@ -12,45 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-import type * as VersionsModule from './versions.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn(), downloadFile: vi.fn() }
-})
-
-vi.mock('./versions.ts', async () => {
-  const actual = await vi.importActual<typeof VersionsModule>('./versions.ts')
-  return { ...actual, downloadRevision: vi.fn(), captureFileMetadata: vi.fn() }
-})
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
-import type { TokenManager } from '../google/client.ts'
 import { runWithRevisions } from '../../observe/context.ts'
-import * as drive from '../google/drive.ts'
+import type { StubDrive } from './_test_util.ts'
+import { makeGDriveAccessor, stubDrive } from './_test_util.ts'
 import { read, readFileVersioned } from './read.ts'
-import * as versions from './versions.ts'
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+let drive: StubDrive
 
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return makeGDriveAccessor(drive)
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  drive = stubDrive()
+  // The account has no shared drives; readdir enumerates them on every
+  // listing of the mount root, so this is what a bare My Drive answers.
+  drive.listSharedDrives.mockResolvedValue([])
 })
 
 describe('gdrive read auto-bootstrap', () => {
   it('refetches root listing when entry is evicted from index', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
           {
@@ -63,7 +50,7 @@ describe('gdrive read auto-bootstrap', () => {
       }
       throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
     })
-    vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
+    drive.downloadFile.mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -77,7 +64,7 @@ describe('gdrive read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing even after recursion', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
+    drive.listFiles.mockImplementation((opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
           {
@@ -90,7 +77,7 @@ describe('gdrive read auto-bootstrap', () => {
       }
       throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
     })
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
@@ -105,8 +92,8 @@ describe('gdrive read auto-bootstrap', () => {
   // Mirrors test_read_propagates_parent_refresh_failure: only an absent
   // parent may collapse into the operand's ENOENT.
   it('propagates a failed parent listing instead of reporting ENOENT', async () => {
-    vi.mocked(drive.listFiles).mockRejectedValue(new Error('drive unavailable'))
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.listFiles.mockRejectedValue(new Error('drive unavailable'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
@@ -118,7 +105,7 @@ describe('gdrive read auto-bootstrap', () => {
   })
 
   it('throws EISDIR when reading a shared drive root', async () => {
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     await index.put(
@@ -143,32 +130,27 @@ describe('gdrive read auto-bootstrap', () => {
       code: 'EISDIR',
       virtualPath: '/Team Drive',
     })
-    expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
+    expect(drive.downloadFile).not.toHaveBeenCalled()
   })
 })
 
 describe('gdrive versioned reads', () => {
   it('a pinned path reads that revision, not live content', async () => {
     const enc = new TextEncoder()
-    vi.mocked(versions.downloadRevision).mockResolvedValue(enc.encode('pinned'))
+    drive.downloadRevision.mockResolvedValue(enc.encode('pinned'))
     const data = await runWithRevisions(new Map([['/data/f.txt', 'r1']]), () =>
-      readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', 'f.txt'),
+      readFileVersioned(drive, 'f1', '/data/f.txt', 'f.txt'),
     )
     expect(new TextDecoder().decode(data)).toBe('pinned')
-    expect(versions.downloadRevision).toHaveBeenCalledWith(
-      STUB_TOKEN_MANAGER,
-      'f1',
-      'r1',
-      undefined,
-    )
+    expect(drive.downloadRevision).toHaveBeenCalledWith('f1', 'r1', undefined)
     expect(drive.downloadFile).not.toHaveBeenCalled()
   })
 
   it('an unpinned unrecorded read skips the metadata call', async () => {
     const enc = new TextEncoder()
-    vi.mocked(drive.downloadFile).mockResolvedValue(enc.encode('live'))
-    const data = await readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', 'f.txt')
+    drive.downloadFile.mockResolvedValue(enc.encode('live'))
+    const data = await readFileVersioned(drive, 'f1', '/data/f.txt', 'f.txt')
     expect(new TextDecoder().decode(data)).toBe('live')
-    expect(versions.captureFileMetadata).not.toHaveBeenCalled()
+    expect(drive.captureFileMetadata).not.toHaveBeenCalled()
   })
 })

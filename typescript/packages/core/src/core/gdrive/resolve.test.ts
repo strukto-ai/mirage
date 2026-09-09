@@ -12,22 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('./_test_util.ts')
-  return driveModuleMock(actual)
-})
-
-import type { FakeDrive } from './_test_util.ts'
-import {
-  DOC_MIME,
-  makeGDriveAccessor,
-  makeScopedGDriveAccessor,
-  resetFakeDrive,
-} from './_test_util.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { DOC_MIME, FakeDrive, makeGDriveAccessor, makeScopedGDriveAccessor } from './_test_util.ts'
 import { PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
 import {
@@ -42,10 +29,11 @@ const FOLDER_MIME_TEST = 'application/vnd.google-apps.folder'
 
 const ENC = new TextEncoder()
 let fake: FakeDrive
-const accessor = makeGDriveAccessor()
+let accessor: GDriveAccessor
 
 beforeEach(() => {
-  fake = resetFakeDrive()
+  fake = new FakeDrive()
+  accessor = makeGDriveAccessor(fake)
 })
 
 describe('gdrive resolve', () => {
@@ -112,7 +100,7 @@ describe('gdrive resolve with a folder scope', () => {
     const scope = fake.folder('scope')
     const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'))
     fake.add('f.txt', 'root', undefined, ENC.encode('out'))
-    const scoped = makeScopedGDriveAccessor(scope)
+    const scoped = makeScopedGDriveAccessor(scope, fake)
     const node = await resolveKey(scoped, 'f.txt')
     expect(node?.id).toBe(inner)
     expect(await resolveDir(scoped, '', '/')).toEqual([scope, null])
@@ -123,7 +111,7 @@ describe('gdrive resolve with a shared-drive scope', () => {
   it('threads the root driveId and memoizes the lookup', async () => {
     const scope = fake.add('team', 'root', FOLDER_MIME_TEST, new Uint8Array(0), 'd1')
     const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'), 'd1')
-    const scoped = makeScopedGDriveAccessor(scope)
+    const scoped = makeScopedGDriveAccessor(scope, fake)
     expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
     expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
     const node = await resolveKey(scoped, 'f.txt')

@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../utils/errors.ts'
-import { deleteFile, listFiles } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
 
 /**
@@ -36,13 +35,13 @@ async function rmdirImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)
   if (!isFolder(node)) throw enotdir(path)
-  const children = await listFiles(accessor.tokenManager, {
+  const children = await accessor.drive.listFiles({
     folderId: node.id,
     driveId: node.driveId,
     limit: 1,
   })
   if (children.length > 0) throw enotempty(path)
-  await deleteFile(accessor.tokenManager, node.id)
+  await accessor.drive.deleteFile(node.id)
   await invalidateAfterUnlink(path)
 }
 

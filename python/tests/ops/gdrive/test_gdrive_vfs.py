@@ -22,6 +22,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry
 from mirage.ops import Ops
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
 def _make_gdrive_ops() -> tuple[Ops, IndexCacheStore]:
@@ -57,7 +58,7 @@ async def test_read_gdoc_via_filetype_cascade():
 
 
 @pytest.mark.asyncio
-async def test_read_plain_file_falls_through():
+async def test_read_plain_file_falls_through(monkeypatch):
     ops, index = _make_gdrive_ops()
     await index.put(
         "/gdrive/notes.txt",
@@ -68,13 +69,11 @@ async def test_read_plain_file_falls_through():
             remote_time="2026-04-01T00:00:00Z",
             vfs_name="notes.txt",
         ))
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=b"plain content",
-    ):
-        result = await ops.read("/gdrive/notes.txt")
-        assert result == b"plain content"
+    install_drive(
+        monkeypatch,
+        StubDrive(download_file=AsyncMock(return_value=b"plain content")))
+    result = await ops.read("/gdrive/notes.txt")
+    assert result == b"plain content"
 
 
 @pytest.mark.asyncio

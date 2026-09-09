@@ -23,6 +23,7 @@ from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import FileType, PathSpec
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
 @pytest.fixture
@@ -134,31 +135,23 @@ async def test_stat_shared_drive_is_directory(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
+async def test_stat_not_found(accessor, index, monkeypatch):
     idx = await _populate_index(index)
-    with patch(
-            "mirage.core.gdrive.readdir.list_files",
-            new_callable=AsyncMock,
-            return_value=[],
-    ), patch(
-            "mirage.core.gdrive.resolve.list_files",
-            new_callable=AsyncMock,
-            return_value=[],
-    ), patch(
-            "mirage.core.gdrive.resolve.list_shared_drives",
-            new_callable=AsyncMock,
-            return_value=[],
-    ):
-        with pytest.raises(FileNotFoundError):
-            await stat(
-                accessor,
-                PathSpec(resource_path="nonexistent.txt",
-                         virtual="/nonexistent.txt",
-                         directory="/nonexistent.txt"), idx)
+    install_drive(
+        monkeypatch,
+        StubDrive(list_files=AsyncMock(return_value=[]),
+                  list_shared_drives=AsyncMock(return_value=[])))
+    with pytest.raises(FileNotFoundError):
+        await stat(
+            accessor,
+            PathSpec(resource_path="nonexistent.txt",
+                     virtual="/nonexistent.txt",
+                     directory="/nonexistent.txt"), idx)
 
 
 @pytest.mark.asyncio
-async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
+async def test_stat_cache_miss_falls_back_via_readdir(accessor, index,
+                                                      monkeypatch):
     files = [{
         "id": "f99",
         "name": "fresh.pdf",
@@ -166,16 +159,13 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
         "modifiedTime": "2026-04-15T00:00:00.000Z",
         "size": "2048",
     }]
-    with patch(
-            "mirage.core.gdrive.readdir.list_files",
-            new_callable=AsyncMock,
-            return_value=files,
-    ) as mock_list:
-        result = await stat(
-            accessor,
-            PathSpec(resource_path="fresh.pdf",
-                     virtual="/fresh.pdf",
-                     directory="/fresh.pdf"), index)
+    mock_list = AsyncMock(return_value=files)
+    install_drive(monkeypatch, StubDrive(list_files=mock_list))
+    result = await stat(
+        accessor,
+        PathSpec(resource_path="fresh.pdf",
+                 virtual="/fresh.pdf",
+                 directory="/fresh.pdf"), index)
     assert result.name == "fresh.pdf"
     assert result.extra["file_id"] == "f99"
     # binary files download raw, so Drive's size is the rendered length

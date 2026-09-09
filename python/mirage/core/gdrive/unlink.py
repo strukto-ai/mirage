@@ -15,7 +15,6 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
-from mirage.core.google.drive import delete_file
 from mirage.types import PathSpec
 from mirage.utils.errors import eisdir, enoent
 
@@ -31,5 +30,5 @@ async def unlink(accessor: GDriveAccessor, path: PathSpec) -> None:
         raise enoent(virtual)
     if node.is_folder:
         raise eisdir(virtual)
-    await delete_file(accessor.token_manager, node.id)
+    await accessor.drive.delete_file(node.id)
     await invalidate_after_unlink(path)

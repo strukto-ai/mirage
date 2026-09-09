@@ -20,7 +20,7 @@ from mirage.cache.index.warm import entry_or_warm
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.resolve import resolve_key
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, get_file
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
@@ -48,7 +48,7 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
     node = await resolve_key(accessor, key)
     if node is None:
         raise enoent(virtual)
-    item = await get_file(accessor.token_manager, node.id)
+    item = await accessor.drive.get_file(node.id)
     modified = item.get("modifiedTime", "")
     if node.mime_type == FOLDER_MIME:
         return FileStat(name=node.name,

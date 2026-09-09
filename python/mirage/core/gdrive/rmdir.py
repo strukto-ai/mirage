@@ -16,7 +16,6 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
-from mirage.core.google.drive import delete_file, list_files
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent, enotdir, enotempty
 
@@ -51,11 +50,10 @@ async def rmdir(accessor: GDriveAccessor,
         raise enoent(virtual)
     if not node.is_folder:
         raise enotdir(virtual)
-    children = await list_files(accessor.token_manager,
-                                folder_id=node.id,
-                                drive_id=node.drive_id,
-                                limit=1)
+    children = await accessor.drive.list_files(folder_id=node.id,
+                                               drive_id=node.drive_id,
+                                               limit=1)
     if children:
         raise enotempty(path)
-    await delete_file(accessor.token_manager, node.id)
+    await accessor.drive.delete_file(node.id)
     await invalidate_after_unlink(path)

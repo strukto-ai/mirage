@@ -22,9 +22,8 @@ from typing import Any, ParamSpec, TypeVar
 import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import (FOLDER_MIME, MIME_TO_EXT, get_file,
-                                      list_files, list_shared_drives)
+from mirage.core.gdrive.api import DriveApi
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -74,12 +73,11 @@ async def root_context(accessor: GDriveAccessor) -> tuple[str, str | None]:
     Returns:
         tuple[str, str | None]: (root folder id, shared drive id or None).
     """
-    token_manager = accessor.token_manager
-    folder_id = token_manager.config.folder_id
+    folder_id = accessor.token_manager.config.folder_id
     if not folder_id:
         return "root", None
     if not hasattr(accessor, "root_drive_id"):
-        item = await get_file(token_manager, folder_id)
+        item = await accessor.drive.get_file(folder_id)
         accessor.root_drive_id = item.get("driveId")
     return folder_id, accessor.root_drive_id
 
@@ -153,7 +151,7 @@ def node_from_item(item: dict[str, Any], drive_id: str | None) -> DriveNode:
 
 
 async def resolve_segment(
-    token_manager: TokenManager,
+    drive: DriveApi,
     parent_id: str,
     segment: str,
     drive_id: str | None,
@@ -162,7 +160,7 @@ async def resolve_segment(
     """Resolve one path segment inside a parent folder.
 
     Args:
-        token_manager (TokenManager): OAuth2 token manager.
+        drive (DriveApi): the accessor's Drive door.
         parent_id (str): parent folder ID.
         segment (str): vfs path segment.
         drive_id (str | None): shared drive scope, if any.
@@ -170,18 +168,17 @@ async def resolve_segment(
             shared drive name is also a valid directory.
     """
     for name, mime in query_candidates(segment):
-        matches = await list_files(token_manager,
-                                   folder_id=parent_id,
-                                   drive_id=drive_id,
-                                   name=name,
-                                   mime_type=mime)
+        matches = await drive.list_files(folder_id=parent_id,
+                                         drive_id=drive_id,
+                                         name=name,
+                                         mime_type=mime)
         if matches:
             return node_from_item(matches[0], drive_id)
     if at_root:
         # Shared Drive enumeration is best-effort, mirroring readdir: a
         # missing scope must not break resolution of My Drive paths.
         try:
-            shared = await list_shared_drives(token_manager)
+            shared = await drive.list_shared_drives()
         except Exception:
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared = []
@@ -201,14 +198,14 @@ async def resolve_key(accessor: GDriveAccessor, key: str) -> DriveNode | None:
         accessor (GDriveAccessor): backend accessor.
         key (str): mount-relative path ("a/b/c"); "" is the mount root.
     """
-    token_manager = accessor.token_manager
+    drive = accessor.drive
     parent_id, drive_id = await root_context(accessor)
     node: DriveNode | None = None
     segments = [s for s in key.split("/") if s]
     for i, segment in enumerate(segments):
         # Shared drive names are only directories at the real Drive root,
         # never inside a folder-scoped mount.
-        node = await resolve_segment(token_manager,
+        node = await resolve_segment(drive,
                                      parent_id,
                                      segment,
                                      drive_id,

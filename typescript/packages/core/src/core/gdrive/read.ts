@@ -19,11 +19,9 @@ import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec } from '../../types.ts'
 import { record, recordingActive, revisionFor, startOp } from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
-import { downloadFile } from '../google/drive.ts'
-import { captureFileMetadata, downloadRevision } from './versions.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
-import type { TokenManager } from '../google/client.ts'
+import type { DriveApi } from './api.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
@@ -34,7 +32,7 @@ import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 // (fingerprint, revision) so snapshots can pin it later, mirroring the
 // msgraph read_item.
 export async function readFileVersioned(
-  tm: TokenManager,
+  drive: DriveApi,
   fileId: string,
   virtual: string,
   label: string,
@@ -48,12 +46,12 @@ export async function readFileVersioned(
   let revision: string | null = pinned
   let data: Uint8Array
   if (pinned !== null) {
-    data = await downloadRevision(tm, fileId, pinned, window)
+    data = await drive.downloadRevision(fileId, pinned, window)
   } else if (recordingActive()) {
-    ;[fingerprint, revision] = await captureFileMetadata(tm, fileId)
-    data = await downloadFile(tm, fileId, window)
+    ;[fingerprint, revision] = await drive.captureFileMetadata(fileId)
+    data = await drive.downloadFile(fileId, window)
   } else {
-    data = await downloadFile(tm, fileId, window)
+    data = await drive.downloadFile(fileId, window)
   }
   record('read', label, 'gdrive', data.length, timer, { fingerprint, revision })
   return data
@@ -101,7 +99,7 @@ export async function read(
     return sliceWindow(await readSpreadsheet(accessor.tokenManager, entry.id), offset, size)
   if (rt === 'gdrive/gslide')
     return sliceWindow(await readPresentation(accessor.tokenManager, entry.id), offset, size)
-  return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, key, offset, size)
+  return readFileVersioned(accessor.drive, entry.id, path.virtual, key, offset, size)
 }
 
 export async function* stream(

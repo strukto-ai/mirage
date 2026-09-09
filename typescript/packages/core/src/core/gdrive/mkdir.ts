@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { eexist, enotdir } from '../../utils/errors.ts'
-import { createFolder } from '../google/drive.ts'
 import {
   eaccesOnDenied,
   isFolder,
@@ -29,7 +28,7 @@ import {
 
 async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = false): Promise<void> {
   const key = path.resourcePath
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   if (key === '') {
     if (parents) return
     throw eexist(path)
@@ -39,7 +38,7 @@ async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = fal
     if (node !== null) throw eexist(path)
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    await createFolder(tm, basename, parentId)
+    await drive.createFolder(basename, parentId)
     await invalidateAfterWrite(path)
     return
   }
@@ -49,9 +48,15 @@ async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = fal
     ? path.virtual.slice(0, path.virtual.length - key.length).replace(/\/$/, '')
     : ''
   for (const [i, segment] of segments.entries()) {
-    let node = await resolveSegment(tm, parentId, segment, driveId, i === 0 && parentId === 'root')
+    let node = await resolveSegment(
+      drive,
+      parentId,
+      segment,
+      driveId,
+      i === 0 && parentId === 'root',
+    )
     if (node === null) {
-      node = nodeFromItem(await createFolder(tm, segment, parentId), driveId)
+      node = nodeFromItem(await drive.createFolder(segment, parentId), driveId)
       // Every created level makes its parent's cached listing stale, not
       // just the leaf's; a later warm-through resolution of the chain
       // would otherwise ENOENT on the stale ancestor.

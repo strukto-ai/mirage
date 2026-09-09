@@ -23,6 +23,7 @@ from mirage.core.gdrive.read import read
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
+from tests.fixtures.gdrive_stub import StubDrive, install_drive
 
 
 @pytest.fixture
@@ -125,7 +126,7 @@ async def test_read_gslide(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_regular(accessor, index):
+async def test_read_regular(accessor, index, monkeypatch):
     await index.put(
         "/photo.png",
         IndexEntry(
@@ -136,14 +137,11 @@ async def test_read_regular(accessor, index):
             vfs_name="photo.png",
         ))
     img_bytes = b"\x89PNG\r\n"
-    with patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=img_bytes,
-    ):
-        result = await read(
-            accessor,
-            PathSpec(resource_path="photo.png",
-                     virtual="/photo.png",
-                     directory="/photo.png"), index)
-        assert result == img_bytes
+    install_drive(monkeypatch,
+                  StubDrive(download_file=AsyncMock(return_value=img_bytes)))
+    result = await read(
+        accessor,
+        PathSpec(resource_path="photo.png",
+                 virtual="/photo.png",
+                 directory="/photo.png"), index)
+    assert result == img_bytes

@@ -17,7 +17,6 @@ import pytest
 from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
-import mirage.core.gdrive.resolve as resolve_mod
 from mirage.core.gdrive.resolve import (DriveNode, drive_target_name,
                                         eacces_on_denied, query_candidates,
                                         resolve_dir, resolve_key,
@@ -141,12 +140,14 @@ async def test_root_context_memoizes_drive_lookup(fake_drive, scoped_accessor,
     accessor = scoped_accessor(scope)
     calls = 0
 
-    async def counting_get_file(token_manager, file_id):
+    real_get_file = fake_drive.get_file
+
+    async def counting_get_file(file_id):
         nonlocal calls
         calls += 1
-        return await fake_drive.get_file(token_manager, file_id)
+        return await real_get_file(file_id)
 
-    monkeypatch.setattr(resolve_mod, "get_file", counting_get_file)
+    monkeypatch.setattr(fake_drive, "get_file", counting_get_file)
     assert await resolve_dir(accessor, "", "/") == (scope, "d1")
     assert await resolve_dir(accessor, "", "/") == (scope, "d1")
     assert calls == 1

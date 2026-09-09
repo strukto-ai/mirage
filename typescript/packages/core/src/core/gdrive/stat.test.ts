@@ -26,21 +26,17 @@ vi.mock('./resolve.ts', async () => {
   return { ...actual, resolveKey: vi.fn(actual.resolveKey) }
 })
 
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { FileType, PathSpec } from '../../types.ts'
-import type { TokenManager } from '../google/client.ts'
+import { makeGDriveAccessor, stubDrive } from './_test_util.ts'
 import * as readdirModule from './readdir.ts'
 import * as resolveModule from './resolve.ts'
 import { stat } from './stat.ts'
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
-
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return makeGDriveAccessor(stubDrive())
 }
 
 describe('gdrive stat shared drives', () => {

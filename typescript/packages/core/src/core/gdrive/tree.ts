@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import type { DriveFile } from '../google/drive.ts'
-import { FOLDER_MIME, MIME_TO_EXT, listFiles } from '../google/drive.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import { resolveDir } from './resolve.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -37,7 +37,7 @@ export async function* iterTree(
   const stack: [string, string, string | null][] = [[base, folderId, driveId]]
   for (let head = stack.shift(); head !== undefined; head = stack.shift()) {
     const [rel, fid, did] = head
-    const children = await listFiles(accessor.tokenManager, { folderId: fid, driveId: did })
+    const children = await accessor.drive.listFiles({ folderId: fid, driveId: did })
     children.sort((a, b) => {
       const an = vfsName(a)
       const bn = vfsName(b)
