@@ -19,6 +19,7 @@ import { NO_FOLLOW_OPS, type NamespaceLinks } from './config.ts'
 import type { OpKwargs } from './registry.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
+import { type Clock, SystemClock } from '../utils/clock.ts'
 import { exdev, isMissingPath } from '../utils/errors.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 
@@ -62,6 +63,11 @@ export class Ops {
   // for its symlink surface.
   readonly links: NamespaceLinks | null
   private readonly ownerOf: OwnerOf
+  // The workspace's clock, so every op this facade times and stamps
+  // reads the same one. It is also the clock a kernel mount's core
+  // takes, since the core is handed this facade and nothing else from
+  // the workspace.
+  private readonly clockRef: Clock
   /**
    * The op ledger: every facade op lands here, and the executor
    * appends each shell line's ops too, so this is the one
@@ -74,11 +80,18 @@ export class Ops {
     sink: OpSink | null = null,
     links: NamespaceLinks | null = null,
     ownerOf: OwnerOf = () => null,
+    clock: Clock | null = null,
   ) {
     this.dispatch = dispatch
     this.sink = sink
     this.links = links
     this.ownerOf = ownerOf
+    this.clockRef = clock ?? new SystemClock()
+  }
+
+  /** The clock this facade times ops with. */
+  get clock(): Clock {
+    return this.clockRef
   }
 
   /** Ops that moved bytes over the network, in arrival order. */
@@ -130,7 +143,7 @@ export class Ops {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    const timer = startOp()
+    const timer = startOp(this.clockRef)
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
     // both follows, so an op meant for a link entry itself (chmod -h, a
     // guest's lchown) still records the link's own path.

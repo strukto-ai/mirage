@@ -35,6 +35,7 @@ from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.types import ContentType, FileType
+from mirage.utils.clock import ManualClock
 from mirage.workspace.snapshot.keys import (CacheKey, MountKey,
                                             ResourceStateKey, StateKey)
 from mirage.workspace.snapshot.state import (apply_state_dict,
@@ -589,3 +590,40 @@ async def test_to_state_dict_carries_no_entries_for_a_redis_cache():
         assert state[StateKey.CACHE][CacheKey.ENTRIES] == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_restored_cache_entry_ages_on_the_injected_clock():
+    # A snapshot stores cached_at and ttl as data, so the restored
+    # entry's expiry is decided by the clock the restoring workspace
+    # was given, never by the wall clock of the run that took it.
+    src = Workspace({"/": RAMResource()},
+                    mode=MountMode.WRITE,
+                    clock=ManualClock(start=1000.0))
+    await src._cache.set("/c.txt", b"cached", ttl=10)
+    state = await to_state_dict(src)
+
+    clock = ManualClock(start=1000.0)
+    restored = await Workspace.from_state(state, clock=clock)
+    entry = restored._cache._entries["/c.txt"]
+    assert entry.cached_at == 1000
+    assert entry.ttl == 10
+    assert await restored._cache.exists("/c.txt") is True
+    clock.advance(9)
+    assert await restored._cache.exists("/c.txt") is True
+    clock.advance(1)
+    assert await restored._cache.exists("/c.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_the_workspace_clock():
+    # A copy reads time the way its origin does, so a TTL stamped on the
+    # copy still expires on the clock the origin was given.
+    clock = ManualClock(start=1000.0)
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE, clock=clock)
+    copied = await ws.copy()
+    await copied._cache.set("/c.txt", b"cached", ttl=10)
+    clock.advance(9)
+    assert await copied._cache.exists("/c.txt") is True
+    clock.advance(1)
+    assert await copied._cache.exists("/c.txt") is False

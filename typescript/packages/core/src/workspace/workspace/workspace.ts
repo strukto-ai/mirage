@@ -95,6 +95,7 @@ import {
 } from '../../policy/profile.ts'
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
@@ -131,6 +132,15 @@ export class Workspace {
   readonly jobTable: JobTable
   readonly agentId: string | null
   readonly cache: FileCache & Resource
+  /**
+   * The one clock this workspace and its components read time from: the
+   * file cache (entry TTLs), the op facade (op durations and stamps)
+   * and, through that facade, a kernel mount's prefetch TTL. Private:
+   * the injection surface is the constructor option, and a reader that
+   * needs the clock reaches it through the facade that uses it.
+   * Mirrors python's `Workspace._clock`.
+   */
+  private readonly clock: Clock
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
@@ -189,6 +199,12 @@ export class Workspace {
         resource.setIndex?.(options.index)
       }
     }
+    // The workspace owns one clock and hands it to the components that
+    // measure elapsed time: the file cache (entry TTLs), the op facade
+    // (op durations and stamps) and, through that facade, a kernel
+    // mount's prefetch TTL. Undefined keeps the real clock, so a
+    // deployment that never mentions time behaves as before.
+    this.clock = options.clock ?? new SystemClock()
     this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
@@ -316,7 +332,7 @@ export class Workspace {
     }
     this.observer = new Observer(stores.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
-    this.cache = buildFileCache(options.cache, options.cacheLimit)
+    this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock)
     this.registry.attachFileCache(this.cache)
     // Only an explicit agentId claims the workspace user; a bare launch
     // adopts whatever identity the namespace store holds.
@@ -395,6 +411,7 @@ export class Workspace {
         const mount = this.registry.tryMountFor(path)
         return mount === null ? null : { prefix: mount.prefix, kind: mount.resource.kind }
       },
+      this.clock,
     )
     this.runtimes = new Runtimes({
       registry: this.registry,
@@ -1347,6 +1364,9 @@ export class Workspace {
       // instance, and without the block the copy would answer the
       // first read with "unknown secrets source".
       secrets: options.secrets ?? this.declaredSecretSources,
+      // A copy reads time the way its origin does, so a restored
+      // entry's TTL is measured on the same timeline it was stamped on.
+      clock: options.clock ?? this.clock,
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId

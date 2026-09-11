@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { CacheType } from '../../cache/file/config.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { ManualClock, SystemClock } from '../../utils/clock.ts'
 import { Workspace } from './workspace.ts'
 import { buildFileCache, registerFileCacheStore } from './cache.ts'
 
@@ -50,6 +51,45 @@ describe('the workspace cache', () => {
     const ws = new Workspace({}, { cache: { type: CacheType.RAM, limit: 4096 } })
     expect(ws.cache).toBeInstanceOf(RAMFileCacheStore)
     expect(ws.cache.cacheLimit).toBe(4096)
+  })
+
+  it('hands one clock to the op facade', () => {
+    // The facade is the reader a mount core inherits from, so this is
+    // the one clock handoff a caller can observe.
+    const clock = new ManualClock()
+    const ws = new Workspace({}, { clock })
+    expect(ws.fs.clock).toBe(clock)
+  })
+
+  it('runs on the real clock when given none', () => {
+    expect(new Workspace({}).fs.clock).toBeInstanceOf(SystemClock)
+  })
+
+  it('expires a cached entry on its own clock', async () => {
+    const clock = new ManualClock(1000)
+    const ws = new Workspace({}, { clock })
+    await ws.cache.set('/f.txt', new TextEncoder().encode('hello'), { ttl: 10 })
+    clock.advance(9)
+    expect(await ws.cache.exists('/f.txt')).toBe(true)
+    clock.advance(1)
+    expect(await ws.cache.exists('/f.txt')).toBe(false)
+  })
+
+  it('a built cache ages entries on the given clock', async () => {
+    const clock = new ManualClock(1000)
+    const cache = buildFileCache(undefined, 1024, clock)
+    await cache.set('/f.txt', new TextEncoder().encode('hello'), { ttl: 10 })
+    clock.advance(10)
+    expect(await cache.exists('/f.txt')).toBe(false)
+  })
+
+  it('a cache config does not lose the clock', async () => {
+    const clock = new ManualClock(1000)
+    const cache = buildFileCache({ type: CacheType.RAM, limit: 2048 }, 1024, clock)
+    expect(cache.cacheLimit).toBe(2048)
+    await cache.set('/f.txt', new TextEncoder().encode('hello'), { ttl: 10 })
+    clock.advance(10)
+    expect(await cache.exists('/f.txt')).toBe(false)
   })
 
   it('closes the store it built', async () => {

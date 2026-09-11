@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.utils.clock import ManualClock
 
 
 @pytest.mark.asyncio
@@ -123,3 +125,56 @@ async def test_evict_prefix_reclaims_the_evicted_bytes():
     await cache.evict_prefix("/data/")
     assert cache.cache_size == 2
     assert cache.cache_entries == 1
+
+
+@pytest.mark.asyncio
+async def test_ttl_boundary_is_exact_on_an_injected_clock():
+    # The boundary the seam exists for: probed at ttl-1 and at ttl with
+    # no sleep, no real time, and nothing patched globally.
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/f.txt", b"hello", ttl=10)
+    clock.advance(9)
+    assert await cache.exists("/f.txt") is True
+    assert await cache.get("/f.txt") == b"hello"
+    clock.advance(1)
+    assert await cache.exists("/f.txt") is False
+    assert await cache.get("/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_expired_entry_is_dropped_on_read():
+    clock = ManualClock(start=0.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/f.txt", b"hello", ttl=5)
+    clock.advance(5)
+    assert await cache.get("/f.txt") is None
+    assert cache.cache_size == 0
+    assert cache.cache_entries == 0
+
+
+@pytest.mark.asyncio
+async def test_add_replaces_an_entry_the_clock_expired():
+    clock = ManualClock(start=0.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/f.txt", b"old", ttl=5)
+    assert await cache.add("/f.txt", b"new") is False
+    clock.advance(5)
+    assert await cache.add("/f.txt", b"new") is True
+    assert await cache.get("/f.txt") == b"new"
+
+
+@pytest.mark.asyncio
+async def test_cached_at_is_stamped_by_the_injected_clock():
+    clock = ManualClock(start=4242.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/f.txt", b"hello")
+    assert cache._entries["/f.txt"].cached_at == 4242
+
+
+@pytest.mark.asyncio
+async def test_default_store_stamps_from_the_real_clock():
+    cache = RAMFileCacheStore(cache_limit="1MB")
+    await cache.set("/f.txt", b"hello")
+    assert cache._entries["/f.txt"].cached_at == pytest.approx(time.time(),
+                                                               abs=5)

@@ -16,6 +16,7 @@ import { CacheType, type CacheConfig, type RedisCacheConfig } from '../../cache/
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Resource } from '../../resource/base.ts'
+import type { Clock } from '../../utils/clock.ts'
 
 export type FileCacheStore = FileCache & Resource
 export type FileCacheFactory = (config: RedisCacheConfig) => FileCacheStore
@@ -45,10 +46,14 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  * @param cache the cache config; undefined keeps the RAM store sized by
  *   `cacheLimit`.
  * @param cacheLimit the size knob used only when no config is given.
+ * @param clock the workspace's clock, handed to the store that ages
+ *   entries itself. The redis store takes none: its TTLs are
+ *   server-side `EXPIRE` and it reads no time here.
  */
 export function buildFileCache(
   cache: CacheConfig | undefined,
   cacheLimit: string | number = '512MB',
+  clock?: Clock,
 ): FileCacheStore {
   // Every CacheConfig field is optional, so a built store is
   // structurally assignable to it and would slip through to the RAM
@@ -75,5 +80,6 @@ export function buildFileCache(
   return new RAMFileCacheStore({
     limit: cache?.limit ?? cacheLimit,
     maxDrainBytes: cache?.maxDrainBytes ?? null,
+    ...(clock !== undefined ? { clock } : {}),
   })
 }

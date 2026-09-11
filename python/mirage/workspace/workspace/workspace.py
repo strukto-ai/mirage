@@ -53,6 +53,7 @@ from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           parse_mount_mode)
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
@@ -133,7 +134,14 @@ class Workspace:
         | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
+        clock: Clock | None = None,
     ) -> None:
+        # The workspace owns one clock and hands it to the components
+        # that measure elapsed time: the file cache (entry TTLs), the
+        # op facade (op durations and stamps) and, through that facade,
+        # a kernel mount's prefetch TTL. None keeps the real clock, so
+        # a deployment that never mentions time behaves as before.
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._registry = MountRegistry()
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
@@ -164,7 +172,8 @@ class Workspace:
                                         session_store)
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
-        self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
+        self._cache: FileCacheMixin = build_file_cache(cache, cache_limit,
+                                                       self._clock)
         self._index_config = index
         self._closed = False
         self._closing = False
@@ -289,7 +298,8 @@ class Workspace:
                         agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
-                        dispatch=self._dispatcher.dispatch)
+                        dispatch=self._dispatcher.dispatch,
+                        clock=self._clock)
         self._kernel_mounts = KernelMounts(self._ops, self._session_mgr)
         # Held only while the workspace is a context manager; set by
         # lifecycle.patch_process. Declared here because the pair was
@@ -811,15 +821,15 @@ class Workspace:
         await _write_snapshot(self, target, compress=compress)
 
     @classmethod
-    async def load(
-            cls,
-            source,
-            *,
-            resources: dict[str, Any] | None = None,
-            clis: CLIOverrides | None = None,
-            secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None,
-            drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
+    async def load(cls,
+                   source,
+                   *,
+                   resources: dict[str, Any] | None = None,
+                   clis: CLIOverrides | None = None,
+                   secrets: Mapping[str, SecretSource | Mapping[str, Any]]
+                   | None = None,
+                   drift_policy: DriftPolicy = DriftPolicy.STRICT,
+                   clock: Clock | None = None) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
         For every recorded read:
@@ -858,23 +868,29 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
+            clock: the clock the restored workspace reads time through.
+                A snapshot stores an entry's `cached_at` and `ttl` as
+                data, so a restored entry ages against this clock, not
+                against the wall clock of the run that took it.
         """
         return await cls.from_state(read_tar(source),
                                     resources=resources,
                                     clis=clis,
                                     secrets=secrets,
-                                    drift_policy=drift_policy)
+                                    drift_policy=drift_policy,
+                                    clock=clock)
 
     @classmethod
-    async def from_state(
-            cls,
-            state: dict[str, Any],
-            *,
-            resources: dict[str, Any] | None = None,
-            clis: CLIOverrides | None = None,
-            secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None,
-            drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
+    async def from_state(cls,
+                         state: dict[str, Any],
+                         *,
+                         resources: dict[str, Any] | None = None,
+                         clis: CLIOverrides | None = None,
+                         secrets: Mapping[str,
+                                          SecretSource | Mapping[str, Any]]
+                         | None = None,
+                         drift_policy: DriftPolicy = DriftPolicy.STRICT,
+                         clock: Clock | None = None) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
         The in-process inverse of ``to_state_dict``: build the mounts,
@@ -898,11 +914,13 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
+            clock: the clock the restored workspace reads time through.
         """
         ws = await cls._from_state(state,
                                    resources=resources,
                                    clis=clis,
-                                   secrets=secrets)
+                                   secrets=secrets,
+                                   clock=clock)
         install_fingerprints(ws,
                              state.get(StateKey.FINGERPRINTS) or [],
                              drift_policy)
@@ -929,25 +947,27 @@ class Workspace:
         return await type(self)._from_state(state,
                                             resources=resources,
                                             clis=reusable_clis(self),
-                                            secrets=self._declared_sources)
+                                            secrets=self._declared_sources,
+                                            clock=self._clock)
 
     @classmethod
-    async def _from_state(
-        cls,
-        state: dict[str, Any],
-        *,
-        resources: dict[str, Any] | None = None,
-        clis: CLIOverrides | None = None,
-        secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None
-    ) -> "Workspace":
+    async def _from_state(cls,
+                          state: dict[str, Any],
+                          *,
+                          resources: dict[str, Any] | None = None,
+                          clis: CLIOverrides | None = None,
+                          secrets: Mapping[str,
+                                           SecretSource | Mapping[str, Any]]
+                          | None = None,
+                          clock: Clock | None = None) -> "Workspace":
         args = build_mount_args(state, resources, clis)
         ws = cls(args.mount_args,
                  consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
                  clis=args.clis,
-                 secrets=secrets)
+                 secrets=secrets,
+                 clock=clock)
         if resources:
             ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)

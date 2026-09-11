@@ -14,7 +14,9 @@
 
 /* eslint-disable @typescript-eslint/require-await */
 import { describe, expect, it } from 'vitest'
+import { ManualClock, SystemClock } from '../utils/clock.ts'
 import {
+  finishRecord,
   record,
   recordStream,
   revisionFor,
@@ -214,5 +216,39 @@ describe('revisions context', () => {
     await runWithRevisions(new Map([['/s3/a', 'v1']]), async () => {
       expect(revisionFor('/s3/a')).toBe('v1')
     })
+  })
+})
+
+describe('OpTimer clock', () => {
+  it('reads duration from the injected clock', () => {
+    const clock = new ManualClock()
+    const timer = startOp(clock)
+    expect(timer.elapsedMs).toBe(0)
+    clock.advance(2.5)
+    expect(timer.elapsedMs).toBe(2500)
+  })
+
+  it('defaults to the system clock', () => {
+    expect(startOp().clock).toBeInstanceOf(SystemClock)
+  })
+
+  it('finishRecord stamps the timestamp from the timer clock', () => {
+    const clock = new ManualClock(1700)
+    const timer = startOp(clock)
+    clock.advance(3)
+    const rec = finishRecord('read', '/a', 's3', 4, timer)
+    expect(rec.durationMs).toBe(3000)
+    expect(rec.timestamp).toBe(1_703_000)
+  })
+
+  it('a recorded op carries the injected duration', async () => {
+    const clock = new ManualClock(0)
+    const [, records] = await runWithRecording(async () => {
+      const timer = startOp(clock)
+      clock.advance(1.25)
+      record('read', '/a', 's3', 1, timer)
+      return Promise.resolve(null)
+    })
+    expect(records.map((r) => r.durationMs)).toEqual([1250])
   })
 })
