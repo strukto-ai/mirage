@@ -1,9 +1,10 @@
 import pytest
 
 from mirage.policy.errors import PolicyError
+from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import match_op, rule_scope
-from mirage.policy.types import (AdmissionRules, CommandRule, HideReason,
-                                 OpsContext)
+from mirage.policy.types import (AdmissionRules, CommandContext, CommandRule,
+                                 HideReason, OpsContext, Outcome)
 from mirage.shell.variable import VarAttr
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, PathSpec,
                           ShowEntry, ShownPaths)
@@ -14,8 +15,8 @@ from mirage.policy.profile import (  # isort: skip
     CommandsBlock, MountCommandsBlock, PathsBlock, ProfileMount,
     SessionProfile, VarsBlock)
 from mirage.workspace.session.resolve import (  # isort: skip
-    apply_profile, compile_commands, compile_profile, narrow, resolve_profile,
-    with_inline)
+    apply_profile, compile_commands, compile_profile, narrow, narrow_profile,
+    narrow_restored, narrowing_of, resolve_profile, with_inline)
 
 PROFILES = {
     "default":
@@ -409,3 +410,768 @@ def test_compile_profile_carries_the_name_and_narrow_stamps_it():
     assert compile_profile(None).profile is None
     narrow(session, compile_profile(None))
     assert session.profile is None
+
+
+def _restored(**fields) -> Session:
+    return Session(session_id="table", **fields)
+
+
+def test_narrow_restored_takes_the_weaker_mode_over_both_key_sets():
+    session = Session(session_id="s", mount_modes={"/a": MountMode.WRITE})
+    narrow_restored(
+        session,
+        _restored(mount_modes={
+            "/a/": MountMode.READ,
+            "b": MountMode.EXEC
+        }))
+    assert session.mount_modes == {"/a": MountMode.READ, "/b": MountMode.EXEC}
+    # A table narrowing nothing leaves the session's own map in place.
+    modes = session.mount_modes
+    narrow_restored(session, _restored(mount_modes={"/a": MountMode.EXEC}))
+    assert session.mount_modes is modes
+
+
+def test_narrow_restored_unions_hides_in_order_without_repeats():
+    session = Session(session_id="s",
+                      hidden_paths=HiddenPaths(paths=("/x", ),
+                                               patterns=("*.pem", )),
+                      hidden_vars=HiddenVars(names=("A", )),
+                      hide_reasons=(HideReason(patterns=("/x", ),
+                                               reason="sealed"), ))
+    narrow_restored(
+        session,
+        _restored(hidden_paths=HiddenPaths(paths=("/y", "/x"),
+                                           patterns=("*.key", "*.pem")),
+                  hidden_vars=HiddenVars(names=("A", "B"),
+                                         patterns=("AWS_*", )),
+                  hide_reasons=(HideReason(patterns=("/x", ), reason="sealed"),
+                                HideReason(patterns=("/y", ),
+                                           reason="private"))))
+    assert session.hidden_paths == HiddenPaths(paths=("/x", "/y"),
+                                               patterns=("*.pem", "*.key"))
+    assert session.hidden_vars == HiddenVars(names=("A", "B"),
+                                             patterns=("AWS_*", ))
+    assert session.hide_reasons == (HideReason(patterns=("/x", ),
+                                               reason="sealed"),
+                                    HideReason(patterns=("/y", ),
+                                               reason="private"))
+    # One side stating nothing takes the other's spec as it is.
+    bare = Session(session_id="bare")
+    narrow_restored(bare, _restored(hidden_vars=HiddenVars(names=("T", ))))
+    assert bare.hidden_vars == HiddenVars(names=("T", ))
+    assert bare.hidden_paths is None
+
+
+def test_narrow_restored_intersects_allow_lists_and_appends_rules():
+    deny_rm = CommandRule(reason="no", commands=("rm", ))
+    deny_mv = CommandRule(reason="no", commands=("mv", ))
+    session = Session(session_id="s",
+                      commands=AdmissionRules(allow=("git *", "cat"),
+                                              deny=(deny_rm, )))
+    narrow_restored(
+        session,
+        _restored(commands=AdmissionRules(
+            allow=("git push", "cat", "ls"),
+            ask=(CommandRule(reason="ask", commands=("git", )), ),
+            deny=(deny_rm, deny_mv))))
+    assert session.commands == AdmissionRules(allow=("git push", "cat"),
+                                              ask=(CommandRule(
+                                                  reason="ask",
+                                                  commands=("git", )), ),
+                                              deny=(deny_rm, deny_mv))
+    # A list only one side states stands: it installs only what it lists.
+    one = Session(session_id="one")
+    narrow_restored(one, _restored(commands=AdmissionRules(allow=("ls", ))))
+    assert one.commands == AdmissionRules(allow=("ls", ))
+    other = Session(session_id="other",
+                    commands=AdmissionRules(allow=("ls", )))
+    narrow_restored(other,
+                    _restored(commands=AdmissionRules(deny=(deny_rm, ))))
+    assert other.commands == AdmissionRules(allow=("ls", ), deny=(deny_rm, ))
+
+
+def test_narrow_restored_keeps_a_show_only_as_both_sides_allow_it():
+    session = Session(
+        session_id="s",
+        mount_modes={"/repo": MountMode.READ},
+        hidden_paths=HiddenPaths(paths=("/repo/sealed", )),
+        shown_paths=ShownPaths(entries=(
+            ShowEntry(path="/repo/sealed/public", mode=None),
+            ShowEntry(path="/repo/sealed/docs", mode=MountMode.WRITE),
+            ShowEntry(path="/repo/build", mode=None),
+        )))
+    narrow_restored(
+        session,
+        _restored(shown_paths=ShownPaths(entries=(
+            ShowEntry(path="/repo/sealed/public", mode=None),
+            ShowEntry(path="/repo/sealed/docs", mode=MountMode.READ),
+            ShowEntry(path="/repo/sealed/other", mode=None),
+            ShowEntry(path="/repo/out", mode=MountMode.EXEC),
+        ))))
+    assert session.shown_paths == ShownPaths(entries=(
+        # Both state it, neither with a mode: list-form on both sides.
+        ShowEntry(path="/repo/sealed/public", mode=None),
+        # Both state a mode: the weaker.
+        ShowEntry(path="/repo/sealed/docs", mode=MountMode.READ),
+        # Only the session states it and nothing hides it: kept.
+        ShowEntry(path="/repo/build", mode=None),
+        # Only the table states it, nothing hides it, and its mode is
+        # held under the session's cap at /repo.
+        ShowEntry(path="/repo/out", mode=MountMode.READ),
+        # /repo/sealed/other, only the table's, re-opens a hidden
+        # subtree and is dropped.
+    ))
+
+
+def test_narrow_restored_is_the_identity_for_a_table_from_the_same_document():
+    compiled = compile_profile(
+        SessionProfile(mounts={
+            "/repo":
+            ProfileMount(mode=MountMode.WRITE,
+                         paths=PathsBlock(hide=("/repo/sealed", ),
+                                          show={"/repo/sealed/public": "r"},
+                                          reasons=(HideReason(
+                                              patterns=("/repo/sealed", ),
+                                              reason="sealed"), )),
+                         commands=MountCommandsBlock(ask=("git push", )))
+        },
+                       vars=VarsBlock(hide=("AWS_*", )),
+                       commands=CommandsBlock(allow=("git *", "ls", "rm"),
+                                              deny=("rm", ))), "named")
+    session = Session(session_id="s")
+    narrow(session, compiled)
+    table = Session.from_dict(session.to_dict())
+    narrow_restored(session, table)
+    assert session.commands is compiled.commands
+    assert session.hidden_paths is compiled.hidden_paths
+    assert session.hidden_vars is compiled.hidden_vars
+    assert session.shown_paths is compiled.shown_paths
+    assert session.hide_reasons is compiled.hide_reasons
+    assert session.mount_modes == compiled.mount_modes
+    assert session.to_dict() == table.to_dict()
+
+
+def test_narrow_restored_keeps_the_sessions_program_and_name():
+    target = compile_profile(SessionProfile(cwd="/x"), "target")
+    session = Session(session_id="s")
+    narrow(session, target)
+    table = Session(session_id="s",
+                    profile="other",
+                    commands=AdmissionRules(
+                        deny=(CommandRule(reason="no", commands=("rm", )), )))
+    narrow_restored(session, table)
+    assert session.profile == "target"
+    assert session.script is target.script
+    assert session.commands == table.commands
+
+
+# A show is always stated against a hide, so reading the merged hide set
+# dropped every one-sided show under its own side's hide: a table that
+# simply never mentioned /vault took /vault/public away with it.
+def test_narrow_restored_keeps_a_one_sided_show_under_its_own_hide():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/vault", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/vault/public", mode=None), )))
+    narrow_restored(session, _restored())
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/vault/public", mode=None), ))
+    assert path_visible(session.hidden_paths, session.shown_paths,
+                        "/vault/public")
+    # The same either way round: the table's show under the table's own
+    # hide survives an unrestricted session.
+    other = Session(session_id="s")
+    narrow_restored(
+        other,
+        _restored(hidden_paths=HiddenPaths(paths=("/vault", )),
+                  shown_paths=ShownPaths(
+                      entries=(ShowEntry(path="/vault/public", mode=None), ))))
+    assert other.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/vault/public", mode=None), ))
+
+
+# A pattern show is the same case: dropped only where the other side
+# hides at all, since no comparison proves which names it leaves open.
+def test_narrow_restored_keeps_a_one_sided_pattern_show_when_nothing_hides():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/work/aaa", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/work/aaa/*.txt", mode=None), )))
+    narrow_restored(session, _restored())
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/work/aaa/*.txt", mode=None), ))
+    hidden = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/work/aaa", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/work/aaa/*.txt", mode=None), )))
+    narrow_restored(hidden,
+                    _restored(hidden_paths=HiddenPaths(paths=("/work", ))))
+    assert hidden.shown_paths is None
+
+
+def test_narrow_profile_joins_restrictions_onto_a_live_session():
+    session = Session(session_id="s",
+                      mount_modes={"/repo": MountMode.WRITE},
+                      hidden_paths=HiddenPaths(paths=("/repo/live", )))
+    narrow_profile(
+        session,
+        compile_profile(
+            SessionProfile(mounts={"/repo": "r"},
+                           paths=PathsBlock(hide=("/repo/sealed", )),
+                           commands=CommandsBlock(deny=("rm", ))), "named"))
+    assert session.mount_modes == {"/repo": MountMode.READ}
+    assert path_hidden(session.hidden_paths, "/repo/live")
+    assert path_hidden(session.hidden_paths, "/repo/sealed")
+    assert session.profile == "named"
+
+
+# A program the host installed with set_session_profile is the host's,
+# and a restore only adds restrictions: the name travels with it, so a
+# session never reports a group whose script it is not running.
+def test_narrow_profile_keeps_a_program_the_session_already_runs():
+    running = compile_profile(
+        SessionProfile(
+            policy={
+                "script": {
+                    "source": "def pre_command(ctx):\n    return None\n",
+                    "language": "python",
+                },
+                "runtime": "monty",
+            }), "locked")
+    session = Session(session_id="s")
+    narrow(session, running)
+    narrow_profile(session, compile_profile(SessionProfile(cwd="/x"),
+                                            "wanted"))
+    assert session.script is running.script
+    assert session.profile == "locked"
+
+
+def test_narrow_profile_takes_the_program_of_a_session_running_none():
+    wanted = compile_profile(
+        SessionProfile(
+            policy={
+                "script": {
+                    "source": "def pre_command(ctx):\n    return None\n",
+                    "language": "python",
+                },
+                "runtime": "monty",
+            }), "wanted")
+    session = Session(session_id="s")
+    narrow_profile(session, wanted)
+    assert session.script is wanted.script
+    assert session.profile == "wanted"
+
+
+def test_narrowing_of_round_trips_through_narrow():
+    compiled = compile_profile(
+        SessionProfile(mounts={"/repo": "r"},
+                       paths=PathsBlock(hide=("/repo/sealed", ),
+                                        show={"/repo/sealed/public": "r"}),
+                       vars=VarsBlock(hide=("AWS_*", )),
+                       commands=CommandsBlock(deny=("rm", ))), "named")
+    session = Session(session_id="s")
+    narrow(session, compiled)
+    before = session.to_dict()
+    saved = narrowing_of(session)
+    narrow_profile(
+        session,
+        compile_profile(
+            SessionProfile(mounts={"/repo": "rwx"},
+                           paths=PathsBlock(hide=("/other", ))), "wider"))
+    assert session.to_dict() != before
+    narrow(session, saved)
+    assert session.to_dict() == before
+
+
+# Both sides hide /vault and both reach /vault/public/docs, one through
+# a broad carve-out and one through a narrow one. An exact-path lookup
+# found no counterpart for either entry, so each was judged one-sided
+# and dropped against the other side's /vault hide, and the subtree both
+# sides permit came back inaccessible. A grant is a depth comparison,
+# not a string match: the narrower carve-out is the intersection.
+def test_narrow_restored_keeps_a_nested_show_both_sides_reach():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/vault", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/vault/public", mode=None), )))
+    narrow_restored(
+        session,
+        _restored(
+            hidden_paths=HiddenPaths(paths=("/vault", )),
+            shown_paths=ShownPaths(
+                entries=(ShowEntry(path="/vault/public/docs", mode=None), ))))
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/vault/public/docs", mode=None), ))
+    assert path_visible(session.hidden_paths, session.shown_paths,
+                        "/vault/public/docs")
+    # Only the narrower grant survives: the broad one is not the
+    # table's, and its siblings stay sealed.
+    assert not path_visible(session.hidden_paths, session.shown_paths,
+                            "/vault/public/other")
+
+
+# The mode travels with the nesting: a narrow carve-out is held under
+# what the broad one allows above it, since a show scores deeper than a
+# per-mount cap and would otherwise lift it.
+def test_narrow_restored_holds_a_nested_show_under_the_broader_mode():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/vault", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/vault/public", mode=MountMode.READ), )))
+    narrow_restored(
+        session,
+        _restored(hidden_paths=HiddenPaths(paths=("/vault", )),
+                  shown_paths=ShownPaths(entries=(ShowEntry(
+                      path="/vault/public/docs", mode=MountMode.WRITE), ))))
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/vault/public/docs", mode=MountMode.READ), ))
+
+
+def _ruled(doc: dict, name: str) -> Session:
+    """A session narrowed under one profile document."""
+    session = Session(session_id=name)
+    narrow(session, compile_profile(SessionProfile.model_validate(doc), name))
+    return session
+
+
+class _Registry:
+
+    def is_mount_root(self, path: str) -> bool:
+        return False
+
+
+def _path(virtual: str) -> PathSpec:
+    return PathSpec(virtual=virtual,
+                    directory=virtual.rsplit("/", 1)[0] or "/",
+                    resource_path=virtual,
+                    resolved=True,
+                    raw_path=virtual)
+
+
+def _ctx(command: str, *paths: str, words: tuple[str,
+                                                 ...] = ()) -> CommandContext:
+    """One classified line, the way the door hands it to the law."""
+    specs = tuple(_path(p) for p in paths)
+    return CommandContext(command=command,
+                          paths=specs,
+                          operands=specs,
+                          argv=(*words, *paths),
+                          cwd="/",
+                          registry=_Registry(),
+                          tokens=(command, *words, *paths))
+
+
+def _answer(session: Session,
+            command: str,
+            *paths: str,
+            words: tuple[str, ...] = ()) -> Outcome:
+    """What the session's joined rules say about one line."""
+    return decide(_ctx(command, *paths, words=words), session.commands).outcome
+
+
+# `rule_at` reads competing rules by anchor depth, deny before ask only
+# at equal depth, so concatenating the two lists let a deeper ask from
+# the table outrank a shallower deny on the session: a target refusing
+# `cat /vault/*` answered a table asking `cat /vault/public/*` with a
+# prompt. A deny from either side has to stay a deny.
+def test_narrow_restored_keeps_a_deny_a_deeper_ask_would_outrank():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "deny": [{
+                    "reason": "vault is sealed",
+                    "commands": {
+                        "cat": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "ask": [{
+                    "reason": "public needs a nod",
+                    "commands": {
+                        "cat": ["/vault/public/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    # The deny is restated at the table entry's own depth, where the
+    # verb tie-break lets the refusal win, carrying its own reason; the
+    # ask stays whole.
+    assert [(r.reason, r.paths) for r in session.commands.deny] == [
+        ("vault is sealed", ("/vault/*", )),
+        ("vault is sealed", ("/vault/public/*", )),
+    ]
+    assert [(r.reason, r.paths) for r in session.commands.ask
+            ] == [("public needs a nod", ("/vault/public/*", ))]
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.DENY
+
+
+# Only the covered part moves: a carve-out the other side never spoke
+# about is still a question, not a refusal and not a grant.
+def test_narrow_restored_curbs_only_what_the_other_side_denies():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "deny": [{
+                    "reason": "vault is sealed",
+                    "commands": {
+                        "cat": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "commands": {
+                        "cat": ["/vault/public/*", "/notes/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [(r.reason, r.paths) for r in session.commands.ask
+            ] == [("a nod, please", ("/vault/public/*", "/notes/*"))]
+    assert [(r.reason, r.paths) for r in session.commands.deny] == [
+        ("vault is sealed", ("/vault/*", )),
+        ("vault is sealed", ("/vault/public/*", )),
+    ]
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.DENY
+    assert _answer(session, "cat", "/notes/x") is Outcome.ASK
+
+
+# A deny deeper than the ask already wins on its own subtree and must
+# not swallow the shallower question above it.
+def test_narrow_restored_leaves_an_ask_a_deeper_deny_already_outranks():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "deny": [{
+                    "reason": "the key is sealed",
+                    "commands": {
+                        "cat": ["/vault/public/key/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "commands": {
+                        "cat": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [(r.reason, r.paths) for r in session.commands.ask
+            ] == [("a nod, please", ("/vault/*", ))]
+    assert [(r.reason, r.paths) for r in session.commands.deny
+            ] == [("the key is sealed", ("/vault/public/key/*", ))]
+
+
+# A deny about another command reaches nothing the ask names, and
+# refusing there would refuse a line neither side refuses.
+def test_narrow_restored_does_not_curb_across_commands():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "rm", "echo"],
+                "deny": [{
+                    "reason": "vault is sealed",
+                    "commands": {
+                        "rm": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "rm", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "commands": {
+                        "cat": ["/vault/public/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [(r.reason, r.paths) for r in session.commands.ask
+            ] == [("a nod, please", ("/vault/public/*", ))]
+    assert [(r.reason, r.paths) for r in session.commands.deny
+            ] == [("vault is sealed", ("/vault/*", ))]
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.ASK
+
+
+# A deny written under a mount section applies only to lines working
+# inside that mount, and a top-level ask applies everywhere, so the
+# two overlap inside the mount: there the deeper ask outranked the
+# deny and answered the refusal with a prompt. The deny is restated at
+# the ask's depth, still scoped to its mount.
+def test_narrow_restored_restates_a_mount_scoped_deny_inside_its_mount():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"]
+            },
+            "mounts": {
+                "/vault": {
+                    "commands": {
+                        "deny": [{
+                            "reason": "vault is sealed",
+                            "commands": {
+                                "cat": ["/vault/*"]
+                            }
+                        }]
+                    }
+                }
+            },
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "commands": {
+                        "cat": ["/vault/public/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [
+        (r.reason, r.commands, r.paths, r.mount) for r in session.commands.deny
+    ] == [
+        ("vault is sealed", ("cat", ), ("/vault/*", ), "/vault"),
+        ("vault is sealed", ("cat", ), ("/vault/public/*", ), "/vault"),
+    ]
+    assert [(r.reason, r.paths) for r in session.commands.ask
+            ] == [("a nod, please", ("/vault/public/*", ))]
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.DENY
+
+
+# An ask naming paths alone speaks about every command, so it overlaps
+# a `cat` deny on `cat` lines and nothing else: the deny is restated
+# for `cat` at the ask's depth, and the other commands are still asked
+# about, since neither side refused them.
+def test_narrow_restored_restates_a_deny_for_the_commands_the_ask_shares():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "rm", "echo"],
+                "deny": [{
+                    "reason": "vault is sealed",
+                    "commands": {
+                        "cat": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "rm", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "paths": ["/vault/public/*"]
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [(r.reason, r.commands, r.paths)
+            for r in session.commands.deny] == [
+                ("vault is sealed", ("cat", ), ("/vault/*", )),
+                ("vault is sealed", ("cat", ), ("/vault/public/*", )),
+            ]
+    assert [(r.reason, r.commands, r.paths) for r in session.commands.ask
+            ] == [("a nod, please", (), ("/vault/public/*", ))]
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.DENY
+    assert _answer(session, "rm", "/vault/public/x") is Outcome.ASK
+
+
+# Two command patterns meet token by token: a `git` ask and a
+# `git push` deny share `git push`, so the push is refused and every
+# other git verb is still asked about.
+def test_narrow_restored_restates_a_deny_at_the_verb_the_ask_shares():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["git", "echo"],
+                "deny": [{
+                    "reason": "no pushing from the vault",
+                    "commands": {
+                        "git push": ["/vault/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["git", "echo"],
+                "ask": [{
+                    "reason": "a nod, please",
+                    "commands": {
+                        "git": ["/vault/public/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [
+        (r.reason, r.commands, r.paths) for r in session.commands.deny
+    ] == [
+        ("no pushing from the vault", ("git push", ), ("/vault/*", )),
+        ("no pushing from the vault", ("git push", ), ("/vault/public/*", )),
+    ]
+    assert _answer(session, "git", "/vault/public/x",
+                   words=("push", )) is Outcome.DENY
+    assert _answer(session, "git", "/vault/public/x",
+                   words=("pull", )) is Outcome.ASK
+
+
+# A deny the other side's own deeper ask already outranks is not
+# restated: that side's answer at the entry was a question, so there is
+# no refusal to keep, and restating it would refuse a line neither side
+# refuses.
+def test_narrow_restored_leaves_a_deny_the_other_side_carved_out_itself():
+    session = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "deny": [{
+                    "reason": "vault is sealed",
+                    "commands": {
+                        "cat": ["/vault/*"]
+                    }
+                }],
+                "ask": [{
+                    "reason": "public needs a nod",
+                    "commands": {
+                        "cat": ["/vault/public/*"]
+                    }
+                }],
+            }
+        }, "target")
+    table = _ruled(
+        {
+            "commands": {
+                "allow": ["cat", "echo"],
+                "ask": [{
+                    "reason": "reports need a nod",
+                    "commands": {
+                        "cat": ["/vault/public/reports/*"]
+                    }
+                }],
+            }
+        }, "source")
+    narrow_restored(session, table)
+    assert session.commands is not None
+    assert [(r.reason, r.paths) for r in session.commands.deny
+            ] == [("vault is sealed", ("/vault/*", ))]
+    assert _answer(session, "cat", "/vault/public/reports/q") is Outcome.ASK
+    assert _answer(session, "cat", "/vault/other") is Outcome.DENY
+
+
+# Joining a rule set with itself is a no-op, carve-outs included: a
+# checkout feeds live tables back through the restore, and a document's
+# own deeper ask over its own deny is its answer, not a lifted refusal.
+def test_narrow_restored_joins_a_rule_set_with_itself_as_a_no_op():
+    doc = {
+        "commands": {
+            "allow": ["cat", "echo"],
+            "deny": [{
+                "reason": "vault is sealed",
+                "commands": {
+                    "cat": ["/vault/*"]
+                }
+            }],
+            "ask": [{
+                "reason": "public needs a nod",
+                "commands": {
+                    "cat": ["/vault/public/*"]
+                }
+            }],
+        }
+    }
+    session = _ruled(doc, "target")
+    before = session.commands
+    narrow_restored(session, _ruled(doc, "source"))
+    assert session.commands is before
+    assert _answer(session, "cat", "/vault/public/x") is Outcome.ASK
+
+
+# A table whose show list spells one path twice keeps what was in
+# force, not what was written last: `shown_mode` takes the weaker of
+# two entries at a depth, so matching against the raw list paired the
+# session against the wrong spelling and restored an executable
+# subtree the source only ever read.
+def test_narrow_restored_folds_a_duplicate_table_show_to_its_weakest():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/repo", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/repo/build", mode=MountMode.EXEC), )))
+    narrow_restored(
+        session,
+        _restored(hidden_paths=HiddenPaths(paths=("/repo", )),
+                  shown_paths=ShownPaths(entries=(
+                      ShowEntry(path="/repo/build", mode=MountMode.READ),
+                      ShowEntry(path="/repo/build", mode=MountMode.EXEC),
+                  ))))
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/repo/build", mode=MountMode.READ), ))
+
+
+# An anchored pattern is asked the same question as a path, so a
+# broader pattern grants a narrower one and the narrower survives as
+# the intersection, exactly as two nested exact carve-outs do. Two
+# patterns that only overlap have no single entry naming their common
+# ground and are both dropped -- the narrowing direction, stated in
+# `_grants`.
+def test_narrow_restored_keeps_the_narrower_of_two_nested_show_patterns():
+    session = Session(
+        session_id="s",
+        hidden_paths=HiddenPaths(paths=("/vault", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry(path="/vault/a/b/*", mode=None), )))
+    narrow_restored(
+        session,
+        _restored(hidden_paths=HiddenPaths(paths=("/vault", )),
+                  shown_paths=ShownPaths(
+                      entries=(ShowEntry(path="/vault/a/*", mode=None), ))))
+    assert session.shown_paths == ShownPaths(
+        entries=(ShowEntry(path="/vault/a/b/*", mode=None), ))
+    assert path_visible(session.hidden_paths, session.shown_paths,
+                        "/vault/a/b/f.txt")
+    assert not path_visible(session.hidden_paths, session.shown_paths,
+                            "/vault/a/other.txt")

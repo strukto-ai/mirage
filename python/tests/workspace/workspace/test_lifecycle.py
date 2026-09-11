@@ -907,3 +907,33 @@ async def test_unmount_leaves_borrowed_resources_open(used):
     finally:
         await replica.close()
         await ws.close()
+
+
+# TypeScript has exposed `runtimeEntries` from the start; python had no
+# way to read the world a workspace was built with, which a program
+# restoring a snapshot needs, since a snapshot carries no runtimes and
+# the loader has to be told which world to build.
+@pytest.mark.asyncio
+async def test_runtime_entries_reads_the_world_it_was_built_with():
+    named = Workspace({"/m": RAMResource()},
+                      mode=MountMode.WRITE,
+                      runtimes=["monty"])
+    try:
+        # The named world, plus the VFS runtime the wiring always
+        # carries: what a loader states is what gets built.
+        assert [r.name for r in named.runtime_entries] == ["monty", "vfs"]
+    finally:
+        await named.close()
+    ws = Workspace({"/m": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        before = [r.name for r in ws.runtime_entries]
+        assert "monty" in before
+
+        class Extra(Runtime):
+            name = "extra"
+
+        # `add_runtime` appends, and the view is live.
+        added = ws.add_runtime(Extra())
+        assert [r.name for r in ws.runtime_entries] == [*before, added.name]
+    finally:
+        await ws.close()

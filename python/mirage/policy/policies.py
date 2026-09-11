@@ -300,6 +300,15 @@ class Policies:
                 return True
         return False
 
+    def names(self) -> tuple[str, ...]:
+        """The class name of every registered policy, in order.
+
+        What a snapshot records about the coded policies: a policy is
+        code, so a state can only name it, and a loader compares the
+        names against what it registered.
+        """
+        return tuple(type(policy).__name__ for policy in self._policies)
+
     def wants(self, hook: str) -> bool:
         """True when any policy overrides ``hook``.
 

@@ -102,6 +102,20 @@ describe('SessionManager', () => {
     await m.closeAll()
     expect(m.list().map((x) => x.sessionId)).toEqual(['def'])
   })
+
+  it('discard forgets a candidate and frees its id', () => {
+    const m = new SessionManager('def')
+    m.create('candidate')
+    m.discard('candidate')
+    expect(() => m.get('candidate')).toThrow(/unknown session/)
+    expect(m.create('candidate').sessionId).toBe('candidate')
+    expect(() => {
+      m.discard('def')
+    }).toThrow(/Cannot discard the default session/)
+    expect(() => {
+      m.discard('nonexistent')
+    }).toThrow(/unknown session/)
+  })
 })
 
 describe('SessionManager with a SessionStore', () => {

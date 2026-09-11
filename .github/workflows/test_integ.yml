@@ -460,6 +460,39 @@ jobs:
       - name: Run curl/wget battery (HTTP fixture started by the adapter)
         run: ./python/.venv/bin/python integ/runners/python/main.py --facet http --strict
 
+  integ-snapshot:
+    name: Cross-language snapshot planes
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      EMAIL_HOST: 127.0.0.1
+      MAIL_URL: http://127.0.0.1:5085
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
+        with:
+          build-packages: "false"
+          typescript-build-artifact: integ-typescript-dist
+
+      # Every plane a snapshot carries, written by one language and read
+      # by the other in all four directions. --strict makes a case that
+      # skipped for a missing service a failure, so a service that fails
+      # to come up cannot quietly shrink the matrix.
+      - name: Run the cross-language snapshot battery
+        run: bash integ/snapshot/cross.sh --strict
+
   integ-shared-ts:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
@@ -1646,7 +1679,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-wandb]
+    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-shared-parity, integ-snapshot, integ-database, integ-data, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-wandb]
     if: always()
     steps:
       - name: Check required jobs

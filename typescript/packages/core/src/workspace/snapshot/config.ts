@@ -13,13 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CLISpec } from '../../commands/cli/types.ts'
+import type { SessionProfile } from '../../policy/profile.ts'
 import type { ConsistencyPolicy, MountMode } from '../../types.ts'
 import type { Resource } from '../../resource/base.ts'
 
+/**
+ * Constructor inputs derived from a state dict. `Workspace.load` uses
+ * this to instantiate a fresh Workspace; snapshot code never constructs
+ * one itself. Mirrors the Python `MountArgs`.
+ */
 export interface MountArgs {
   clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
   mountArgs: Record<string, [Resource, MountMode]>
+  /** The workspace's consistency knob, LAZY for a state that predates the key. */
   consistency: ConsistencyPolicy
   defaultSessionId: string | undefined
   defaultAgentId: string | null
+  /** The named profiles the snapshot carried, parsed; absent when it carried none. */
+  profiles?: Record<string, SessionProfile>
+  /** The default profile's name, null for the implicit `default` or no default at all. */
+  profile: string | null
+  /**
+   * The class names of the coded policies the source registered beyond
+   * the built-ins. Informational: code is the loader's to supply, and
+   * `Workspace.fromState` warns about a name it does not find registered.
+   */
+  policies: readonly string[]
 }

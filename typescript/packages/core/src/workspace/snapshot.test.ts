@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ruleToJSON } from './session/serialize.ts'
 import { setCwd } from './session/shell_dirs.ts'
 import { seedVar } from './session/state.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -30,11 +31,14 @@ import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { secretStr } from '../resource/secrets.ts'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMResource, type RAMResourceState } from '../resource/ram/ram.ts'
+import { REDACTED_SECRET, resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
-import { MountMode } from '../types.ts'
+import { ConsistencyPolicy, MountMode } from '../types.ts'
 import { VERSION } from '../version.ts'
+import { parseSessionProfile, profileFromJSON, type SessionProfile } from '../policy/profile.ts'
+import type { WorkspaceOptions } from './workspace/types.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import {
   applyStateDict,
@@ -759,8 +763,14 @@ describe('applyStateDict and the deployment', () => {
   // A mount that asks to be handed back live (`needs_override`, a
   // redacted credential) skipped the prefix check along with its
   // loadState, so a renamed remote mount, the case the report exists
-  // for, stayed silent while Python reported it. The skip itself stays:
-  // a live mount at the prefix is not loaded from the saved state.
+  // for, stayed silent while Python reported it. The loadState skip is
+  // gone too, and for the same reason it was wrong in the first place:
+  // a snapshot's content is the snapshot's, and the resources that ask
+  // to be handed back live are exactly the ones behind a credential --
+  // redis and disk carry their bytes in that state, so skipping them
+  // dropped every one while python restored them. A cred-only resource
+  // (the S3 family) implements loadState as a no-op, which is what made
+  // the skip look harmless.
   it('a live-only snapshot mount with no matching prefix is reported too', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
@@ -788,9 +798,439 @@ describe('applyStateDict and the deployment', () => {
       const messages = warn.mock.calls.map((c) => String(c[0]))
       expect(messages.some((m) => m.includes('/data') && m.includes('not restored'))).toBe(true)
       expect(messages.some((m) => m.includes('/keep'))).toBe(false)
-      expect(loadState).not.toHaveBeenCalled()
+      expect(loadState).toHaveBeenCalledTimes(1)
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+const RESTRICTED = {
+  env: { SLACK_TOKEN: 'xoxb-secret' },
+  vars: { hide: ['SLACK_TOKEN'] },
+  commands: { deny: ['rm'], ask: [{ reason: 'creates files', commands: ['touch'] }] },
+}
+
+const LOCKED = {
+  commands: { allow: ['echo', 'cat', 'rm', 'ls', 'test'], deny: ['rm'] },
+  policy: {
+    script: new ScriptSource('export function preCommand() {\n  return null\n}\n', 'js'),
+    runtime: 'quickjs',
+  },
+}
+
+function profiled(
+  profiles: Record<string, unknown>,
+  options: Partial<WorkspaceOptions> = {},
+  mode: MountMode = MountMode.WRITE,
+): Workspace {
+  const ram = new RAMResource()
+  const ops = new OpsRegistry()
+  ops.registerResource(ram)
+  const parsed: Record<string, SessionProfile> = Object.fromEntries(
+    Object.entries(profiles).map(([name, doc]) => [name, parseSessionProfile(doc)]),
+  )
+  return new Workspace(
+    { '/data': [ram, mode] },
+    { mode: MountMode.WRITE, ops, shellParser: parser, profiles: parsed, ...options },
+  )
+}
+
+const loadOptions = (): WorkspaceOptions => ({
+  mode: MountMode.WRITE,
+  ops: new OpsRegistry(),
+  shellParser: parser,
+})
+
+async function line(ws: Workspace, command: string, sessionId: string) {
+  const result = await ws.execute(command, { sessionId })
+  return {
+    exit: result.exitCode,
+    out: new TextDecoder().decode(result.stdout),
+    err: new TextDecoder().decode(result.stderr),
+  }
+}
+
+describe('the document rides the state and the restore never widens', () => {
+  // A session created under a named profile came back under the target's
+  // default: the snapshot carried no document, so `Workspace.load` had
+  // nothing to narrow it under, and the restore copied cwd, vars and
+  // modes off the table and dropped the rest. The state now carries the
+  // document and the restore lands the whole table under the profile of
+  // its name.
+  it('a session under a named profile survives fromState', async () => {
+    const source = profiled({ default: {}, restricted: RESTRICTED })
+    source.createSession('agent', {
+      profile: 'restricted',
+      permissions: parseSessionProfile({ commands: { deny: ['mv'] } }),
+    })
+    expect((await line(source, 'touch /data/made', 'agent')).exit).toBe(126)
+    const pending = source.decisions.pending('agent')
+    expect(pending).toHaveLength(1)
+    const state = await toStateDict(source)
+    await source.close()
+    expect(state.profile).toBeNull()
+    expect(profileFromJSON(state.profiles?.restricted ?? {})).toEqual(
+      parseSessionProfile(RESTRICTED),
+    )
+    const target = await Workspace.fromState(state, loadOptions())
+    const restored = target.getSession('agent')
+    expect(restored.profile).toBe('restricted')
+    expect(restored.hiddenVars).not.toBeNull()
+    expect(await line(target, 'echo tok=[$SLACK_TOKEN]', 'agent')).toEqual({
+      exit: 0,
+      out: 'tok=[]\n',
+      err: '',
+    })
+    const refused = await line(target, 'rm -f /data/x', 'agent')
+    expect(refused.exit).toBe(126)
+    expect(refused.err).toContain('rm: Permission denied')
+    expect((await line(target, 'mv /data/a /data/b', 'agent')).exit).toBe(126)
+    expect((await line(target, 'export SLACK_TOKEN=evil', 'agent')).exit).not.toBe(0)
+    expect(target.decisions.pending('agent').map((d) => d.id)).toEqual(pending.map((d) => d.id))
+    // The record spells a rule with every key, the compiled document only
+    // the stated ones; the ledger compares them structurally.
+    expect(target.decisions.pending('agent').map((d) => ruleToJSON(d.rule))).toEqual(
+      pending.map((d) => ruleToJSON(d.rule)),
+    )
+    await target.close()
+  })
+
+  // A restored table is a fact about the source session, never a grant:
+  // a wider cap and a wider allow list than the target's document states
+  // land as the target's, and what the table adds on top is kept.
+  it('a restored table never widens the target document', async () => {
+    const source = profiled({ default: { commands: { allow: ['cat', 'echo', 'touch', 'ls'] } } })
+    source.createSession('agent', { mounts: { '/data': 'write' } })
+    expect((await line(source, 'touch /data/made', 'agent')).exit).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = profiled({
+      default: {
+        mounts: { '/data': 'r' },
+        commands: { allow: ['echo', 'ls', 'rm'], deny: ['rm'] },
+      },
+    })
+    await applyStateDict(target, state)
+    const restored = target.getSession('agent')
+    expect(restored.mountModes).toEqual(new Map([['/data', MountMode.READ]]))
+    expect(new Set(restored.commands?.allow ?? [])).toEqual(new Set(['echo', 'ls']))
+    expect((await line(target, 'echo ok', 'agent')).exit).toBe(0)
+    expect((await line(target, 'touch /data/x', 'agent')).exit).toBe(127)
+    expect((await line(target, 'rm /data/made', 'agent')).exit).not.toBe(0)
+    const listed = await line(target, 'ls /data', 'agent')
+    expect(listed.exit).toBe(0)
+    expect(listed.out).toContain('made')
+    await target.close()
+  })
+
+  // The other direction: a table narrower than the target's document
+  // lands with its own hides, denies and answers, under a target that
+  // states nothing at all (its `default` name resolves to the target
+  // default).
+  it("a table's own narrowing lands under a permissive target", async () => {
+    const source = profiled({ default: RESTRICTED })
+    expect((await source.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    source.createSession('agent')
+    expect((await line(source, 'touch /data/made', 'agent')).exit).toBe(126)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = buildWorkspace()
+    await applyStateDict(target, state)
+    for (const sid of ['agent', target.defaultSessionId]) {
+      expect(await line(target, 'echo tok=[$SLACK_TOKEN]', sid)).toEqual({
+        exit: 0,
+        out: 'tok=[]\n',
+        err: '',
+      })
+      expect((await line(target, 'rm /data/f.txt', sid)).exit).toBe(126)
+    }
+    expect((await target.execute('test -e /data/f.txt')).exitCode).toBe(0)
+    expect(target.decisions.pending('agent')).toHaveLength(1)
+    // Nothing the target document never said arrives as a program.
+    expect(target.getSession('agent').profile).toBeNull()
+    expect(target.getSession('agent').script).toBeNull()
+    await target.close()
+  })
+
+  // A name the target does not define is refused with the PolicyError an
+  // unknown profile gets everywhere, before a mount or a session has
+  // moved.
+  it('an unknown profile name refuses the load before it lands', async () => {
+    const source = profiled({ restricted: RESTRICTED }, { sessionId: 'src' })
+    expect((await source.execute('echo restored > /data/f.txt')).exitCode).toBe(0)
+    source.createSession('agent', { profile: 'restricted' })
+    const state = await toStateDict(source)
+    await source.close()
+    const target = profiled({}, { sessionId: 'tgt' })
+    expect((await target.execute('export KEEP=1')).exitCode).toBe(0)
+    await expect(applyStateDict(target, state)).rejects.toThrow(/unknown profile "restricted"/)
+    expect(target.env.KEEP).toBe('1')
+    expect(target.listSessions().map((s) => s.sessionId)).toEqual(['tgt'])
+    expect((await target.execute('test -e /data/f.txt')).exitCode).toBe(1)
+    // The gate created a candidate for the table and dropped it, so the
+    // id is free again.
+    expect(target.createSession('agent').sessionId).toBe('agent')
+    await target.close()
+    // The loader's own document has the same rule: one that omits the
+    // snapshot's default profile fails at construction.
+    await expect(
+      Workspace.fromState(
+        { ...state, profile: 'restricted' },
+        { ...loadOptions(), profiles: { default: parseSessionProfile({}) } },
+      ),
+    ).rejects.toThrow(/unknown profile "restricted"/)
+  })
+
+  // The loader's document outranks the snapshot's, the way the document
+  // outranks a stored record at hydration.
+  it("a loader-supplied document wins over the snapshot's", async () => {
+    const source = profiled({ restricted: RESTRICTED })
+    source.createSession('agent', { profile: 'restricted' })
+    const state = await toStateDict(source)
+    await source.close()
+    const target = await Workspace.fromState(state, {
+      ...loadOptions(),
+      profiles: { restricted: parseSessionProfile({ commands: { deny: ['touch'] } }) },
+    })
+    const restored = target.getSession('agent')
+    expect(restored.profile).toBe('restricted')
+    // The table's hides and rules still land (never wider), the loader's
+    // rule beside them.
+    expect(restored.hiddenVars).not.toBeNull()
+    expect((await line(target, 'touch /data/x', 'agent')).exit).toBe(126)
+    expect((await line(target, 'rm -f /data/x', 'agent')).exit).toBe(126)
+    expect(target.createSession('fresh', { profile: 'restricted' }).hiddenVars).toBeNull()
+    await target.close()
+  })
+
+  // Landing a workspace's own state on itself changes nothing, which a
+  // checkout that hands live tables back through the restore relies on.
+  it("re-applying a workspace's own state is a no-op", async () => {
+    const ws = profiled(
+      {
+        default: {
+          mounts: {
+            '/data': {
+              mode: 'rw',
+              paths: { hide: ['/data/sealed', '*.pem'], show: { '/data/sealed/public': 'r' } },
+              commands: { ask: ['git push'] },
+            },
+          },
+          vars: { hide: ['AWS_*'] },
+          commands: { allow: ['ls', 'cat', 'echo', 'git *', 'rm'], deny: ['rm'] },
+        },
+        restricted: RESTRICTED,
+      },
+      {},
+      MountMode.EXEC,
+    )
+    ws.createSession('agent', {
+      profile: 'restricted',
+      permissions: parseSessionProfile({ paths: { hide: ['/data/.env'] } }),
+    })
+    expect((await ws.execute('echo a > /data/a.txt')).exitCode).toBe(0)
+    expect((await line(ws, 'touch /data/b', 'agent')).exit).toBe(126)
+    const before = ws.listSessions().map((s) => s.toJSON())
+    const compiled = ws.sessionManager.defaultProfile
+    expect(compiled).not.toBeNull()
+    await applyStateDict(ws, await toStateDict(ws))
+    expect(ws.listSessions().map((s) => s.toJSON())).toEqual(before)
+    const dflt = ws.getSession(ws.defaultSessionId)
+    expect(dflt.commands).toBe(compiled?.commands)
+    expect(dflt.hiddenPaths).toBe(compiled?.hiddenPaths)
+    expect(dflt.shownPaths).toBe(compiled?.shownPaths)
+    expect(dflt.hiddenVars).toBe(compiled?.hiddenVars)
+    expect(dflt.hideReasons).toBe(compiled?.hideReasons)
+    await ws.close()
+  })
+
+  // The consistency knob is the workspace's; every mount used to record
+  // the mount() default and the loader restored LAZY regardless.
+  it('the consistency knob round-trips', async () => {
+    const source = profiled({}, { consistency: ConsistencyPolicy.ALWAYS })
+    const state = await toStateDict(source)
+    await source.close()
+    expect(state.consistency).toBe('always')
+    expect(state.mounts.every((m) => m.consistency === 'always')).toBe(true)
+    expect(buildMountArgs(state).consistency).toBe(ConsistencyPolicy.ALWAYS)
+    const target = await Workspace.fromState(state, loadOptions())
+    expect(target.registry.getConsistency()).toBe(ConsistencyPolicy.ALWAYS)
+    await target.close()
+    const { consistency: _dropped, ...older } = state
+    void _dropped
+    expect(buildMountArgs(older as typeof state).consistency).toBe(ConsistencyPolicy.LAZY)
+  })
+
+  // A coded policy is named, never carried: the loader registers it, and
+  // a name nothing answers to is reported rather than silently dropped.
+  it('a recorded policy class the target lacks is reported', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const source = profiled({}, { policies: [new DenyGate()] })
+      const state = await toStateDict(source)
+      await source.close()
+      expect(state.policies).toEqual(['DenyGate'])
+      const target = await Workspace.fromState(state, loadOptions())
+      await target.close()
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('DenyGate'))).toBe(true)
+      warn.mockClear()
+      const supplied = await Workspace.fromState(state, {
+        ...loadOptions(),
+        policies: [new DenyGate()],
+      })
+      await supplied.close()
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('policy class'))).toBe(false)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  // Content behind a credential: the restore skipped loadState for
+  // every mount whose recorded config carried a redaction marker,
+  // which is exactly what a content resource behind a credential has,
+  // so a redis or disk mount's bytes were dropped on this host while
+  // python restored them. Found by the cross-language snapshot
+  // battery (integ/snapshot), where TypeScript could not read back a
+  // redis mount either arm had written.
+  it('loads the state of a mount whose config is redacted', async () => {
+    const loaded: RAMResourceState[] = []
+    class CredentialedRAM extends RAMResource {
+      override getState(): RAMResourceState {
+        // What a store behind a credential records: its content, and a
+        // config whose secret is a marker rather than the secret. The
+        // config rides beside the declared fields, as every
+        // credentialed resource's state does.
+        return { ...super.getState(), config: { url: REDACTED_SECRET } } as RAMResourceState
+      }
+
+      override loadState(state: RAMResourceState): void {
+        loaded.push(state)
+        super.loadState(state)
+      }
+    }
+    const source = new CredentialedRAM()
+    const ops = new OpsRegistry()
+    ops.registerResource(source)
+    const ws = new Workspace(
+      { '/data': source },
+      { mode: MountMode.WRITE, ops, shellParser: parser },
+    )
+    expect((await ws.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    const state = await toStateDict(ws)
+    await ws.close()
+    const mount = state.mounts.find((m) => m.prefix.replace(/\/$/, '') === '/data')
+    expect(mount).toBeDefined()
+    expect(resourceStateRequiresOverride(mount?.resource_state)).toBe(true)
+    // A redacted config cannot be rebuilt, so the loader is handed a
+    // live resource -- and its state has to land in it.
+    const target = new CredentialedRAM()
+    const restored = await Workspace.fromState(state, loadOptions(), { '/data': target })
+    expect(loaded).toHaveLength(1)
+    expect(new TextDecoder().decode(await restored.fs.readFile('/data/f.txt'))).toBe('kept\n')
+    await restored.close()
+  })
+
+  // The gate created and narrowed the sessions it had to make, but left
+  // the default session and every live one on whatever profile they
+  // already ran under, so the target's document of the name a table
+  // carries never governed the restored session: `narrowRestored` takes
+  // no program and no new restriction off a table, and nothing else
+  // applied the document's.
+  it('a stricter loader profile governs the restored default session', async () => {
+    const source = profiled({ crew: { commands: { deny: ['rm'] } } })
+    expect((await source.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    await source.setSessionProfile(source.defaultSessionId, 'crew')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = await Workspace.fromState(state, {
+      ...loadOptions(),
+      profiles: { crew: parseSessionProfile({ commands: { deny: ['rm', 'cat'] } }) },
+    })
+    const restored = target.getSession(target.defaultSessionId)
+    expect(restored.profile).toBe('crew')
+    const sid = target.defaultSessionId
+    expect((await line(target, 'rm /data/f.txt', sid)).exit).toBe(126)
+    expect((await line(target, 'cat /data/f.txt', sid)).exit).toBe(126)
+    expect((await line(target, 'ls /data', sid)).exit).toBe(0)
+    await target.close()
+  })
+
+  // The other half of the same rule: a checkout adds the version's
+  // restrictions to a live session and lifts none of the live ones, and
+  // the program the host installed with setSessionProfile stays.
+  it("a checkout never lifts a live session's program", async () => {
+    const source = profiled({})
+    expect((await source.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = profiled({ locked: LOCKED })
+    await target.setSessionProfile(target.defaultSessionId, 'locked')
+    const program = target.getSession(target.defaultSessionId).script
+    expect(program).not.toBeNull()
+    await applyStateDict(target, state, { replaceCache: true })
+    const live = target.getSession(target.defaultSessionId)
+    expect(live.script).toBe(program)
+    expect(live.profile).toBe('locked')
+    expect((await line(target, 'rm /data/f.txt', target.defaultSessionId)).exit).toBe(126)
+    await target.close()
+  })
+
+  // A refusal after the profiles have been joined onto the live
+  // sessions puts them back: the workspace is the one the snapshot
+  // never touched.
+  it('a refused table puts a joined live session back', async () => {
+    const source = profiled({ crew: { commands: { deny: ['rm'] } } })
+    await source.setSessionProfile(source.defaultSessionId, 'crew')
+    expect((await source.execute('export SEALED=1')).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const refuseSealed: Policy = {
+      preSession: (ctx) =>
+        ctx.key === 'SEALED' ? { kind: 'deny', reason: 'sealed is refused' } : null,
+    }
+    const target = profiled({ crew: { commands: { deny: ['rm'] } } }, { policies: [refuseSealed] })
+    const before = target.getSession(target.defaultSessionId).toJSON()
+    await expect(applyStateDict(target, state)).rejects.toThrow()
+    expect(target.getSession(target.defaultSessionId).toJSON()).toEqual(before)
+    await target.close()
+  })
+
+  // A policy hook reads its program off the manager by session id, and
+  // the manager cannot answer for the snapshot's default id until
+  // `adoptDefault` re-keys the live default onto it. So a checkout
+  // whose recorded default id differs from the live one gated that
+  // table under the target's default program instead of the one the
+  // join had just installed, and a `preSession` rule the named profile
+  // carries never saw the restored variables.
+  it('gates a remapped default table under its landing id', async () => {
+    // The rule keys on the session id the gate names, which is the one
+    // thing the fix changes: a hook is handed `sessionId` and, in
+    // `ScriptPolicy`'s case, resolves its program from it. The live
+    // default is where the table lands; the recorded `src` is an id the
+    // manager cannot answer for until `adoptDefault` re-keys it.
+    const gated: string[] = []
+    const sealed: Policy = {
+      preSession: (ctx) => {
+        gated.push(ctx.sessionId)
+        return ctx.sessionId === 'tgt' && ctx.key === 'SEALED'
+          ? { kind: 'deny', reason: 'sealed is refused' }
+          : null
+      },
+    }
+    const source = profiled({}, { sessionId: 'src' })
+    expect((await source.execute('export SEALED=1')).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    expect(state.default_session_id).toBe('src')
+    const target = profiled({}, { sessionId: 'tgt', policies: [sealed] })
+    await expect(applyStateDict(target, state)).rejects.toThrow(/sealed is refused/)
+    expect(gated).toContain('tgt')
+    expect(gated).not.toContain('src')
+    // Refused before anything landed: the live default keeps its id and
+    // the variable never arrived.
+    expect(target.defaultSessionId).toBe('tgt')
+    expect(target.getSession('tgt').vars.SEALED).toBeUndefined()
+    await target.close()
   })
 })

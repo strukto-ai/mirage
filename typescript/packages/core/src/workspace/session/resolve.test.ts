@@ -16,21 +16,39 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
+import { decide } from '../../policy/match/decide.ts'
 import { matchOp, ruleScope } from '../../policy/match/rule.ts'
-import type { OpsContext } from '../../policy/types.ts'
+import {
+  Outcome,
+  type AdmissionRules,
+  type CommandContext,
+  type CommandRule,
+  type OpsContext,
+} from '../../policy/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { pathHidden, pathVisible } from '../../utils/hidden.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
+import { ScriptSource } from '../../runtime/routing/types.ts'
 import {
   applyProfile,
   compileCommands,
   compileProfile,
   narrow,
+  narrowingOf,
+  narrowProfile,
+  narrowRestored,
   resolveProfile,
   withInline,
 } from './resolve.ts'
 import { Session } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
+
+const POLICY_DOC = {
+  policy: {
+    script: new ScriptSource('export function preCommand() {\n  return null\n}\n', 'js'),
+    runtime: 'quickjs',
+  },
+}
 
 function readOp(virtual: string): OpsContext {
   return {
@@ -442,5 +460,761 @@ describe('the path axis through resolve', () => {
     const empty = compileProfile(null)
     expect(empty.shownPaths).toBeNull()
     expect(empty.hideReasons).toEqual([])
+  })
+})
+
+describe('narrowRestored', () => {
+  const table = (init: ConstructorParameters<typeof Session>[0]): Session =>
+    new Session({ ...init, sessionId: 'table' })
+
+  it('takes the weaker mode over both key sets', () => {
+    const session = new Session({
+      sessionId: 's',
+      mountModes: new Map([['/a', MountMode.WRITE]]),
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        mountModes: new Map([
+          ['/a/', MountMode.READ],
+          ['b', MountMode.EXEC],
+        ]),
+      }),
+    )
+    expect(session.mountModes).toEqual(
+      new Map([
+        ['/a', MountMode.READ],
+        ['/b', MountMode.EXEC],
+      ]),
+    )
+    // A table narrowing nothing leaves the session's own map in place.
+    const modes = session.mountModes
+    narrowRestored(
+      session,
+      table({ sessionId: 'table', mountModes: new Map([['/a', MountMode.EXEC]]) }),
+    )
+    expect(session.mountModes).toBe(modes)
+  })
+
+  it('unions hides in order without repeats', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/x'], patterns: ['*.pem'] },
+      hiddenVars: { names: ['A'], patterns: [] },
+      hideReasons: [{ patterns: ['/x'], reason: 'sealed' }],
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/y', '/x'], patterns: ['*.key', '*.pem'] },
+        hiddenVars: { names: ['A', 'B'], patterns: ['AWS_*'] },
+        hideReasons: [
+          { patterns: ['/x'], reason: 'sealed' },
+          { patterns: ['/y'], reason: 'private' },
+        ],
+      }),
+    )
+    expect(session.hiddenPaths).toEqual({ paths: ['/x', '/y'], patterns: ['*.pem', '*.key'] })
+    expect(session.hiddenVars).toEqual({ names: ['A', 'B'], patterns: ['AWS_*'] })
+    expect(session.hideReasons).toEqual([
+      { patterns: ['/x'], reason: 'sealed' },
+      { patterns: ['/y'], reason: 'private' },
+    ])
+    // One side stating nothing takes the other's spec as it is.
+    const bare = new Session({ sessionId: 'bare' })
+    narrowRestored(bare, table({ sessionId: 'table', hiddenVars: { names: ['T'], patterns: [] } }))
+    expect(bare.hiddenVars).toEqual({ names: ['T'], patterns: [] })
+    expect(bare.hiddenPaths).toBeNull()
+  })
+
+  it('intersects allow lists and appends rules', () => {
+    const denyRm: CommandRule = { reason: 'no', commands: ['rm'], paths: [], mount: '' }
+    const denyMv: CommandRule = { reason: 'no', commands: ['mv'], paths: [], mount: '' }
+    const askGit: CommandRule = { reason: 'ask', commands: ['git'], paths: [], mount: '' }
+    const session = new Session({
+      sessionId: 's',
+      commands: { allow: ['git *', 'cat'], ask: [], deny: [denyRm] },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        commands: { allow: ['git push', 'cat', 'ls'], ask: [askGit], deny: [denyRm, denyMv] },
+      }),
+    )
+    expect(session.commands).toEqual({
+      allow: ['git push', 'cat'],
+      ask: [askGit],
+      deny: [denyRm, denyMv],
+    })
+    // A list only one side states stands: it installs only what it lists.
+    const one = new Session({ sessionId: 'one' })
+    narrowRestored(
+      one,
+      table({ sessionId: 'table', commands: { allow: ['ls'], ask: [], deny: [] } }),
+    )
+    expect(one.commands).toEqual({ allow: ['ls'], ask: [], deny: [] })
+    const other = new Session({
+      sessionId: 'other',
+      commands: { allow: ['ls'], ask: [], deny: [] },
+    })
+    narrowRestored(
+      other,
+      table({ sessionId: 'table', commands: { allow: null, ask: [], deny: [denyRm] } }),
+    )
+    expect(other.commands).toEqual({ allow: ['ls'], ask: [], deny: [denyRm] })
+  })
+
+  it('keeps a show only as both sides allow it', () => {
+    const session = new Session({
+      sessionId: 's',
+      mountModes: new Map([['/repo', MountMode.READ]]),
+      hiddenPaths: { paths: ['/repo/sealed'], patterns: [] },
+      shownPaths: {
+        entries: [
+          { path: '/repo/sealed/public', mode: null },
+          { path: '/repo/sealed/docs', mode: MountMode.WRITE },
+          { path: '/repo/build', mode: null },
+        ],
+      },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        shownPaths: {
+          entries: [
+            { path: '/repo/sealed/public', mode: null },
+            { path: '/repo/sealed/docs', mode: MountMode.READ },
+            { path: '/repo/sealed/other', mode: null },
+            { path: '/repo/out', mode: MountMode.EXEC },
+          ],
+        },
+      }),
+    )
+    expect(session.shownPaths).toEqual({
+      entries: [
+        // Both state it, neither with a mode: list-form on both sides.
+        { path: '/repo/sealed/public', mode: null },
+        // Both state a mode: the weaker.
+        { path: '/repo/sealed/docs', mode: MountMode.READ },
+        // Only the session states it and nothing hides it: kept.
+        { path: '/repo/build', mode: null },
+        // Only the table states it, nothing hides it, and its mode is
+        // held under the session's cap at /repo. /repo/sealed/other,
+        // only the table's, re-opens a hidden subtree and is dropped.
+        { path: '/repo/out', mode: MountMode.READ },
+      ],
+    })
+  })
+
+  it('is the identity for a table from the same document', () => {
+    const compiled = compileProfile(
+      parseSessionProfile({
+        mounts: {
+          '/repo': {
+            mode: 'rw',
+            paths: {
+              hide: [{ patterns: ['/repo/sealed'], reason: 'sealed' }],
+              show: { '/repo/sealed/public': 'r' },
+            },
+            commands: { ask: ['git push'] },
+          },
+        },
+        vars: { hide: ['AWS_*'] },
+        commands: { allow: ['git *', 'ls', 'rm'], deny: ['rm'] },
+      }),
+      'named',
+    )
+    const session = new Session({ sessionId: 's' })
+    narrow(session, compiled)
+    const stored = Session.fromJSON(session.toJSON() as Parameters<typeof Session.fromJSON>[0])
+    narrowRestored(session, stored)
+    expect(session.commands).toBe(compiled.commands)
+    expect(session.hiddenPaths).toBe(compiled.hiddenPaths)
+    expect(session.hiddenVars).toBe(compiled.hiddenVars)
+    expect(session.shownPaths).toBe(compiled.shownPaths)
+    expect(session.hideReasons).toBe(compiled.hideReasons)
+    expect(session.mountModes).toEqual(compiled.mountModes)
+    expect(session.toJSON()).toEqual(stored.toJSON())
+  })
+
+  it("keeps the session's program and name", () => {
+    const target = compileProfile(parseSessionProfile({ cwd: '/x' }), 'target')
+    const session = new Session({ sessionId: 's' })
+    narrow(session, target)
+    const rules: AdmissionRules = {
+      allow: null,
+      ask: [],
+      deny: [{ reason: 'no', commands: ['rm'], paths: [], mount: '' }],
+    }
+    narrowRestored(session, table({ sessionId: 'table', profile: 'other', commands: rules }))
+    expect(session.profile).toBe('target')
+    expect(session.script).toBe(target.script)
+    expect(session.commands).toEqual(rules)
+  })
+
+  // A show is always stated against a hide, so reading the merged hide
+  // set dropped every one-sided show under its own side's hide: a table
+  // that simply never mentioned /vault took /vault/public away with it.
+  it('keeps a one-sided show under its own hide', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/vault'], patterns: [] },
+      shownPaths: { entries: [{ path: '/vault/public', mode: null }] },
+    })
+    narrowRestored(session, table({ sessionId: 'table' }))
+    expect(session.shownPaths).toEqual({ entries: [{ path: '/vault/public', mode: null }] })
+    expect(pathVisible(session.hiddenPaths, session.shownPaths, '/vault/public')).toBe(true)
+    // The same either way round: the table's show under the table's own
+    // hide survives an unrestricted session.
+    const other = new Session({ sessionId: 's' })
+    narrowRestored(
+      other,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/vault'], patterns: [] },
+        shownPaths: { entries: [{ path: '/vault/public', mode: null }] },
+      }),
+    )
+    expect(other.shownPaths).toEqual({ entries: [{ path: '/vault/public', mode: null }] })
+  })
+
+  // A pattern show is the same case: dropped only where the other side
+  // hides at all, since no comparison proves which names it leaves open.
+  it('keeps a one-sided pattern show when nothing on the other side hides', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/work/aaa'], patterns: [] },
+      shownPaths: { entries: [{ path: '/work/aaa/*.txt', mode: null }] },
+    })
+    narrowRestored(session, table({ sessionId: 'table' }))
+    expect(session.shownPaths).toEqual({ entries: [{ path: '/work/aaa/*.txt', mode: null }] })
+    const hidden = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/work/aaa'], patterns: [] },
+      shownPaths: { entries: [{ path: '/work/aaa/*.txt', mode: null }] },
+    })
+    narrowRestored(
+      hidden,
+      table({ sessionId: 'table', hiddenPaths: { paths: ['/work'], patterns: [] } }),
+    )
+    expect(hidden.shownPaths).toBeNull()
+  })
+
+  // Both sides hide /vault and both reach /vault/public/docs, one
+  // through a broad carve-out and one through a narrow one. An
+  // exact-path lookup found no counterpart for either entry, so each
+  // was judged one-sided and dropped against the other side's /vault
+  // hide, and the subtree both sides permit came back inaccessible. A
+  // grant is a depth comparison, not a string match: the narrower
+  // carve-out is the intersection.
+  it('keeps a nested show both sides reach', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/vault'], patterns: [] },
+      shownPaths: { entries: [{ path: '/vault/public', mode: null }] },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/vault'], patterns: [] },
+        shownPaths: { entries: [{ path: '/vault/public/docs', mode: null }] },
+      }),
+    )
+    expect(session.shownPaths).toEqual({ entries: [{ path: '/vault/public/docs', mode: null }] })
+    expect(pathVisible(session.hiddenPaths, session.shownPaths, '/vault/public/docs')).toBe(true)
+    // Only the narrower grant survives: the broad one is not the
+    // table's, and its siblings stay sealed.
+    expect(pathVisible(session.hiddenPaths, session.shownPaths, '/vault/public/other')).toBe(false)
+  })
+
+  // The mode travels with the nesting: a narrow carve-out is held under
+  // what the broad one allows above it, since a show scores deeper than
+  // a per-mount cap and would otherwise lift it.
+  it('holds a nested show under the broader mode', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/vault'], patterns: [] },
+      shownPaths: { entries: [{ path: '/vault/public', mode: MountMode.READ }] },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/vault'], patterns: [] },
+        shownPaths: { entries: [{ path: '/vault/public/docs', mode: MountMode.WRITE }] },
+      }),
+    )
+    expect(session.shownPaths).toEqual({
+      entries: [{ path: '/vault/public/docs', mode: MountMode.READ }],
+    })
+  })
+
+  // An anchored pattern is asked the same question as a path, so a
+  // broader pattern grants a narrower one and the narrower survives as
+  // the intersection, exactly as two nested exact carve-outs do. Two
+  // patterns that only overlap have no single entry naming their common
+  // ground and are both dropped -- the narrowing direction, stated in
+  // `grants`.
+  it('keeps the narrower of two nested show patterns', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/vault'], patterns: [] },
+      shownPaths: { entries: [{ path: '/vault/a/b/*', mode: null }] },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/vault'], patterns: [] },
+        shownPaths: { entries: [{ path: '/vault/a/*', mode: null }] },
+      }),
+    )
+    expect(session.shownPaths).toEqual({ entries: [{ path: '/vault/a/b/*', mode: null }] })
+    expect(pathVisible(session.hiddenPaths, session.shownPaths, '/vault/a/b/f.txt')).toBe(true)
+    expect(pathVisible(session.hiddenPaths, session.shownPaths, '/vault/a/other.txt')).toBe(false)
+  })
+
+  const ruled = (doc: unknown, name: string): Session => {
+    const session = new Session({ sessionId: name })
+    narrow(session, compileProfile(parseSessionProfile(doc), name))
+    return session
+  }
+
+  const registry = { isMountRoot: () => false }
+  const subject = (virtual: string): PathSpec =>
+    new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+      resourcePath: virtual,
+      resolved: true,
+      rawPath: virtual,
+    })
+  /** One classified line, the way the door hands it to the law. */
+  const line = (command: string, paths: string[], words: string[] = []): CommandContext => {
+    const specs = paths.map(subject)
+    return {
+      command,
+      paths: specs,
+      operands: specs,
+      argv: [...words, ...paths],
+      cwd: '/',
+      registry,
+      tokens: [command, ...words, ...paths],
+    }
+  }
+  /** What the session's joined rules say about one line. */
+  const answer = (session: Session, command: string, paths: string[], words: string[] = []) =>
+    decide(line(command, paths, words), session.commands).outcome
+
+  // `ruleAt` reads competing rules by anchor depth, deny before ask
+  // only at equal depth, so concatenating the two lists let a deeper
+  // ask from the table outrank a shallower deny on the session: a
+  // target refusing `cat /vault/*` answered a table asking
+  // `cat /vault/public/*` with a prompt. A deny from either side has to
+  // stay a deny.
+  it('keeps a deny a deeper ask would outrank', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'echo'],
+          deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'echo'],
+            ask: [{ reason: 'public needs a nod', commands: { cat: ['/vault/public/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    // The deny is restated at the table entry's own depth, where the
+    // verb tie-break lets the refusal win, carrying its own reason; the
+    // ask stays whole.
+    expect(session.commands?.deny.map((r) => [r.reason, r.paths])).toEqual([
+      ['vault is sealed', ['/vault/*']],
+      ['vault is sealed', ['/vault/public/*']],
+    ])
+    expect(session.commands?.ask.map((r) => [r.reason, r.paths])).toEqual([
+      ['public needs a nod', ['/vault/public/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.DENY)
+  })
+
+  // Only the covered part moves: a carve-out the other side never
+  // spoke about is still a question, not a refusal and not a grant.
+  it('curbs only what the other side denies', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'echo'],
+          deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'echo'],
+            ask: [{ reason: 'a nod, please', commands: { cat: ['/vault/public/*', '/notes/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.ask.map((r) => [r.reason, r.paths])).toEqual([
+      ['a nod, please', ['/vault/public/*', '/notes/*']],
+    ])
+    expect(session.commands?.deny.map((r) => [r.reason, r.paths])).toEqual([
+      ['vault is sealed', ['/vault/*']],
+      ['vault is sealed', ['/vault/public/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.DENY)
+    expect(answer(session, 'cat', ['/notes/x'])).toBe(Outcome.ASK)
+  })
+
+  // A deny deeper than the ask already wins on its own subtree and
+  // must not swallow the shallower question above it.
+  it('leaves an ask a deeper deny already outranks', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'echo'],
+          deny: [{ reason: 'the key is sealed', commands: { cat: ['/vault/public/key/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'echo'],
+            ask: [{ reason: 'a nod, please', commands: { cat: ['/vault/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.ask.map((r) => [r.reason, r.paths])).toEqual([
+      ['a nod, please', ['/vault/*']],
+    ])
+    expect(session.commands?.deny.map((r) => [r.reason, r.paths])).toEqual([
+      ['the key is sealed', ['/vault/public/key/*']],
+    ])
+  })
+
+  // A deny about another command reaches nothing the ask names, and
+  // refusing there would refuse a line neither side refuses.
+  it('does not curb across commands', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'rm', 'echo'],
+          deny: [{ reason: 'vault is sealed', commands: { rm: ['/vault/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'rm', 'echo'],
+            ask: [{ reason: 'a nod, please', commands: { cat: ['/vault/public/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.ask.map((r) => [r.reason, r.paths])).toEqual([
+      ['a nod, please', ['/vault/public/*']],
+    ])
+    expect(session.commands?.deny.map((r) => [r.reason, r.paths])).toEqual([
+      ['vault is sealed', ['/vault/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.ASK)
+  })
+
+  // A deny written under a mount section applies only to lines working
+  // inside that mount, and a top-level ask applies everywhere, so the
+  // two overlap inside the mount: there the deeper ask outranked the
+  // deny and answered the refusal with a prompt. The deny is restated
+  // at the ask's depth, still scoped to its mount.
+  it('restates a mount-scoped deny inside its mount', () => {
+    const session = ruled(
+      {
+        commands: { allow: ['cat', 'echo'] },
+        mounts: {
+          '/vault': {
+            commands: { deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }] },
+          },
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'echo'],
+            ask: [{ reason: 'a nod, please', commands: { cat: ['/vault/public/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(
+      session.commands?.deny.map((r) => [r.reason, r.commands, r.paths, r.mount ?? '']),
+    ).toEqual([
+      ['vault is sealed', ['cat'], ['/vault/*'], '/vault'],
+      ['vault is sealed', ['cat'], ['/vault/public/*'], '/vault'],
+    ])
+    expect(session.commands?.ask.map((r) => [r.reason, r.paths])).toEqual([
+      ['a nod, please', ['/vault/public/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.DENY)
+  })
+
+  // An ask naming paths alone speaks about every command, so it
+  // overlaps a `cat` deny on `cat` lines and nothing else: the deny is
+  // restated for `cat` at the ask's depth, and the other commands are
+  // still asked about, since neither side refused them.
+  it('restates a deny for the commands the ask shares with it', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'rm', 'echo'],
+          deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'rm', 'echo'],
+            ask: [{ reason: 'a nod, please', paths: ['/vault/public/*'] }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.deny.map((r) => [r.reason, r.commands, r.paths])).toEqual([
+      ['vault is sealed', ['cat'], ['/vault/*']],
+      ['vault is sealed', ['cat'], ['/vault/public/*']],
+    ])
+    expect(session.commands?.ask.map((r) => [r.reason, r.commands ?? [], r.paths])).toEqual([
+      ['a nod, please', [], ['/vault/public/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.DENY)
+    expect(answer(session, 'rm', ['/vault/public/x'])).toBe(Outcome.ASK)
+  })
+
+  // Two command patterns meet token by token: a `git` ask and a
+  // `git push` deny share `git push`, so the push is refused and every
+  // other git verb is still asked about.
+  it('restates a deny at the verb the ask shares with it', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['git', 'echo'],
+          deny: [{ reason: 'no pushing from the vault', commands: { 'git push': ['/vault/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['git', 'echo'],
+            ask: [{ reason: 'a nod, please', commands: { git: ['/vault/public/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.deny.map((r) => [r.reason, r.commands, r.paths])).toEqual([
+      ['no pushing from the vault', ['git push'], ['/vault/*']],
+      ['no pushing from the vault', ['git push'], ['/vault/public/*']],
+    ])
+    expect(answer(session, 'git', ['/vault/public/x'], ['push'])).toBe(Outcome.DENY)
+    expect(answer(session, 'git', ['/vault/public/x'], ['pull'])).toBe(Outcome.ASK)
+  })
+
+  // A deny the other side's own deeper ask already outranks is not
+  // restated: that side's answer at the entry was a question, so there
+  // is no refusal to keep, and restating it would refuse a line neither
+  // side refuses.
+  it('leaves a deny the other side carved out itself', () => {
+    const session = ruled(
+      {
+        commands: {
+          allow: ['cat', 'echo'],
+          deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }],
+          ask: [{ reason: 'public needs a nod', commands: { cat: ['/vault/public/*'] } }],
+        },
+      },
+      'target',
+    )
+    narrowRestored(
+      session,
+      ruled(
+        {
+          commands: {
+            allow: ['cat', 'echo'],
+            ask: [{ reason: 'reports need a nod', commands: { cat: ['/vault/public/reports/*'] } }],
+          },
+        },
+        'source',
+      ),
+    )
+    expect(session.commands?.deny.map((r) => [r.reason, r.paths])).toEqual([
+      ['vault is sealed', ['/vault/*']],
+    ])
+    expect(answer(session, 'cat', ['/vault/public/reports/q'])).toBe(Outcome.ASK)
+    expect(answer(session, 'cat', ['/vault/other'])).toBe(Outcome.DENY)
+  })
+
+  // Joining a rule set with itself is a no-op, carve-outs included: a
+  // checkout feeds live tables back through the restore, and a
+  // document's own deeper ask over its own deny is its answer, not a
+  // lifted refusal.
+  it('joins a rule set with itself as a no-op', () => {
+    const doc = {
+      commands: {
+        allow: ['cat', 'echo'],
+        deny: [{ reason: 'vault is sealed', commands: { cat: ['/vault/*'] } }],
+        ask: [{ reason: 'public needs a nod', commands: { cat: ['/vault/public/*'] } }],
+      },
+    }
+    const session = ruled(doc, 'target')
+    const before = session.commands
+    narrowRestored(session, ruled(doc, 'source'))
+    expect(session.commands).toBe(before)
+    expect(answer(session, 'cat', ['/vault/public/x'])).toBe(Outcome.ASK)
+  })
+
+  // A table whose show list spells one path twice keeps what was in
+  // force, not what was written last: `shownMode` takes the weaker of
+  // two entries at a depth, so matching against the raw list paired the
+  // session against the wrong spelling and restored an executable
+  // subtree the source only ever read.
+  it('folds a duplicate table show to its weakest mode', () => {
+    const session = new Session({
+      sessionId: 's',
+      hiddenPaths: { paths: ['/repo'], patterns: [] },
+      shownPaths: { entries: [{ path: '/repo/build', mode: MountMode.EXEC }] },
+    })
+    narrowRestored(
+      session,
+      table({
+        sessionId: 'table',
+        hiddenPaths: { paths: ['/repo'], patterns: [] },
+        shownPaths: {
+          entries: [
+            { path: '/repo/build', mode: MountMode.READ },
+            { path: '/repo/build', mode: MountMode.EXEC },
+          ],
+        },
+      }),
+    )
+    expect(session.shownPaths).toEqual({
+      entries: [{ path: '/repo/build', mode: MountMode.READ }],
+    })
+  })
+})
+
+describe('narrowProfile', () => {
+  const PROGRAM = parseSessionProfile(POLICY_DOC)
+
+  it('joins restrictions onto a live session', () => {
+    const session = new Session({
+      sessionId: 's',
+      mountModes: new Map([['/repo', MountMode.WRITE]]),
+      hiddenPaths: { paths: ['/repo/live'], patterns: [] },
+    })
+    narrowProfile(
+      session,
+      compileProfile(
+        parseSessionProfile({
+          mounts: { '/repo': 'r' },
+          paths: { hide: ['/repo/sealed'] },
+          commands: { deny: ['rm'] },
+        }),
+        'named',
+      ),
+    )
+    expect(session.mountModes).toEqual(new Map([['/repo', MountMode.READ]]))
+    expect(pathHidden(session.hiddenPaths, '/repo/live')).toBe(true)
+    expect(pathHidden(session.hiddenPaths, '/repo/sealed')).toBe(true)
+    expect(session.profile).toBe('named')
+  })
+
+  // A program the host installed with setSessionProfile is the host's,
+  // and a restore only adds restrictions: the name travels with it, so
+  // a session never reports a group whose script it is not running.
+  it('keeps a program the session already runs', () => {
+    const running = compileProfile(PROGRAM, 'locked')
+    const session = new Session({ sessionId: 's' })
+    narrow(session, running)
+    narrowProfile(session, compileProfile(parseSessionProfile({ cwd: '/x' }), 'wanted'))
+    expect(session.script).toBe(running.script)
+    expect(session.profile).toBe('locked')
+  })
+
+  it('takes the program of a session running none', () => {
+    const wanted = compileProfile(PROGRAM, 'wanted')
+    const session = new Session({ sessionId: 's' })
+    narrowProfile(session, wanted)
+    expect(session.script).toBe(wanted.script)
+    expect(session.profile).toBe('wanted')
+  })
+
+  it('round trips through narrowingOf and narrow', () => {
+    const compiled = compileProfile(
+      parseSessionProfile({
+        mounts: { '/repo': 'r' },
+        paths: { hide: ['/repo/sealed'], show: { '/repo/sealed/public': 'r' } },
+        vars: { hide: ['AWS_*'] },
+        commands: { deny: ['rm'] },
+      }),
+      'named',
+    )
+    const session = new Session({ sessionId: 's' })
+    narrow(session, compiled)
+    const before = session.toJSON()
+    const saved = narrowingOf(session)
+    narrowProfile(
+      session,
+      compileProfile(
+        parseSessionProfile({ mounts: { '/repo': 'rwx' }, paths: { hide: ['/other'] } }),
+        'wider',
+      ),
+    )
+    expect(session.toJSON()).not.toEqual(before)
+    narrow(session, saved)
+    expect(session.toJSON()).toEqual(before)
   })
 })

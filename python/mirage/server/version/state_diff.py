@@ -38,24 +38,42 @@ def _is_empty(delta: dict[str, Any]) -> bool:
     return not (delta["added"] or delta["deleted"] or delta["modified"])
 
 
+# The session's own id is the key the delta is filed under, and
+# `generation` is a counter that bumps on every line the session runs, so
+# reporting it would mark every session modified after any activity at
+# all. Everything else the session serializes is state a reader is
+# entitled to see move.
+_SESSION_DIFF_SKIP = frozenset({SessionKey.SESSION_ID, "generation"})
+
+
 def _session_delta(before: dict[str, Any], after: dict[str,
                                                        Any]) -> dict[str, Any]:
+    """Every session field that moved between the two payloads.
+
+    Naming three fields (env, mount_modes, cwd) meant the diff went quiet
+    on every other one, so a version whose only change was an access rule
+    or a standing answer read as unmodified right up to the checkout that
+    applied it. Walking the union of the two payloads keeps a field added
+    later in view without a second list to remember it: a dict field
+    reports which keys moved, anything else reports from/to.
+
+    Args:
+        before (dict[str, Any]): the earlier session payload.
+        after (dict[str, Any]): the later session payload.
+    """
     out: dict[str, Any] = {}
-    env = _dict_delta(
-        before.get(SessionKey.ENV) or {},
-        after.get(SessionKey.ENV) or {})
-    if not _is_empty(env):
-        out["env"] = env
-    grants = _dict_delta(
-        before.get("mount_modes") or {},
-        after.get("mount_modes") or {})
-    if not _is_empty(grants):
-        out["mount_modes"] = grants
-    if before.get(SessionKey.CWD) != after.get(SessionKey.CWD):
-        out["cwd"] = {
-            "from": before.get(SessionKey.CWD),
-            "to": after.get(SessionKey.CWD),
-        }
+    for key in sorted(before.keys() | after.keys()):
+        if key in _SESSION_DIFF_SKIP:
+            continue
+        was, now = before.get(key), after.get(key)
+        if was == now:
+            continue
+        if isinstance(was, dict) or isinstance(now, dict):
+            delta = _dict_delta(was or {}, now or {})
+            if not _is_empty(delta):
+                out[key] = delta
+            continue
+        out[key] = {"from": was, "to": now}
     return out
 
 

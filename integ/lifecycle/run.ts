@@ -62,7 +62,7 @@ type Step = (
   | { op: 'write'; path: string; data: string }
   | { op: 'exec'; command: string; session?: string }
   | { op: 'set_mode'; path: string; mode: MountMode }
-  | { op: 'session'; id: string; profile?: Record<string, unknown> }
+  | { op: 'session'; id: string; profile?: Record<string, unknown> | string }
   | { op: 'close_session'; id: string }
   | { op: 'set_profile'; session?: string; profile: Record<string, unknown> | string | null }
   | {
@@ -172,7 +172,10 @@ async function action(
       ws.setMountMode(step.path, step.mode)
       break
     case 'session':
-      ws.createSession(step.id, { profile: profileDocument(step.profile ?? {}) })
+      ws.createSession(step.id, {
+        profile:
+          typeof step.profile === 'string' ? step.profile : profileDocument(step.profile ?? {}),
+      })
       break
     case 'close_session':
       await ws.closeSession(step.id)

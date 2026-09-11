@@ -18,6 +18,8 @@ implementations cannot drift apart.
   Each fake has a selftest: `pnpm run <name>:selftest`.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
+- `snapshot/`: the cross-language snapshot battery (below). Its own
+  corpus, its own two runners, driven by `snapshot/cross.sh`.
 
 ## Runs and tenants
 
@@ -52,3 +54,53 @@ The core facet also needs redis and mongo on their default ports (CI uses a
 it) and `MIRAGE_QUICKJS_HOME` pointing at the quickjs-ng WASI build for the
 scripted target. If a pinned port is taken locally, copy `ci/fakes.json` and
 move that one entry.
+
+## Cross-language snapshots
+
+`snapshot/` asks one question the shell-line battery cannot: **can the other
+language read what this one wrote?** A snapshot is the workspace document plus
+the workspace state, and `lifecycle/` only ever takes one back into the host
+that wrote it. `snapshot/cross.sh` runs all four directions -- python to
+typescript, typescript to python, and each language to itself as the control.
+
+Each arm builds its **own** world from the same case document, which is what
+makes the question answerable without sharing a fake tenant between two
+processes. That works because a snapshot carries content for the resources
+that hold it (RAM and redis restore through `load_state`) and a fingerprint
+for the ones that do not, so an object store the reader seeded from the same
+fixture matches by construction, and a live-only mount (slack, gmail, email) is
+read live.
+
+**The comparison is the assertion.** Every arm records what its verify steps
+observed and `cross.sh` diffs the writer's record against the reader's, so a
+plane one language carries and the other drops shows up without anyone having
+written an expectation for it. A case's own `expect` blocks pin the absolute
+truths a matching pair of wrong answers would otherwise hide.
+
+The planes it covers, per case: the named profile a session ran under and its
+policy program, hides and shows and hidden variables, ask rules and the answers
+a host gave them, per-mount caps, allow and deny lists, the env template,
+coded policy names, installed CLIs with their configs redacted (git, gh,
+himalaya, slack, gws), a script CLI's whole program, and the mounts themselves
+over ram, redis, s3, slack, gmail, google drive, email and github.
+
+```bash
+integ/snapshot/cross.sh                 # skips a case whose service is absent
+integ/snapshot/cross.sh --strict        # what CI runs: a skip is a failure
+integ/snapshot/cross.sh --case ram_document_sessions_and_asks
+```
+
+One arm at a time, which is what to reach for when a direction disagrees:
+
+```bash
+./python/.venv/bin/python integ/snapshot/run.py write RUN /tmp/w
+cd integ && node_modules/.bin/tsx snapshot/run.ts read RUN /tmp/w --out /tmp/r
+diff /tmp/w/<case>.python.json /tmp/r/<case>.typescript.json
+```
+
+Two things a case has to say per host rather than once, because they are
+deployment wiring a snapshot deliberately does not carry: the runtime a policy
+or a script CLI names (python's default world carries monty, typescript's
+carries pyodide), and the coded policy classes the loader registers. A case
+declares both per language and the reader passes them through the loader's
+`profiles=`, `runtimes=` and `policies=`, which is the documented escape hatch.

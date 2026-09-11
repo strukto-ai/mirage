@@ -26,7 +26,7 @@ Create all Git worktrees under the repository-local `.worktrees/` directory.
 - Keep Python and TypeScript layout, architecture, and semantics mirrored as much as practical.
 - When changing one implementation, check the other for the matching pattern or feature. If one side is more correct, use it to improve the weaker side instead of copying a bad design.
 - For major Python or TypeScript changes, consider adding or updating integration coverage under `integ/`.
-- **The layout half of that rule is gated.** `scripts/check_layout_parity.py` diffs the module-name sets of every `mirage/<pkg>/` against its TypeScript counterpart (core/node/browser unioned onto one namespace, plus cli/server/agents by prefix), folding camelCase, hyphens and a leading underscore so a rename reads as a rename rather than a missing module; `__init__.py` and `index.ts` are skipped because only Python needs one per directory. Intentional differences live in `spec/layout_exceptions.json` with a reason, and a stale entry fails as loudly as a new gap. `--strict` (what CI runs) does not demand zero: it fails when the count moves off the committed `baseline` in *either* direction, so new drift is blocked and closing a divergence has to be locked in by lowering the number. Run it without `--strict` for the full advisory report; that report is how layout work gets scoped.
+- **The layout half of that rule is gated.** `scripts/check_layout_parity.py` diffs the module-name sets of every `mirage/<pkg>/` against its TypeScript counterpart (core/node/browser unioned onto one namespace, plus cli/server/agents by prefix), folding camelCase, hyphens and a leading underscore so a rename reads as a rename rather than a missing module; `__init__.py` and `index.ts` are skipped because only Python needs one per directory. Intentional differences live in `spec/layout_exceptions.json` with a reason, and a stale entry fails as loudly as a new gap. `--strict` (what CI runs) does not demand zero: it fails when the count moves off the committed `baseline` in _either_ direction, so new drift is blocked and closing a divergence has to be locked in by lowering the number. Run it without `--strict` for the full advisory report; that report is how layout work gets scoped.
 - **mirage ships no filetype renderers, and no factory for them.** Parquet, ORC, feather/arrow/ipc and hdf5/h5 rendering are gone, along with the `parquet`/`hdf5`/`pdf` extras, the `hyparquet`/`apache-arrow`/`h5wasm` dependencies, and the whole `commands/builtin/filetype_factory/` package in both languages (with its `filetype_read` / `filetypeRead` op knobs). A file with an unregistered extension is read as raw bytes. The one surviving extension point is registration on a mount: a command or op carrying a `filetype` resolves as `(name, filetype)` before `(name, resource)` before `(name,)`. `examples/{python,typescript}/filetype/` register a `.tally` renderer end to end and are gated in CI against `integ/truth/*/filetype.json`; `tests/commands/custom/test_filetype_fns.py` and `test_unregister_removes_all_filetypes` cover the unit path.
 
 ## Module Layout
@@ -102,7 +102,7 @@ agent discovers state, the CLI is how it acts.
 - **A CLI that mimics a real program is gated against that program.**
   `ntn` is the worked example: every case in `integ/cli/ntn.json` is asserted
   twice, once by the shared battery inside a mirage workspace and once by
-  `integ/ntn_conformance.ts`, which runs the *same shell line* with the real
+  `integ/ntn_conformance.ts`, which runs the _same shell line_ with the real
   npm `ntn` binary pointed at the same fake through `NOTION_API_BASE_URL`. A
   golden both agree on is by construction what the official CLI prints, so the
   grammar cannot drift from upstream without a red build. Four rules keep it
@@ -142,7 +142,7 @@ agent discovers state, the CLI is how it acts.
   `Option.metavar` (`VERSION`, rendered `--notion-version <VERSION>`; derived
   from the long spelling when absent, which covers most options and is why only
   the four upstream overrides declare one). `Option.env` is a fourth and is
-  **not** a synonym for `default`: an env-sourced value counts as *supplied*,
+  **not** a synonym for `default`: an env-sourced value counts as _supplied_,
   so clap echoes it in a usage line where a defaulted one is invisible, and it
   is read from the session rather than frozen into the spec. The executor fills
   it, so a leaf reads one flag instead of a flag and a fallback.
@@ -186,7 +186,7 @@ agent discovers state, the CLI is how it acts.
 ## Notion data sources
 
 The notion backend speaks **`Notion-Version: 2025-09-03`**, the generation that
-split a database into a container plus one or more *data sources*. The split is
+split a database into a container plus one or more _data sources_. The split is
 not cosmetic and it is not optional:
 
 - **The database object no longer carries `properties`.** The column schema
@@ -266,7 +266,7 @@ Both dataclasses are shared by every command in the repo, so a field
 added for one command is a field every other command's author has to
 read past, and a fourth one turns the grammar into a pile of per-command
 dialects. **Do not add a field to `CommandSpec`, `Operand` or `Option`
-unless POSIX *and* argparse both already have the concept, and then name
+unless POSIX _and_ argparse both already have the concept, and then name
 it after theirs, not after the mechanism it trips inside the parser.**
 
 Both, not either. The test is literal, not a judgement call: write the
@@ -301,7 +301,7 @@ A `CLISpec` **is** a `CommandSpec` (python: subclass; TypeScript:
 `extends`), and every level of a CLI tree parses with the ordinary spec
 machinery. Moving a command to the CLI tier therefore does not exempt it
 from this rule, because it still parses with the same `Option` and
-`Operand`. The CLI tier is for a program *tree* (a verb the line selects,
+`Operand`. The CLI tier is for a program _tree_ (a verb the line selects,
 like `git status` or `ntn api`), not for a program with an unusual
 option grammar.
 
@@ -380,7 +380,7 @@ a leading `-P`/`-H`/`-L` option instead, last one wins, so it lives in
 (`ls -l` and `ls -d` report a command-line link itself, while a bare `ls`
 dereferences a link to a directory, and `ls -L` overrides both).
 
-Those tables only cover the *operand*; honoring `-L` below it is the generic's
+Those tables only cover the _operand_; honoring `-L` below it is the generic's
 job, not the router's.
 
 Rendering derives from one fact: `link_stat` builds
@@ -391,7 +391,7 @@ and `file`'s "symbolic link to" all follow from it without a second lookup.
 `du` sizes a link at its target string's length. This is not a divergence:
 mirage's `du` counts bytes, which is GNU's `--apparent-size --block-size=1`
 (`du -b`) mode, and in that mode GNU reports a symlink as `len(target)` too. The
-familiar `0` comes from GNU's default 1 KiB *block* mode, where a short target
+familiar `0` comes from GNU's default 1 KiB _block_ mode, where a short target
 sits inline in the inode and occupies no data blocks (`stat` reports
 `size=15 blocks=0` for it). mirage has no block mode at all, so `0` is not an
 option it can express; comparing against it would also make every regular file
@@ -437,7 +437,7 @@ look wrong (a 6-byte file is `6` in bytes, `4` in 1 KiB blocks).
   `fuse/darwin.py`.** The FSKit shim finalizes every created item through
   macFUSE's Darwin-only `setattr_x` and routes rename through `renamex`;
   mfusepy leaves those `fuse_operations` slots as reserved NULLs, so without
-  the extension module create/mkdir fail with ENOSYS *after* the op already
+  the extension module create/mkdir fail with ENOSYS _after_ the op already
   applied and rename never reaches userspace (verified by libfuse wire
   trace: CREATE success, then SETATTR -78). Do not remove the
   `install_macfuse_extensions()` call in `mount.py`, and keep the struct
@@ -569,7 +569,7 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   the raw `IsADirectoryError` leaked the host path behind a disk mount.
 - **`zip` is Info-ZIP, which inverts tar's two defaults.** A directory
   operand contributes only its own entry unless `-r` says to descend,
-  and a symlink is *followed* unless `-y` says to store the link, where
+  and a symlink is _followed_ unless `-y` says to store the link, where
   tar always descends and always stores unless `-h`. Both are just the
   `recurse` / `dereference` arguments to the shared scan. The rest is
   pinned against Info-ZIP 3.0 on `debian:stable-slim`: a leading slash
@@ -600,7 +600,7 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   in via `CompressionStream`, and a codec may be **decompress-only**,
   which is the one deliberate py/ts divergence here. Python reads and
   writes `.tar.bz2` because `bz2` is stdlib; TypeScript only reads one,
-  because every JavaScript bzip2 *compressor* is GPL (`compressjs`,
+  because every JavaScript bzip2 _compressor_ is GPL (`compressjs`,
   `archive-wasm`) and an Apache-2.0 package cannot ship that, while
   `seek-bzip` (MIT) decodes. `tar -cj` therefore exits 1 with
   `tar: bzip2 not supported`, the same answer browser core already gives
@@ -617,7 +617,7 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   unprefixed mount cannot see it, so cover a prefixed mount too.
 - **`du` has one backend contract: `size` and `entries`.** Each backend exposes `core/<backend>/du/size.py` (recursive byte total for one path) and `core/<backend>/du/entries.py` (per-file breakdown), wired as `du_size` / `du_entries` on the adapter. `entries` returns `(entries, total)` where entries are **leaf files only, in mount-relative path space, with no summary row**; the generic lifts them onto virtual paths (`to_virtual`, via `mount_prefix_of`) and re-spells them as the operand was typed (`respell_raw`). A backend that returns backend-key paths, or appends its own roll-up row, makes two mounts holding the same filename render identical lines. Do not reintroduce a second shape; the old flat-list `du_multi` contract is gone.
 - **`du` prints a line per directory, derived not walked.** GNU prints one line per directory with its recursive total, post-order (children before parents), plus one per file under `-a`. Backends only ever report leaf files, so the generic derives the directory rows by summing each leaf into every ancestor (`rollup`, same name both languages), then emits post-order with siblings sorted. Two deliberate divergences: GNU orders siblings by `readdir` (filesystem-dependent), mirage sorts them; and an empty directory is invisible to mirage because no leaf points at it. Sizes are bytes, not GNU's 1 KiB blocks, since an object store has no block size. `--max-depth` prunes only what is printed, never the walk, because every printed total still covers the whole subtree. Verify changes with the differential harness against `debian:stable-slim`: paths, exit codes and stderr must match GNU exactly.
-- **`du` usage errors exit 1, not 2.** `du` is absent from `USAGE_EXIT`, which is correct: GNU du exits 1 for `-s` with `-a` ("cannot both summarize and show all entries"), `-s` with `--max-depth` ("warning: summarizing conflicts with --max-depth=N"), and a bad depth ("invalid maximum depth 'x'"). All three are raised by `parse_flags` / `parseDuFlags` *before* any I/O, mirroring GNU's option-parse order: the depth is parsed as the option is read, so a bad depth wins over the conflict checks. An unreadable operand is not a usage error: GNU names it (`du: cannot access 'x': No such file or directory`), prints every other operand, and exits 1, and still prints `0 total` under `-c` when every operand failed. With no operand at all, du measures the working directory; it never says "missing operand".
+- **`du` usage errors exit 1, not 2.** `du` is absent from `USAGE_EXIT`, which is correct: GNU du exits 1 for `-s` with `-a` ("cannot both summarize and show all entries"), `-s` with `--max-depth` ("warning: summarizing conflicts with --max-depth=N"), and a bad depth ("invalid maximum depth 'x'"). All three are raised by `parse_flags` / `parseDuFlags` _before_ any I/O, mirroring GNU's option-parse order: the depth is parsed as the option is read, so a bad depth wins over the conflict checks. An unreadable operand is not a usage error: GNU names it (`du: cannot access 'x': No such file or directory`), prints every other operand, and exits 1, and still prints `0 total` under `-c` when every operand failed. With no operand at all, du measures the working directory; it never says "missing operand".
 - **`du` walks are bounded.** Backends with no native du op are walked one `readdir` at a time, which on an API tree is one request per directory. `CommandIO.max_du_entries` caps that walk; when it trips, `du` prints what it accounted for, writes a notice to stderr and exits 1 (GNU's behavior for a tree it could not fully read), rather than hanging or silently reporting a wrong number. Slack sets a low cap (`DU_MAX_ENTRIES`) because it exposes a directory per conversation per day against a ~50/minute rate limit.
 - **Async-native by default.** I/O uses `aiofiles` / `redis.asyncio` / `aioboto3`, and command pipelines are async generators.
 - **Python unit tests mirror src 1:1 where reasonable.** Try to have a matching `tests/<path>/test_a.py` for each source file `mirage/<path>/a.py`. `__init__.py`, pure type-stub modules, and trivial re-exports are fine to skip; modules with real logic should have one.
@@ -662,7 +662,40 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   snapshot restore is **not** exempt: every session table and the env template
   a snapshot carries clear the gate (`gate_restored_vars`) before any of it
   lands, mount state included, so a refusal aborts the load with the workspace
-  as it was rather than half-restored.
+  as it was rather than half-restored. The same restore lands each table under
+  the target's profile of the table's name (the snapshot carries the profile
+  documents, `StateKey.PROFILES`; an unknown name refuses the load): the
+  profile is put on the session **before** the gate runs, so the program it
+  carries judges the table, and it is put on by `narrow` for a session the
+  restore creates and by `narrow_profile` for one already there, which joins
+  rather than stamps. Then the table itself joins through `narrow_restored`.
+  Neither join widens: restrictions union, grants intersect, and the program
+  is the profile's only when the session runs none, so a checkout can only add
+  restrictions to a live session and `set_session_profile` is the host's reset.
+  A refusal rolls the joined sessions back (`narrowing_of`) beside the created
+  ones. Every gate call names the id the table _lands_ on, never the one the
+  snapshot recorded: a hook resolves its program from that id, and the manager
+  cannot answer for a re-keyed default until `adopt_default` runs.
+  Two traps in the join. A show is always stated against a hide, so whether a
+  one-sided show survives is asked of the **other side**, never of the merged
+  hide set — and of its shows as well as its hides, since a grant is a depth
+  comparison and not a string match (one side's `show /vault/public` grants the
+  other's narrower `show /vault/public/docs`, and the narrower one is the
+  intersection). Reading the union instead erases every show exception the
+  other side simply never mentioned. And the rule lists are **not** a
+  concatenation: two rule sets read together are read by anchor depth, so a
+  deeper ask from one side outranks a shallower deny from the other and answers
+  a refusal with a prompt. `_curb_asks`/`curbAsks` restates each such deny at
+  the ask's own depth, in the scope the two rules share (the commands and the
+  mount both speak about), in both directions, where the verb tie-break lets
+  the refusal win; the ask stays whole, so outside that scope it still asks (a
+  top-level `cat` ask meeting a deny written under one mount is refused inside
+  that mount alone, an all-command ask meeting a `cat` deny is refused for
+  `cat` alone). A deny the other side's own deeper ask already outranks is not
+  restated, since that side's answer there was a question, which is what makes
+  joining a rule set with itself a no-op, carve-outs included; and nothing is
+  dropped, since dropping an entry would answer _allow_ and lift the question
+  its own side asked.
 - **The record client is a substrate, not a session detail.** Sessions, the
   namespace node table and workspace metadata are three tables that persist the
   same way, so the keyed-record clients live in `workspace/record/`

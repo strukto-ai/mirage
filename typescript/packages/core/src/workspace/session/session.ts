@@ -879,3 +879,9 @@ export class Session {
     })
   }
 }
+
+/**
+ * One session table as `toJSON` writes it and `fromJSON` reads it: the
+ * record the session store keeps and a snapshot carries.
+ */
+export type StoredSession = Parameters<typeof Session.fromJSON>[0]

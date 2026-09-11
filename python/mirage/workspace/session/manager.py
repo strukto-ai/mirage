@@ -435,6 +435,30 @@ class SessionManager:
     def get(self, session_id: str) -> Session:
         return self._sessions[session_id]
 
+    def discard(self, session_id: str) -> None:
+        """Forget a session ``create`` made that never landed.
+
+        A snapshot restore creates a candidate for every table it has
+        yet to vet and drops the candidates when a table is refused, so
+        the store never sees a half-made session. ``close`` is the wrong
+        door for that: it deletes from the store, which never held the
+        candidate. The default session is never a candidate and is
+        refused here.
+
+        Args:
+            session_id (str): the candidate's id.
+
+        Raises:
+            ValueError: the default session.
+            KeyError: no session of that id.
+        """
+        if session_id == self._default_id:
+            raise ValueError("Cannot discard the default session")
+        if session_id not in self._sessions:
+            raise KeyError(session_id)
+        del self._sessions[session_id]
+        del self._locks[session_id]
+
     async def set_profile(self, session_id: str,
                           compiled: CompiledProfile) -> Session:
         """Replace restrictions without resetting the session's scratch state.

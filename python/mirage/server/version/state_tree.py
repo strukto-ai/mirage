@@ -121,11 +121,17 @@ def tree_inputs_from_state(
             resource_state,
         })
     cache = state[StateKey.CACHE]
+    # The document keys ride the config block, or a checkout or clone
+    # at this version would land its sessions under no profile.
     config = {
         StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
         StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
         StateKey.DEFAULT_AGENT_ID: state[StateKey.DEFAULT_AGENT_ID],
         StateKey.CURRENT_AGENT_ID: state[StateKey.CURRENT_AGENT_ID],
+        StateKey.PROFILES: state.get(StateKey.PROFILES) or {},
+        StateKey.PROFILE: state.get(StateKey.PROFILE),
+        StateKey.POLICIES: state.get(StateKey.POLICIES) or [],
+        StateKey.CONSISTENCY: state.get(StateKey.CONSISTENCY),
         CacheKey.LIMIT: cache[CacheKey.LIMIT],
         CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
     }
@@ -204,4 +210,10 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
         StateKey.FINGERPRINTS: meta.get("fingerprints", []),
         StateKey.NODES: nodes,
         StateKey.LIVE_ONLY_MOUNTS: [],
+        # ``get`` throughout: a meta committed before the document keys
+        # existed reads as a snapshot without them.
+        StateKey.PROFILES: config.get(StateKey.PROFILES) or {},
+        StateKey.PROFILE: config.get(StateKey.PROFILE),
+        StateKey.POLICIES: config.get(StateKey.POLICIES) or [],
+        StateKey.CONSISTENCY: config.get(StateKey.CONSISTENCY),
     }

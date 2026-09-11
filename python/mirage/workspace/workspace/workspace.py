@@ -15,6 +15,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from enum import Enum, auto
 from types import TracebackType
 from typing import Any, Literal, overload
 
@@ -35,6 +36,7 @@ from mirage.ops import Ops
 from mirage.policy import (AskHandler, Decisions, Explanation, HandOff,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
+from mirage.policy.profile import CompiledProfile
 from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
@@ -96,6 +98,20 @@ from mirage.workspace.workspace.types import ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
+
+
+class _Omitted(Enum):
+    """A loader argument nobody passed, which None cannot stand for.
+
+    An enum, not a sentinel object: ``profile=None`` is a real value on
+    ``load``/``from_state`` — it says the target runs with no default
+    profile at all — so the absent argument needs a spelling of its own
+    or a caller could never clear the name a snapshot carries.
+    """
+    TOKEN = auto()
+
+
+_OMITTED = _Omitted.TOKEN
 
 
 class Workspace:
@@ -631,6 +647,17 @@ class Workspace:
             prefixes.append(entry.prefix)
         return prefixes
 
+    @property
+    def runtime_entries(self) -> tuple[Runtime, ...]:
+        """The ordered runtime world, as a read-only view of the live list.
+
+        The twin of TypeScript's ``runtimeEntries``. A snapshot carries
+        no runtimes -- they are deployment wiring, like the stores --
+        so a program that has to know which world it restored under
+        reads it here.
+        """
+        return tuple(self._runtimes.entries)
+
     def runtime_context(self, session_id: str | None = None) -> RuntimeContext:
         """Capture local workspace doors for an adapter, scoped to one session.
 
@@ -819,6 +846,11 @@ class Workspace:
             clis: CLIOverrides | None = None,
             secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None,
+            profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+            profile: str | None | _Omitted = _OMITTED,
+            policies: list[Policy] | None = None,
+            runtimes: list[Runtime | str] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -853,6 +885,26 @@ class Workspace:
                 (it is the deployment's credentials), so a pointer at a
                 declared instance needs the block supplied here, the
                 way a redacted mount needs `resources`.
+            profiles: the named profiles to restore under, replacing
+                the documents the snapshot carries. The snapshot's own
+                are used when omitted; a document given here wins, the
+                way the document outranks a stored record at hydration,
+                and one that omits the snapshot's default profile fails
+                at construction as an unknown name.
+            profile: the default profile's name, replacing the
+                snapshot's. None is a value here, not an omission: it
+                loads with no default profile at all, where leaving
+                the argument out keeps the snapshot's.
+            policies: the coded policies to register. A snapshot names
+                the source's policy classes and cannot carry them;
+                `from_state` warns about a recorded name no registered
+                policy answers to.
+            runtimes: the runtime world to build, as the constructor
+                takes it. A snapshot carries no runtimes (they are
+                deployment wiring, like the stores), so a profile
+                policy or a CLI script naming one the default world
+                lacks needs it named here; the TypeScript loader takes
+                the same knob through its options.
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and drops the restored RAM
                 cache entries for fingerprinted paths; a Redis cache is
@@ -863,6 +915,10 @@ class Workspace:
                                     resources=resources,
                                     clis=clis,
                                     secrets=secrets,
+                                    profiles=profiles,
+                                    profile=profile,
+                                    policies=policies,
+                                    runtimes=runtimes,
                                     drift_policy=drift_policy)
 
     @classmethod
@@ -874,6 +930,11 @@ class Workspace:
             clis: CLIOverrides | None = None,
             secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None,
+            profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+            profile: str | None | _Omitted = _OMITTED,
+            policies: list[Policy] | None = None,
+            runtimes: list[Runtime | str] | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -893,6 +954,16 @@ class Workspace:
                 installed programs).
             secrets: {instance: declaration} for the restored env
                 pointers; a snapshot never carries the `secrets:` block.
+            profiles: the named profiles to restore under, replacing
+                the snapshot's documents (see `load`).
+            profile: the default profile's name, replacing the
+                snapshot's. None is a value here, not an omission: it
+                loads with no default profile at all, where leaving
+                the argument out keeps the snapshot's.
+            policies: the coded policies to register; a recorded name
+                none of them answers to is reported at warning level.
+            runtimes: the runtime world to build, as the constructor
+                takes it (see `load`).
             drift_policy: STRICT (default) raises on mismatch. OFF
                 disables drift checking and drops the restored RAM
                 cache entries for fingerprinted paths; a Redis cache is
@@ -902,7 +973,11 @@ class Workspace:
         ws = await cls._from_state(state,
                                    resources=resources,
                                    clis=clis,
-                                   secrets=secrets)
+                                   secrets=secrets,
+                                   profiles=profiles,
+                                   profile=profile,
+                                   policies=policies,
+                                   runtimes=runtimes)
         install_fingerprints(ws,
                              state.get(StateKey.FINGERPRINTS) or [],
                              drift_policy)
@@ -912,6 +987,19 @@ class Workspace:
                 "Workspace.from_state: %s mount(s) opt out of snapshot "
                 "replay; reads against them will serve current state with "
                 "no drift detection: %s", len(live_only), live_only)
+        # A policy is code the snapshot can only name; the loader
+        # registers it, and a name nothing answers to is said out loud
+        # rather than silently running the workspace without it.
+        registered = set(ws.policies.names())
+        missing = [
+            name for name in (state.get(StateKey.POLICIES) or [])
+            if name not in registered
+        ]
+        if missing:
+            logger.warning(
+                "Workspace.from_state: the snapshot names %s policy "
+                "class(es) this workspace does not register; pass them as "
+                "policies=: %s", len(missing), missing)
         return ws
 
     async def copy(self) -> "Workspace":
@@ -939,15 +1027,27 @@ class Workspace:
         resources: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None
+        | None = None,
+        profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+        profile: str | None | _Omitted = _OMITTED,
+        policies: list[Policy] | None = None,
+        runtimes: list[Runtime | str] | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, resources, clis)
+        # The snapshot's document, unless the loader states its own: a
+        # profile the loader names replaces the recorded one the way the
+        # document outranks a stored record at hydration.
         ws = cls(args.mount_args,
                  consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
                  clis=args.clis,
-                 secrets=secrets)
+                 secrets=secrets,
+                 profiles=args.profiles if profiles is None else profiles,
+                 profile=args.profile if profile is _OMITTED else profile,
+                 policies=policies,
+                 runtimes=runtimes)
         if resources:
             ws._shared_resources = {id(r) for r in resources.values()}
         await apply_state_dict(ws, state)
@@ -1002,18 +1102,44 @@ class Workspace:
         """
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        base = self._base_profile(profile)
         inline = (SessionProfile.model_validate(permissions)
                   if permissions is not None else None)
         if mounts is not None:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts}))
-        compiled = compile_profile(with_inline(base, inline),
-                                   self._profile_name(profile))
+        compiled = self.compiled_profile(profile, inline)
         check_cli_verbs(compiled.commands, self._cli_verbs())
         session = self._session_mgr.create(session_id)
         apply_profile(session, compiled)
         return session
+
+    def compiled_profile(
+            self,
+            profile: str | SessionProfile | None,
+            inline: SessionProfile | None = None) -> CompiledProfile:
+        """The session fields a profile compiles to on this workspace.
+
+        The profile as named (a name from ``profiles``, a document, or
+        None for the workspace default) with an inline document added.
+        The one door ``create_session``, ``set_session_profile`` and a
+        snapshot restore all compile through, so a restored session is
+        narrowed exactly as a created one is.
+
+        Args:
+            profile (str | SessionProfile | None): the profile to
+                compile: a name, a SessionProfile, or None for the
+                workspace default.
+            inline (SessionProfile | None): an inline document of ask
+                and deny rules and hides, already validated.
+
+        Raises:
+            PolicyError: an unknown profile name, an inline document
+                that states an allow list, a show or a script, or rules
+                that cannot behave as written.
+        """
+        return compile_profile(
+            with_inline(self._base_profile(profile), inline),
+            self._profile_name(profile))
 
     def _cli_verbs(self) -> dict[str, frozenset[str]]:
         """The verbs each installed CLI declares, keyed by head word.
@@ -1089,8 +1215,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        compiled = compile_profile(self._base_profile(profile),
-                                   self._profile_name(profile))
+        compiled = self.compiled_profile(profile)
         check_cli_verbs(compiled.commands, self._cli_verbs())
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()

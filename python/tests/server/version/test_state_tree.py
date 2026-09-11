@@ -223,3 +223,46 @@ async def test_a_meta_without_a_ref_reads_as_constructed_in_code():
     restored = to_state(entries, meta)
 
     assert restored[StateKey.MOUNTS][0][MountKey.RESOURCE_REF] is None
+
+
+@pytest.mark.asyncio
+async def test_the_document_keys_ride_the_config_block():
+    """A checkout or clone at a version lands its sessions under the
+    version's document, so the profiles, the default profile's name, the
+    policy names and the consistency knob travel in the meta."""
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE,
+                   profiles={
+                       "default": {},
+                       "restricted": {
+                           "commands": {
+                               "deny": ["rm"]
+                           }
+                       }
+                   },
+                   profile="restricted")
+    state = await to_state_dict(ws)
+    state[StateKey.POLICIES] = ["RulePolicy"]
+    state[StateKey.CONSISTENCY] = "always"
+
+    entries, meta = tree_inputs_from_state(state)
+    config = meta["config"]
+    assert config[StateKey.PROFILE] == "restricted"
+    assert sorted(config[StateKey.PROFILES]) == ["default", "restricted"]
+    assert config[StateKey.POLICIES] == ["RulePolicy"]
+    assert config[StateKey.CONSISTENCY] == "always"
+    restored = to_state(entries, blob_to_meta(meta_to_blob(meta)))
+    for key in (StateKey.PROFILES, StateKey.PROFILE, StateKey.POLICIES,
+                StateKey.CONSISTENCY):
+        assert restored[key] == state[key]
+
+    # A meta committed before the keys existed reads as a snapshot
+    # without them.
+    for key in (StateKey.PROFILES, StateKey.PROFILE, StateKey.POLICIES,
+                StateKey.CONSISTENCY):
+        del meta["config"][key]
+    older = to_state(entries, blob_to_meta(meta_to_blob(meta)))
+    assert older[StateKey.PROFILES] == {}
+    assert older[StateKey.PROFILE] is None
+    assert older[StateKey.POLICIES] == []
+    assert older[StateKey.CONSISTENCY] is None

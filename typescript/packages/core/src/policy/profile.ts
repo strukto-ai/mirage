@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, WILDCARD } from './constants.ts'
 import type { CommandRule, AdmissionRules, ProfileScript } from './types.ts'
 import { ScriptSource } from '../runtime/routing/types.ts'
 import type { HiddenPaths, HiddenVars, ShowEntry, ShownPaths } from '../types.ts'
+import { weakerMode } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
@@ -593,4 +594,179 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   if (obj.commands !== undefined && obj.commands !== null)
     out.commands = parseCommandsBlock(obj.commands, `${where}.commands`)
   return out
+}
+
+/**
+ * One rule in the document grammar `parseRule` reads back. A rule
+ * naming one command over the whole line with the verb's default reason
+ * is the bare string the document spells it as. The rest take a
+ * mapping, one shape per pairing: commands alone as a list, paths alone
+ * as a list, both as the mapping of each command to its paths, the only
+ * spelling the grammar has for that pairing. A rule stating neither
+ * means every command and is written as the wildcard pattern, the
+ * grammar's one spelling of it. A rule inside a document block carries
+ * no `mount`: only the resolver stamps one, on compiled rules, so a
+ * stamped rule here is a caller's error, not state.
+ */
+function ruleToDoc(rule: CommandRule, defaultReason: string): string | Record<string, unknown> {
+  if (rule.mount !== undefined && rule.mount !== '') {
+    throw new Error(`a document rule carries no mount: ${JSON.stringify(rule)}`)
+  }
+  const commands = rule.commands ?? []
+  const paths = rule.paths ?? []
+  const [head] = commands
+  if (
+    head !== undefined &&
+    commands.length === 1 &&
+    paths.length === 0 &&
+    rule.reason === defaultReason
+  ) {
+    return head
+  }
+  const doc: Record<string, unknown> = { reason: rule.reason }
+  if (commands.length > 0 && paths.length > 0) {
+    doc.commands = Object.fromEntries(commands.map((cmd) => [cmd, [...paths]]))
+  } else if (paths.length > 0) {
+    doc.paths = [...paths]
+  } else {
+    doc.commands = commands.length > 0 ? [...commands] : [WILDCARD]
+  }
+  return doc
+}
+
+/** The `ask` and `deny` lists of a commands block, empty ones omitted. */
+function verbsToDoc(
+  ask: readonly CommandRule[] | undefined,
+  deny: readonly CommandRule[] | undefined,
+): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (ask !== undefined && ask.length > 0) {
+    doc.ask = ask.map((rule) => ruleToDoc(rule, DEFAULT_ASK_REASON))
+  }
+  if (deny !== undefined && deny.length > 0) {
+    doc.deny = deny.map((rule) => ruleToDoc(rule, DEFAULT_DENY_REASON))
+  }
+  return doc
+}
+
+/**
+ * A `paths` block as a document: the flat hide list, the show entries
+ * as the mapping of path to mode (null for a list-form entry, which
+ * both parsers accept) and the reason groups.
+ */
+function pathsToDoc(block: PathsBlock): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (block.hide.length > 0) doc.hide = [...block.hide]
+  const show = block.show ?? []
+  if (show.length > 0) doc.show = showToJSON(show)
+  const reasons = block.reasons ?? []
+  if (reasons.length > 0) {
+    doc.reasons = reasons.map((group) => ({ patterns: [...group.patterns], reason: group.reason }))
+  }
+  return doc
+}
+
+/** One mount section as a document. */
+function mountToDoc(entry: ProfileMount): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (entry.mode != null) doc.mode = entry.mode
+  if (entry.commands != null) doc.commands = verbsToDoc(entry.commands.ask, entry.commands.deny)
+  if (entry.paths != null) doc.paths = pathsToDoc(entry.paths)
+  return doc
+}
+
+/**
+ * A profile as the document its parser reads back.
+ *
+ * The shape a snapshot carries a profile in, so a loader without the
+ * deployment's config file still has the document its sessions were
+ * narrowed under. The parsed object is not that shape: a compiled rule
+ * holds fields the document grammar refuses (`mount`, `commands` beside
+ * `paths`), so this writes the grammar instead. An unsaid field is
+ * omitted and a stated-but-empty block is kept, so
+ * `profileFromJSON(profileToJSON(p))` reads as `p` for any profile
+ * `parseSessionProfile` produced (deep-equal too, except that a rule
+ * written as a one-entry mapping with the default reason comes back as
+ * the bare string spells it, with no `paths` key where the mapping form
+ * left an empty one; every reader treats the two alike). One known
+ * limit: a rule a typed caller built with several commands *and* paths
+ * has only the mapping form to travel in, and reads back as one rule
+ * per command, which the doors judge the same way. Mirrors the Python
+ * `profile_to_dict`.
+ */
+/**
+ * A show list as the document's mapping, weakest mode per path.
+ *
+ * The grammar keys a show by path, so two entries for one path have one
+ * slot -- and the last one written is not the one that governs:
+ * `shownMode` takes the weaker of two entries at a depth, failing
+ * toward refusal, so keeping the last could serialize an `rwx` over the
+ * `r` that was actually in force and hand the subtree back executable
+ * after a reload. A list-form entry (no mode) states visibility only
+ * and never answers a mode question, so a stated mode beside it wins
+ * the slot rather than being erased by it.
+ */
+function showToJSON(show: readonly ShowEntry[]): Record<string, MountMode | null> {
+  const doc: Record<string, MountMode | null> = {}
+  for (const entry of show) {
+    if (!(entry.path in doc)) {
+      doc[entry.path] = entry.mode
+      continue
+    }
+    if (entry.mode === null) continue
+    const held = doc[entry.path]
+    doc[entry.path] = held == null ? entry.mode : weakerMode(held, entry.mode)
+  }
+  return doc
+}
+
+export function profileToJSON(profile: SessionProfile): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (profile.cwd != null) doc.cwd = profile.cwd
+  if (profile.env != null) doc.env = { ...profile.env }
+  if (profile.mounts != null) {
+    doc.mounts = Object.fromEntries(
+      [...profile.mounts].map(([prefix, entry]) => [prefix, mountToDoc(entry)]),
+    )
+  }
+  if (profile.paths != null) doc.paths = pathsToDoc(profile.paths)
+  if (profile.vars != null) doc.vars = { hide: [...profile.vars.hide] }
+  if (profile.commands != null) {
+    const block = verbsToDoc(profile.commands.ask, profile.commands.deny)
+    if (profile.commands.allow != null) block.allow = [...profile.commands.allow]
+    doc.commands = block
+  }
+  if (profile.policy != null) {
+    const script = profile.policy.script
+    doc.policy = {
+      script:
+        script instanceof ScriptSource
+          ? { source: script.source, language: script.language, module: script.module }
+          : script,
+      runtime: profile.policy.runtime,
+    }
+  }
+  return doc
+}
+
+/**
+ * The profile a `profileToJSON` document names. The parser does the
+ * reading, so a document from a snapshot passes the same door a config
+ * file does; a policy script block is revived into a `ScriptSource`
+ * first, since the parser takes a string as a path the config door has
+ * yet to load. Mirrors the Python `profile_from_dict`.
+ */
+export function profileFromJSON(doc: Record<string, unknown>): SessionProfile {
+  const revived: Record<string, unknown> = { ...doc }
+  if (isPlainObject(doc.policy) && isPlainObject(doc.policy.script)) {
+    const { source, language, module } = doc.policy.script
+    if (typeof source !== 'string') throw new Error('profile.policy.script.source must be a string')
+    if (language !== 'python' && language !== 'js') {
+      throw new Error(
+        `profile.policy.script.language: unknown script language '${String(language)}'`,
+      )
+    }
+    revived.policy = { ...doc.policy, script: new ScriptSource(source, language, module === true) }
+  }
+  return parseSessionProfile(revived)
 }

@@ -53,19 +53,41 @@ function isEmpty(delta: DictDelta): boolean {
   )
 }
 
+// The session's own id is the key the delta is filed under, and
+// `generation` is a counter that bumps on every line the session runs, so
+// reporting it would mark every session modified after any activity at all.
+// Everything else the session serializes is state a reader may see move.
+const SESSION_DIFF_SKIP = new Set(['session_id', 'generation'])
+
+function isPlainDict(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Every session field that moved between the two payloads. Naming three
+// fields (env, mount_modes, cwd) meant the diff went quiet on every other
+// one, so a version whose only change was an access rule or a standing
+// answer read as unmodified right up to the checkout that applied it.
+// Walking the union keeps a field added later in view without a second
+// list to remember it.
 function sessionDelta(before: AnyDict, after: AnyDict): AnyDict {
   const out: AnyDict = {}
-  const env = dictDelta(
-    (before.env as AnyDict | undefined) ?? {},
-    (after.env as AnyDict | undefined) ?? {},
-  )
-  if (!isEmpty(env)) out.env = env
-  const grants = dictDelta(
-    (before.mount_modes as AnyDict | undefined) ?? {},
-    (after.mount_modes as AnyDict | undefined) ?? {},
-  )
-  if (!isEmpty(grants)) out.mount_modes = grants
-  if (before.cwd !== after.cwd) out.cwd = { from: before.cwd, to: after.cwd }
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+  for (const key of keys.sort(compareCodePoints)) {
+    if (SESSION_DIFF_SKIP.has(key)) continue
+    const was = before[key]
+    const now = after[key]
+    if (JSON.stringify(was) === JSON.stringify(now)) continue
+    if (isPlainDict(was) || isPlainDict(now)) {
+      const delta = dictDelta(
+        (was as AnyDict | undefined) ?? {},
+        (now as AnyDict | undefined) ?? {},
+      )
+      if (!isEmpty(delta)) out[key] = delta
+      continue
+    }
+    // A field one table lacks reads as null, as the python side renders it.
+    out[key] = { from: was ?? null, to: now ?? null }
+  }
   return out
 }
 

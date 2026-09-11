@@ -16,7 +16,15 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { MountMode } from '../types.ts'
-import { parseProfileMount, parseProfileMounts, parseSessionProfile } from './profile.ts'
+import { shownMode } from '../utils/hidden.ts'
+import {
+  parseProfileMount,
+  parseProfileMounts,
+  parseSessionProfile,
+  profileFromJSON,
+  profileToJSON,
+} from './profile.ts'
+import { ScriptSource } from '../runtime/routing/types.ts'
 
 const mountSection = (raw: unknown): unknown => parseProfileMount(raw, '/repo', 'mounts[/repo]')
 
@@ -360,5 +368,174 @@ describe('parseProfileMounts', () => {
       new Map([['/a', { mode: MountMode.WRITE }]]),
     )
     expect(parseProfileMounts(null)).toBeNull()
+  })
+})
+
+// One document over every block kind, spelled loosely, and the one
+// document the codec writes for it; `test_profile.py` asserts the same
+// two literals, so the two writers cannot drift.
+const CODEC_DOCUMENT = {
+  cwd: '/scratch',
+  env: { PAGER: 'cat' },
+  mounts: {
+    '/repo': 'r',
+    'scratch/': {
+      mode: 'rwx',
+      commands: {
+        deny: ['git push'],
+        ask: [{ reason: 'careful', commands: { rm: ['/scratch/keep/*'] } }],
+      },
+      paths: {
+        hide: ['/scratch/.env', { patterns: ['/scratch/sealed/*'], reason: 'sealed' }],
+        show: { '/scratch/sealed/public': 'r', '/scratch/sealed/docs': null },
+      },
+    },
+  },
+  paths: { hide: ['*.pem'], show: ['/repo/docs'] },
+  vars: { hide: ['AWS_*', 'SLACK_TOKEN'] },
+  commands: {
+    allow: ['ls', 'cat', 'git *'],
+    deny: [
+      'rm',
+      { reason: 'no pushes', commands: ['git push'] },
+      { reason: 'sealed', paths: ['/repo/secrets'] },
+    ],
+    ask: [{ commands: { mv: ['/repo/*'] } }],
+  },
+  policy: {
+    script: {
+      source: 'def pre_command(ctx):\n    return None\n',
+      language: 'python',
+      module: false,
+    },
+    runtime: 'monty',
+  },
+}
+
+const CODEC_WRITTEN = {
+  cwd: '/scratch',
+  env: { PAGER: 'cat' },
+  mounts: {
+    '/repo': { mode: 'read' },
+    '/scratch': {
+      mode: 'exec',
+      commands: {
+        ask: [{ reason: 'careful', commands: { rm: ['/scratch/keep/*'] } }],
+        deny: ['git push'],
+      },
+      paths: {
+        hide: ['/scratch/.env', '/scratch/sealed/*'],
+        show: { '/scratch/sealed/public': 'read', '/scratch/sealed/docs': null },
+        reasons: [{ patterns: ['/scratch/sealed/*'], reason: 'sealed' }],
+      },
+    },
+  },
+  paths: { hide: ['*.pem'], show: { '/repo/docs': null } },
+  vars: { hide: ['AWS_*', 'SLACK_TOKEN'] },
+  commands: {
+    ask: [{ reason: DEFAULT_ASK_REASON, commands: { mv: ['/repo/*'] } }],
+    deny: [
+      'rm',
+      { reason: 'no pushes', commands: ['git push'] },
+      { reason: 'sealed', paths: ['/repo/secrets'] },
+    ],
+    allow: ['ls', 'cat', 'git *'],
+  },
+  policy: {
+    script: {
+      source: 'def pre_command(ctx):\n    return None\n',
+      language: 'python',
+      module: false,
+    },
+    runtime: 'monty',
+  },
+}
+
+describe('profileToJSON / profileFromJSON', () => {
+  it('writes the document grammar and reads it back', () => {
+    const profile = profileFromJSON(CODEC_DOCUMENT)
+    expect(profile.policy?.script).toBeInstanceOf(ScriptSource)
+    const written = profileToJSON(profile)
+    expect(written).toEqual(CODEC_WRITTEN)
+    expect(profileFromJSON(written)).toEqual(profile)
+    expect(profileToJSON(profileFromJSON(written))).toEqual(written)
+  })
+
+  it.each([
+    [{}],
+    [{ commands: { allow: [] } }],
+    [{ vars: { hide: [] }, paths: {}, mounts: {}, env: {}, commands: {} }],
+  ])('keeps a stated-but-empty block apart from an unsaid one: %j', (doc) => {
+    // Null and empty are two different documents: an empty allow list
+    // installs nothing, an absent one installs everything.
+    const profile = profileFromJSON(doc)
+    expect(profileFromJSON(profileToJSON(profile))).toEqual(profile)
+  })
+
+  it('spells what only a typed caller can build', () => {
+    // Several commands beside paths have only the mapping form to travel
+    // in, and read back as one rule per command.
+    const both = profileFromJSON(
+      profileToJSON({
+        commands: {
+          allow: null,
+          ask: [],
+          deny: [{ reason: 'r', commands: ['rm', 'mv'], paths: ['/x'] }],
+        },
+      }),
+    )
+    expect(both.commands?.deny).toEqual([
+      { reason: 'r', commands: ['rm'], paths: ['/x'] },
+      { reason: 'r', commands: ['mv'], paths: ['/x'] },
+    ])
+    // A rule naming neither is every command, which the grammar spells
+    // as the wildcard.
+    expect(
+      profileToJSON({ commands: { allow: null, ask: [{ reason: 'all' }], deny: [] } }),
+    ).toEqual({
+      commands: { ask: [{ reason: 'all', commands: ['*'] }] },
+    })
+    // A mount stamp belongs to a compiled rule, never to a document.
+    expect(() =>
+      profileToJSON({
+        commands: {
+          allow: null,
+          ask: [],
+          deny: [{ reason: 'r', commands: ['rm'], mount: '/repo' }],
+        },
+      }),
+    ).toThrow(/carries no mount/)
+  })
+
+  // The document keys a show by path, so two entries for one path have
+  // one slot -- and the last one written is not the one that governs.
+  // `shownMode` takes the weaker of two entries at a depth, failing
+  // toward refusal, so serializing the last handed the subtree back
+  // executable after a reload while the source session was read-only.
+  it('serializes a duplicate show path at its weakest mode', () => {
+    const show = [
+      { path: '/vault/public', mode: MountMode.READ },
+      { path: '/vault/public', mode: MountMode.EXEC },
+    ]
+    expect(profileToJSON({ paths: { hide: ['/vault'], show } })).toEqual({
+      paths: { hide: ['/vault'], show: { '/vault/public': 'read' } },
+    })
+    // What is in force before the round trip is what comes back.
+    expect(shownMode({ entries: show }, '/vault/public/f')).toEqual([2, MountMode.READ])
+  })
+
+  // A list-form entry states visibility only and answers no mode
+  // question, so a stated mode beside it takes the slot rather than
+  // being erased by it.
+  it('does not let a list-form duplicate erase a stated mode', () => {
+    for (const pair of [
+      [null, MountMode.READ],
+      [MountMode.READ, null],
+    ]) {
+      const show = pair.map((mode) => ({ path: '/vault/public', mode }))
+      expect(profileToJSON({ paths: { hide: ['/vault'], show } })).toEqual({
+        paths: { hide: ['/vault'], show: { '/vault/public': 'read' } },
+      })
+    }
   })
 })

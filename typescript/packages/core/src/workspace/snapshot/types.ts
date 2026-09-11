@@ -15,8 +15,7 @@
 import type { EventDict } from '../../observe/observer.ts'
 import type { ResourceStateBase } from '../../resource/base.ts'
 import type { RAMResourceState } from '../../resource/ram/ram.ts'
-import type { MountMode } from '../../types.ts'
-import type { VarFields } from '../session/session.ts'
+import type { StoredSession, VarFields } from '../session/session.ts'
 
 export type ResourceState = RAMResourceState | (ResourceStateBase & Record<string, unknown>)
 
@@ -45,14 +44,6 @@ interface CacheSnapshot {
   limit: number
   max_drain_bytes: number | null
   entries: CacheEntrySnapshot[]
-}
-
-export interface SessionSnapshot {
-  session_id: string
-  cwd: string
-  env: Record<string, string>
-  created_at?: number
-  mount_modes?: Record<string, MountMode>
 }
 
 export interface JobSnapshot {
@@ -115,7 +106,11 @@ export interface WorkspaceStateDict {
   default_session_id: string | undefined
   default_agent_id: string | null
   current_agent_id: string | null
-  sessions: SessionSnapshot[]
+  // Every session's whole table, as `Session.toJSON` writes it and the
+  // session store keeps it: cwd, variables, the narrowing (modes, hides,
+  // shows, hidden vars, hide reasons, admission rules, script, profile
+  // name) and the host's standing answers.
+  sessions: StoredSession[]
   mounts: MountSnapshot[]
   cache: CacheSnapshot
   history: EventDict[]
@@ -149,4 +144,18 @@ export interface WorkspaceStateDict {
    * Optional for snapshots that predate the env plane.
    */
   env?: VarFields
+  /**
+   * The workspace document, minus what the loader supplies: the named
+   * profiles as documents (`profileToJSON`), the default profile's name
+   * (null for the implicit `default` or none), the class names of the
+   * coded policies beyond the built-ins (named, never carried: they are
+   * the loader's to register), and the consistency knob. Optional for
+   * snapshots that predate them; a state without them restores as it
+   * always did. A profile's `env` literals travel verbatim, as the `env`
+   * template's do.
+   */
+  profiles?: Record<string, Record<string, unknown>>
+  profile?: string | null
+  policies?: string[]
+  consistency?: string
 }

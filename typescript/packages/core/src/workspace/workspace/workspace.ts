@@ -89,6 +89,7 @@ import { SessionManager } from '../session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
 import { varsFromEntries, type Session } from '../session/session.ts'
 import {
+  type CompiledProfile,
   parseProfileMounts,
   parseProfilePolicy,
   type SessionProfile,
@@ -162,8 +163,8 @@ export class Workspace {
   private readonly router: Router
   private readonly routePolicy: RoutePolicy | null
   private readonly scriptPolicy: ScriptPolicy
-  private readonly profiles: Record<string, SessionProfile>
-  private readonly defaultProfileName: string | null
+  private readonly profilesInternal: Record<string, SessionProfile>
+  private readonly defaultProfileNameInternal: string | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -262,15 +263,18 @@ export class Workspace {
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
     // session runs under, so there is no workspace-wide block above it.
-    this.profiles = { ...(options.profiles ?? {}) }
-    this.defaultProfileName = options.profile ?? null
-    if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
-      throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
+    this.profilesInternal = { ...(options.profiles ?? {}) }
+    this.defaultProfileNameInternal = options.profile ?? null
+    if (
+      this.defaultProfileNameInternal !== null &&
+      !(this.defaultProfileNameInternal in this.profilesInternal)
+    ) {
+      throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileNameInternal)}`)
     }
     // The config door validates the pairing too, but a typed caller
     // does not pass that door, and the python host refuses the same
     // profiles at construction.
-    for (const [name, profile] of Object.entries(this.profiles)) {
+    for (const [name, profile] of Object.entries(this.profilesInternal)) {
       // A typed caller does not pass the parser, so this door repeats
       // its two checks: the old keys are told where they went, and a
       // policy block is whole.
@@ -665,10 +669,41 @@ export class Workspace {
    * named, else the workspace default.
    */
   private baseProfile(profile: string | SessionProfile | null): SessionProfile | null {
-    if (profile === null && this.defaultProfileName !== null) {
-      return this.profiles[this.defaultProfileName] ?? null
+    if (profile === null && this.defaultProfileNameInternal !== null) {
+      return this.profilesInternal[this.defaultProfileNameInternal] ?? null
     }
-    return resolveProfile(this.profiles, profile)
+    return resolveProfile(this.profilesInternal, profile)
+  }
+
+  /**
+   * The named profiles, as the constructor took them: the document a
+   * snapshot carries, so a loader without the deployment's config file
+   * still has what its sessions were narrowed under.
+   */
+  get profiles(): Readonly<Record<string, SessionProfile>> {
+    return this.profilesInternal
+  }
+
+  /** The default profile's name, null for the implicit `default` or no default at all. */
+  get defaultProfileName(): string | null {
+    return this.defaultProfileNameInternal
+  }
+
+  /**
+   * The session fields a profile compiles to on this workspace: the
+   * profile as named (a name from `profiles`, a document, or null for
+   * the workspace default) with an inline document added. The one door
+   * `createSession`, `setSessionProfile` and a snapshot restore all
+   * compile through, so a restored session is narrowed exactly as a
+   * created one is. Throws PolicyError on an unknown profile name, an
+   * inline document that states an allow list, a show or a script, or
+   * rules that cannot behave as written.
+   */
+  compiledProfile(
+    profile: string | SessionProfile | null,
+    inline: SessionProfile | null = null,
+  ): CompiledProfile {
+    return compileProfile(withInline(this.baseProfile(profile), inline), this.profileName(profile))
   }
 
   /**
@@ -678,8 +713,10 @@ export class Workspace {
    */
   private profileName(profile: string | SessionProfile | null): string {
     if (typeof profile === 'string') return profile
-    if (profile === null && this.defaultProfileName !== null) return this.defaultProfileName
-    if (profile === null && DEFAULT_PROFILE in this.profiles) return DEFAULT_PROFILE
+    if (profile === null && this.defaultProfileNameInternal !== null) {
+      return this.defaultProfileNameInternal
+    }
+    if (profile === null && DEFAULT_PROFILE in this.profilesInternal) return DEFAULT_PROFILE
     return ''
   }
 
@@ -708,15 +745,11 @@ export class Workspace {
       permissions?: SessionProfile | null
     } = {},
   ): Session {
-    const base = this.baseProfile(options.profile ?? null)
     let inline: SessionProfile | null = options.permissions ?? null
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
-    const compiled = compileProfile(
-      withInline(base, inline),
-      this.profileName(options.profile ?? null),
-    )
+    const compiled = this.compiledProfile(options.profile ?? null, inline)
     checkCliVerbs(compiled.commands, this.cliVerbs())
     const session = this.sessionManager.create(sessionId)
     applyProfile(session, compiled)
@@ -753,7 +786,7 @@ export class Workspace {
     profile: string | SessionProfile | null,
   ): Promise<Session> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
+    const compiled = this.compiledProfile(profile)
     checkCliVerbs(compiled.commands, this.cliVerbs())
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
@@ -1288,6 +1321,17 @@ export class Workspace {
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
     ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    // A policy is code the snapshot can only name; the loader registers
+    // it, and a name nothing answers to is said out loud rather than
+    // silently running the workspace without it.
+    const registered = new Set(ws.policies.names())
+    const missing = (state.policies ?? []).filter((name) => !registered.has(name))
+    if (missing.length > 0) {
+      console.warn(
+        `Workspace.fromState: the snapshot names ${String(missing.length)} policy class(es) ` +
+          `this workspace does not register; pass them as policies: ${missing.join(', ')}`,
+      )
+    }
     return ws
   }
 
@@ -1316,10 +1360,16 @@ export class Workspace {
     for (const [prefix, [resource, mode]] of Object.entries(args.mountArgs)) {
       resources[prefix] = [resource, mode]
     }
+    // The snapshot's document, unless the loader states its own: a
+    // profile the loader names replaces the recorded one the way the
+    // document outranks a stored record at hydration.
     const mergedOptions: WorkspaceOptions = {
+      consistency: args.consistency,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
+      ...(args.profiles !== undefined ? { profiles: args.profiles } : {}),
+      ...(args.profile !== null ? { profile: args.profile } : {}),
       ...options,
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>

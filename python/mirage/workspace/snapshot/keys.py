@@ -31,6 +31,16 @@ class StateKey(StrEnum):
     LIVE_ONLY_MOUNTS = "live_only_mounts"
     NODES = "nodes"
     CLIS = "clis"
+    # The workspace document, minus what the loader supplies: the named
+    # profiles as documents, the default profile's name, the class names
+    # of the coded policies and the consistency knob. A profile's `env`
+    # literals travel verbatim, as the `env` template's do: a credential
+    # is a managed pointer in this model, and a profile env holds plain
+    # strings, so there is nothing in one to redact.
+    PROFILES = "profiles"
+    PROFILE = "profile"
+    POLICIES = "policies"
+    CONSISTENCY = "consistency"
 
 
 class MountKey(StrEnum):
