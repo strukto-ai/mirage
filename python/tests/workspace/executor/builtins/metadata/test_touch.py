@@ -33,7 +33,7 @@ async def test_touch_sets_mtime():
     code, _, _ = await _run(ws, "touch -t 202603041200 /data/f.txt")
     assert code == 0
     _, out, _ = await _run(ws, "ls -l /data")
-    assert "Mar  4 12:00" in out
+    assert "Mar  4  2026" in out
 
 
 @pytest.mark.asyncio
@@ -86,4 +86,4 @@ async def test_touch_r_relative_reference_resolves_against_cwd():
     code, _, err = await _run(ws, "cd /data && touch -r f.txt new.txt")
     assert code == 0, err
     _, out, _ = await _run(ws, "ls -l /data")
-    assert out.count("Mar  4 12:00") == 2
+    assert out.count("Mar  4  2026") == 2

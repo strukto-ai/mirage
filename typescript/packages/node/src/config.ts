@@ -20,14 +20,15 @@ import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import type { Resource } from '@struktoai/mirage-core/resource/base'
-import type { RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
+import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
-import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
 import {
   EnvVarSchema,
-  SourceBlockSchema,
+  SecretSourceSchema,
   type EnvEntries,
-  type SourceEntries,
+  type SecretEntries,
 } from '@struktoai/mirage-core/secrets/config'
 import {
   ConsistencyPolicy,
@@ -40,6 +41,7 @@ import {
 } from '@struktoai/mirage-core/types'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { S3WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s3'
@@ -49,6 +51,11 @@ import { isModulePath, loadAttr, splitRef } from './resource/loader.ts'
 // The config door is a workspace entry point of its own (the daemon
 // builds from here), so it arms the builtin secrets sources like the
 // node Workspace module does.
+import {
+  configHoldsPointer,
+  resolveConfigSecrets,
+  resolveSourcesFor,
+} from '@struktoai/mirage-core/secrets/sources'
 import './secrets/constants.ts'
 import { buildResource } from './resource/registry.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
@@ -87,11 +94,37 @@ function loadScriptSource(value: string): ScriptSource {
   return new ScriptSource(readFileSync(path, 'utf-8'), language, path.endsWith('.mjs'))
 }
 
-function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
+type RuntimeClass = new (options?: RuntimeOptions<never>) => Runtime
+
+/**
+ * Load the `Runtime` subclass a `source:Class` reference names.
+ *
+ * The runtime twin of the `resource:` and `cli:` reference forms: a
+ * deployment ships a runtime as a file and names it from yaml with no
+ * host program calling `registerRuntime`. The class is constructed with
+ * the uniform `(captures, config, script)` options like a builtin, so
+ * the entry's other keys reach it unchanged. Mirrors `_runtime_class` in
+ * `mirage/config.py`.
+ */
+async function loadRuntimeClass(ref: string): Promise<RuntimeClass> {
+  const loaded = await loadAttr(ref)
+  if (typeof loaded !== 'function' || !(loaded.prototype instanceof Runtime)) {
+    throw new Error(`${JSON.stringify(ref)} is not a Runtime subclass`)
+  }
+  return loaded as RuntimeClass
+}
+
+/**
+ * Turn config runtime entries into workspace runtime entries: names, or
+ * mappings carrying a name plus the uniform runtime options. A name is a
+ * registered runtime or a `source:Class` reference to a `Runtime`
+ * subclass.
+ */
+async function buildRuntimeEntries(entries: unknown[]): Promise<RuntimeEntry[]> {
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
     if (typeof entry === 'string') {
-      out.push(buildRuntime(entry))
+      out.push(entry.includes(':') ? new (await loadRuntimeClass(entry))() : buildRuntime(entry))
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
@@ -104,6 +137,16 @@ function buildRuntimeEntries(entries: unknown[]): RuntimeEntry[] {
     }
     const withScript: Record<string, unknown> =
       script !== undefined ? { ...options, script: loadScriptSource(script) } : options
+    if (name.includes(':')) {
+      // The key check `buildRuntime` runs for a name: the base
+      // constructor ignores a key it does not read, so without it a typo
+      // would leave the runtime on its defaults where Python's
+      // `**options` refuses the entry.
+      const cls = await loadRuntimeClass(name)
+      checkRuntimeOptions(name, withScript)
+      out.push(new cls(withScript as RuntimeOptions<never>))
+      continue
+    }
     out.push(buildRuntime(name, withScript))
   }
   return out
@@ -331,6 +374,11 @@ function validateStoreBlock(value: unknown): void {
   }
 }
 
+/** A raw block's `config`, or an empty mapping when it is absent or not one. */
+function asConfig(value: unknown): Readonly<Record<string, unknown>> {
+  return isPlainObject(value) ? value : {}
+}
+
 /**
  * Reject any key no Python config model declares, before normalization
  * folds snake_case into camelCase and the distinction is gone.
@@ -347,6 +395,18 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
     for (const [name, block] of Object.entries(raw.clis)) {
       if (!isPlainObject(block)) throw new Error(`cli \`${name}\` must be a mapping`)
       rejectUnknownKeys(block, CLI_KEYS, `cli \`${name}\``)
+      // A pointer may only fill a config that a model validates, because
+      // the model is what a snapshot redacts by. A script's config is
+      // opaque: nothing declares which key is a credential, so the
+      // snapshot captures it verbatim, and a pointer resolved into it
+      // would be written out as the value it fetched. Refused here, on
+      // the block, so every door that reads a config inherits the rule.
+      if (typeof block.script === 'string' && configHoldsPointer(asConfig(block.config))) {
+        throw new Error(
+          `clis entry '${name}': a script's config is opaque and a pointer in it would be ` +
+            'written into every snapshot; read the credential from a managed env var instead',
+        )
+      }
     }
   }
   // The profiles validate through the core's own validators (the same
@@ -385,7 +445,7 @@ function validateSecretsBlock(value: unknown): void {
   for (const [name, block] of Object.entries(value)) {
     if (!isPlainObject(block)) throw new Error(`config \`secrets.${name}\` must be a mapping`)
     rejectUnknownKeys(block, SOURCE_KEYS, `config \`secrets.${name}\``)
-    const parsed = SourceBlockSchema.safeParse(block)
+    const parsed = SecretSourceSchema.safeParse(block)
     if (!parsed.success) {
       const detail = parsed.error.issues[0]?.message ?? parsed.error.message
       throw new Error(`config \`secrets.${name}\`: ${detail}`)
@@ -495,7 +555,7 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
 }
 
 /**
- * Load each profile's path-form script into a ScriptSource.
+ * Load each profile's path-form policy into a ScriptSource.
  *
  * By this door the path is absolute for a file config (the check door
  * rebased it onto the config file's directory); an object config's
@@ -507,9 +567,10 @@ function loadProfileScripts(
 ): Record<string, SessionProfile> {
   const out: Record<string, SessionProfile> = {}
   for (const [name, profile] of Object.entries(profiles)) {
+    const policy = profile.policy
     out[name] =
-      typeof profile.script === 'string'
-        ? { ...profile, script: loadScriptSource(profile.script) }
+      policy != null && typeof policy.script === 'string'
+        ? { ...profile, policy: { ...policy, script: loadScriptSource(policy.script) } }
         : profile
   }
   return out
@@ -758,21 +819,33 @@ export function loadWorkspaceConfig(
 }
 
 /**
- * Resolve relative script paths against the config file's directory.
+ * Resolve relative script paths and code refs against the config file's
+ * directory.
  *
- * A path-form `script`/`route_policy` in a config file means "next to the
- * file" (the docker build-context model), never "wherever the server
- * happens to run". In-memory object configs are untouched.
+ * A path-form `script`/`route_policy`, a `cli: ./tool.mjs:TREE`, a
+ * `resource: ./wiki.mjs:WikiResource` and a runtime entry's
+ * `name: ./box.mjs:EchoBox` in a config file all mean "next to the file"
+ * (the docker build-context model), never "wherever the server happens
+ * to run". In-memory object configs are untouched. Exported so
+ * the CLI applies the same rebase to a `load`/`clone` override, which is
+ * read without validation and so cannot go through
+ * `checkWorkspaceConfigFile`; mirrors `_absolutize_scripts` in
+ * `mirage/config.py`.
  */
-function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
+export function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
   const policy = raw.route_policy
   if (typeof policy === 'string' && isScriptPath(policy) && !isAbsolute(policy.trim())) {
     raw.route_policy = join(base, policy.trim())
   }
   if (Array.isArray(raw.runtimes)) {
-    for (const entry of raw.runtimes) {
-      if (isPlainObject(entry)) absolutizeScriptKey(entry, base)
-    }
+    raw.runtimes.forEach((entry: unknown, i: number) => {
+      if (isPlainObject(entry)) {
+        absolutizeScriptKey(entry, base)
+        absolutizeCodeRef(entry, 'name', base)
+      } else if (typeof entry === 'string') {
+        ;(raw.runtimes as unknown[])[i] = rebaseCodeRef(entry, base)
+      }
+    })
   }
   if (isPlainObject(raw.clis)) {
     for (const block of Object.values(raw.clis)) {
@@ -788,12 +861,16 @@ function absolutizeScripts(raw: Record<string, unknown>, base: string): void {
   }
   if (isPlainObject(raw.profiles)) {
     for (const block of Object.values(raw.profiles)) {
-      if (isPlainObject(block)) absolutizeScriptKey(block, base)
+      // A profile's policy block carries its program the way a clis
+      // entry does, so its `script` rebases the same way.
+      if (isPlainObject(block) && isPlainObject(block.policy)) {
+        absolutizeScriptKey(block.policy, base)
+      }
     }
   }
 }
 
-/** Rebase one runtimes/clis entry's relative `script` path onto `base`. */
+/** Rebase one runtimes/clis/policy entry's relative `script` path onto `base`. */
 function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void {
   const script = entry.script
   if (typeof script === 'string' && isScriptPath(script) && !isAbsolute(script.trim())) {
@@ -804,9 +881,10 @@ function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void
 /**
  * Rebase a path-form colon reference under `key` onto `base`.
  *
- * `cli: ./tool.mjs:TREE` and `resource: ./wiki.mjs:WikiResource` both
- * mean "next to the config file", the same build-context rule `script:`
- * follows; without this the pointer reaches `loadAttr` relative and
+ * `cli: ./tool.mjs:TREE`, `resource: ./wiki.mjs:WikiResource` and a
+ * runtime entry's `name: ./box.mjs:EchoBox` all mean "next to the config
+ * file", the same build-context rule `script:` follows; without this the
+ * pointer reaches `loadAttr` relative and
  * resolves against the server process's cwd. A package specifier
  * (`my-clis:JIRA`) is left alone: Node resolves it, not the filesystem.
  * The split is `splitRef`/`isModulePath`, the same pair `loadAttr` uses,
@@ -814,10 +892,21 @@ function absolutizeScriptKey(entry: Record<string, unknown>, base: string): void
  */
 function absolutizeCodeRef(entry: Record<string, unknown>, key: string, base: string): void {
   const ref = entry[key]
-  if (typeof ref !== 'string' || !ref.includes(':')) return
+  if (typeof ref === 'string') entry[key] = rebaseCodeRef(ref, base)
+}
+
+/**
+ * `ref` with a relative path-form source rebased onto `base`. Anything
+ * that is not a relative path-form reference (a bare name, a package
+ * specifier, an absolute path) comes back unchanged, so the bare string
+ * runtime entry (`- ./box.mjs:EchoBox` beside `- monty`) reads the same
+ * way the keyed forms do.
+ */
+function rebaseCodeRef(ref: string, base: string): string {
+  if (!ref.includes(':')) return ref
   const [source, attr] = splitRef(ref)
-  if (!isModulePath(source) || isAbsolute(source)) return
-  entry[key] = `${join(base, source)}:${attr}`
+  if (!isModulePath(source) || isAbsolute(source)) return ref
+  return `${join(base, source)}:${attr}`
 }
 
 /**
@@ -957,8 +1046,15 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, Limit>]> = {}
   const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
+  // Built before the mounts, because a mount's config may point at one:
+  // `resolveConfigSecrets` inside `buildResource` fetches through these.
+  const blocks = [...Object.values(cfg.mounts), ...Object.values(cfg.clis ?? {})]
+  const sources = await resolveSourcesFor(
+    cfg.secrets,
+    blocks.map((block) => block.config ?? {}),
+  )
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
-    const r = await buildResource(block.resource, block.config ?? {})
+    const r = await buildResource(block.resource, block.config ?? {}, sources)
     const m = coerceMountMode(block.mode, wsMode)
     resources[prefix] = [r, m, parseLimits(block.command_limits)]
     const backend = (block.backend ?? MountBackend.VFS) as MountBackend
@@ -967,7 +1063,13 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const index = buildIndex(cfg.index)
   const stateStore = buildStateStore(cfg.store)
   const cliEntries =
-    cfg.clis !== undefined && cfg.clis !== null ? await buildCliEntries(cfg.clis) : undefined
+    cfg.clis !== undefined && cfg.clis !== null
+      ? await buildCliEntries(cfg.clis, sources)
+      : undefined
+  const runtimeEntries =
+    cfg.runtimes !== undefined && cfg.runtimes !== null
+      ? await buildRuntimeEntries(cfg.runtimes)
+      : undefined
   const consoleFactory = buildConsoleFactory(cfg.console)
   return {
     resources,
@@ -985,9 +1087,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       // sets beside the same store.
       ...(stateStore !== undefined ? { store: stateStore, ownsStore: true } : {}),
       ...(consoleFactory !== undefined ? { consoleFactory } : {}),
-      ...(cfg.runtimes !== undefined && cfg.runtimes !== null
-        ? { runtimes: buildRuntimeEntries(cfg.runtimes) }
-        : {}),
+      ...(runtimeEntries !== undefined ? { runtimes: runtimeEntries } : {}),
       ...(cfg.routePolicy !== undefined && cfg.routePolicy !== null
         ? { routePolicy: loadScriptSource(cfg.routePolicy) }
         : {}),
@@ -1005,7 +1105,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       // Same reason: building a source reads its bootstrap pointers,
       // which the workspace does once, before its first fetch.
       ...(cfg.secrets !== undefined && cfg.secrets !== null
-        ? { secrets: cfg.secrets as SourceEntries }
+        ? { secrets: cfg.secrets as SecretEntries }
         : {}),
     },
     kernelMounts,
@@ -1065,6 +1165,7 @@ function asCliSpec(value: unknown, name: string, ref: string): CLISpec {
 
 async function buildCliEntries(
   clis: Record<string, CLIBlock>,
+  sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<Record<string, [string | CLISpec, Record<string, unknown> | null]>> {
   const out: Record<string, [string | CLISpec, Record<string, unknown> | null]> = {}
   for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
@@ -1108,7 +1209,13 @@ async function buildCliEntries(
           runtime: block.runtime ?? null,
         })
       : await resolveCliRef(block.cli as string, name)
-    out[name] = [entry, block.config ?? {}]
+    // A CLI credential reads a pointer the way a mount's does: the
+    // account CLI's `config_model` is the same model a resource
+    // parses, so it must receive the credential, not the pointer.
+    out[name] = [
+      entry,
+      await resolveConfigSecrets(block.config ?? {}, sources, `clis.${name}.config`),
+    ]
   }
   return out
 }

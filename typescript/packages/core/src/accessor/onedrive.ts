@@ -22,8 +22,12 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
-import { type ConfigOf, redactConfigWithSchema, type RedactedConfig } from '../resource/secrets.ts'
-import { normalizeFields } from '../utils/normalize.ts'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  type RedactedConfig,
+} from '../resource/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {
@@ -39,9 +43,12 @@ export interface OneDriveConfig extends MsGraphConfig {
 
 const DRIVE_TARGETS = ['driveId', 'siteId', 'groupId', 'userId'] as const
 
+// Names the count and the fields actually set, the way python's
+// `OneDriveConfig` validator does; a fixed message listing all four
+// targets pointed at two the caller never wrote.
 function driveTargetError(named: readonly string[]): string {
   return (
-    `OneDrive config names more than one drive (${named.join(', ')}); ` +
+    `OneDriveConfig names ${String(named.length)} drives (${named.join(', ')}); ` +
     "set exactly one, or none for the signed-in user's drive"
   )
 }
@@ -58,8 +65,9 @@ const OneDriveConfigSchema = z
   // With four fields and a fixed precedence, setting two would make the
   // mount silently address whichever won, which is the kind of
   // misconfiguration that only shows up as a confusing 404.
-  .refine((c) => DRIVE_TARGETS.filter((f) => c[f] !== undefined).length <= 1, {
-    message: driveTargetError(DRIVE_TARGETS),
+  .superRefine((c, ctx) => {
+    const named = DRIVE_TARGETS.filter((f) => c[f] !== undefined)
+    if (named.length > 1) ctx.addIssue({ code: 'custom', message: driveTargetError(named) })
   })
 
 export type OneDriveConfigRedacted = RedactedConfig<
@@ -72,7 +80,7 @@ export function redactOneDriveConfig(config: OneDriveConfig): OneDriveConfigReda
 }
 
 export function normalizeOneDriveConfig(input: Record<string, unknown>): OneDriveConfig {
-  return OneDriveConfigSchema.parse(normalizeFields(input)) as OneDriveConfig
+  return parseConfigWithSchema(OneDriveConfigSchema, input)
 }
 
 export interface OneDriveConfigResolved extends MsGraphConfigResolved {

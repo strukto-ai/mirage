@@ -200,7 +200,7 @@ def test_workspace_context_open_modes_and_cleanup():
                    mode=MountMode.WRITE,
                    store=store,
                    owns_store=True)
-    asyncio.run(ws.ops.write("/data/input.txt", b"original"))
+    asyncio.run(ws.fs.write("/data/input.txt", b"original"))
 
     with ws:
         with open("/data/input.txt") as readable:

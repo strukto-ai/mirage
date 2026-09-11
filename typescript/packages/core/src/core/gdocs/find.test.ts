@@ -84,7 +84,7 @@ function mockStats(
         name,
         size: entry.size ?? null,
         modified: entry.modified ?? null,
-        type: entry.dir === true ? FileType.DIRECTORY : FileType.TEXT,
+        type: entry.dir === true ? FileType.DIRECTORY : FileType.FILE,
       }),
     )
   })

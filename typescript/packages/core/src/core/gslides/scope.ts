@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { CORPUS } from '../google/constants.ts'
 import { FILE_NAME } from './constants.ts'
 import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
@@ -26,7 +26,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'file',
     segments: [new Slot('corpus', CORPUS), new Slot('name', FILE_NAME, 'file_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 

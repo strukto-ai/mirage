@@ -40,7 +40,7 @@ async def test_touch_does_not_create_the_parent(workspace, tmp_path):
 
 @pytest.mark.asyncio
 async def test_touch_under_a_plain_file_reports_not_a_directory(workspace):
-    await workspace.ops.write("/plain", b"x")
+    await workspace.fs.write("/plain", b"x")
     io = await workspace.execute("touch /plain/f.txt")
     assert io.exit_code == 1
     assert io.stderr == (b"touch: cannot touch '/plain/f.txt': "

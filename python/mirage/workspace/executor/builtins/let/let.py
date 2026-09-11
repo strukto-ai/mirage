@@ -23,7 +23,7 @@ from mirage.workspace.executor.builtins.shared import (readonly_refusal,
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import Session
 from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.state import (ensure_var_visible,
+from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
                                             visible_env)
 from mirage.workspace.types import ExecutionNode
@@ -59,17 +59,21 @@ async def handle_let(
     view = require_view(state)
     value = 0
     for expr in args:
+        reader = random_reader(session)
+        error: ArithError | None = None
+        value = 0
         try:
             arith = evaluate_arith(expr,
                                    visible_env(session),
-                                   elements=session_elements(session))
+                                   elements=session_elements(session, reader),
+                                   read_var=reader.read,
+                                   wrote_var=reader.wrote)
+            writes, value = arith.writes, arith.value
         except ArithError as exc:
-            err = f"bash: let: {expr}: {exc}\n".encode()
-            return None, IOResult(exit_code=1,
-                                  stderr=err), ExecutionNode(command="let",
-                                                             exit_code=1,
-                                                             stderr=err)
-        for write in arith.writes:
+            # bash bound the assignments made before the error; they
+            # land before the error is reported.
+            error, writes = exc, exc.writes
+        for write in writes:
             try:
                 ensure_var_visible(session, write.name)
             except PolicyDenied as exc:
@@ -77,12 +81,18 @@ async def handle_let(
             if view.is_readonly(write.name):
                 return readonly_refusal("let", write.name)
         try:
-            for write in arith.writes:
+            for write in writes:
                 await assign_element(session, view, write.name, write.key,
                                      write.value)
+            reader.settle()
         except PolicyDenied as exc:
             return refusal("let", exc)
-        value = arith.value
+        if error is not None:
+            err = f"bash: let: {expr}: {error}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="let",
+                                                             exit_code=1,
+                                                             stderr=err)
     code = 0 if value != 0 else 1
     return None, IOResult(exit_code=code), ExecutionNode(command="let",
                                                          exit_code=code)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { JSON_NAME, RAW } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope } from '../hierarchy/scope.ts'
 
@@ -33,7 +33,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'workspace_json',
     segments: [...WS, 'workspace.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'boards', segments: [...WS, 'boards'] }),
   new Scope({ kind: 'board', segments: BOARD }),
@@ -41,21 +41,21 @@ export const SCOPES: readonly Scope[] = [
     kind: 'board_json',
     segments: [...BOARD, 'board.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'members', segments: [...BOARD, 'members'] }),
   new Scope({
     kind: 'member',
     segments: [...BOARD, 'members', new Slot('member', JSON_NAME, 'member_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'labels', segments: [...BOARD, 'labels'] }),
   new Scope({
     kind: 'label',
     segments: [...BOARD, 'labels', new Slot('label', JSON_NAME, 'label_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'lists', segments: [...BOARD, 'lists'] }),
   new Scope({ kind: 'list', segments: LIST }),
@@ -63,7 +63,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'list_json',
     segments: [...LIST, 'list.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'cards', segments: [...LIST, 'cards'] }),
   new Scope({ kind: 'card', segments: CARD }),
@@ -71,13 +71,13 @@ export const SCOPES: readonly Scope[] = [
     kind: 'card_json',
     segments: [...CARD, 'card.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'comments_jsonl',
     segments: [...CARD, 'comments.jsonl'],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
 ]
 

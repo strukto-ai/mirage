@@ -63,6 +63,14 @@ def test_find_unterminated_backtick_accepts_balanced(command):
     "if",
     "if; fi",
     'echo "unterm',
+    ";s",
+    "| s",
+    "&& s",
+    "& s",
+    "echo a ; ; echo b",
+    "echo bg &; echo fg",
+    "true;;s",
+    "echo a ;& echo b",
 ])
 def test_find_syntax_error_detects_error_nodes(bad_cmd):
     ast = parse(bad_cmd)
@@ -76,6 +84,11 @@ def test_find_syntax_error_detects_error_nodes(bad_cmd):
     "for x in a b; do echo $x; done",
     "if true; then echo y; fi",
     "cat /tmp/x | sort",
+    "echo bg & echo fg",
+    "echo a &",
+    "echo a;",
+    "case x in a) echo a;; esac",
+    "case x in a) echo a;& b) echo b;;& c) echo c;; esac",
 ])
 def test_find_syntax_error_returns_none_for_valid(good_cmd):
     assert find_syntax_error(parse(good_cmd)) is None
@@ -85,6 +98,8 @@ def test_find_syntax_error_returns_none_for_valid(good_cmd):
     "if then fi",
     "echo (",
     "for x do done",
+    ";s",
+    "true;;s",
 ])
 def test_execute_returns_clear_syntax_error(bad_cmd):
     ws = Workspace({"/data": RAMResource()})
@@ -94,6 +109,22 @@ def test_execute_returns_clear_syntax_error(bad_cmd):
     stderr = io.stderr or b""
     assert b"syntax error" in stderr, (
         f"expected 'syntax error' in stderr for {bad_cmd!r}, got {stderr!r}")
+
+
+@pytest.mark.parametrize("bad_cmd, token", [
+    (";s", ";"),
+    ("| s", "|"),
+    ("&& s", "&&"),
+    ("echo a ; ; echo b", ";"),
+    ("echo bg &; echo fg", ";"),
+    ("true;;s", ";;"),
+])
+def test_stray_separator_is_a_syntax_error_and_nothing_runs(bad_cmd, token):
+    ws = Workspace({"/data": RAMResource()})
+    io = asyncio.run(ws.execute(bad_cmd))
+    assert io.exit_code == 2
+    assert io.stderr == f"mirage: syntax error near '{token}'\n".encode()
+    assert not io.stdout
 
 
 @pytest.mark.parametrize("bad_cmd", [

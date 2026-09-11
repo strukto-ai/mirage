@@ -39,6 +39,8 @@ class OpRecord:
             bytes can be re-fetched even if the live object has moved on.
             Strictly stronger than ``fingerprint`` — populated only by
             backends that can guarantee revision durability.
+        mount_id (str | None): In-process mount identity for snapshot
+            ownership checks; never used as a persisted backend revision.
     """
 
     op: str
@@ -49,8 +51,22 @@ class OpRecord:
     duration_ms: int
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
+    mount_id: str | None = field(default=None, repr=False, compare=False)
 
     @property
     def is_cache(self) -> bool:
         """Whether this op was served from the in-memory cache."""
         return self.source == "ram"
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        """Public observation fields, excluding in-process mount ownership."""
+        return {
+            "op": self.op,
+            "path": self.path,
+            "source": self.source,
+            "bytes": self.bytes,
+            "timestamp": self.timestamp,
+            "duration_ms": self.duration_ms,
+            "fingerprint": self.fingerprint,
+            "revision": self.revision,
+        }

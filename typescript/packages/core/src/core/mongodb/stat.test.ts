@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { stat } from './stat.ts'
 import { stubMongoDriver } from './_test_util.ts'
 
@@ -79,7 +79,7 @@ describe('stat', () => {
       }),
       ps('/mongo/app/collections/users/documents.jsonl'),
     )
-    expect(r.type).toBe(FileType.TEXT)
+    expect(r.content).toBe(ContentType.TEXT)
     expect(r.size).toBeNull()
     expect(r.extra.document_count).toBe(42)
     expect(r.extra.indexes).toEqual([{ name: '_id_', keys: { _id: 1 } }])
@@ -93,20 +93,20 @@ describe('stat', () => {
       }),
       ps('/mongo/app/views/recent/documents.jsonl'),
     )
-    expect(r.type).toBe(FileType.TEXT)
+    expect(r.content).toBe(ContentType.TEXT)
     expect(r.extra.indexes).toEqual([])
     expect(r.extra.kind).toBe('view')
   })
 
   it('marks schema.json as TEXT', async () => {
     const r = await stat(accessor(), ps('/mongo/app/collections/users/schema.json'))
-    expect(r.type).toBe(FileType.TEXT)
+    expect(r.content).toBe(ContentType.TEXT)
     expect(r.name).toBe('schema.json')
   })
 
   it('marks database.json as TEXT', async () => {
     const r = await stat(accessor(), ps('/mongo/app/database.json'))
-    expect(r.type).toBe(FileType.TEXT)
+    expect(r.content).toBe(ContentType.TEXT)
     expect(r.name).toBe('database.json')
   })
 

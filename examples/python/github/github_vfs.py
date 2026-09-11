@@ -80,7 +80,7 @@ async def main():
         core_isfile = os.path.isfile("/github/python/mirage/core")
         print(f"  /github/python/mirage/core: {core_isfile}")
 
-        records = ws.ops.records
+        records = ws.fs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

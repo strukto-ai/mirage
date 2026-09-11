@@ -63,14 +63,18 @@ async function execute(
   wsId: string,
   sessionId: string,
   command: string,
-): Promise<{ exitCode: number; stderr: string }> {
+): Promise<{ exitCode: number; stderr: string; refusal: { kind: string; reason: string } | null }> {
   const r = await app.inject({
     method: 'POST',
     url: `/v1/workspaces/${wsId}/execute`,
     payload: { command, sessionId },
   })
   expect(r.statusCode).toBe(200)
-  return r.json<{ exitCode: number; stderr: string }>()
+  return r.json<{
+    exitCode: number
+    stderr: string
+    refusal: { kind: string; reason: string } | null
+  }>()
 }
 
 async function raiseAsk(
@@ -80,7 +84,8 @@ async function raiseAsk(
 ): Promise<string> {
   const refused = await execute(app, wsId, sessionId, 'rm /f.txt')
   expect(refused.exitCode).toBe(126)
-  expect(refused.stderr).toContain('requires approval')
+  expect(refused.stderr).toBe('rm: Permission denied\n')
+  expect(refused.refusal?.kind).toBe('pending')
   const r = await app.inject({
     method: 'GET',
     url: `/v1/workspaces/${wsId}/asks?sessionId=${sessionId}`,
@@ -161,8 +166,9 @@ describe('asks router', () => {
 
     const retried = await execute(app, 'asks-deny', 'agent_a', 'rm /f.txt')
     expect(retried.exitCode).toBe(126)
-    expect(retried.stderr).toContain('policy denied')
-    expect(retried.stderr).toContain(ASK_REASON)
+    expect(retried.stderr).toBe('rm: Permission denied\n')
+    expect(retried.refusal?.kind).toBe('deny')
+    expect(retried.refusal?.reason).toContain(ASK_REASON)
     await app.close()
   })
 

@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
+import type { ArithWrite } from '../../../../shell/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
 import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
-import { ensureVarVisible, sessionElements } from '../../../session/state.ts'
+import { ensureVarVisible, randomReader, sessionElements } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
@@ -49,19 +50,29 @@ export async function handleLet(
   const view = requireView(state)
   let value = 0n
   for (const expr of args) {
-    let result: ArithResult
+    const reader = randomReader(session)
+    let error: ArithError | null = null
+    let writes: readonly ArithWrite[] = []
+    let expected = 0n
     try {
-      result = evaluateArith(expr, visibleEnv(session), 0, sessionElements(session))
+      const result: ArithResult = evaluateArith(
+        expr,
+        visibleEnv(session),
+        0,
+        sessionElements(session, reader),
+        reader.read,
+        reader.wrote,
+      )
+      writes = result.writes
+      expected = result.value
     } catch (err) {
       if (!(err instanceof ArithError)) throw err
-      const errBytes = new TextEncoder().encode(`bash: let: ${expr}: ${err.message}\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: errBytes }),
-        new ExecutionNode({ command: 'let', exitCode: 1, stderr: errBytes }),
-      ]
+      // bash bound the assignments made before the error; they land
+      // before the error is reported.
+      error = err
+      writes = err.writes
     }
-    for (const write of result.writes) {
+    for (const write of writes) {
       try {
         ensureVarVisible(session, write.name)
       } catch (err) {
@@ -71,14 +82,23 @@ export async function handleLet(
       if (view.isReadonly(write.name)) return readonlyRefusal('let', write.name)
     }
     try {
-      for (const write of result.writes) {
+      for (const write of writes) {
         await assignElement(session, view, write.name, write.key, write.value)
       }
+      reader.settle()
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       throw err
     }
-    value = result.value
+    if (error !== null) {
+      const errBytes = new TextEncoder().encode(`bash: let: ${expr}: ${error.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: 'let', exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    value = expected
   }
   const code = value !== 0n ? 0 : 1
   return [

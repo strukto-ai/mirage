@@ -188,7 +188,7 @@
           "command": "echo hi",
           "expect": {
             "exit": 126,
-            "stderr_contains": "policy denied: nothing runs"
+            "stderr_contains": "echo: Permission denied"
           }
         }
       ]

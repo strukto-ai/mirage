@@ -26,6 +26,9 @@ export interface MountSnapshot {
   mode: string
   consistency: string
   resource_class: string
+  // The `resource:` value the registry built the resource from, or null
+  // for one constructed in code. See `resourceRefOf`.
+  resource_ref: string | null
   resource_state: ResourceState
 }
 

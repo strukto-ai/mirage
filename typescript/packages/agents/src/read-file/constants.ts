@@ -1,5 +1,4 @@
-import { FileType } from '@struktoai/mirage-core/types'
-import type { FileType as MirageFileType } from '@struktoai/mirage-core/types'
+import { ContentType } from '@struktoai/mirage-core/types'
 
 export const READ_FILE_MIME = Object.freeze({
   BINARY: 'application/octet-stream',
@@ -67,15 +66,15 @@ export const MIME_FOR_EXTENSION: Readonly<Record<string, ReadFileMime>> = Object
   pdf: READ_FILE_MIME.PDF,
 })
 
-export const MIME_FOR_FILE_TYPE: Readonly<Partial<Record<MirageFileType, ReadFileMime>>> =
+export const MIME_FOR_FILE_TYPE: Readonly<Partial<Record<ContentType, ReadFileMime>>> =
   Object.freeze({
-    [FileType.JSON]: READ_FILE_MIME.JSON,
-    [FileType.CSV]: READ_FILE_MIME.CSV,
-    [FileType.TEXT]: READ_FILE_MIME.PLAIN_TEXT,
-    [FileType.IMAGE_PNG]: READ_FILE_MIME.IMAGE_PNG,
-    [FileType.IMAGE_JPEG]: READ_FILE_MIME.IMAGE_JPEG,
-    [FileType.IMAGE_GIF]: READ_FILE_MIME.IMAGE_GIF,
-    [FileType.PDF]: READ_FILE_MIME.PDF,
+    [ContentType.JSON]: READ_FILE_MIME.JSON,
+    [ContentType.CSV]: READ_FILE_MIME.CSV,
+    [ContentType.TEXT]: READ_FILE_MIME.PLAIN_TEXT,
+    [ContentType.IMAGE_PNG]: READ_FILE_MIME.IMAGE_PNG,
+    [ContentType.IMAGE_JPEG]: READ_FILE_MIME.IMAGE_JPEG,
+    [ContentType.IMAGE_GIF]: READ_FILE_MIME.IMAGE_GIF,
+    [ContentType.PDF]: READ_FILE_MIME.PDF,
   })
 
 export const MODEL_IMAGE_MIMES: ReadonlySet<ReadFileMime> = new Set([

@@ -246,19 +246,86 @@ export interface FsEntry {
 export const LIST_TRUNCATED =
   'Result truncated after reaching the entry limit. Rerun with a larger --limit, up to 10000.'
 
+// `search` says something else, and says less of it. Captured on the same day
+// as the sentence above, from `search hf://datasets "toolace" --limit 2`: no
+// ceiling is quoted, because search's own is 1,000 rather than the listing's
+// 10,000 and upstream simply does not name it here.
+export const SEARCH_TRUNCATED = 'Result truncated: limit.'
+
+/**
+ * A repository row, which is what the discovery scopes list instead of files.
+ *
+ * Captured (`ls hf://models/deepseek-ai --limit 1`):
+ *
+ *   | repo | deepseek-ai/DeepSeek-V4-Flash-Vision-Exp |
+ *     hf://models/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp |  |
+ *     repo=model, public, likes=444, downloads=17893,
+ *     task=image-text-to-text, updated=2026-09-01T09:22:10.000Z |
+ *
+ * Two columns a file row leaves empty are filled here: `Path` carries the full
+ * `owner/name` rather than a leaf and `URI` carries the repository's own hf://
+ * identity. `Details` is a comma-joined summary rather than a size.
+ */
+export interface RepoEntry {
+  type: 'repo'
+  id: string
+  uri: string
+  repoType: string
+  // `false` where the key is present and the repository is not gated, and the
+  // flavour word where it is; absent entirely for a Space, which carries no
+  // such key at all.
+  gated?: string | false
+  visibility: string
+  likes: number
+  downloads?: number
+  task?: string
+  sdk?: string
+  updated: string
+}
+
+function isRepo(row: FsEntry | RepoEntry): row is RepoEntry {
+  return row.type === 'repo'
+}
+
+// Four of these ride only some kinds, and each absence was captured rather
+// than reasoned about. A space carries no `downloads` and no `gated` at all --
+// not a zero and not `gated=false` -- and carries `sdk` where a model carries
+// `task`. `gated=manual` sits BESIDE `public` rather than replacing it, which
+// is the one that would have been guessed wrong: gating and visibility are two
+// facts about a repository, not two values of one.
+function repoDetails(row: RepoEntry): string {
+  return [
+    `repo=${row.repoType}`,
+    row.visibility,
+    ...(typeof row.gated === 'string' ? [`gated=${row.gated}`] : []),
+    `likes=${String(row.likes)}`,
+    ...(row.downloads === undefined ? [] : [`downloads=${String(row.downloads)}`]),
+    ...(row.task === undefined ? [] : [`task=${row.task}`]),
+    ...(row.sdk === undefined ? [] : [`sdk=${row.sdk}`]),
+    `updated=${row.updated}`,
+  ].join(', ')
+}
+
 export function listingMarkdown(
   cmd: string,
   uri: string,
-  rows: FsEntry[],
+  rows: (FsEntry | RepoEntry)[],
   truncated = false,
 ): string {
   const out = [`# hf_fs ${cmd}`, '', `URI: \`${uri}\``, '']
   out.push('| Type | Path | URI | Target | Details |', '|---|---|---|---|---|')
   for (const row of rows) {
+    if (isRepo(row)) {
+      out.push(`| repo | ${escapeCell(row.id)} | ${escapeCell(row.uri)} |  | ${repoDetails(row)} |`)
+      continue
+    }
     const details = row.type === 'dir' ? '' : `${row.lfs ? 'lfs, ' : ''}size=${humanSize(row.size)}`
     out.push(`| ${row.type} | ${escapeCell(row.path)} |  |  | ${details} |`)
   }
-  if (truncated) out.push('', LIST_TRUNCATED)
+  // Which sentence depends on the command, because upstream's does: `ls` and
+  // `find` stop at an entry limit and `search` stops at a limit, and they are
+  // not the same notice.
+  if (truncated) out.push('', cmd === 'search' ? SEARCH_TRUNCATED : LIST_TRUNCATED)
   return out.join('\n')
 }
 
@@ -278,7 +345,11 @@ export function listingMarkdown(
 // directory upstream, and a path that is not there is `missing` rather than an
 // absent Type line -- both are printed, and both are printed for every
 // outcome, so a reader never has to infer a field from its absence.
-export type StatKind = 'file' | 'dir' | 'repo' | 'missing'
+// `namespace` is upstream's fifth, and it is not conditional on the owner
+// existing: `stat hf://models/no-such-owner-xyz-42` answers `exists: yes` and
+// `type: namespace`. The server is describing the SHAPE of the URI there, not
+// looking anything up, which is why this fake can answer it without a query.
+export type StatKind = 'file' | 'dir' | 'repo' | 'missing' | 'namespace'
 
 /**
  * Captured:
@@ -309,6 +380,7 @@ export function statMarkdown(
   path: string,
   size?: number,
   contentType?: string,
+  namespace?: string,
 ): string {
   return [
     `# hf_fs stat`,
@@ -317,6 +389,9 @@ export function statMarkdown(
     `- Exists: ${kind === 'missing' ? 'no' : 'yes'}`,
     `- Type: \`${kind}\``,
     `- Path: \`${path}\``,
+    // Only a namespace prints it, and it prints AFTER the path rather than
+    // beside the URI it came from.
+    ...(namespace === undefined ? [] : [`- Namespace: \`${namespace}\``]),
     ...(kind === 'file' && size !== undefined ? [`- Size: ${humanSize(size)}`] : []),
     // AFTER the size here, and BEFORE the byte count in `catMarkdown`. The
     // two orders are upstream's, captured separately, and neither is a typo:
@@ -395,6 +470,11 @@ export const FS_IMAGE_ONLY = 'HF_FS_IMAGE_ONLY'
 export const FS_UNSUPPORTED_MEDIA = 'HF_FS_UNSUPPORTED_MEDIA'
 export const FS_IMAGE_TOO_LARGE = 'HF_FS_IMAGE_TOO_LARGE'
 export const FS_BUDGET = 'HF_FS_ATTACHMENT_BUDGET_EXCEEDED'
+// Not "you asked wrongly" but "not here": the command and the URI are both
+// valid and the combination is refused. Captured from
+// `find hf://models/trending`, which upstream answers with this code and a
+// sentence naming the command that WOULD work.
+export const FS_UNSUPPORTED_OP = 'HF_FS_UNSUPPORTED_OPERATION'
 
 const RECOVERY: Record<string, string> = {
   [FS_NOT_FOUND]:
@@ -412,6 +492,8 @@ const RECOVERY: Record<string, string> = {
     'Attach supports only files ending in .jpg, .jpeg, .png, or .webp. Use stat for metadata.',
   [FS_IMAGE_TOO_LARGE]:
     'Use stat for metadata. Attach cannot truncate images or exceed its configured complete-file limit.',
+  [FS_UNSUPPORTED_OP]:
+    'Follow the supported operation named in the error. Otherwise narrow the URI scope or remove the unsupported option.',
   // Upstream's own sentence, curly apostrophe included -- it is bytes the
   // model is charged for, so it is copied rather than tidied.
   [FS_BUDGET]:

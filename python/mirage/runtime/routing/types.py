@@ -240,11 +240,12 @@ class RouteResult(RouteOutcome):
 class DenyResult(RouteOutcome):
     """The negative arm: refuse the line before anything runs.
 
-    The line exits 126 with ``<command>: policy denied: <reason>`` on
-    stderr. Wire form: {"deny": reason}.
+    The line exits 126 with ``<command>: Permission denied`` on
+    stderr and the reason on the result's ``refusal`` record. Wire
+    form: {"deny": reason}.
 
     Args:
-        reason (str): why the line was denied, shown on stderr.
+        reason (str): why the line was denied.
     """
 
     reason: str

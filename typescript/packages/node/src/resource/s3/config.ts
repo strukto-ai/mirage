@@ -14,9 +14,14 @@
 
 import { S3ConfigSchema as S3CoreConfigSchema } from '@struktoai/mirage-core/resource/s3/config'
 import type { S3Config as S3CoreConfig } from '@struktoai/mirage-core/resource/s3/config'
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { type FieldNormalizer, secondsToMs } from '@struktoai/mirage-core/utils/normalize'
 
 export interface S3Config extends S3CoreConfig {
   profile?: string
@@ -42,35 +47,44 @@ export function redactConfig(config: S3Config): S3ConfigRedacted {
   return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted
 }
 
+// Only the entries `snakeToCamel` would get wrong, shared by every
+// S3-compatible alias: python spells the profile `aws_profile`, the endpoint
+// `endpoint_url`, path style `path_style`, and states timeouts in seconds
+// where TypeScript uses milliseconds. Every other field maps by default, so
+// it does not belong here. One map rather than a copy per provider: oci and
+// supabase each lost `path_style` when theirs were hand-copied, and
+// `path_style: false` was honored on python and silently ignored here.
+const S3_FAMILY_RENAME: Record<string, string> = {
+  aws_profile: 'profile',
+  endpoint_url: 'endpoint',
+  path_style: 'forcePathStyle',
+  timeout: 'timeoutMs',
+}
+
+const S3_FAMILY_TRANSFORM = { timeout: secondsToMs }
+
+export const S3_FAMILY_NORMALIZER: FieldNormalizer = {
+  rename: S3_FAMILY_RENAME,
+  transform: S3_FAMILY_TRANSFORM,
+}
+
+// S3 proper also takes the credentials under boto3's `aws_` spellings.
+const S3_NORMALIZER: FieldNormalizer = {
+  rename: {
+    aws_access_key_id: 'accessKeyId',
+    aws_secret_access_key: 'secretAccessKey',
+    aws_session_token: 'sessionToken',
+    ...S3_FAMILY_RENAME,
+  },
+  transform: S3_FAMILY_TRANSFORM,
+}
+
 /**
  * Translate Python-style snake_case keys (as used in YAML configs and the
- * Python `S3Config`) to the TS-idiomatic camelCase fields. Already-camelCase
- * keys pass through unchanged so user code that constructs `S3Config`
- * directly keeps working.
- *
- * Python ↔ TS mapping:
- *   aws_access_key_id     ↔ accessKeyId
- *   aws_secret_access_key ↔ secretAccessKey
- *   aws_session_token     ↔ sessionToken
- *   aws_profile           ↔ profile
- *   endpoint_url          ↔ endpoint
- *   path_style            ↔ forcePathStyle
- *   timeout (sec, int)    ↔ timeoutMs (ms, number — converted ×1000)
- *   proxy                 ↔ proxy
+ * Python `S3Config`) to the TS-idiomatic camelCase fields, then validate.
+ * Already-camelCase keys pass through unchanged so user code that
+ * constructs `S3Config` directly keeps working.
  */
 export function normalizeS3Config(input: Record<string, unknown>): S3Config {
-  return normalizeFields(input, {
-    rename: {
-      aws_access_key_id: 'accessKeyId',
-      aws_secret_access_key: 'secretAccessKey',
-      aws_session_token: 'sessionToken',
-      aws_profile: 'profile',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as S3Config
+  return parseConfigWithSchema(S3ConfigSchema, input, S3_NORMALIZER)
 }

@@ -24,6 +24,7 @@ from openhands.sdk.workspace.local import LocalWorkspace
 from openhands.sdk.workspace.models import CommandResult, FileOperationResult
 from pydantic import Field, PrivateAttr
 
+from mirage.agents.io_text import with_refusal
 from mirage.workspace.workspace import Workspace as MirageBackingWorkspace
 
 logger = logging.getLogger(__name__)
@@ -151,7 +152,9 @@ class MirageWorkspace(LocalWorkspace):
             io_result = self._bridge.run(
                 _execute_with_timeout(self._ws, full_command, timeout))
             stdout = self._coerce_text(getattr(io_result, "stdout", b""))
-            stderr = self._coerce_text(getattr(io_result, "stderr", b""))
+            stderr = with_refusal(
+                self._coerce_text(getattr(io_result, "stderr", b"")),
+                io_result.refusal)
             exit_code = int(getattr(io_result, "exit_code", 0) or 0)
             return CommandResult(
                 command=command,
@@ -181,7 +184,7 @@ class MirageWorkspace(LocalWorkspace):
             parent = str(Path(dst).parent)
             if parent and parent not in (".", "/"):
                 self._ensure_parent(parent)
-            self._bridge.run(self._ws.ops.write(dst, data))
+            self._bridge.run(self._ws.fs.write(dst, data))
             return FileOperationResult(
                 success=True,
                 source_path=str(src),
@@ -205,7 +208,7 @@ class MirageWorkspace(LocalWorkspace):
         src = str(source_path)
         dst = Path(destination_path)
         try:
-            data = self._bridge.run(self._ws.ops.read(src))
+            data = self._bridge.run(self._ws.fs.read(src))
             if isinstance(data, str):
                 data = data.encode("utf-8")
             dst.parent.mkdir(parents=True, exist_ok=True)

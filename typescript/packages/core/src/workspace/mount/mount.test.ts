@@ -269,7 +269,7 @@ describe('Mount.executeCmd', () => {
       Promise.resolve(
         p.endsWith('dir.tally')
           ? new FileStat({ name: p, type: FileType.DIRECTORY })
-          : new FileStat({ name: p, size: 4 }),
+          : new FileStat({ name: p, type: FileType.FILE, size: 4 }),
       )
 
     await m.executeCmd('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { statPath })

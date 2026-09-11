@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from itertools import groupby
 
 from mirage.commands.builtin.utils.formatting import ls_mode_string
+from mirage.commands.builtin.utils.identity import (Identity, group_name,
+                                                    identity_of, owner_name)
 from mirage.commands.builtin.utils.operands import operand_stat
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
@@ -28,8 +30,6 @@ _TYPE_LABELS = {
     FileType.CHAR_DEVICE: "character special file",
     FileType.FILE: "regular file",
 }
-
-_DEFAULT_OWNER = "user"
 
 _SHELL_SPECIAL = frozenset("!\"#$&()*;<=>?[\\^`{|}~")
 
@@ -82,10 +82,6 @@ def _type_bits(s: FileStat) -> int:
     if s.type == FileType.CHAR_DEVICE:
         return 0o020000
     return 0o100000
-
-
-def _owner(value: int | str | None) -> str:
-    return str(value) if value is not None else _DEFAULT_OWNER
 
 
 def _epoch(iso: str | None) -> str:
@@ -196,7 +192,8 @@ def _apply_flags(value: str, flags: str, width: str, precision: str | None,
     return value
 
 
-def _directive_value(spec: str, s: FileStat, name: str) -> str:
+def _directive_value(spec: str, s: FileStat, name: str,
+                     identity: Identity | None) -> str:
     if spec == "%":
         return "%"
     if spec == "n":
@@ -212,9 +209,9 @@ def _directive_value(spec: str, s: FileStat, name: str) -> str:
     if spec == "f":
         return format(_type_bits(s) | _effective_mode(s), "x")
     if spec in ("u", "U"):
-        return _owner(s.uid)
+        return owner_name(s.uid, identity)
     if spec in ("g", "G"):
-        return _owner(s.gid)
+        return group_name(s.gid, identity)
     if spec == "x":
         return s.atime or s.modified or ""
     if spec == "X":
@@ -264,13 +261,16 @@ def _name_parts(s: FileStat, name: str, quoted: bool) -> list[str]:
     return [_quote_name(p) for p in parts] if quoted else parts
 
 
-def _render_directive(d: _FormatDirective, s: FileStat, name: str) -> str:
+def _render_directive(d: _FormatDirective, s: FileStat, name: str,
+                      identity: Identity | None) -> str:
     """Render one directive with its flags, width and precision applied.
 
     Args:
         d (_FormatDirective): the parsed directive.
         s (FileStat): the stat being rendered.
         name (str): the operand as it was typed.
+        identity (Identity | None): who the session is, for %U and %G
+            on an entry that reports no owner of its own.
     """
     if d.spec == "N":
         # GNU formats the name and a symlink's target as two separate
@@ -279,8 +279,8 @@ def _render_directive(d: _FormatDirective, s: FileStat, name: str) -> str:
         return " -> ".join(
             _apply_flags(part, d.flags, d.width, d.precision, d.spec)
             for part in _name_parts(s, name, bare))
-    return _apply_flags(_directive_value(d.spec, s, name), d.flags, d.width,
-                        d.precision, d.spec)
+    return _apply_flags(_directive_value(d.spec, s, name, identity), d.flags,
+                        d.width, d.precision, d.spec)
 
 
 def _is_conversion(char: str) -> bool:
@@ -332,7 +332,8 @@ def _parse_format_directive(fmt: str, start: int) -> _FormatDirective | None:
                             spec=spec)
 
 
-def _format_stat(fmt: str, s: FileStat, name: str) -> str:
+def _format_stat(fmt: str, s: FileStat, name: str,
+                 identity: Identity | None) -> str:
     parts: list[str] = []
     cursor = 0
     while cursor < len(fmt):
@@ -346,7 +347,7 @@ def _format_stat(fmt: str, s: FileStat, name: str) -> str:
             parts.append("%")
             cursor = start + 1
             continue
-        parts.append(_render_directive(directive, s, name))
+        parts.append(_render_directive(directive, s, name, identity))
         cursor = directive.end
     return "".join(parts)
 
@@ -375,6 +376,7 @@ async def stat(
     links: LinkView | None = None,
     stat_path: StatPath | None = None,
     mounts: MountView | None = None,
+    identity: Identity | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Report file status, GNU stat semantics.
 
@@ -392,6 +394,9 @@ async def stat(
         mounts (MountView | None): the mount boundaries, so a mount root
             reports its own name rather than the backend's name for its
             root.
+        identity (Identity | None): who the session is: what ``%U`` and
+            ``%G`` print for an entry that reports no uid or gid of its
+            own; None outside a workspace, where both print ``-``.
     """
     if not paths:
         raise ValueError("stat: missing operand")
@@ -405,7 +410,7 @@ async def stat(
         linked = None if L or links is None else links.stat_at(p.virtual)
         if linked is not None:
             if fmt is not None:
-                lines.append(_format_stat(fmt, linked, p.raw_path))
+                lines.append(_format_stat(fmt, linked, p.raw_path, identity))
             else:
                 lines.append(_render_stat(linked))
             continue
@@ -419,7 +424,7 @@ async def stat(
             err += fs_error_line("stat", p, exc).encode()
             continue
         if fmt is not None:
-            lines.append(_format_stat(fmt, s, p.raw_path))
+            lines.append(_format_stat(fmt, s, p.raw_path, identity))
         else:
             lines.append(_render_stat(s))
     io = IOResult(exit_code=1 if err else 0, stderr=err or None)
@@ -461,4 +466,5 @@ async def stat_generic(
                       L=parsed.deref,
                       links=opts.ns.links if opts.ns is not None else None,
                       stat_path=opts.stat_path,
-                      mounts=opts.ns.mounts if opts.ns is not None else None)
+                      mounts=opts.ns.mounts if opts.ns is not None else None,
+                      identity=identity_of(opts))

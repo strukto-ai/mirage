@@ -12,18 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import { rstripSlash } from '../../utils/slash.ts'
-import { REDACTED_SECRET, type RedactedConfig } from '../secrets.ts'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  REDACTED_SECRET,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
-export interface DifyConfig {
-  apiKey: string
-  baseUrl: string
-  datasetId: string
-  slugMetadataName?: string
-  maxConcurrency?: number
-  requestTimeout?: number
-  retryAttempts?: number
-  retryMaxDelay?: number
+const DifyConfigSchema = z.object({
+  apiKey: secretStr(),
+  baseUrl: z.string(),
+  datasetId: z.string(),
+  slugMetadataName: z.string().optional(),
+  maxConcurrency: z.number().optional(),
+  requestTimeout: z.number().optional(),
+  retryAttempts: z.number().optional(),
+  retryMaxDelay: z.number().optional(),
+})
+
+export type DifyConfig = ConfigOf<typeof DifyConfigSchema>
+
+export function normalizeDifyConfig(input: Record<string, unknown>): DifyConfig {
+  return parseConfigWithSchema(DifyConfigSchema, input)
 }
 
 export interface DifyConfigResolved {

@@ -38,6 +38,15 @@ class BaseResource:
     caches_reads: bool = False
     accessor: Accessor = Accessor()
     _ops: dict[str, Callable[..., Any]] = {}
+    # The ``resource:`` value the registry built this instance from, a
+    # name (``"s3"``, ``"wiki"``) or a code reference
+    # (``"./wiki.py:WikiResource"``), stamped by ``build_resource``; None
+    # for an instance constructed in code. A snapshot records it beside
+    # the class path so the loader can rebuild the mount through the
+    # same door yaml used, which is the only door that knows a class
+    # loaded from a script file. TypeScript keeps the same fact in a
+    # table beside its ``Resource`` interface (``resourceRefOf``).
+    resource_ref: str | None = None
     PROMPT: str = ""
     WRITE_PROMPT: str = ""
 
@@ -62,8 +71,9 @@ class BaseResource:
     # The FUSE path does not need this: direct_io + attr_timeout=0 +
     # hydrate-on-open make size-unknown files read correctly anyway. FSKit
     # has no direct_io equivalent, so a mount there is driven entirely by
-    # the reported size and a False resource would serve silent empty
-    # files. mount-time checks refuse rather than let that happen; see
+    # the reported size and a False resource serves silent empty files.
+    # The mount-time check (fuse/backend.py check_sizes) names such
+    # mounts in a warning rather than refusing; see
     # docs/python/setup/fuse.mdx.
     SIZES_ALWAYS_KNOWN: bool = False
 
@@ -192,6 +202,11 @@ class BaseResource:
 
     def load_state(self, state: dict[str, Any]) -> None:
         pass
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether this instance has completed its resource lifecycle."""
+        return self._closed
 
     async def close(self) -> None:
         if self._closed:

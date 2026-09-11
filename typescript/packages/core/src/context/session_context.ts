@@ -391,6 +391,32 @@ export function runWithRedirectPaths<T>(
   return Promise.resolve(redirectStorage.run([node, paths], fn))
 }
 
+const programStorage = createAsyncContext<Session | null>()
+
+/**
+ * Run a line as a program run in a session: `find -exec` hands its words
+ * to `execvp`, so the head it runs is the coreutils program, not the
+ * shell's builtin of the same name (`printf -v` is a format string there,
+ * not an assignment). Keyed by the session object, and cleared again by
+ * a nested shell the line starts (`-exec sh -c ...`, which snapshots the
+ * same session), so that shell's builtins are its own.
+ */
+export function runAsProgram<T>(session: Session, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(programStorage.run(session, fn))
+}
+
+/** Run a nested shell's script as the shell's own again: a nested shell
+ * is a program, and the builtins it runs are its builtins, `printf -v`
+ * included. */
+export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(programStorage.run(null, fn))
+}
+
+/** Whether the line running in this session is a program run. */
+export function isProgramInvocation(session: Session): boolean {
+  return programStorage.getStore() === session
+}
+
 /**
  * The redirect targets bound to this command node, empty for any other
  * node or when none are bound.

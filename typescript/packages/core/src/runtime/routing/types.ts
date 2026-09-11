@@ -190,7 +190,7 @@ export class RouteResult {
 
 /**
  * The negative arm: refuse the line before anything runs. The line
- * exits 126 with `<command>: policy denied: <reason>` on stderr.
+ * exits 126 with `<command>: Permission denied`, the reason on the result's `refusal` record, on stderr.
  * Wire form: `{deny: reason}`.
  */
 export class DenyResult {

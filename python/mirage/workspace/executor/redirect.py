@@ -17,6 +17,7 @@ from enum import Enum, auto
 
 import tree_sitter
 
+from mirage.commands.spec.usage import read_fail_exit
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -25,10 +26,18 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
+from mirage.shell.descriptors import (bad_descriptor_line, unreadable_stdin,
+                                      unsupported_descriptor)
+from mirage.shell.helpers import get_text
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, fs_strerror
+from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.workspace.executor.builtins import _to_scope
+from mirage.workspace.executor.builtins.exec.constants import (
+    CLOSED, OPEN_FOR_READING, TO_STDERR, TO_STDIN, TO_STDOUT)
+from mirage.workspace.executor.builtins.exec.exec import read_open_source
 from mirage.workspace.executor.create import create_file
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -41,14 +50,64 @@ class _Fd(Enum):
 
     An enum, not a sentinel object: the same variable also holds a
     virtual path string once a redirect lands, and a member can never
-    collide with one.
+    collide with one. CLOSED is where `>&-` points a descriptor: bytes
+    written there are dropped, and a command whose stdout was closed
+    reports the write failure the way GNU echo does.
     """
     TO_STDOUT = auto()
     TO_STDERR = auto()
+    CLOSED = auto()
 
 
 _TO_STDOUT = _Fd.TO_STDOUT
 _TO_STDERR = _Fd.TO_STDERR
+_CLOSED = _Fd.CLOSED
+
+
+class _Unreadable(Enum):
+    """A descriptor a read cannot use: closed, or open for writing only."""
+
+    TOKEN = auto()
+
+
+def _persistently_closed(session: Session) -> set[int]:
+    """The descriptors an ``exec`` closed for the shell, which a line's
+    dup from refuses before the command runs.
+
+    Args:
+        session (Session): shell session state.
+    """
+    closed: set[int] = set()
+    if session.exec_stdin_identity == CLOSED:
+        closed.add(FD_STDIN)
+    if session.exec_stdout == CLOSED:
+        closed.add(FD_STDOUT)
+    if session.exec_stderr == CLOSED:
+        closed.add(FD_STDERR)
+    return closed
+
+
+def _stdin_dest(session: Session) -> _Fd | str:
+    """Where a write through fd 0 lands, read off the shell's bindings.
+
+    Its own read end, a closed descriptor and a file's read end take
+    no write (`echo x >&0` is bash's `write error: Bad file descriptor`
+    with stdin a pipe); a terminal stream dup'd onto it (`exec 0<&1`)
+    writes where that stream goes; a file opened for writing
+    (`exec 0>f`) is the file.
+
+    Args:
+        session (Session): shell session state.
+    """
+    identity = session.exec_stdin_identity
+    if (identity is None or identity == CLOSED
+            or identity.startswith(OPEN_FOR_READING)):
+        return _CLOSED
+    if identity == TO_STDOUT:
+        return _TO_STDOUT
+    if identity == TO_STDERR:
+        return _TO_STDERR
+    return identity
 
 
 async def handle_redirect(
@@ -69,6 +128,17 @@ async def handle_redirect(
     truncated unless appending) when the redirect is processed, even
     if the stream ends up empty — including the command-less
     `> file` form (command is None).
+
+    A redirect naming a descriptor above 2 is refused before anything
+    opens, in bash's own words for a descriptor that is not open
+    (``3: Bad file descriptor``, exit 1, the command never runs and the
+    rest of the line goes on). bash would open ``3>f`` itself; mirage
+    models no descriptor table, so claiming fd 3 and duplicating from
+    it are refused alike rather than silently aliased onto stdout.
+    ``>&-`` closes a stream for the command: its stdout is dropped and,
+    if it wrote any, ``<cmd>: write error: Bad file descriptor`` exits
+    1; a closed stdin reads as empty, a documented approximation of
+    EBADF.
 
     A redirect target that cannot be opened is a shell error, not a
     command error — on both the ``<`` read and the ``>`` write side.
@@ -95,18 +165,70 @@ async def handle_redirect(
     while bash fails at open time and never runs it; the write error
     and exit 1 are reported either way.
     """
-    cmd_stdin = stdin
     for r in redirects:
+        if r.kind == RedirectKind.AMBIGUOUS:
+            # bash's word: `3>&foo` is refused before any descriptor is
+            # judged or any file opened, and the command never runs.
+            return _shell_failure(
+                f"{_redirect_word(r)}: ambiguous redirect\n".encode())
+    bad_fd = unsupported_descriptor(redirects)
+    if bad_fd is not None:
+        return _shell_failure(bad_descriptor_line(bad_fd))
+    # What each descriptor would yield to a read: stdin as given, and
+    # the two output descriptors nothing, since they are open for
+    # writing only. A dup copies the entry, so `1<&0 0<&1` hands stdin's
+    # file back to stdin while `0<&1` alone leaves stdin unreadable, and
+    # a closed descriptor is unreadable too. The command sees the
+    # unreadable entry as a source that fails on its first read, as in
+    # bash (`cat 0<&1`, `cat <&-`), while one that never reads is
+    # untouched (`true 0<&1`).
+    inputs: list[ByteSource | None | _Unreadable] = [
+        stdin, _Unreadable.TOKEN, _Unreadable.TOKEN
+    ]
+    # A stream `exec 1<f` opened for reading answers a read through it
+    # (`cat <&1`) with the file, from its start, and one `exec 1<&0`
+    # aliased onto stdin's own read end reads what stdin reads.
+    for fd, binding in ((FD_STDOUT, session.exec_stdout),
+                        (FD_STDERR, session.exec_stderr)):
+        if binding is not None and binding.startswith(OPEN_FOR_READING):
+            inputs[fd] = await read_open_source(dispatch, binding)
+        elif binding == TO_STDIN:
+            inputs[fd] = inputs[FD_STDIN]
+    # A descriptor an earlier redirect closed, or an `exec` closed for
+    # the shell, is not merely write-only: a later dup from it is bash's
+    # `0: Bad file descriptor`, and the command never runs (`touch
+    # marker 0<&- 1<&0` and `exec 1>&-; touch marker 2>&1` create
+    # nothing). A dup of a closed descriptor onto itself stays the no-op
+    # it is, and a redirect that opens or dups onto the descriptor
+    # takes it out of the set again.
+    closed = _persistently_closed(session)
+    for r in redirects:
+        if isinstance(r.target, int):
+            if r.target == FD_CLOSE:
+                closed.add(r.fd)
+                inputs[r.fd] = _Unreadable.TOKEN
+                continue
+            if r.target == r.fd:
+                # A self-dup changes nothing: a closed descriptor stays
+                # closed, so `touch m 1>&- 1>&1 2>&1` is still refused.
+                continue
+            if r.target in closed:
+                return _shell_failure(bad_descriptor_line(r.target))
+            inputs[r.fd] = inputs[r.target]
+            closed.discard(r.fd)
+            continue
+        for fd in ([FD_STDOUT, FD_STDERR] if r.fd == FD_BOTH else [r.fd]):
+            closed.discard(fd)
         if r.kind == RedirectKind.STDIN:
             scope = _ensure_scope(r.target)
             try:
                 file_data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
                 return _redirect_failure(scope, exc)
-            cmd_stdin = file_data
+            inputs[r.fd] = file_data
         elif r.kind == RedirectKind.HEREDOC:
-            cmd_stdin = encode_text(r.target) if isinstance(r.target,
-                                                            str) else r.target
+            inputs[r.fd] = encode_text(r.target) if isinstance(
+                r.target, str) else r.target
         elif r.kind == RedirectKind.HERESTRING:
             text = r.target
             if isinstance(text, str):
@@ -114,9 +236,16 @@ async def handle_redirect(
                     text = text[1:-1]
                 elif text.startswith("'") and text.endswith("'"):
                     text = text[1:-1]
-                cmd_stdin = encode_text(text + "\n")
+                inputs[r.fd] = encode_text(text + "\n")
             else:
-                cmd_stdin = text
+                inputs[r.fd] = text
+
+        else:
+            # An output redirect opens its target for writing only, so
+            # the descriptor stays unreadable: `cat 1>out 0<&1` reads
+            # from out's write end and fails with EBADF, as bash's does.
+            for fd in ([FD_STDOUT, FD_STDERR] if r.fd == FD_BOTH else [r.fd]):
+                inputs[fd] = _Unreadable.TOKEN
 
     # Before the command, because bash decides an open before it forks:
     # `set -C; touch marker > existing` creates no marker at all. Running
@@ -145,40 +274,52 @@ async def handle_redirect(
             and not isinstance(r.target, int))
         token = set_redirect_paths(command.id, targets)
         try:
-            stdout, io, exec_node = await execute_node(command, session,
-                                                       cmd_stdin, call_stack)
+            command_stdin = inputs[FD_STDIN]
+            stdout, io, exec_node = await execute_node(
+                command, session,
+                unreadable_stdin() if isinstance(command_stdin, _Unreadable)
+                else command_stdin, call_stack)
         finally:
             reset_redirect_paths(token)
         refused = exec_node.refused
-        barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-        if isinstance(barriered, memoryview):
-            barriered = bytes(barriered)
-        stdout_data = await materialize(barriered) or b""
+        try:
+            barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            if isinstance(barriered, memoryview):
+                barriered = bytes(barriered)
+            stdout_data = await materialize(barriered) or b""
+        except FS_ERRORS as exc:
+            # stdin bound to a closed or write-only descriptor fails
+            # only once the command reads it, which is this drain; that
+            # is the command's failure in its own voice (`cat: -: Bad
+            # file descriptor`), and the line goes on.
+            name = exec_node.command.split()[0] if exec_node.command else ""
+            stdout_data = b""
+            io.stderr = ((await materialize(io.stderr) or b"") +
+                         format_fs_error(name, exc, exec_node.paths))
+            io.exit_code = read_fail_exit(name, exc)
         stderr_data = await materialize(io.stderr) or b""
 
-    fd1: _Fd | str = _TO_STDOUT
-    fd2: _Fd | str = _TO_STDERR
+    fds: list[_Fd | str] = [_stdin_dest(session), _TO_STDOUT, _TO_STDERR]
     file_bufs: dict[str, bytearray] = {}
     file_scopes: dict[str, PathSpec] = {}
 
     for r in redirects:
+        if isinstance(r.target, int):
+            dest = _CLOSED if r.target == FD_CLOSE else fds[r.target]
+            fds[r.fd] = dest
+            if isinstance(dest, str) and dest not in file_bufs and not refused:
+                # fd 0 holds a file's write end (`exec 0>f`), which
+                # `exec` truncated when it opened it, so a dup from it
+                # appends, as writes through bash's shared offset do.
+                scope = _ensure_scope(dest)
+                file_scopes[dest] = scope
+                file_bufs[dest] = bytearray(await
+                                            _read_existing(dispatch, scope))
+            continue
+
         if r.kind in (RedirectKind.STDIN, RedirectKind.HEREDOC,
                       RedirectKind.HERESTRING):
-            continue
-
-        # 2>&1 — fd2 follows wherever fd1 points right now
-        if r.kind == RedirectKind.STDERR_TO_STDOUT and isinstance(
-                r.target, int):
-            fd2 = fd1
-            continue
-
-        # >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-        if r.fd == 1 and isinstance(r.target, int) and r.target == 2:
-            fd1 = fd2
-            continue
-
-        # other numeric dups (3>&1, ...) are not simulated
-        if isinstance(r.target, int):
+            fds[r.fd] = _CLOSED
             continue
 
         if refused:
@@ -200,17 +341,19 @@ async def handle_redirect(
         else:
             file_bufs[path] = bytearray()
 
-        if r.fd == -1:  # &> / &>>
-            fd1 = path
-            fd2 = path
-        elif r.kind == RedirectKind.STDERR:
-            fd2 = path
+        if r.fd == FD_BOTH:
+            fds[FD_STDOUT] = path
+            fds[FD_STDERR] = path
         else:
-            fd1 = path
+            fds[r.fd] = path
 
+    if fds[FD_STDOUT] is _CLOSED and stdout_data and command is not None:
+        stderr_data += _closed_write_line(command)
+        io.exit_code = 1
     out_stdout = bytearray()
     out_stderr = bytearray()
-    for data, dest in ((stdout_data, fd1), (stderr_data, fd2)):
+    for data, dest in ((stdout_data, fds[FD_STDOUT]), (stderr_data,
+                                                       fds[FD_STDERR])):
         if dest is _TO_STDOUT:
             out_stdout += data
         elif dest is _TO_STDERR:
@@ -281,9 +424,40 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
 
 
+def _closed_write_line(command: tree_sitter.Node) -> bytes:
+    """GNU's line for a write onto a closed stdout, in the command's name.
+
+    Args:
+        command (tree_sitter.Node): the command whose stdout was closed.
+    """
+    words = get_text(command).split()
+    name = words[0] if words else "redirect"
+    return f"{name}: write error: Bad file descriptor\n".encode()
+
+
+def _redirect_word(r: Redirect) -> str:
+    """The redirect's target as typed, for a refusal that names it.
+
+    Args:
+        r (Redirect): the redirect, its target expanded or not.
+    """
+    return r.target.raw_path if isinstance(r.target, PathSpec) else str(
+        r.target)
+
+
 def _redirect_failure(scope: PathSpec,
                       exc: OSError) -> tuple[None, IOResult, ExecutionNode]:
     """Shell-attributed IOResult for a ``<`` source that cannot be read.
+
+    Args:
+        scope (PathSpec): The redirect source that could not be read.
+        exc (OSError): The filesystem error raised by the read.
+    """
+    return _shell_failure(_redirect_error_line(scope, exc))
+
+
+def _shell_failure(line: bytes) -> tuple[None, IOResult, ExecutionNode]:
+    """Shell-attributed IOResult that replaces the command's whole run.
 
     bash never runs the command and stops processing redirects at the
     first failure, so this replaces the whole result. Returning an
@@ -293,10 +467,9 @@ def _redirect_failure(scope: PathSpec,
     (``cd /data && cat < missing`` used to report ``cd:``).
 
     Args:
-        scope (PathSpec): The redirect source that could not be read.
-        exc (OSError): The filesystem error raised by the read.
+        line (bytes): the diagnostic, already in the shell's voice.
     """
-    io = IOResult(exit_code=1, stderr=_redirect_error_line(scope, exc))
+    io = IOResult(exit_code=1, stderr=line)
     return None, io, ExecutionNode(command="redirect", exit_code=1)
 
 

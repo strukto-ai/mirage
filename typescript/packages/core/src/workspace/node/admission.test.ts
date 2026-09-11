@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
-import { getTestParser } from '../fixtures/workspace_fixture.ts'
+import { getTestParser, voicedStderr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import { Admitted, admit, admitLine, policyScopes } from './admission.ts'
@@ -176,10 +176,10 @@ describe('admission', () => {
         '',
         reparse,
       )
-      return refusal === null ? null : [refusal.exitCode, DEC.decode(refusal.stderr)]
+      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
     const unread = (raw: string) =>
-      `policy denied: cannot read ${raw} before the runtime expands it\n`
+      `Permission denied\npolicy denied: cannot read ${raw} before the runtime expands it\n`
     // Quotes and escapes read as the text they name: a quoted path is a
     // path, a quoted head is the command.
     expect(await line('\'cat\' "/data/secret"')).toEqual([1, 'cat: /data/secret: sealed\n'])
@@ -198,16 +198,16 @@ describe('admission', () => {
     expect(await line('echo $(cat /data/secret)')).toEqual([1, 'cat: /data/secret: sealed\n'])
     expect(await line('ls | xargs cat')).toEqual([
       126,
-      'cat: policy denied: runs on operands the gate cannot read\n',
+      'cat: Permission denied\npolicy denied: runs on operands the gate cannot read\n',
     ])
     expect(await line('ls | xargs echo')).toBeNull()
     expect(await line('source /data/env.sh')).toEqual([
       126,
-      'source: policy denied: runs lines the gate cannot read\n',
+      'source: Permission denied\npolicy denied: runs lines the gate cannot read\n',
     ])
     expect(await line('/data/run.sh')).toEqual([
       126,
-      '/data/run.sh: policy denied: runs lines the gate cannot read\n',
+      '/data/run.sh: Permission denied\npolicy denied: runs lines the gate cannot read\n',
     ])
     expect(await line("sh -c 'rm /data/x'; sh -c 'sort'")).toEqual([
       127,
@@ -287,19 +287,19 @@ describe('admission', () => {
         '',
         (t) => parser.parse(t),
       )
-      return refusal === null ? null : [refusal.exitCode, DEC.decode(refusal.stderr)]
+      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
     expect(await line('grep -r x /data')).toEqual([
       126,
-      'grep: policy denied: walks a tree the gate cannot follow\n',
+      'grep: Permission denied\npolicy denied: walks a tree the gate cannot follow\n',
     ])
     expect(await line('rg x /data')).toEqual([
       126,
-      'rg: policy denied: walks a tree the gate cannot follow\n',
+      'rg: Permission denied\npolicy denied: walks a tree the gate cannot follow\n',
     ])
     expect(await line('cat /data/se*')).toEqual([
       126,
-      'cat: policy denied: expands a pattern only the runtime can read\n',
+      'cat: Permission denied\npolicy denied: expands a pattern only the runtime can read\n',
     ])
     // The judged words still pass: a named clean path, a command no
     // path rule reads, a walker the rules leave alone.
@@ -325,7 +325,7 @@ describe('admission', () => {
         '',
         (t) => parser.parse(t),
       )
-      return refusal === null ? null : [refusal.exitCode, DEC.decode(refusal.stderr)]
+      return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
     expect(await line('cat < /data/secret')).toEqual([1, 'cat: /data/secret: sealed\n'])
     expect(await line('head -c 1 /data/open > /data/secret2')).toBeNull()
@@ -335,7 +335,7 @@ describe('admission', () => {
     ])
     expect(await line('cat < $F')).toEqual([
       126,
-      'cat: policy denied: cannot read $F before the runtime expands it\n',
+      'cat: Permission denied\npolicy denied: cannot read $F before the runtime expands it\n',
     ])
     expect(await line('echo hi > $F')).toBeNull()
     expect(await line("cat /data/open <<< 'body'")).toBeNull()

@@ -16,14 +16,15 @@ import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageShell } from './shell.ts'
 
-function mkWs(): Workspace {
+function mkWs(extra: Partial<WorkspaceOptions> = {}): Workspace {
   const ram = new RAMResource()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops, ...extra })
 }
 
 describe('MirageShell', () => {
@@ -63,5 +64,20 @@ describe('MirageShell', () => {
     if (out.outcome.type === 'exit') {
       expect(out.outcome.exitCode).not.toBe(0)
     }
+  })
+
+  it('names the reason beside a refused command', async () => {
+    // stderr is bash's bare `Permission denied`; the reason rides the
+    // refusal record, and a text surface appends it as one more line.
+    const ws = mkWs({
+      routePolicy: (ctx) => (ctx.command === 'rm' ? { deny: 'no deletes' } : null),
+    })
+    const shell = new MirageShell(ws)
+    const result = await shell.run({ commands: ['rm /x'] })
+
+    const [out] = result.output
+    if (out === undefined) throw new Error('expected one result entry')
+    expect(out.stderr).toBe('rm: Permission denied\npolicy denied: no deletes\n')
+    expect(out.outcome).toEqual({ type: 'exit', exitCode: 126 })
   })
 })

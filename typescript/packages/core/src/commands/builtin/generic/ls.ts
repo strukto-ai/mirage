@@ -20,6 +20,7 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import type { ChildMounts, LinkView, MountView, StatPath } from '../../../ops/types.ts'
 import { formatLsLong } from '../utils/formatting.ts'
+import { identityOf, type Identity } from '../utils/identity.ts'
 import { gnuStrerror, isEacces, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { CycleError, respellOne } from '../../../utils/path.ts'
@@ -115,7 +116,7 @@ const CLASSIFY_SUFFIX: Partial<Record<FileType, string>> = {
 }
 
 function formatShort(s: FileStat, classify: boolean): string {
-  const suffix = (classify && s.type != null ? CLASSIFY_SUFFIX[s.type] : undefined) ?? ''
+  const suffix = (classify ? CLASSIFY_SUFFIX[s.type] : undefined) ?? ''
   return `${s.name}${suffix}`
 }
 
@@ -124,10 +125,11 @@ function appendListing(
   long: boolean,
   human: boolean,
   classify: boolean,
+  identity: Identity,
   lines: string[],
 ): void {
   if (long) {
-    for (const line of formatLsLong(stats, { human })) lines.push(line)
+    for (const line of formatLsLong(stats, { human, identity })) lines.push(line)
     return
   }
   for (const s of stats) lines.push(formatShort(s, classify))
@@ -462,6 +464,7 @@ export async function lsGeneric(
   const sortBy: SortBy = fl.asBool('t') ? 'time' : fl.asBool('S') ? 'size' : 'name'
   const links = opts.ns?.links ?? null
   const deref = fl.asBool('L')
+  const identity = identityOf(opts)
   const warnings: LsWarning[] = []
   const lines: string[] = []
 
@@ -494,7 +497,7 @@ export async function lsGeneric(
       }
     }
     const rows = collected.length > 1 ? sortStats(collected, sortBy, reverse) : collected
-    appendListing(rows, long, human, classify, lines)
+    appendListing(rows, long, human, classify, identity, lines)
     return finish(lines, warnings)
   }
 
@@ -519,7 +522,7 @@ export async function lsGeneric(
   // (or under -R); a lone directory operand is listed bare.
   const headed = recursive || targets.length > 1
   const rows = operands.flatMap((o) => (o.row !== null ? [o.row] : []))
-  appendListing(rows, long, human, classify, lines)
+  appendListing(rows, long, human, classify, identity, lines)
   let printed = rows.length > 0
   for (const operand of operands) {
     for (const [dirSpec, entries] of operand.groups) {
@@ -527,7 +530,7 @@ export async function lsGeneric(
         if (printed) lines.push('')
         lines.push(`${respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
       }
-      appendListing(entries, long, human, classify, lines)
+      appendListing(entries, long, human, classify, identity, lines)
       printed = true
     }
   }

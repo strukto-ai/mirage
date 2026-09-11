@@ -12,7 +12,7 @@ import { isNotFound, nextcloudKey } from './util.ts'
  * the same request `rmR` sends and the emptiness check is the only thing
  * separating them. Without it `rmdir` destroyed the whole subtree for
  * every caller that does not pre-check emptiness itself, and the command
- * builders are the only callers that do: FUSE, `ws.ops` and the sandbox
+ * builders are the only callers that do: FUSE, `ws.fs` and the sandbox
  * runtimes all reach the op directly.
  *
  * PROPFIND on a collection returns the collection itself, so an entry

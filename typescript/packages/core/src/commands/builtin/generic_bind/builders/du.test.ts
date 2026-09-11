@@ -47,7 +47,7 @@ const OPS: CommandIO = {
     return Promise.resolve(
       new FileStat({
         name: p.virtual,
-        type: node.dir ? FileType.DIRECTORY : FileType.TEXT,
+        type: node.dir ? FileType.DIRECTORY : FileType.FILE,
         size: node.size ?? null,
       }),
     )

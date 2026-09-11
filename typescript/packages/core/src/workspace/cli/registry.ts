@@ -14,6 +14,7 @@
 
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
+import { errorSummary } from '../../secrets/summary.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
 import { JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS, SHELL_NAMES } from '../lookup/constants.ts'
 import { z } from 'zod'
@@ -131,7 +132,15 @@ export class CLIRegistry {
           )
         }
       }
-      return model.parse(norm)
+      try {
+        return model.parse(norm)
+      } catch (err) {
+        // An account CLI's config is where a fetched credential lands, the
+        // same as a mount's: field and code only, never zod's rendering of
+        // the refused value. Mirrors the python registry's `error_summary`.
+        if (err instanceof z.ZodError) throw new Error(`CLI '${name}': ${errorSummary(err)}`)
+        throw err
+      }
     }
     const result = model(config ?? {})
     // The snapshot stores the normalized config and replays it through

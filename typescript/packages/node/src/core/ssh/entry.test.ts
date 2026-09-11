@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileType } from '@struktoai/mirage-core/types'
+import { ContentType, FileType } from '@struktoai/mirage-core/types'
 import { attrsToFileStat } from './entry.ts'
 
 describe('attrsToFileStat', () => {
@@ -25,19 +25,19 @@ describe('attrsToFileStat', () => {
 
   it('returns JSON type for foo.json', () => {
     const stat = attrsToFileStat('foo.json', { mode: 0o100644, size: 12 })
-    expect(stat.type).toBe(FileType.JSON)
+    expect(stat.content).toBe(ContentType.JSON)
     expect(stat.name).toBe('foo.json')
   })
 
   it('returns TEXT type for foo.txt with regular-file mode', () => {
     const stat = attrsToFileStat('foo.txt', { mode: 0o100644, size: 7 })
-    expect(stat.type).toBe(FileType.TEXT)
+    expect(stat.content).toBe(ContentType.TEXT)
     expect(stat.name).toBe('foo.txt')
   })
 
   it('returns BINARY type for foo.bin', () => {
     const stat = attrsToFileStat('foo.bin', { mode: 0o100644, size: 0 })
-    expect(stat.type).toBe(FileType.BINARY)
+    expect(stat.content).toBe(ContentType.BINARY)
   })
 
   it('formats modified as ISO 8601 when mtime is given', () => {
@@ -71,6 +71,6 @@ describe('attrsToFileStat', () => {
   it('carries the name through unchanged', () => {
     const stat = attrsToFileStat('weird-name.parquet', { mode: 0o100644, size: 100 })
     expect(stat.name).toBe('weird-name.parquet')
-    expect(stat.type).toBe(FileType.BINARY)
+    expect(stat.content).toBe(ContentType.BINARY)
   })
 })

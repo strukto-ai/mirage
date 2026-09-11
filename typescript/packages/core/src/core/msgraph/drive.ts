@@ -26,7 +26,7 @@ import {
 import type { FindOptions } from '../../resource/base.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent, listingError } from '../../utils/errors.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { MsGraphConfigResolved } from './config.ts'
@@ -302,7 +302,8 @@ function entryStat(item: Record<string, unknown>): FileStat {
   }
   return new FileStat({
     name,
-    type: guessType(name),
+    type: FileType.FILE,
+    content: contentTypeForPath(name),
     size: asNumber(item.size),
     modified: asString(item.lastModifiedDateTime),
     fingerprint: asString(item.cTag),
@@ -631,8 +632,8 @@ export async function statItem(
       const entry = lookup.entry
       return new FileStat({
         name: entry.name,
-        type:
-          entry.resourceType === ResourceType.FOLDER ? FileType.DIRECTORY : guessType(entry.name),
+        type: entry.resourceType === ResourceType.FOLDER ? FileType.DIRECTORY : FileType.FILE,
+        content: entry.resourceType === ResourceType.FOLDER ? null : contentTypeForPath(entry.name),
         size: entry.size,
         modified: entry.remoteTime || null,
         fingerprint: asString(entry.extra.ctag),

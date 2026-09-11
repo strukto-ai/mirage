@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { INT_JSON, JSON_NAME, JSONL_NAME } from '../hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
 
@@ -28,7 +28,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'trace',
     segments: ['traces', new Slot('trace_id', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'sessions', segments: ['sessions'], probed: false }),
   new Scope({ kind: 'session', segments: ['sessions', new Slot('session_id')] }),
@@ -36,7 +36,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'session_trace',
     segments: ['sessions', new Slot('session_id'), new Slot('trace_id', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'prompts', segments: ['prompts'], probed: false }),
   new Scope({ kind: 'prompt', segments: ['prompts', new Slot('prompt_name')] }),
@@ -47,7 +47,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'prompt_version',
     segments: ['prompts', new Slot('prompt_name'), new Slot('version', INT_JSON)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'datasets', segments: ['datasets'], probed: false }),
   new Scope({ kind: 'dataset', segments: ['datasets', new Slot('dataset_name')] }),
@@ -55,14 +55,14 @@ export const SCOPES: readonly Scope[] = [
     kind: 'dataset_items',
     segments: ['datasets', new Slot('dataset_name'), 'items.jsonl'],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
   new Scope({ kind: 'runs', segments: ['datasets', new Slot('dataset_name'), 'runs'] }),
   new Scope({
     kind: 'dataset_run',
     segments: ['datasets', new Slot('dataset_name'), 'runs', new Slot('run_name', JSONL_NAME)],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
 ]
 

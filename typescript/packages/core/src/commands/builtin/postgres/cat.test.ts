@@ -29,7 +29,7 @@ import * as readModule from '../../../core/postgres/read.ts'
 import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
 import { materialize } from '../../../io/types.ts'
-import { FileStat, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
 
 const POSTGRES_CAT = POSTGRES_COMMANDS.filter((c) => c.name === 'cat' && c.filetype == null)
@@ -63,7 +63,9 @@ describe('postgres cat size-guard surfacing', () => {
       'public/tables/users/rows.jsonl too large to read entirely: ' +
       '~50000 rows / ~5000000 bytes (thresholds: 10000 rows / 1000000 bytes); ' +
       'use head, tail, wc, grep, or pass limit/offset'
-    vi.mocked(statModule.stat).mockResolvedValue(new FileStat({ name: 'rows.jsonl' }))
+    vi.mocked(statModule.stat).mockResolvedValue(
+      new FileStat({ name: 'rows.jsonl', type: FileType.FILE }),
+    )
     vi.mocked(readModule.readStream).mockImplementation(() => failingStream(message))
 
     const cmd = POSTGRES_CAT[0]

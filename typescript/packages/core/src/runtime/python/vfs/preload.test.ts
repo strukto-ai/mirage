@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { preloadInto } from './preload.ts'
 import { RuntimeVFS } from '../../vfs.ts'
-import { DEVICE_NUMBERS_KEY, FileStat, FileType } from '../../../types.ts'
+import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../../../types.ts'
 import { CHAR_MODE } from '../../../utils/stat_view.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -57,7 +57,7 @@ function makeFakeFS(withLinks = true): FakeFS {
 // The door builds each row from a name plus one stat, so a double
 // standing in for the bridge has to answer both.
 function fileStat(size: number): FileStat {
-  return new FileStat({ name: 'f', size, type: FileType.TEXT })
+  return new FileStat({ name: 'f', size, type: FileType.FILE, content: ContentType.TEXT })
 }
 
 function dirStat(): FileStat {
@@ -121,7 +121,8 @@ describe('preloadInto', () => {
     const stat = new FileStat({
       name: 'a.txt',
       size: 5,
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       mode: 0o600,
       modified: '2026-07-15T00:00:00Z',
     })

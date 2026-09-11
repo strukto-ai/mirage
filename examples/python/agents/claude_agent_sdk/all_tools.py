@@ -76,7 +76,7 @@ async def main() -> None:
     print("all six tools exercised:", not missing, "| missing:", missing
           or "none")
 
-    final = await ws.ops.read("/notes.txt")
+    final = await ws.fs.read("/notes.txt")
     print("\n=== /notes.txt final content (from the Mirage workspace) ===")
     print(final.decode("utf-8"))
 

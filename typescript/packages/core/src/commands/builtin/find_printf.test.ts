@@ -22,7 +22,27 @@ describe('expandPrintf', () => {
     mtimeEpoch: 1786887930,
     mode: null,
     targetKind: null,
+    uid: null,
+    gid: null,
   }
+
+  it('expands the owner family from the identity', () => {
+    const warnings: string[] = []
+    const identity = { user: 'alice', profile: 'admin' }
+    // No uid/gid on the entry: the owner is the workspace user and the
+    // group the session's profile, the rule ls -l draws its columns by.
+    expect(expandPrintf('%u %U %g %G\n', '/data/a.txt', '/data', stat, warnings, identity)).toBe(
+      'alice alice admin admin\n',
+    )
+    // A reported owner wins; `-` when nothing names one.
+    const owned = { ...stat, uid: 501, gid: 'staff' }
+    expect(expandPrintf('%u %g\n', '/data/a.txt', '/data', owned, warnings, identity)).toBe(
+      '501 staff\n',
+    )
+    expect(expandPrintf('%u %g\n', '/data/a.txt', '/data', stat, warnings)).toBe('- -\n')
+    expect(printfNeedsStat('%u %g\n')).toBe(true)
+    expect(warnings).toEqual([])
+  })
 
   it('expands the path family', () => {
     const warnings: string[] = []
@@ -42,7 +62,7 @@ describe('expandPrintf', () => {
         '%y %m\n',
         '/data/sub',
         '/data',
-        { size: 0, kind: 'd', mtimeEpoch: 0, mode: null, targetKind: null },
+        { size: 0, kind: 'd', mtimeEpoch: 0, mode: null, targetKind: null, uid: null, gid: null },
         warnings,
       ),
     ).toBe('d 755\n')
@@ -58,7 +78,7 @@ describe('expandPrintf', () => {
         '%m %M\n',
         '/data/sub',
         '/data',
-        { size: 0, kind: 'd', mtimeEpoch: 0, mode: 0o700, targetKind: null },
+        { size: 0, kind: 'd', mtimeEpoch: 0, mode: 0o700, targetKind: null, uid: null, gid: null },
         warnings,
       ),
     ).toBe('700 drwx------\n')
@@ -66,7 +86,15 @@ describe('expandPrintf', () => {
 
   it('reports the target kind for %Y on a link, N when it dangles', () => {
     const warnings: string[] = []
-    const link = { size: 5, kind: 'l' as const, mtimeEpoch: 0, mode: null, targetKind: null }
+    const link = {
+      size: 5,
+      kind: 'l' as const,
+      mtimeEpoch: 0,
+      mode: null,
+      targetKind: null,
+      uid: null,
+      gid: null,
+    }
     expect(
       expandPrintf('%y %Y\n', '/data/lnk', '/data', { ...link, targetKind: 'd' }, warnings),
     ).toBe('l d\n')

@@ -14,7 +14,7 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { basename, norm } from './utils.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -43,7 +43,8 @@ export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
       name: basename(p),
       size: data.byteLength,
       modified: accessor.store.modified.get(p) ?? null,
-      type: guessType(p),
+      type: FileType.FILE,
+      content: contentTypeForPath(p),
       mode: attrs.mode ?? null,
       uid: attrs.uid ?? null,
       gid: attrs.gid ?? null,

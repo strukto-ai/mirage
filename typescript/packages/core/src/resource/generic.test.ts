@@ -20,7 +20,7 @@ import { command, type RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
+import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -80,7 +80,12 @@ function stat(accessor: WikiAccessor, path: PathSpec): Promise<FileStat> {
   if (typeof found !== 'string')
     return Promise.resolve(new FileStat({ name, size: null, type: FileType.DIRECTORY }))
   return Promise.resolve(
-    new FileStat({ name, size: ENC.encode(found).length, type: FileType.TEXT }),
+    new FileStat({
+      name,
+      size: ENC.encode(found).length,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+    }),
   )
 }
 

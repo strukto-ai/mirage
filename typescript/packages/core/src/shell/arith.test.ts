@@ -137,6 +137,9 @@ function fakeElements(): ElementOps {
     ['arr 1', '20'],
   ])
   const ops: ElementOps = {
+    isAssoc(name: string) {
+      return name === 'm'
+    },
     resolve(name, subscript, env) {
       if (name === 'm') return subscript.replace(/^["']|["']$/g, '')
       return evaluateArith(subscript, env, 0, ops).value.toString()
@@ -199,5 +202,71 @@ describe('evaluateArith elements', () => {
   it('tokenizes nested brackets', () => {
     const ops = fakeElements()
     expect(evaluateArith('arr[arr[1] - 19]', {}, 0, ops).value).toBe(20n)
+  })
+})
+
+describe('dynamic reads', () => {
+  it('asks the reader first and tells it of every write', () => {
+    // A dynamic name's reader answers before the pending assignments
+    // and the environment, and hears each scalar assignment as it is
+    // made, nested evaluations included, so it can act on it at once.
+    const events: [string, string][] = []
+    const result = evaluateArith(
+      'D=42, x=D, y',
+      { y: 'D+1' },
+      0,
+      null,
+      (name) => (name === 'D' ? '7' : null),
+      (name, value) => {
+        events.push([name, value])
+      },
+    )
+    expect(result.value).toBe(8n)
+    expect(events).toEqual([
+      ['D', '42'],
+      ['x', '7'],
+    ])
+    expect(result.writes.map((w) => [w.name, w.value])).toEqual([
+      ['D', '42'],
+      ['x', '7'],
+    ])
+  })
+})
+
+describe('compound assignment', () => {
+  it('reads the target before the right side', () => {
+    // bash 5.2: `RANDOM=42, RANDOM-=RANDOM` is the first draw minus the
+    // second, so a dynamic name is read for the target first.
+    const draws = ['17772', '26794']
+    const result = evaluateArith('D-=D', {}, 0, null, () => draws.shift() ?? null)
+    expect(result.value).toBe(-9022n)
+  })
+})
+
+describe('a variable evaluated as an expression', () => {
+  it('shares the record of the expression around it', () => {
+    // bash: `x='y=5'; $((x))` leaves y at 5, and the nested read sees
+    // the pending updates of the expression around it.
+    const first = evaluateArith('x, y + 1', { x: 'y=5' })
+    expect(first.value).toBe(6n)
+    expect(first.writes.map((w) => [w.name, w.value])).toEqual([['y', '5']])
+    const second = evaluateArith('y=1, x, y', { x: 'y+=1' })
+    expect(second.value).toBe(2n)
+    expect(second.writes.map((w) => [w.name, w.value])).toEqual([['y', '2']])
+  })
+})
+
+describe('an indexed subscript', () => {
+  it('evaluates in the record of the expression around it', () => {
+    // bash: `a[5]=7; $((a[x=5] + x))` is 12 and leaves x at 5; the
+    // subscript's assignment is seen by the rest of the expression and
+    // recorded with it.
+    const result = evaluateArith('arr[x=1] + x', {}, 0, fakeElements())
+    expect(result.value).toBe(21n)
+    expect(result.writes.map((w) => [w.name, w.key, w.value])).toEqual([['x', null, '1']])
+    // An associative subscript stays a key, never an expression.
+    const assoc = evaluateArith('m[a] + 1', {}, 0, fakeElements())
+    expect(assoc.value).toBe(8n)
+    expect(assoc.writes).toEqual([])
   })
 })

@@ -80,14 +80,14 @@ async def test_call_read_offset_and_limit(server):
 
 @pytest.mark.asyncio
 async def test_call_edit(server, workspace):
-    await workspace.ops.write("/e.txt", b"foo bar")
+    await workspace.fs.write("/e.txt", b"foo bar")
     result = await server.call_tool("edit", {
         "path": "/e.txt",
         "old_string": "bar",
         "new_string": "qux"
     })
     assert result.isError is False
-    assert await workspace.ops.read("/e.txt") == b"foo qux"
+    assert await workspace.fs.read("/e.txt") == b"foo qux"
 
 
 @pytest.mark.asyncio
@@ -125,9 +125,9 @@ def test_server_advertises_name_and_version(workspace):
 @pytest.mark.asyncio
 async def test_stale_write_protection_reaches_the_tools(workspace):
     server = MirageMcpServer(workspace, stale_write_protection=False)
-    await workspace.ops.write("/a.txt", b"hello world")
+    await workspace.fs.write("/a.txt", b"hello world")
     await server.call_tool("read", {"path": "/a.txt"})
-    await workspace.ops.write("/a.txt", b"hello there")
+    await workspace.fs.write("/a.txt", b"hello there")
     result = await server.call_tool("edit", {
         "path": "/a.txt",
         "old_string": "hello",

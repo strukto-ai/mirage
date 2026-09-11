@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol
 
 from mirage.runtime.types import ScriptSource
-from mirage.types import Limit, PathSpec, Producer
+from mirage.types import Limit, PathSpec, Producer, Refusal
 
 
 class MountRootQuery(Protocol):
@@ -36,8 +36,10 @@ class MountRootQuery(Protocol):
 class DenyScope(StrEnum):
     """What a command-plane refusal is about, which picks its voice.
 
-    COMMAND refuses the whole line: ``<cmd>: policy denied: <reason>``,
-    exit 126. OPERAND refuses one operand and keeps the GNU voice
+    COMMAND refuses the whole line in bash's own words,
+    ``<cmd>: Permission denied``, exit 126, and the reason rides the
+    result's ``refusal`` record instead. OPERAND refuses one operand
+    and keeps the GNU voice
     ``<cmd>: <reason>`` (the reason names the operand, as
     ``rm: cannot remove 'x': ...`` does), exit 1, or the command's own
     fatal code where GNU differs (tar exits 2). The exit code and errno
@@ -56,8 +58,8 @@ class Outcome(StrEnum):
     ALLOW is silence as well as consent, since a line no rule speaks
     about runs. DENY covers both refusals, and ``Ruling.rule`` tells
     them apart: a rule refused it, or, with no rule, the allow list did.
-    Both exit 126; only the wording differs, because one has an
-    operator's reason to print and the other has none.
+    Both exit 126 and print the same line; the ``refusal`` record
+    carries the operator's reason when there is one.
     """
 
     ALLOW = "allow"
@@ -78,12 +80,18 @@ class Deny:
             trailing newline; the door adds both.
         scope (DenyScope): whole command or one operand; ignored off
             the command plane.
+        policy (str): the class name of the policy that spoke,
+            stamped by the chain so no policy names itself.
+        failed (bool): True when the chain refused on a policy's
+            behalf because it raised.
     """
 
     kind: ClassVar[str] = "deny"
 
     reason: str
     scope: DenyScope = DenyScope.COMMAND
+    policy: str = ""
+    failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,6 +296,116 @@ class Decision:
 
 
 @dataclass(frozen=True, slots=True)
+class Occurrence:
+    """Where one command stands: the text it was parsed from, its span
+    in that text, and the occurrence of the node that text was evaluated
+    from, so the commands of a nested line stand under the word that
+    ran them.
+
+    The pass computes one from the line's parse and the gate from the
+    node it runs, by one rule (``workspace/node/occurrence``), and the
+    ledger only compares them: a grant a pass claims is bound to the
+    occurrence it judged, and offered to a reader at that occurrence
+    alone. So a word that expands at run time into the same command as
+    a literal spelling elsewhere on the line (``$S && cat secret``)
+    cannot run on the literal's nod, and one body evaluated under two
+    words (``eval 'cat s'; eval 'cat s'``) is two occurrences.
+
+    Args:
+        parent (Occurrence | None): the node whose text this command
+            was parsed from, None for a typed line.
+        source (str): the text the command was parsed from.
+        start (int): the command's first byte in that text.
+        end (int): the byte after its last.
+    """
+
+    parent: "Occurrence | None"
+    source: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class Claim:
+    """One grant a reader of a line matched, and the occurrence it
+    matched it for.
+
+    Args:
+        occurrence (Occurrence): the command the grant answers.
+        decision (Decision): the settled ONCE record.
+    """
+
+    occurrence: Occurrence
+    decision: Decision
+
+
+@dataclass(eq=False, slots=True)
+class HandOff:
+    """The ONCE grants a line's readers matched to its commands, for the
+    line's end to spend.
+
+    One per line, made by the executor and filled by ``Decisions.resolve``
+    as a pass or a gate admits a command: every grant it matches, whether
+    the host gave it inline just now or out of band before the line, is
+    claimed here instead of spent, bound to the occurrence it was
+    judged for. A claimed grant is on offer to that occurrence alone,
+    so two spellings of one command on a line each need a nod of their
+    own, and invisible to every other line of the session while this
+    one lives, so two lines judged at once cannot both run on one nod.
+    Nothing spends a claim while the line runs: a gate the run reaches
+    again at the same place (a loop body) runs on the same nod, and
+    every claim, reached or not, is spent when the line ends
+    (``Decisions.revoke``). A background job the line launches holds a
+    copy of the claims made for the commands inside it on a hand-off
+    of its own (``Decisions.split``), since its gates run after the
+    line has returned and it ends on its own clock; a grant is spent
+    when the last hand-off holding it ends. Compared by identity,
+    because the hand-off is the line.
+
+    A line the executor evaluates from inside another (``$( )``,
+    ``eval``, ``source``, ``xargs``, the line an alias invocation
+    rewrites to) is a line of its own with a hand-off of its own,
+    linked to the outer line's through ``parent`` and standing under
+    the node that ran it through ``origin``: the outer pass reads into
+    the words it runs, so the grants it claimed for them are the inner
+    line's to run on, at the occurrences the outer pass computed for
+    them, and what the inner line's own gates claim is handed to the
+    outer line when it ends (``Decisions.hand_up``), for the next
+    evaluation from the same node to run on and the typed line's end
+    to spend.
+
+    Args:
+        claimed (list[Claim]): the grants matched so far, in the order
+            the commands were judged.
+        parent (HandOff | None): the hand-off of the line this one was
+            evaluated from, None for a typed line.
+        origin (Occurrence | None): the node this line's text was
+            evaluated from, None for a typed line.
+    """
+
+    claimed: list[Claim] = field(default_factory=list)
+    parent: "HandOff | None" = None
+    origin: Occurrence | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Claimant:
+    """Who reads the ledger: one command of one line.
+
+    A judging pass and the gate that runs the line name themselves the
+    same way, so a grant the pass claimed for a command is found by the
+    gate for that command and by no other reader.
+
+    Args:
+        line (HandOff): the line's hand-off.
+        occurrence (Occurrence): the command's place on it.
+    """
+
+    line: HandOff
+    occurrence: Occurrence
+
+
+@dataclass(frozen=True, slots=True)
 class Pending:
     """The door's answer while the host has not decided: the line is
     refused for now, and the id names what to grant.
@@ -387,9 +505,11 @@ class ProfileScript:
     """One profile's script, as a session carries it: the program, the
     engine it runs on, and the profile it speaks for.
 
-    Compiled off ``SessionProfile.script`` beside the admission rules,
-    and evaluated per command by ``ScriptPolicy`` with the command's
-    facts as ``ctx``; its answer is allow (no opinion), deny or ask.
+    Compiled off ``SessionProfile.policy`` beside the admission rules,
+    and evaluated by ``ScriptPolicy`` at the admission hooks the program
+    defines (``pre_command``, ``pre_ops``, ``pre_session``) with the
+    door's facts as ``ctx``; its answer is allow (no opinion), deny, or
+    at the command gate ask.
 
     Args:
         profile (str): the profile's name, which the script reads as
@@ -509,7 +629,7 @@ class CommandContext:
 class OpsContext:
     """Facts about one VFS op, as pre_ops hooks see it.
 
-    Fires at the op doors (the ``ws.ops`` facade, which also serves
+    Fires at the op doors (the ``ws.fs`` facade, which also serves
     FUSE, and the shell's internal dispatcher), before any backend or
     cache I/O, so it holds however the mount is reached.
 
@@ -633,6 +753,8 @@ class Explanation:
             the session's hides dropped what it cannot see.
         exit_code (int): what the line would exit with, 0 to run.
         stderr (str): what the agent would read, empty to run.
+        refusal (Refusal | None): the record the refused result
+            would carry, None when the line would run.
     """
 
     command: str
@@ -645,3 +767,4 @@ class Explanation:
     paths: tuple[str, ...] = ()
     exit_code: int = 0
     stderr: str = ""
+    refusal: Refusal | None = None

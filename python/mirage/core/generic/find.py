@@ -7,7 +7,7 @@ from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                tree_has_empty, tree_has_type)
 from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import matches_mtime
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 class ResolvedPath(Protocol):
@@ -94,7 +94,9 @@ async def _matches(
     item_norm = item.rstrip("/") or "/"
     item_name = (start_name if item_norm == root_norm else
                  item.rstrip("/").rsplit("/", 1)[-1])
-    spec = PathSpec.from_str_path(item, mount_key(item, prefix))
+    # The walk strips its mount prefix; backend probes still need both paths.
+    virtual = (prefix.rstrip("/") + "/" + item.lstrip("/")).rstrip("/") or "/"
+    spec = PathSpec.from_str_path(virtual, item.lstrip("/"))
     kind = "f"
     if needs_kind:
         resolved = await resolve_path(accessor, spec, index)

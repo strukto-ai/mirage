@@ -138,6 +138,7 @@ async def patch(
     R: bool = False,
     i: PathSpec | None = None,
     N: bool = False,
+    mount_prefix: str = "",
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.PATCH, paths[2].raw_path
@@ -149,7 +150,9 @@ async def patch(
     file_hunks = _parse_patch(patch_text, strip_count)
     writes: dict[str, ByteSource] = {}
     for file_path, hunks in file_hunks.items():
-        file_spec = PathSpec.from_str_path(file_path)
+        file_spec = PathSpec.from_str_path(
+            mount_prefix.rstrip("/") + "/" + file_path.lstrip("/"),
+            file_path.lstrip("/"))
         try:
             original = (await read_bytes(file_spec)).decode(errors="replace")
         except FileNotFoundError:
@@ -203,4 +206,5 @@ async def patch_generic(
                        p=parsed.strip,
                        R=parsed.reverse,
                        i=parsed.input_path,
-                       N=parsed.forward)
+                       N=parsed.forward,
+                       mount_prefix=opts.mount_prefix or "")

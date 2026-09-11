@@ -47,7 +47,7 @@ const stat = (p: PathSpec): Promise<FileStat> =>
   Promise.resolve(
     new FileStat({
       name: p.virtual.split('/').pop() ?? '',
-      type: p.virtual === '/data' ? FileType.DIRECTORY : FileType.TEXT,
+      type: p.virtual === '/data' ? FileType.DIRECTORY : FileType.FILE,
     }),
   )
 const readdir = (p: PathSpec): Promise<string[]> =>

@@ -17,6 +17,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
+import { z } from '@struktoai/mirage-core/resource/secrets'
+import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
+
+const LoadAccountConfig = z.strictObject({ account: z.string().default('default') })
+type LoadAccountConfig = z.infer<typeof LoadAccountConfig>
 
 const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -116,6 +121,25 @@ describe('workspaces router', () => {
       payload: { config: { mounts: { '/': { resource: 'not-a-real-resource' } } } },
     })
     expect(res.statusCode).toBe(502)
+    await app.close()
+  })
+
+  it('POST /v1/workspaces 400s for a bad secrets block', async () => {
+    // Resolution moved into configToWorkspaceArgs, whose catch answers
+    // 502. An unresolvable source is the caller's config, and python's
+    // create route refuses the same body with 400.
+    const app = buildApp()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: {
+        config: {
+          mounts: { '/': { resource: 'ram', mode: 'write' } },
+          secrets: { prod: { source: 'nope' } },
+        },
+      },
+    })
+    expect(res.statusCode).toBe(400)
     await app.close()
   })
 
@@ -258,6 +282,64 @@ describe('workspaces router', () => {
       expect(res.statusCode).toBe(400)
     } finally {
       await app.close().catch(() => undefined)
+    }
+  })
+
+  it('POST /v1/workspaces/load reads a pointer in an override mount config', async () => {
+    // The load route built override mounts without the resolved
+    // declarations, so an alias reached `sourceFor` as a provider name.
+    registerSecrets('acct-load', LoadAccountConfig, (config: LoadAccountConfig, ref: string) =>
+      Promise.resolve({ fields: { credential: `${config.account}:${ref}` } }),
+    )
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
+    const tar = join(dir, 'ptr.tar')
+    const app1 = buildApp({ snapshotRoot: dir })
+    try {
+      await app1.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          id: 'ptr-src',
+          config: {
+            mounts: {
+              '/': { resource: 'ram', mode: 'write' },
+              '/slack': { resource: 'slack', mode: 'read', config: { token: 'xoxb-src' } },
+            },
+          },
+        },
+      })
+      const snap = await app1.inject({
+        method: 'POST',
+        url: '/v1/workspaces/ptr-src/snapshot',
+        payload: { path: tar },
+      })
+      expect(snap.statusCode).toBe(200)
+      const app2 = buildApp({ snapshotRoot: dir })
+      try {
+        const res = await app2.inject({
+          method: 'POST',
+          url: '/v1/workspaces/load',
+          payload: {
+            path: tar,
+            id: 'ptr-loaded',
+            override: {
+              secrets: { prod: { source: 'acct-load', config: { account: 'live' } } },
+              mounts: {
+                '/slack': {
+                  resource: 'slack',
+                  config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
+                },
+              },
+            },
+          },
+        })
+        expect(res.statusCode).toBe(201)
+      } finally {
+        await app2.close().catch(() => undefined)
+      }
+    } finally {
+      await app1.close().catch(() => undefined)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

@@ -56,6 +56,42 @@ ARITH_MAX_DEPTH = 16
 # `Session.argv0` is the one place the two are folded together.
 SHELL_ARGV0 = "mirage"
 
+# The descriptors the shell models: stdin, stdout and stderr, and no
+# table above them. A redirect naming any other number is refused
+# before it does anything (`shell/descriptors.py`), because the old
+# fall-through aliased fd 3 onto stdout and `exec 3>&-` closed the
+# session's stdout. FD_BOTH is `Redirect.fd` for `&>`; FD_CLOSE is
+# `Redirect.target` for `>&-`.
+FD_STDIN = 0
+FD_STDOUT = 1
+FD_STDERR = 2
+FD_BOTH = -1
+FD_CLOSE = -1
+SHELL_FDS = frozenset({FD_STDIN, FD_STDOUT, FD_STDERR})
+
+# The two dynamic variables the shell answers itself: PIPESTATUS reads
+# the session's record of the last pipeline (`Session.pipe_status`) and
+# RANDOM steps a generator (`session/rng.py`). Neither lives in the
+# variable store.
+PIPESTATUS = "PIPESTATUS"
+RANDOM = "RANDOM"
+# bash 5.2's generator (lib/sh/random.c): a Park-Miller minimal-standard
+# step through Schrage's method, the value folding the state's two
+# halves and keeping 15 bits, and a draw that never repeats the value
+# before it. A seed is the assigned integer truncated to 32 bits, and a
+# zero state steps from ZERO_SEED. Identical in both languages, so
+# `RANDOM=42` is the same sequence everywhere, and bash's.
+RANDOM_A = 16807
+RANDOM_Q = 127773
+RANDOM_R = 2836
+RANDOM_M = 0x7FFFFFFF
+RANDOM_ZERO_SEED = 123459876
+RANDOM_MODULUS = 1 << 32
+RANDOM_MAX = 32767
+# What `Session._random_seed` holds once `unset RANDOM` has stripped the
+# name of its meaning: no generated word is ever empty.
+RANDOM_UNSET = ""
+
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final
 # `&&`/`||` fails; short-circuit failures set Session.errexit_immune

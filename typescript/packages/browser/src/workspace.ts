@@ -17,6 +17,9 @@ import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { savedResourceBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
+import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
+import { buildResource, knownResources } from './resource/registry.ts'
 import { ENGINE_WASM_BASE64, GRAMMAR_WASM_BASE64 } from './generated/wasm.ts'
 
 let cachedParser: Promise<ShellParser> | null = null
@@ -50,6 +53,14 @@ function randomSessionId(): string {
 }
 
 export class Workspace extends CoreWorkspace {
+  /** A saved mount rebuilds through this package's resource registry. */
+  protected static override async buildSavedResource(
+    entry: MountSnapshot,
+  ): Promise<Resource | null> {
+    const build = savedResourceBuild(entry, (name) => knownResources().includes(name))
+    return build === null ? null : buildResource(build.name, build.config)
+  }
+
   constructor(resources: Record<string, Resource>, options: WorkspaceOptions = {}) {
     super(resources, {
       ...options,

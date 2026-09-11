@@ -17,8 +17,11 @@ import { Runtime } from './base.ts'
 import {
   bindCommands,
   buildRuntime,
+  checkRuntimeOptions,
   DEFAULT_ENTRIES,
   DEFAULT_PYTHON,
+  knownRuntimes,
+  registerRuntime,
   runtimeBindingsFor,
   VFSRuntime,
 } from './table.ts'
@@ -136,6 +139,17 @@ describe('buildRuntime option validation', () => {
       /unknown runtime config key 'home'/,
     )
   })
+
+  it('the key check stands alone, so a referenced class gets the same refusal', () => {
+    expect(() => {
+      checkRuntimeOptions('./box.mjs:EchoBox', { captuers: ['nvidia-smi'] })
+    }).toThrow(
+      /unknown \.\/box\.mjs:EchoBox runtime option 'captuers' \(expected: 'captures', 'config', 'script'\)/,
+    )
+    expect(() => {
+      checkRuntimeOptions('./box.mjs:EchoBox', { captures: ['nvidia-smi'], config: {} })
+    }).not.toThrow()
+  })
 })
 
 describe('runtimeBindingsFor', () => {
@@ -155,5 +169,34 @@ describe('runtimeBindingsFor', () => {
     expect(() => runtimeBindingsFor([new FakeRuntime(), new VFSRuntime()], 'nope')).toThrow(
       /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'vfs'\)/,
     )
+  })
+})
+
+describe('registerRuntime', () => {
+  class Other extends FakeRuntime {}
+
+  it('makes a host class buildable by name', () => {
+    registerRuntime('fake-registered', FakeRuntime)
+    expect(knownRuntimes()).toContain('fake-registered')
+    // FakeRuntime declares its own captures and ignores options, so the
+    // table's construction path is what is under test here.
+    const built = buildRuntime('fake-registered')
+    expect(built).toBeInstanceOf(FakeRuntime)
+    expect([...built.captures]).toEqual(['python3', 'made-up'])
+  })
+
+  it('refuses a core builtin name', () => {
+    expect(() => {
+      registerRuntime('monty', FakeRuntime)
+    }).toThrow(/shadows a builtin/)
+    expect(() => {
+      registerRuntime('vfs', FakeRuntime)
+    }).toThrow(/shadows a builtin/)
+  })
+
+  it('replaces a custom name', () => {
+    registerRuntime('fake-replaced', FakeRuntime)
+    registerRuntime('fake-replaced', Other)
+    expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
   })
 })

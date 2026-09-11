@@ -163,7 +163,7 @@ class SessionManager:
 
         The default profile's rules for an id this manager does not know,
         the empty id of an unbound door included (FUSE, the host's own
-        ``ws.ops``), so a door that names no session is judged like a
+        ``ws.fs``), so a door that names no session is judged like a
         session that named no profile rather than judged not at all.
 
         Args:
@@ -356,7 +356,14 @@ class SessionManager:
     async def flush(self) -> None:
         """Write dirty sessions through the store's generation gate."""
         for session in list(self._sessions.values()):
-            await self._flush_one(session)
+            async with self._locks[session.session_id]:
+                await self._flush_one(session)
+
+    async def settle(self) -> None:
+        """Wait for admitted session writes before their store closes."""
+        for lock in list(self._locks.values()):
+            async with lock:
+                pass
 
     async def _flush_one(self, session: Session) -> None:
         """Persist one session, retrying when another writer races us."""
@@ -427,6 +434,25 @@ class SessionManager:
 
     def get(self, session_id: str) -> Session:
         return self._sessions[session_id]
+
+    async def set_profile(self, session_id: str,
+                          compiled: CompiledProfile) -> Session:
+        """Replace restrictions without resetting the session's scratch state.
+
+        Args:
+            session_id (str): an existing, hydrated session.
+            compiled (CompiledProfile): its replacement profile.
+        """
+        async with self._locks[session_id]:
+            session = self.get(session_id)
+            candidate = copy.copy(session)
+            narrow(candidate, compiled)
+            await self._flush_one(candidate)
+            narrow(session, compiled)
+            session.generation = candidate.generation
+            if session_id == self._default_id:
+                self._default_profile = compiled
+            return session
 
     def list(self) -> list[Session]:
         return list(self._sessions.values())

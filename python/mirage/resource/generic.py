@@ -131,6 +131,17 @@ class GenericResource(BaseResource):
     ``@command`` verbs, and ``ops`` registers ``@op`` handlers for FUSE
     and os-interception mounts.
 
+    Snapshots and versions see one of two things, and the subclass
+    picks which by what it owns. Content the resource holds itself (an
+    in-memory store) is mirage-owned state: override ``get_state`` and
+    ``load_state`` to carry it, register the class under its name, and
+    a snapshot or a version rebuilds the mount with that content and
+    no override. Content that lives in a remote backend is only
+    observed: keep the default state (``needs_override``), set
+    ``supports_snapshot`` and fill ``FileStat.fingerprint``, and a
+    snapshot pins what it read while ``Workspace.load`` asks for the
+    live resource back.
+
     Args:
         name (str): resource name commands register under; also the
             registry key when the class is exposed via
@@ -225,10 +236,16 @@ class GenericResource(BaseResource):
         return await self._resolve(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
-        # ``needs_override`` is inert for python's own loader, which
-        # rebuilds the class from ``type`` through the registry. It is
-        # written for a TypeScript reader, whose ``buildMountArgs``
-        # consults no registry and would otherwise restore this mount as
-        # an empty RAMResource; the builtins carrying the key do so for
-        # the same reason.
+        # The base cannot know a subclass's constructor, so by default a
+        # GenericResource cannot be rebuilt from its state and says so:
+        # both loaders then require the mount to be handed back live
+        # (``resources=``; ``Workspace.copy`` does this itself). A
+        # subclass whose content is its own, the way RAMResource's is,
+        # overrides this and ``load_state`` to carry that content and
+        # drops the flag; registered under its name it rebuilds from a
+        # snapshot or a version with no override, and its content is
+        # what gets versioned. A subclass over a remote backend keeps
+        # the flag and versions through ``supports_snapshot``
+        # fingerprints instead: that content is the backend's, and a
+        # snapshot only pins what it observed.
         return {"type": self.name, "needs_override": True}

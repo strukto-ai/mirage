@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import asdict
 from typing import Any
 
 from mirage.io.types import IOResult
@@ -37,10 +38,16 @@ async def io_result_to_dict(
         stdout = await result.materialize_stdout()
         stderr = await result.materialize_stderr()
         return {
-            "kind": "io",
-            "exit_code": result.exit_code,
-            "stdout": stdout.decode(errors="replace"),
-            "stderr": stderr.decode(errors="replace"),
+            "kind":
+            "io",
+            "exit_code":
+            result.exit_code,
+            "stdout":
+            stdout.decode(errors="replace"),
+            "stderr":
+            stderr.decode(errors="replace"),
+            "refusal":
+            (asdict(result.refusal) if result.refusal is not None else None),
         }
     if isinstance(result, ProvisionResult):
         return {"kind": "provision", **result.model_dump()}

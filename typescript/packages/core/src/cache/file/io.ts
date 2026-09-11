@@ -16,6 +16,19 @@ import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { drainBudget, type FileCache } from './mixin.ts'
+import { KeyLock } from '../lock.ts'
+
+const mutationLocks = new WeakMap<FileCache, KeyLock>()
+
+/** Serialize cache fills with mount ownership changes, including remote writes. */
+export function withCacheMutation<T>(cache: FileCache, fn: () => Promise<T>): Promise<T> {
+  let lock = mutationLocks.get(cache)
+  if (lock === undefined) {
+    lock = new KeyLock()
+    mutationLocks.set(cache, lock)
+  }
+  return lock.withLock('', fn)
+}
 
 /**
  * Latest backend fingerprint recorded for a read of `path`.
@@ -49,6 +62,20 @@ async function setCached(
   path: string,
   data: Uint8Array,
   records: readonly OpRecord[] | undefined,
+  isCacheable: ((path: string) => boolean) | undefined,
+): Promise<void> {
+  await withCacheMutation(cache, async () => {
+    if (isCacheable === undefined || isCacheable(path)) {
+      await setCachedLocked(cache, path, data, records)
+    }
+  })
+}
+
+async function setCachedLocked(
+  cache: FileCache,
+  path: string,
+  data: Uint8Array,
+  records: readonly OpRecord[] | undefined,
 ): Promise<void> {
   const fingerprint = readFingerprint(records, path)
   if (fingerprint === null && bytesEqual(await cache.get(path), data)) {
@@ -73,14 +100,21 @@ export async function applyIo(
     const source = io.reads[path] ?? io.writes[path]
     if (source === undefined) continue
     if (source instanceof Uint8Array) {
-      await setCached(cache, path, source, records)
+      await setCached(cache, path, source, records, isCacheable)
     } else if (source instanceof CachableAsyncIterator) {
       if (source.exhausted) {
-        await setCached(cache, path, concat(source.bufferedChunks), records)
+        await setCached(cache, path, concat(source.bufferedChunks), records, isCacheable)
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          const task = backgroundDrain(cache, tasks, path, source, drainBudget(cache), records)
+          const task: Promise<void> = backgroundDrain(
+            cache,
+            path,
+            source,
+            drainBudget(cache),
+            () => tasks.get(path) === task && (isCacheable === undefined || isCacheable(path)),
+            records,
+          )
           tasks.set(path, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
@@ -89,7 +123,7 @@ export async function applyIo(
       }
     } else {
       const data = await materialize(source)
-      await setCached(cache, path, data, records)
+      await setCached(cache, path, data, records, isCacheable)
     }
   }
   for (const path of Object.keys(io.writes)) {
@@ -106,18 +140,20 @@ export async function applyIo(
 // their read record lazily, once the GET response arrives.
 async function backgroundDrain(
   cache: FileCache,
-  tasks: Map<string, Promise<void>>,
   path: string,
   it: CachableAsyncIterator,
   maxBytes: number,
+  isCurrent: () => boolean,
   records?: readonly OpRecord[],
 ): Promise<void> {
   try {
     const materialized = await it.drainBounded(maxBytes)
     if (materialized === null) return
-    if (tasks.has(path)) {
-      await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
-    }
+    await withCacheMutation(cache, async () => {
+      if (isCurrent()) {
+        await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
+      }
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`background drain failed for ${path}: ${msg}`)

@@ -35,7 +35,7 @@ async def test_dry_run_dispatch_with_provision_fn():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/a.txt", b"hello world")
+    await ws.fs.write("/tmp/a.txt", b"hello world")
 
     async def my_cat(store, paths, *texts, **_extra):
         return b"hello world", IOResult()
@@ -69,7 +69,7 @@ def test_dry_run_dispatch_without_provision_fn():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.ops.write("/tmp/a.txt", b"hello"))
+    asyncio.run(ws.fs.write("/tmp/a.txt", b"hello"))
 
     async def my_cmd(store, paths, *texts, **_extra):
         return b"ok", IOResult()
@@ -104,7 +104,7 @@ async def test_dry_run_filetype_specific():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/data.avro", b"avro-bytes")
+    await ws.fs.write("/tmp/data.avro", b"avro-bytes")
 
     async def cat_generic(store, paths, *texts, **_extra):
         return b"generic", IOResult()

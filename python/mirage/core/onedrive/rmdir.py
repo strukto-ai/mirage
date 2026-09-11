@@ -32,7 +32,7 @@ async def rmdir(accessor: OneDriveAccessor,
     the emptiness check is the only thing separating them. Without it
     ``rmdir`` destroyed the whole subtree for every caller that does not
     pre-check emptiness itself, and the command builders are the only
-    callers that do: FUSE, ``ws.ops`` and the sandbox runtimes all reach
+    callers that do: FUSE, ``ws.fs`` and the sandbox runtimes all reach
     the op directly.
 
     Args:

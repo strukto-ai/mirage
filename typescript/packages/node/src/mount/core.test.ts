@@ -14,7 +14,7 @@
 
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
-import { FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
+import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -269,10 +269,16 @@ describe('applyStatAttrs', () => {
     // local-time reading, which put python FUSE and node FUSE apart by
     // the host's UTC offset for the same backend stamp.
     const core = await mkCore()
-    const naive = new FileStat({ name: 'f', type: FileType.TEXT, modified: NAIVE_STAMP })
+    const naive = new FileStat({
+      name: 'f',
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      modified: NAIVE_STAMP,
+    })
     const aware = new FileStat({
       name: 'f',
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       modified: `${NAIVE_STAMP}+00:00`,
     })
     const base = {
@@ -298,7 +304,8 @@ describe('applyStatAttrs', () => {
     const core = await mkCore()
     const epoch = new FileStat({
       name: 'f',
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       modified: '1970-01-01T00:00:00Z',
     })
     const base = {

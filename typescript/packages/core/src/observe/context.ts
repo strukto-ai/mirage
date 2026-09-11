@@ -19,6 +19,7 @@ import { rstripSlash } from '../utils/slash.ts'
 interface RecordingState {
   records: OpRecord[]
   mountPrefix: string
+  mountId: string | null
 }
 
 const storage = createAsyncContext<RecordingState>()
@@ -35,7 +36,7 @@ interface RevisionsState {
 const revisionsStorage = createAsyncContext<RevisionsState>()
 
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], mountPrefix: '' }
+  const state: RecordingState = { records: [], mountPrefix: '', mountId: null }
   const value = await storage.run(state, fn)
   return [value, state.records]
 }
@@ -50,10 +51,23 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
  *
  * Inert (runs `fn` unchanged) when no recording context is active.
  */
-export function runWithMountPrefix<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
+export function runWithMountPrefix<T>(
+  prefix: string,
+  fn: () => Promise<T>,
+  mountId?: string | null,
+): Promise<T> {
   const state = storage.getStore()
   if (state === undefined) return fn()
-  return Promise.resolve(storage.run({ records: state.records, mountPrefix: prefix }, fn))
+  return Promise.resolve(
+    storage.run(
+      {
+        records: state.records,
+        mountPrefix: prefix,
+        mountId: mountId === undefined ? state.mountId : mountId,
+      },
+      fn,
+    ),
+  )
 }
 
 /**
@@ -66,11 +80,12 @@ export function runWithMountPrefix<T>(prefix: string, fn: () => Promise<T>): Pro
 export async function* withMountPrefix(
   prefix: string,
   it: AsyncIterable<Uint8Array>,
+  mountId?: string | null,
 ): AsyncGenerator<Uint8Array> {
   const iter = it[Symbol.asyncIterator]()
   try {
     for (;;) {
-      const step = await runWithMountPrefix(prefix, () => iter.next())
+      const step = await runWithMountPrefix(prefix, () => iter.next(), mountId)
       if (step.done === true) return
       yield step.value
     }
@@ -147,6 +162,7 @@ export function finishRecord(
     durationMs: elapsed,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
+    mountId: storage.getStore()?.mountId ?? null,
   })
 }
 
@@ -182,6 +198,7 @@ export function recordStream(
     durationMs: 0,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
+    mountId: storage.getStore()?.mountId ?? null,
   })
   state.records.push(rec)
   return rec

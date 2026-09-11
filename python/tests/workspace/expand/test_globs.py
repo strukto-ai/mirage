@@ -24,11 +24,10 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
+from mirage.workspace.mount.mount import MountEntry
 
 
 def _mock_registry(resolve_result=None):
-    mount = MagicMock()
-    mount.prefix = "/data/"
 
     async def _resolve_glob(scopes, prefix=""):
         if callable(resolve_result):
@@ -40,10 +39,12 @@ def _mock_registry(resolve_result=None):
         # dir-shaped ask with the directory itself.
         return [s for s in scopes if not s.pattern]
 
-    mount.resource = MagicMock()
-    mount.resource.resolve_glob = _resolve_glob
+    resource = RAMResource()
+    resource.resolve_glob = _resolve_glob
+    mount = MountEntry("/data/", resource, MountMode.READ)
 
     reg = MagicMock()
+    reg.file_cache = None
     reg.clis = CLIRegistry()
     reg.try_mount_for = MagicMock(return_value=mount)
     reg.mounts = MagicMock(return_value=[mount])

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import uuid
 
 import pytest
 import pytest_asyncio
@@ -135,6 +136,36 @@ async def test_read_bytes_window_past_eof_is_empty(accessor):
                     virtual="/hello.txt",
                     directory="/hello.txt")
     assert await read_bytes(accessor, offset=99, size=5, path_spec=spec) == b""
+
+
+@pytest.mark.asyncio
+async def test_read_bytes_zero_length_is_empty_and_preserves_missing():
+    prefix = f"test:read:zero:{uuid.uuid4()}:"
+    store = RedisStore(url=REDIS_URL, key_prefix=prefix)
+    try:
+        await store.set_file("/data", b"payload")
+        await store.set_file("/empty", b"")
+        accessor = RedisAccessor(store)
+        data = PathSpec(resource_path="data",
+                        virtual="/data",
+                        directory="/data")
+        empty = PathSpec(resource_path="empty",
+                         virtual="/empty",
+                         directory="/empty")
+        missing = PathSpec(resource_path="missing",
+                           virtual="/missing",
+                           directory="/missing")
+        assert await read_bytes(accessor, data, offset=0, size=0) == b""
+        assert await read_bytes(accessor, data, offset=4, size=0) == b""
+        assert await read_bytes(accessor, empty, offset=0, size=0) == b""
+        assert await read_bytes(accessor, empty, offset=4, size=0) == b""
+        with pytest.raises(FileNotFoundError):
+            await read_bytes(accessor, missing, offset=0, size=0)
+        with pytest.raises(FileNotFoundError):
+            await read_bytes(accessor, missing, offset=4, size=0)
+    finally:
+        await store.clear()
+        await store.close()
 
 
 @pytest.mark.asyncio

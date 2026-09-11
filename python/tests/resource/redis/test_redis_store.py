@@ -136,3 +136,28 @@ async def test_clear(store):
     assert await store.get_file("/a.txt") is None
     assert await store.has_dir("/sub") is False
     assert await store.get_modified("/a.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_clear_drops_a_browser_staging_key(store):
+    await store._client.set("test:store:tmp:/big:abc", b"partial")
+    await store.clear()
+    assert await store._client.exists("test:store:tmp:/big:abc") == 0
+
+
+@pytest.mark.asyncio
+async def test_prefix_with_glob_metacharacters_matches_literally():
+    mine = RedisStore(url=REDIS_URL, key_prefix="test:[ab]?:")
+    neighbour = RedisStore(url=REDIS_URL, key_prefix="test:ax:")
+    try:
+        await mine.clear()
+        await neighbour.clear()
+        await neighbour.set_file("/other", b"x")
+        await mine.set_file("/mine", b"y")
+        assert await mine.list_files() == ["/mine"]
+        await mine.clear()
+        assert await neighbour.has_file("/other") is True
+    finally:
+        await neighbour.clear()
+        await mine.close()
+        await neighbour.close()

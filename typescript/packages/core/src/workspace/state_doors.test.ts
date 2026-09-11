@@ -36,7 +36,7 @@ import type { RunResult } from '../runtime/types.ts'
 import { MountMode, ResourceName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
-import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
+import { getTestParser, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -87,7 +87,7 @@ describe('name-plane writes go through the door', () => {
     const ws = await makeWs([new DenyOp('symlink')])
     const io = await ws.execute('ln -s x.txt /a/lk')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('Permission denied')
+    expect(voicedStderr(io)).toContain('Permission denied')
     expect(ws.namespace.isLink('/a/lk')).toBe(false)
   })
 
@@ -179,7 +179,7 @@ describe('name-plane writes go through the door', () => {
     expect(made.exitCode).toBe(0)
     const io = await ws.execute('chown -h alice /a/lk')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.namespace.metaFor('/a/lk')?.uid).toBeUndefined()
   })
 
@@ -201,7 +201,7 @@ describe('name-plane writes go through the door', () => {
     open.push(ws)
     const io = await ws.execute('chmod 600 /o/f.txt')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.namespace.metaFor('/o/f.txt')?.mode).toBeUndefined()
   })
 
@@ -239,7 +239,7 @@ describe('session-state writes go through the view', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.execute('export SECRET_X=1')
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_X' in ws.env).toBe(false)
     const allowed = await ws.execute('export PUBLIC_X=1')
     expect(allowed.exitCode).toBe(0)
@@ -255,7 +255,7 @@ describe('session-state writes go through the view', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.execute('SECRET_K=leak printenv SECRET_K')
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('refused by policy')
     expect(stdoutStr(denied)).toBe('')
     // A name no rule covers still reaches the command.
     const allowed = await ws.execute('OPEN_K=fine printenv OPEN_K')
@@ -272,7 +272,7 @@ describe('session-state writes go through the view', () => {
     seedVar(sess, 'SECRET_TOKEN', 'hunter2')
     const io = await ws.execute('declare -x SECRET_TOKEN')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     expect(sess.vars.SECRET_TOKEN?.attrs.has(VarAttr.Export)).toBe(false)
     expect(sess.vars.SECRET_TOKEN?.value).toBe('hunter2')
   })
@@ -285,7 +285,7 @@ describe('session-state writes go through the view', () => {
     const ws = await makeWs([])
     const bad = await ws.execute('declare -x QGOOD=1 1BAD=x')
     expect(bad.exitCode).toBe(1)
-    expect(stderrStr(bad)).toContain('not a valid identifier')
+    expect(voicedStderr(bad)).toContain('not a valid identifier')
     const shown = await ws.execute('declare -p QGOOD')
     expect(stdoutStr(shown)).toBe('declare -x QGOOD="1"\n')
   })
@@ -337,7 +337,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.execute('export SECRET_BARE')
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_BARE' in ws.env).toBe(false)
     const allowed = await ws.execute('export PUBLIC_BARE')
     expect(allowed.exitCode).toBe(0)
@@ -353,7 +353,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const io = await ws.execute('f() { local SECRET_L=1; }; f')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     expect('SECRET_L' in ws.env).toBe(false)
   })
 
@@ -373,7 +373,7 @@ describe('the remaining session writers clear the same gate', () => {
     ]) {
       const io = await ws.execute(line)
       expect(io.exitCode, line).not.toBe(0)
-      expect(stderrStr(io), line).toContain('refused by policy')
+      expect(voicedStderr(io), line).toContain('refused by policy')
     }
     for (const name of ['SECRET_A', 'SECRET_B', 'SECRET_C', 'SECRET_D', 'SECRET_E']) {
       expect(name in session.vars, name).toBe(false)
@@ -388,7 +388,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const denied = await ws.execute('SECRET_P=1; echo after')
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('refused by policy')
+    expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_P' in ws.env).toBe(false)
     const allowed = await ws.execute('PUBLIC_P=1')
     expect(allowed.exitCode).toBe(0)
@@ -408,7 +408,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const io = await ws.execute('SECRET_V=(a b); echo after')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_V' in sess.arrays).toBe(false)
   })
@@ -448,7 +448,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const io = await ws.execute('export SECRET_D=(a)')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_D' in sess.arrays).toBe(false)
   })
@@ -460,7 +460,7 @@ describe('the remaining session writers clear the same gate', () => {
     await ws.execute('readonly LOCKED')
     const io = await ws.execute('export LOCKED=(a)')
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('readonly variable')
+    expect(voicedStderr(io)).toContain('readonly variable')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('LOCKED' in sess.arrays).toBe(false)
   })
@@ -475,7 +475,7 @@ describe('the remaining session writers clear the same gate', () => {
     const denied = await ws.execute('export LOCKED=(a); echo unreached')
     expect(denied.exitCode).toBe(1)
     expect(stdoutStr(denied)).toBe('')
-    expect(stderrStr(denied)).toBe('bash: LOCKED: readonly variable\n')
+    expect(voicedStderr(denied)).toBe('bash: LOCKED: readonly variable\n')
     const after = await ws.execute('echo after')
     expect(after.exitCode).toBe(0)
   })
@@ -505,7 +505,7 @@ describe('the remaining session writers clear the same gate', () => {
     await ws.execute('readonly LOCKED')
     const io = await ws.execute('f() { local LOCKED=(a); echo in-f; }; f')
     expect(stdoutStr(io)).toContain('in-f')
-    expect(stderrStr(io)).toContain('readonly variable')
+    expect(voicedStderr(io)).toContain('readonly variable')
   })
 
   it('export of an array literal prints nothing', async () => {
@@ -536,7 +536,7 @@ describe('the remaining session writers clear the same gate', () => {
     seedVar(ws.getSession(ws.defaultSessionId), 'SECRET_U', 'v')
     const io = await ws.execute("unset 'SECRET_U[0]'")
     expect(io.exitCode).not.toBe(0)
-    expect(stderrStr(io)).toContain('refused by policy')
+    expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.env.SECRET_U).toBe('v')
   })
 
@@ -631,7 +631,7 @@ describe('op hooks bind at the op doors and the command tier', () => {
     const leak = await ws.execute('cat /a/secret.txt')
     expect(leak.exitCode).not.toBe(0)
     expect(stdoutStr(leak)).toBe('')
-    expect(stderrStr(leak)).toContain('cat: /a/secret.txt: Permission denied')
+    expect(voicedStderr(leak)).toContain('cat: /a/secret.txt: Permission denied')
     const removed = await ws.execute('rm /a/prod/keep.txt')
     expect(removed.exitCode).not.toBe(0)
     const kept = await ws.execute('cat /a/prod/keep.txt')
@@ -649,11 +649,11 @@ describe('op hooks bind at the op doors and the command tier', () => {
     expect(walked.exitCode).toBe(2)
     expect(stdoutStr(walked)).toContain('/a/ok.txt:has sealed word')
     expect(stdoutStr(walked)).not.toContain('sealed\n')
-    expect(stderrStr(walked)).toContain('grep: /a/secret.txt: Permission denied')
+    expect(voicedStderr(walked)).toContain('grep: /a/secret.txt: Permission denied')
 
     const lazy = await ws.execute('head -c 3 /a/secret.txt')
     expect(lazy.exitCode).not.toBe(0)
-    expect(stderrStr(lazy)).toContain('head: /a/secret.txt: Permission denied')
+    expect(voicedStderr(lazy)).toContain('head: /a/secret.txt: Permission denied')
     const fine = await ws.execute('head -c 3 /a/ok.txt')
     expect(fine.exitCode).toBe(0)
     expect(stdoutStr(fine)).toBe('has')
@@ -935,7 +935,7 @@ describe('hidden paths across the tiers', () => {
     const io = await ws.execute('cat /a/secrets/token.txt', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('s3cr3t')
-    expect(stderrStr(io)).toContain('No such file')
+    expect(voicedStderr(io)).toContain('No such file')
   })
 
   it('a pattern-hidden file reads as missing', async () => {
@@ -1173,7 +1173,7 @@ describe('session profiles', () => {
     open.push(ws)
     const listed = await ws.execute('ls /a')
     expect(listed.exitCode).not.toBe(0)
-    expect(stderrStr(listed)).toContain('No such file or directory')
+    expect(voicedStderr(listed)).toContain('No such file or directory')
     const root = stdoutStr(await ws.execute('ls /'))
     expect(root).toContain('b')
     expect(root.split(/\s+/)).not.toContain('a')
@@ -1334,7 +1334,7 @@ describe('command permissions end to end', () => {
   async function commandsWs(): Promise<Workspace> {
     const parser = await getTestParser()
     // The frozen subtree is seeded on the resource: the pure path rule
-    // holds at every op door, the host's `ws.ops` included.
+    // holds at every op door, the host's `ws.fs` included.
     const repo = new RAMResource()
     repo.store.dirs.add('/locked')
     repo.store.files.set('/locked/y', ENC.encode('y\n'))
@@ -1357,7 +1357,7 @@ describe('command permissions end to end', () => {
     sessionId?: string,
   ): Promise<[number, string, string]> {
     const r = await ws.execute(text, sessionId === undefined ? {} : { sessionId })
-    return [r.exitCode, stdoutStr(r), stderrStr(r)]
+    return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
   it('an allow list hides unlisted tools from dispatch and the enumerators', async () => {
@@ -1401,7 +1401,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'git commit -m x', 'rev')).toEqual([
       126,
       '',
-      'git: policy denied: git commit is not allowed\n',
+      'git: Permission denied\npolicy denied: git commit is not allowed\n',
     ])
     // The verb walk normalizes the line: options before the verb are
     // not the verb, so `git -C /repo status` is `git status`.
@@ -1438,7 +1438,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'ls /repo', 'tight')).toEqual([
       126,
       '',
-      'ls: policy denied: denied by policy\n',
+      'ls: Permission denied\npolicy denied: denied by policy\n',
     ])
     expect((await line(ws, 'git log', 'tight'))[2]).not.toContain('not allowed')
   })
@@ -1460,12 +1460,12 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'cd /repo && git commit -m x')).toEqual([
       126,
       '',
-      'git: policy denied: history is read-only here\n',
+      'git: Permission denied\npolicy denied: history is read-only here\n',
     ])
     expect(await line(ws, 'cd /scratch && git -C /repo reset --hard')).toEqual([
       126,
       '',
-      'git: policy denied: history is read-only here\n',
+      'git: Permission denied\npolicy denied: history is read-only here\n',
     ])
     expect((await line(ws, 'cd /scratch && git commit -m x'))[2]).not.toContain('read-only')
     expect((await line(ws, 'cd /repo && git reset --soft HEAD'))[2]).not.toContain('read-only')
@@ -1592,13 +1592,17 @@ describe('command permissions end to end', () => {
     )
     open.push(ws)
     await ws.execute('echo x > /scratch/a && echo x > /elsewhere/a && echo x > /scratch/child/c')
-    expect(await line(ws, 'grep -r x /scratch')).toEqual([126, '', 'grep: policy denied: boxed\n'])
+    expect(await line(ws, 'grep -r x /scratch')).toEqual([
+      126,
+      '',
+      'grep: Permission denied\npolicy denied: boxed\n',
+    ])
     expect(await line(ws, 'grep -r x /elsewhere')).toEqual([0, '/elsewhere/a:x\n', ''])
     // Inside the mount the rule needs no ancestor help.
     expect(await line(ws, 'grep x /scratch/child/c')).toEqual([
       126,
       '',
-      'grep: policy denied: boxed\n',
+      'grep: Permission denied\npolicy denied: boxed\n',
     ])
     // A non-recursive grep of the parent never enters the child.
     const [dirCode, , dirErr] = await line(ws, 'grep x /scratch')
@@ -1638,7 +1642,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'git add x', 'rev')).toEqual([
       126,
       '',
-      'git: policy denied: git add is not allowed\n',
+      'git: Permission denied\npolicy denied: git add is not allowed\n',
     ])
     expect((await line(ws, 'git status', 'rev'))[0]).toBe(0)
     expect(box.lines).toEqual(['cat /repo/a | wc -l', 'git status'])
@@ -1674,8 +1678,12 @@ describe('command permissions end to end', () => {
     open.push(ws)
     ws.registerCli('git', cliSpecFor('git'))
     const unread = (raw: string) =>
-      `policy denied: cannot read ${raw} before the runtime expands it\n`
-    expect(await line(ws, 'rm /repo/x')).toEqual([126, '', 'rm: policy denied: no deletes\n'])
+      `Permission denied\npolicy denied: cannot read ${raw} before the runtime expands it\n`
+    expect(await line(ws, 'rm /repo/x')).toEqual([
+      126,
+      '',
+      'rm: Permission denied\npolicy denied: no deletes\n',
+    ])
     expect(await line(ws, '$cmd /repo/x')).toEqual([126, '', '$cmd: ' + unread('$cmd')])
     expect(await line(ws, 'PAYLOAD=\'rm /repo/x\'; eval "$PAYLOAD"')).toEqual([
       126,
@@ -1685,34 +1693,34 @@ describe('command permissions end to end', () => {
     expect(await line(ws, "eval 'rm /repo/x'")).toEqual([
       126,
       '',
-      'rm: policy denied: no deletes\n',
+      'rm: Permission denied\npolicy denied: no deletes\n',
     ])
     expect(await line(ws, 'cat "$f"')).toEqual([126, '', 'cat: ' + unread('"$f"')])
     expect(await line(ws, 'git "$verb" origin')).toEqual([126, '', 'git: ' + unread('"$verb"')])
     expect(await line(ws, 'ls /repo | xargs rm')).toEqual([
       126,
       '',
-      'rm: policy denied: no deletes\n',
+      'rm: Permission denied\npolicy denied: no deletes\n',
     ])
     expect(await line(ws, 'ls /repo | xargs cat')).toEqual([
       126,
       '',
-      'cat: policy denied: runs on operands the gate cannot read\n',
+      'cat: Permission denied\npolicy denied: runs on operands the gate cannot read\n',
     ])
     expect(await line(ws, 'source /repo/env.sh')).toEqual([
       126,
       '',
-      'source: policy denied: runs lines the gate cannot read\n',
+      'source: Permission denied\npolicy denied: runs lines the gate cannot read\n',
     ])
     expect(await line(ws, "sh -c 'timeout 5 rm /repo/x'")).toEqual([
       126,
       '',
-      'rm: policy denied: no deletes\n',
+      'rm: Permission denied\npolicy denied: no deletes\n',
     ])
     expect(await line(ws, "builtin eval 'rm /repo/x'")).toEqual([
       126,
       '',
-      'rm: policy denied: no deletes\n',
+      'rm: Permission denied\npolicy denied: no deletes\n',
     ])
     expect(box.lines).toEqual([])
     // Literal words, and dynamic ones no rule reads, reach the runtime.
@@ -1825,7 +1833,7 @@ describe('command permissions end to end', () => {
     ])
     const [code, , err] = await line(ws, 'rm /repo/shared/a')
     expect(code).toBe(126)
-    expect(err.startsWith('rm: requires approval: sign-off')).toBe(true)
+    expect(err.startsWith('rm: Permission denied\nrequires approval: sign-off')).toBe(true)
     expect(await line(ws, 'rm /repo/shared/a', 'veiled')).toEqual([
       1,
       '',
@@ -1837,7 +1845,7 @@ describe('command permissions end to end', () => {
     expect(await line(ws, 'head /repo/private/k', 'veiled')).toEqual([
       126,
       '',
-      'head: policy denied: no heads\n',
+      'head: Permission denied\npolicy denied: no heads\n',
     ])
   })
 })
@@ -1903,7 +1911,7 @@ describe('ask end to end', () => {
     sessionId?: string,
   ): Promise<[number, string, string]> {
     const r = await ws.execute(text, sessionId === undefined ? {} : { sessionId })
-    return [r.exitCode, stdoutStr(r), stderrStr(r)]
+    return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
   // The one request a step expects on the door; a missing one is the
@@ -1923,7 +1931,7 @@ describe('ask end to end', () => {
     const [code, , err] = await line(ws, 'rm /scratch/z')
     expect(code).toBe(126)
     const request = pendingRequest(ws)
-    expect(err).toBe(`rm: requires approval: sign-off (ask ${request.id})\n`)
+    expect(err).toBe(`rm: Permission denied\nrequires approval: sign-off (ask ${request.id})\n`)
     expect([request.command, request.argv, request.cwd, request.paths]).toEqual([
       'rm',
       ['/scratch/z'],
@@ -1980,14 +1988,16 @@ describe('ask end to end', () => {
     // A bare pattern asks with the default reason.
     const asked = await line(ws, 'head /repo/d/x')
     expect(asked[0]).toBe(126)
-    expect(asked[2].startsWith('head: requires approval: no standing approval')).toBe(true)
+    expect(
+      asked[2].startsWith('head: Permission denied\nrequires approval: no standing approval'),
+    ).toBe(true)
     // Denied: the retry is refused once in the deny voice, then the
     // question is open again.
     await ws.decisions.answer(pendingRequest(ws, 'head').id, Outcome.DENY)
     expect(await line(ws, 'head /repo/d/x')).toEqual([
       126,
       '',
-      'head: policy denied: no standing approval\n',
+      'head: Permission denied\npolicy denied: no standing approval\n',
     ])
     const reasked = await line(ws, 'head /repo/d/x')
     expect(reasked[0]).toBe(126)
@@ -2027,7 +2037,7 @@ describe('ask end to end', () => {
     const [code, , err] = await line(ws, 'wc -c /scratch/z')
     expect(code).toBe(126)
     const request = pendingRequest(ws)
-    expect(err).toBe(`wc: requires approval: looks risky (ask ${request.id})\n`)
+    expect(err).toBe(`wc: Permission denied\nrequires approval: looks risky (ask ${request.id})\n`)
     // The synthesized rule names the program, so a session grant covers
     // every wc line.
     expect(request.rule).toEqual({ reason: 'looks risky', commands: ['wc'] })
@@ -2065,7 +2075,11 @@ describe('ask end to end', () => {
     expect(yes.decisions.pending()).toEqual([])
     const no = await askWs({ onAsk: denyIt })
     await no.execute('touch /scratch/z')
-    expect(await line(no, 'rm /scratch/z')).toEqual([126, '', 'rm: policy denied: sign-off\n'])
+    expect(await line(no, 'rm /scratch/z')).toEqual([
+      126,
+      '',
+      'rm: Permission denied\npolicy denied: sign-off\n',
+    ])
     expect((await line(no, 'cat /scratch/z'))[0]).toBe(0)
   })
 })
@@ -2121,7 +2135,7 @@ describe('a walk below the operand meets the rule guard', () => {
 
   async function line(ws: Workspace, text: string): Promise<[number, string, string]> {
     const r = await ws.execute(text, { sessionId: 'g' })
-    return [r.exitCode, stdoutStr(r), stderrStr(r)]
+    return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
   it('each walker reports the refusal the way GNU reports an unreadable entry', async () => {
@@ -2192,7 +2206,7 @@ describe('a walk below the operand meets the rule guard', () => {
     expect(ws.decisions.pending()).toEqual([])
     const [code, , err] = await line(ws, 'grep a /data/t/asked/a')
     expect(code).toBe(126)
-    expect(err).toContain('grep: requires approval: nod')
+    expect(err).toContain('grep: Permission denied\nrequires approval: nod')
     const [request] = ws.decisions.pending()
     if (request === undefined) throw new Error('no pending request')
     await ws.decisions.answer(request.id, Outcome.ALLOW)

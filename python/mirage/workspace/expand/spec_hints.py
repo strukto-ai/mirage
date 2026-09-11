@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.find_parse import exec_spans
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, ValueType
@@ -45,6 +46,7 @@ def spec_for_command(
 def spec_word_kinds(
     spec: CommandSpec,
     argv: list[str],
+    name: str = "",
 ) -> list[ValueType | None]:
     """Classify argv words into per-position operand kinds.
 
@@ -54,6 +56,11 @@ def spec_word_kinds(
     in one slot and PATH in another (`grep '*.txt' *.txt`). None marks a
     flag token, whose own classification the default handles.
 
+    find's ``-exec`` is the one grammar a spec cannot state (an option
+    whose argument is a program, up to a terminator), so its words are
+    overridden to TEXT here: the rest slot would otherwise read
+    ``echo``, ``{}`` and ``;`` as start points.
+
     Examples:
         cat file.txt           → [PATH]
         grep pattern file.txt  → [TEXT, PATH]
@@ -62,11 +69,18 @@ def spec_word_kinds(
     Args:
         spec (CommandSpec): command specification with flags/positional/rest.
         argv (list[str]): command arguments (without command name).
+        name (str): the command name, which is what says the words are
+            find's.
     """
     # parse_command classifies ignore_tokens as TEXT itself, so there is
     # nothing to override here: leaving them None sent `find \( ... \)`
     # back to the shape heuristic, which read "(" as the bare path "/(".
-    return list(parse_command(spec, argv, cwd="/").word_kinds)
+    kinds = list(parse_command(spec, argv, cwd="/").word_kinds)
+    if name == "find":
+        for start, end in exec_spans(argv):
+            for i in range(start, end + 1):
+                kinds[i] = "str"
+    return kinds
 
 
 def spec_word_bases(

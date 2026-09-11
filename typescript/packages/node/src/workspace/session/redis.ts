@@ -19,7 +19,7 @@ import type { SessionFields } from '@struktoai/mirage-core/workspace/session/sto
 import { loadOptionalPeer } from '../../optional_peer.ts'
 
 // Shipped next to this module in src and copied beside the bundle in
-// dist (tsup onSuccess); byte-identical to the Python cas.lua. Generic
+// dist (scripts/copy-assets.mjs); byte-identical to the Python cas.lua. Generic
 // hash-field CAS, shared with the workspace meta record.
 export const CAS_SCRIPT = readFileSync(new URL('./cas.lua', import.meta.url), 'utf8')
 

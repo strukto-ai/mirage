@@ -334,6 +334,16 @@
       "type": "str"
     },
     {
+      "multiple": true,
+      "short": "-newer",
+      "type": "str"
+    },
+    {
+      "multiple": true,
+      "short": "-newermt",
+      "type": "str"
+    },
+    {
       "short": "-P",
       "type": "bool"
     },

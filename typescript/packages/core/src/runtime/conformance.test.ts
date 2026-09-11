@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { FileStat, FileType, MountMode } from '../types.ts'
+import { ContentType, FileStat, FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
@@ -598,7 +598,14 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
     if (op === 'stat') {
       const hit = files.get(path)
       if (hit !== undefined)
-        return Promise.resolve(new FileStat({ name: path, size: hit.length, type: FileType.TEXT }))
+        return Promise.resolve(
+          new FileStat({
+            name: path,
+            size: hit.length,
+            type: FileType.FILE,
+            content: ContentType.TEXT,
+          }),
+        )
       const dir = path.replace(/\/$/, '')
       const isDir = dirs.has(dir) || [...files.keys()].some((p) => p.startsWith(dir + '/'))
       if (isDir) return Promise.resolve(new FileStat({ name: path, type: FileType.DIRECTORY }))

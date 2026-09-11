@@ -151,6 +151,12 @@
         "has_provision": false,
         "has_write": false
       },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": false
+      },
       "s3": {
         "filetypes": [],
         "has_aggregate": false,
@@ -206,6 +212,7 @@
       "postgres",
       "qdrant",
       "ram",
+      "redis",
       "s3",
       "sharepoint",
       "slack",

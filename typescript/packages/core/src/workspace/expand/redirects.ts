@@ -189,6 +189,7 @@ export async function expandRedirects(
         if (inner !== '') {
           const ioPs = await executeFn(inner, {
             sessionId: session.sessionId,
+            node: procSubNode,
           })
           innerData = await materialize(ioPs.stdout)
         }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
-import { guessType } from '@struktoai/mirage-core/utils/filetype'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { isDirectoryAttrs } from './utils.ts'
 
 export interface SshAttrs {
@@ -59,7 +59,8 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
     size: attrs.size ?? null,
     modified,
     fingerprint: modified,
-    type: guessType(name),
+    type: FileType.FILE,
+    content: contentTypeForPath(name),
     mode,
     atime,
     extra,

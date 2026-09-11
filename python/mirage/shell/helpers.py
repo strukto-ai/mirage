@@ -16,6 +16,8 @@ import shlex
 
 import tree_sitter
 
+from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
+                                    FD_STDOUT)
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
 from mirage.shell.types import FunctionBody
@@ -29,12 +31,50 @@ def get_text(node: tree_sitter.Node) -> str:
     return (node.text or b"").decode()
 
 
+def byte_offset(text: str, index: int) -> int:
+    """Where an index into a node's text falls in the parser's offsets.
+
+    tree-sitter places a node by the bytes of the UTF-8 source, so an
+    index counted in code points reads one place too early for every
+    multibyte character before it.
+
+    Args:
+        text (str): the text the index is into.
+        index (int): a code-point index into it.
+    """
+    return len(text[:index].encode())
+
+
 def get_command_name(node: tree_sitter.Node) -> str:
     """Get the command name string."""
     for c in node.named_children:
         if c.type == NT.COMMAND_NAME:
             return (c.text or b"").decode()
     return ""
+
+
+def claimed_descriptor(command: tree_sitter.Node,
+                       last: tree_sitter.Node) -> int | None:
+    """The descriptor a bare ``0`` before a redirect operator names.
+
+    tree-sitter-bash reads ``0>&-`` and ``0<f`` as an operand ``0``
+    followed by an undecorated redirect, where it gives every other
+    digit string its ``file_descriptor`` node. bash's rule is that a
+    digit string touching the operator is the descriptor, so the number
+    is one when it ends exactly where a sibling ``file_redirect``
+    begins; ``cat a 0 >&-`` keeps its operand.
+
+    Args:
+        command (tree_sitter.Node): the command node the number is in.
+        last (tree_sitter.Node): the command's last child.
+    """
+    if last.type != NT.NUMBER or command.parent is None:
+        return None
+    for sibling in command.parent.named_children:
+        if (sibling.type == NT.FILE_REDIRECT
+                and sibling.start_byte == last.end_byte):
+            return int(get_text(last))
+    return None
 
 
 def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
@@ -52,6 +92,9 @@ def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     parts: list[tree_sitter.Node] = []
     for position, c in enumerate(children):
         if c.is_named and c.type not in _SKIP:
+            if position == len(children) - 1 and claimed_descriptor(
+                    node, c) is not None:
+                continue
             parts.append(c)
         elif c.type == "$":
             nxt = children[position +
@@ -228,17 +271,20 @@ def get_for_parts(
 
 def get_cfor_parts(
     node: tree_sitter.Node,
-) -> tuple[list[tree_sitter.Node | None], list[tree_sitter.Node]]:
+) -> tuple[list[list[tree_sitter.Node]], list[tree_sitter.Node]]:
     """Get ([init, cond, update], body_commands) from a C-style for.
 
     The expression slots are positional between the (( )) delimiters,
-    separated by `;` tokens, and any of them may be empty (None):
-    `for ((;;))`.
+    separated by `;` tokens, and any of them may be empty (an empty
+    list): `for ((;;))`. A slot holds every comma-separated expression
+    the parser found in it, in order, since bash evaluates
+    `for ((a=1, i=0; ...))` as one comma expression; keeping only the
+    last child dropped `a=1`.
 
     Args:
         node (tree_sitter.Node): the c_style_for_statement node.
     """
-    exprs: list[tree_sitter.Node | None] = [None, None, None]
+    exprs: list[list[tree_sitter.Node]] = [[], [], []]
     slot = 0
     inside = False
     body: list[tree_sitter.Node] = []
@@ -253,7 +299,7 @@ def get_cfor_parts(
             if child.type == NT.SEMI:
                 slot += 1
             elif child.is_named and slot < 3:
-                exprs[slot] = child
+                exprs[slot].append(child)
             continue
         if child.type == NT.DO_GROUP:
             body = list(child.named_children)
@@ -265,7 +311,7 @@ def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return list(node.named_children)
 
 
-_REDIRECT_NODE_TYPES = frozenset({
+REDIRECT_NODE_TYPES = frozenset({
     NT.FILE_REDIRECT,
     NT.HEREDOC_REDIRECT,
     NT.HERESTRING_REDIRECT,
@@ -289,38 +335,43 @@ _TARGET_TYPES = frozenset({
     NT.PROCESS_SUBSTITUTION,
 })
 
+_INPUT_OPERATORS = frozenset(
+    {NT.REDIRECT_IN, NT.REDIRECT_DUP_IN, NT.REDIRECT_CLOSE_IN})
+_CLOSE_OPERATORS = frozenset({NT.REDIRECT_CLOSE_OUT, NT.REDIRECT_CLOSE_IN})
+_DUP_OPERATORS = frozenset({NT.REDIRECT_STDERR, NT.REDIRECT_DUP_IN})
+_BOTH_OPERATORS = frozenset({NT.REDIRECT_BOTH, NT.REDIRECT_BOTH_APPEND})
+_REDIRECT_OPERATORS = (
+    _INPUT_OPERATORS | _CLOSE_OPERATORS | _DUP_OPERATORS
+    | _BOTH_OPERATORS
+    | frozenset({NT.REDIRECT_OUT, NT.REDIRECT_CLOBBER, NT.REDIRECT_APPEND}))
 
-def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
-    """Parse a single file_redirect node into a Redirect."""
-    fd = 1
+
+def _parse_file_redirect(child: tree_sitter.Node,
+                         fd: int | None = None) -> Redirect:
+    """Parse a single file_redirect node into a Redirect.
+
+    The operator token decides the shape and the explicit descriptor,
+    when there is one, is kept as typed: `3<f` claims fd 3 and `<&3`
+    duplicates from it, and both are refused downstream rather than
+    read as stdin (`shell/descriptors.py`). ``fd`` is the descriptor
+    the grammar left as the command's last operand (`claimed_descriptor`),
+    which a ``file_descriptor`` child overrides. Three forms carry an int
+    target: a dup (`2>&1`, `>&2`, `<&0`) names the descriptor it copies,
+    a close (`>&-`, `<&-`) carries FD_CLOSE, and `&>` claims FD_BOTH.
+    `2>&1` alone keeps the STDERR_TO_STDOUT kind the fd router keys on;
+    every other output redirect is STDOUT or STDERR by the descriptor
+    it claims.
+    """
     target: str | int = ""
     target_node = None
-    kind = RedirectKind.STDOUT
-    append = False
-    clobber = False
-    dup_fd = None
+    op: str | None = None
+    dup_fd: int | None = None
 
     for c in child.children:
         if c.type == NT.FILE_DESCRIPTOR:
             fd = int(get_text(c))
-        elif c.type == NT.REDIRECT_OUT:
-            pass
-        elif c.type == NT.REDIRECT_CLOBBER:
-            clobber = True
-        elif c.type == NT.REDIRECT_APPEND:
-            append = True
-        elif c.type == NT.REDIRECT_IN:
-            kind = RedirectKind.STDIN
-            fd = 0
-        elif c.type == NT.REDIRECT_STDERR:
-            kind = RedirectKind.STDERR_TO_STDOUT
-        elif c.type == NT.REDIRECT_BOTH:
-            kind = RedirectKind.STDOUT
-            fd = -1
-        elif c.type == NT.REDIRECT_BOTH_APPEND:
-            kind = RedirectKind.STDOUT
-            fd = -1
-            append = True
+        elif c.type in _REDIRECT_OPERATORS:
+            op = c.type
         elif c.type == NT.NUMBER:
             dup_fd = int(get_text(c))
 
@@ -330,34 +381,48 @@ def _parse_file_redirect(child: tree_sitter.Node) -> Redirect:
             target_node = c
             break
 
-    if dup_fd is not None and kind == RedirectKind.STDERR_TO_STDOUT:
-        if fd == 2 and dup_fd == 1:
-            kind = RedirectKind.STDERR_TO_STDOUT
-            target = dup_fd
-        elif fd == 1 and dup_fd == 2:
-            kind = RedirectKind.STDOUT
-            fd = 1
-            target = 2
-        else:
-            target = dup_fd
-
-    if fd == -1:
-        return Redirect(fd=-1,
+    # `>&word` with a word rather than a number is bash's other spelling
+    # of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
+    # too, pinned on bash 5.2). On any other explicit descriptor bash
+    # refuses it as `word: ambiguous redirect`, before the command runs
+    # and before any file opens, so the parse keeps the word for the
+    # message rather than turning `3>&foo` into a both-streams file.
+    word_dup = (op == NT.REDIRECT_STDERR and dup_fd is None
+                and target_node is not None)
+    if word_dup and fd is not None and fd != FD_STDOUT:
+        return Redirect(fd=fd,
+                        target=target,
+                        target_node=target_node,
+                        kind=RedirectKind.AMBIGUOUS)
+    if op in _BOTH_OPERATORS or word_dup:
+        return Redirect(fd=FD_BOTH,
                         target=target,
                         target_node=target_node,
                         kind=RedirectKind.STDOUT,
-                        append=append,
-                        clobber=clobber)
+                        append=op == NT.REDIRECT_BOTH_APPEND)
 
-    if fd == 2 and kind != RedirectKind.STDERR_TO_STDOUT:
+    if fd is None:
+        fd = FD_STDIN if op in _INPUT_OPERATORS else FD_STDOUT
+    if op in _CLOSE_OPERATORS:
+        target = FD_CLOSE
+    elif op in _DUP_OPERATORS and dup_fd is not None:
+        target = dup_fd
+
+    if op in _INPUT_OPERATORS:
+        kind = RedirectKind.STDIN
+    elif fd == FD_STDERR and target == FD_STDOUT and op == NT.REDIRECT_STDERR:
+        kind = RedirectKind.STDERR_TO_STDOUT
+    elif fd == FD_STDERR:
         kind = RedirectKind.STDERR
+    else:
+        kind = RedirectKind.STDOUT
 
     return Redirect(fd=fd,
                     target=target,
                     target_node=target_node,
                     kind=kind,
-                    append=append,
-                    clobber=clobber)
+                    append=op == NT.REDIRECT_APPEND,
+                    clobber=op == NT.REDIRECT_CLOBBER)
 
 
 def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:
@@ -384,15 +449,19 @@ def get_redirects(
     creating/truncating the file).
     """
     nc = node.named_children
-    command = nc[0] if nc and nc[0].type not in _REDIRECT_NODE_TYPES else None
+    command = nc[0] if nc and nc[0].type not in REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
 
+    claimed: int | None = None
     if command is not None and command.type == NT.COMMAND:
         for child in command.named_children:
             if child.type == NT.HERESTRING_REDIRECT:
                 redirects.append(_parse_herestring_redirect(child))
+        if command.children:
+            claimed = claimed_descriptor(command, command.children[-1])
 
     recover_herestring = False
+    command_end = -1 if command is None else command.end_byte
     for child in nc if command is None else nc[1:]:
         if child.type == "ERROR" and get_text(child) == "<<":
             recover_herestring = True
@@ -431,7 +500,9 @@ def get_redirects(
         if recover_herestring:
             redirects.append(_parse_herestring_redirect(child))
         else:
-            redirects.append(_parse_file_redirect(child))
+            # Only the redirect touching the operand can own it.
+            fd = claimed if child.start_byte == command_end else None
+            redirects.append(_parse_file_redirect(child, fd))
         recover_herestring = False
 
     return command, redirects

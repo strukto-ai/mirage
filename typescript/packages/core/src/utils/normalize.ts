@@ -23,6 +23,16 @@ export interface FieldNormalizer {
   drop?: readonly string[]
 }
 
+/**
+ * Python states a timeout in seconds where TypeScript uses milliseconds, so
+ * the S3 family and the Hub configs rename `timeout` to `timeoutMs` and
+ * convert through this. A non-number passes untouched for the schema to
+ * refuse, rather than being multiplied into a different wrong number.
+ */
+export function secondsToMs(value: unknown): unknown {
+  return typeof value === 'number' ? value * 1000 : value
+}
+
 export function snakeToCamel(snake: string): string {
   return snake.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())
 }

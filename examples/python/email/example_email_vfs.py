@@ -77,7 +77,7 @@ async def main():
                 nope = f"/email/{folder}/nope.txt"
                 print(f"  nope.txt: {os.path.exists(nope)}")
 
-        records = ws.ops.records
+        records = ws.fs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

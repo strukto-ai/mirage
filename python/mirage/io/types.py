@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.types import Producer
+from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
 
@@ -101,6 +101,12 @@ class IOResult:
     before treating the status as final.
 
     Args:
+        matched_runs (list[list[PathSpec]] | None): Structured selection
+            before display rendering, for commands whose matches feed
+            later actions: one list of rows per start point, in operand
+            order, so a nested or repeated start point stays its own
+            traversal (GNU walks each to completion before the next).
+            None means the command supplied no structured selection.
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
@@ -114,14 +120,20 @@ class IOResult:
             command, spanning which mounts); merge keeps the rightmost
             producer, mirroring whose stream the shell shows. The
             workspace boundary hands it to the policy layer as
-            context. Facts ride the envelope, policy decisions never
-            do.
+            context. Facts ride the envelope as policy input; the
+            decision a chain hands down rides beside them as
+            ``refusal``, written after the last hook has spoken.
         mutated (bool | None): whether this run changed service state,
             when only the handler can tell. A CLI leaf declares
             ``write`` statically because for almost every verb it is
             static, but ``gh api`` carries its method on the line, so a
             plain ``gh api /user`` is a read through a leaf that is
             declared writable. None leaves the spec's answer standing.
+        refusal (Refusal | None): why the line did not run, when a
+            policy or an unanswered ask refused it; None on every
+            ordinary run. stderr stays in bash's voice, this carries
+            the reason. merge keeps the rightmost record, as it does
+            the producer.
     """
 
     def __init__(self,
@@ -132,8 +144,11 @@ class IOResult:
                  writes: dict[str, ByteSource] | None = None,
                  cache: list[str] | None = None,
                  producer: Producer | None = None,
-                 mutated: bool | None = None) -> None:
+                 mutated: bool | None = None,
+                 refusal: Refusal | None = None,
+                 matched_runs: list[list[PathSpec]] | None = None) -> None:
         self.stdout = stdout
+        self.matched_runs = matched_runs
         self.stderr = stderr
         self._exit_code = exit_code
         self.reads: dict[str, ByteSource] = reads if reads is not None else {}
@@ -142,6 +157,7 @@ class IOResult:
         self.cache: list[str] = cache if cache is not None else []
         self.producer = producer
         self.mutated = mutated
+        self.refusal = refusal
         self._stream_source: IOResult | None = None
 
     @property
@@ -181,6 +197,7 @@ class IOResult:
         # (exit_on_empty firing at drain time) is still visible.
         result = IOResult(
             stdout=other.stdout,
+            matched_runs=other.matched_runs,
             stderr=merged_stderr,
             reads={
                 **self.reads,
@@ -192,6 +209,8 @@ class IOResult:
             },
             cache=self.cache + other.cache,
             producer=other.producer,
+            refusal=(other.refusal
+                     if other.refusal is not None else self.refusal),
         )
         result._stream_source = other
         return result

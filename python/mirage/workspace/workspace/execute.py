@@ -15,6 +15,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -25,15 +26,19 @@ from mirage.commands.errors import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope
-from mirage.policy import resolve_limit
+from mirage.policy import HandOff, resolve_limit
 from mirage.provision import ProvisionResult
 from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
+from mirage.types import Refusal
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.executor.statement import record_status
 from mirage.workspace.node import provision_node, run_command_tree
-from mirage.workspace.node.admission import admit_line
+from mirage.workspace.node.admission import (admit_line, is_pending,
+                                             is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
+from mirage.workspace.node.occurrence import evaluated_from
 from mirage.workspace.session import (get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
@@ -65,12 +70,34 @@ async def plan_eval_stub(cmd: str, **opts: Any) -> IOResult:
     return IOResult()
 
 
+@dataclass(slots=True)
+class NestedRefusal:
+    """The record the line's nested evaluations earned, latest kept.
+
+    Every nested line re-enters execute through ``recurse``, and a
+    substitution keeps only the inner stdout, so that door is the one
+    place its record survives. The typed line reports it when its own
+    tree earned none: the rightmost rule ``IOResult.merge`` applies,
+    with the inner line standing left of the command that consumed
+    its output.
+
+    Args:
+        latest (Refusal | None): the last record a nested line carried.
+    """
+
+    latest: Refusal | None = None
+
+
 async def recurse(
     ws: "Workspace",
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None,
     agent_id: str | None,
+    nested: NestedRefusal,
     cmd: str,
+    node: Any = None,
+    span: tuple[int, int] | None = None,
+    handed: HandOff | None = None,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -79,7 +106,15 @@ async def recurse(
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
     line's routing decision and agent: nested lines never re-route,
-    and an approval they raise is the outer line's agent's.
+    and an approval they raise is the outer line's agent's. It runs on
+    a hand-off of its own under the one the node that runs it runs on,
+    standing at that node: the outer pass reads into the words a
+    command runs and claims for them at that place, so the grants are
+    the inner line's to run on and nobody else's, and what the inner
+    line's gates claim goes back up when it ends
+    (``Decisions.hand_up``), so the next evaluation from the same node
+    (the next batch ``xargs`` hands on) runs on it and the end of the
+    line or job holding it spends it.
 
     Args:
         ws: the workspace hosting the outer line.
@@ -87,14 +122,45 @@ async def recurse(
         routing_decision (RouteDecision | None): the typed line's
             decision, inherited verbatim.
         agent_id (str | None): the typed line's agent, inherited.
+        nested (NestedRefusal): where the record a nested line earned
+            is kept for the typed line.
         cmd (str): the nested command line.
+        node (Any): the node whose text ``cmd`` is: the command running
+            a line, or the substitution being expanded. None when the
+            caller has none, which leaves the inner line's commands
+            standing nowhere the pass could have placed them, so its
+            gates ask afresh.
+        span (tuple[int, int] | None): the span of ``cmd`` within the
+            node's text when the node holds several lines (a backtick
+            region, whose touching pairs tree-sitter lexes as one
+            node), so each stands at its own place.
+        handed (HandOff | None): the hand-off of the subtree that runs
+            this evaluation, bound by the walker at its door
+            (``execute_node``): the line's own for a command in the
+            foreground, a job's own for a command inside a background
+            job, which may reach this after the line has ended. Bound
+            to the line instead, a line a job evaluated late stood
+            under a hand-off already swept: its gate could not see the
+            grant the job held and asked again, and what it claimed
+            went back to a hand-off nothing revokes. None outside a
+            walk, which makes the inner line a line of its own.
     """
-    return await ws.execute(cmd,
-                            cancel=cancel,
-                            record=False,
-                            routing_decision=routing_decision,
-                            agent_id=agent_id,
-                            **opts)
+    if handed is None:
+        inner = None
+    elif node is None:
+        inner = HandOff(parent=handed)
+    else:
+        inner = evaluated_from(node, handed, span)
+    io = await ws.execute(cmd,
+                          cancel=cancel,
+                          record=False,
+                          routing_decision=routing_decision,
+                          agent_id=agent_id,
+                          handed=inner,
+                          **opts)
+    if isinstance(io, IOResult) and io.refusal is not None:
+        nested.latest = io.refusal
+    return io
 
 
 def session_cwd(
@@ -126,6 +192,7 @@ async def execute_line(
     record: bool,
     runtime: str | None,
     routing_decision: RouteDecision | None,
+    handed: HandOff | None = None,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.execute``; see its docstring for the
     argument contract.
@@ -139,9 +206,13 @@ async def execute_line(
 
     Args:
         ws: the workspace the line runs in.
+        handed (HandOff | None): the hand-off the line runs on, made by
+            ``recurse`` for a nested evaluation; None for a typed line,
+            which gets one of its own.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
+    cacheable = ws._dispatcher.capture_cacheable_paths()
     await ws._namespace.ensure_loaded()
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
@@ -200,7 +271,16 @@ async def execute_line(
                                            effective_session, session_id, agent
                                            or "", ws._route_policy,
                                            routing_decision)
-        exec_recursion = partial(recurse, ws, cancel, decision, agent)
+        nested = NestedRefusal()
+        # The line's hand-off: the grants its passes and gates claim
+        # for its commands, which the gates run on and the line's end
+        # spends. A nested evaluation runs on one made under the
+        # hand-off of the node that runs it, which the walker binds
+        # into the door (execute_node), not this line's: a background
+        # job's subtree runs on a hand-off of the job's own.
+        if handed is None:
+            handed = HandOff()
+        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested)
         if provision:
             name = command_name(command)
             guard = resolve_limit(name) if name else None
@@ -213,128 +293,177 @@ async def execute_line(
                                ast,
                                effective_session,
                                agent_id=agent or ""), timeout, name)
-        line_runtime = ws._runtimes.whole_line(ast, decision)
-        if line_runtime is not None:
-            # A whole line is a command like any other: the same
-            # visibility and admission gate as the tree, per parsed
-            # command, before the runtime sees a byte of it.
-            refusal = await admit_line(ast, effective_session, ws._registry,
-                                       ws._namespace, agent or "", cancel)
-            if refusal is not None:
-                io = IOResult(exit_code=refusal.exit_code,
-                              stderr=refusal.stderr)
-                session.last_exit_code = io.exit_code
+        held = False
+        try:
+            line_runtime = ws._runtimes.whole_line(ast, decision)
+            if line_runtime is not None:
+                # A whole line is a command like any other: the same
+                # visibility and admission gate as the tree, per parsed
+                # command, before the runtime sees a byte of it. No gate
+                # follows, so the pass claims on the hand-off and the
+                # sweep below spends what it claimed, or keeps it for
+                # the retry of a line held on a question.
+                refused = await admit_line(ast, effective_session,
+                                           ws._registry, ws._namespace, agent
+                                           or "", cancel, handed)
+                if refused is not None:
+                    held = is_pending(refused)
+                    io = IOResult(exit_code=refused.exit_code,
+                                  stderr=refused.stderr,
+                                  refusal=refused.refusal)
+                    record_status(session, io.exit_code)
+                    return io
+                if ws._has_managed_env:
+                    # Filled only after the line is admitted (a refused
+                    # line must never reach a secret store) and before the
+                    # runtime snapshots the env; a whole-line program may
+                    # read any name, so the walk is not consulted. A dry
+                    # run (provision) returned above and never fetches. A
+                    # SecretsError raises through to the generic fold
+                    # below: the line exits 1 and never runs.
+                    whole_names = fill_names(effective_session, [ast],
+                                             whole=True,
+                                             cli_env_names=frozenset())
+                    # Names first, and the declarations only if there are
+                    # any: both arguments would otherwise be evaluated, so
+                    # a session with nothing pending (a profile hiding
+                    # every managed name) still read a bootstrap source.
+                    # The TypeScript twin shares one helper with the
+                    # per-command path and skipped this by construction.
+                    if whole_names:
+                        await fill_env(effective_session, whole_names, await
+                                       ws._secret_sources())
+                io = await run_whole_line(
+                    line_runtime, command, stdin, effective_session,
+                    ws._registry.mounts(), ws._registry.policies,
+                    ws._dispatcher.invalidate_all_after_remote)
+                record_status(session, io.exit_code)
+                return io
+            # The line is the unit a rule judges, so every command in it is
+            # judged before any of it runs. Nothing here replaces the
+            # per-command gate below, which still binds each command's own
+            # entry gate; this only stops a line a rule refuses from
+            # running half-way. The grants the passes claim for the gates
+            # ride the hand-off, swept in the finally however the line
+            # ends: the sweep has to cover everything from the preflight
+            # on, since a fetch that fails or a kill between it and the
+            # run leaves a claimed grant just as unspent as a skipped gate
+            # does.
+            refused = await prejudge_line(ast, effective_session, ws._registry,
+                                          ws._namespace, handed, agent or "",
+                                          cancel)
+            if refused is not None:
+                # A question left waiting holds the line for its retry,
+                # which has to find the grants standing, so they are
+                # released rather than spent; any other refusal ends
+                # the line.
+                held = is_pending(refused)
+                io = IOResult(exit_code=refused.exit_code,
+                              stderr=refused.stderr,
+                              refusal=refused.refusal)
+                record_status(session, io.exit_code)
                 return io
             if ws._has_managed_env:
-                # Filled only after the line is admitted (a refused
-                # line must never reach a secret store) and before the
-                # runtime snapshots the env; a whole-line program may
-                # read any name, so the walk is not consulted. A dry
-                # run (provision) returned above and never fetches. A
-                # SecretsError raises through to the generic fold
-                # below: the line exits 1 and never runs.
-                whole_names = fill_names(effective_session, [ast],
-                                         whole=True,
-                                         cli_env_names=frozenset())
-                # Names first, and the declarations only if there are
-                # any: both arguments would otherwise be evaluated, so
-                # a session with nothing pending (a profile hiding
-                # every managed name) still read a bootstrap source.
-                # The TypeScript twin shares one helper with the
-                # per-command path and skipped this by construction.
-                if whole_names:
-                    await fill_env(effective_session, whole_names, await
-                                   ws._secret_sources())
-            io = await run_whole_line(
-                line_runtime, command, stdin, effective_session,
-                ws._registry.mounts(), ws._registry.policies,
-                ws._dispatcher.invalidate_all_after_remote)
-            session.last_exit_code = io.exit_code
-            return io
-        # The line is the unit a rule judges, so every command in it is
-        # judged before any of it runs. Nothing here replaces the
-        # per-command gate below, which still binds each command's own
-        # entry gate; this only stops a line a rule refuses from
-        # running half-way.
-        refusal = await prejudge_line(ast, effective_session, ws._registry,
-                                      ws._namespace, agent or "", cancel)
-        if refusal is not None:
-            io = IOResult(exit_code=refusal.exit_code, stderr=refusal.stderr)
-            session.last_exit_code = io.exit_code
-            return io
-        if ws._has_managed_env:
-            # Filled only after the line-tier admission and before the
-            # tree's expansion reads the vars. The walked set carries
-            # stored function bodies too, so a function invoked by bare
-            # name still fills what its body reads. The prejudge pass
-            # leaves single-command lines to the per-command gate, so
-            # the fetch asks the same text-tier question itself, over
-            # the same walked set the names came from: a node already
-            # denied on its literal words never reaches a source, and a
-            # rule that asks is answered before the fetch, with the
-            # approval left for the gate to spend. A deny only the
-            # value gate can see still follows the fetch, because
-            # expansion is what consumes the values.
-            nodes = line_nodes(ast, effective_session)
-            policies = ws._registry.policies
-            writes_gated = (policies is not None
-                            and policies.wants("pre_session"))
+                # Filled only after the line-tier admission and before the
+                # tree's expansion reads the vars. The walked set carries
+                # stored function bodies too, so a function invoked by bare
+                # name still fills what its body reads. The prejudge pass
+                # leaves single-command lines to the per-command gate, so
+                # the fetch asks the same text-tier question itself, over
+                # the same walked set the names came from: a node already
+                # denied on its literal words never reaches a source, and a
+                # rule that asks is answered before the fetch, with the
+                # approval left for the gate to spend. A deny only the
+                # value gate can see still follows the fetch, because
+                # expansion is what consumes the values.
+                nodes = line_nodes(ast, effective_session)
+                policies = ws._registry.policies
+                writes_gated = (policies is not None
+                                and await policies.wants_for(
+                                    "pre_session",
+                                    effective_session.session_id))
 
-            def plan_names(
-                    subset: Sequence[tree_sitter.Node]) -> frozenset[str]:
-                return fill_names(
-                    effective_session,
-                    subset,
-                    whole=guest_bound(subset, decision,
-                                      ws._registry.runtime_bindings),
-                    cli_env_names=cli_env_names(subset, effective_session,
-                                                ws._registry),
-                    writes_gated=writes_gated)
+                def plan_names(
+                        subset: Sequence[tree_sitter.Node]) -> frozenset[str]:
+                    return fill_names(
+                        effective_session,
+                        subset,
+                        whole=guest_bound(subset, decision,
+                                          ws._registry.runtime_bindings),
+                        cli_env_names=cli_env_names(subset, effective_session,
+                                                    ws._registry),
+                        writes_gated=writes_gated)
 
-            names = plan_names(nodes)
-            if names:
-                served = await unrefused_nodes(nodes, effective_session,
-                                               ws._registry, ws._namespace,
-                                               agent or "", cancel)
-                if len(served) != len(nodes):
-                    nodes = served
-                    names = plan_names(served) if served else frozenset()
-                # A fetched value can name another managed variable
-                # (the arithmetic chase recurses through values), and
-                # what a value spells is unknowable before its fetch,
-                # so the plan reruns over the same admitted nodes until
-                # it reaches nothing new. fill_names returns pending
-                # names only, so every pass fetches names the last one
-                # could not see and the loop settles.
-                while names:
-                    # Built here, not above the plan: the declarations
-                    # are read only once an admitted node actually
-                    # wants a value, so a line the per-command gate
-                    # refuses never reaches a bootstrap source either.
-                    # An unknown source name already fails at
-                    # construction; what is left for this to discover
-                    # is an unreadable dotenv or a config the source
-                    # refuses, which is the same treatment an
-                    # unreachable store gets. Memoized, so the loop's
-                    # later passes cost one await.
-                    sources = await ws._secret_sources()
-                    await fill_env(effective_session, names, sources)
-                    names = plan_names(nodes)
-        io, _ = await run_command_tree(
-            ws.dispatch,
-            ws._registry,
-            ws._namespace,
-            ws.job_table,
-            exec_recursion,
-            agent or "",
-            ast,
-            effective_session,
-            stdin,
-            cancel,
-            routing_decision=decision,
-        )
-        session.last_exit_code = io.exit_code
-        await ws.apply_io(io, records=scope.records)
+                names = plan_names(nodes)
+                if names:
+                    served = await unrefused_nodes(nodes, effective_session,
+                                                   ws._registry, ws._namespace,
+                                                   handed, agent or "", cancel)
+                    if len(served) != len(nodes):
+                        nodes = served
+                        names = plan_names(served) if served else frozenset()
+                    # A fetched value can name another managed variable
+                    # (the arithmetic chase recurses through values), and
+                    # what a value spells is unknowable before its fetch,
+                    # so the plan reruns over the same admitted nodes until
+                    # it reaches nothing new. fill_names returns pending
+                    # names only, so every pass fetches names the last one
+                    # could not see and the loop settles.
+                    while names:
+                        # Built here, not above the plan: the declarations
+                        # are read only once an admitted node actually
+                        # wants a value, so a line the per-command gate
+                        # refuses never reaches a bootstrap source either.
+                        # An unknown source name already fails at
+                        # construction; what is left for this to discover
+                        # is an unreadable dotenv or a config the source
+                        # refuses, which is the same treatment an
+                        # unreachable store gets. Memoized, so the loop's
+                        # later passes cost one await.
+                        sources = await ws._secret_sources()
+                        await fill_env(effective_session, names, sources)
+                        names = plan_names(nodes)
+            io, _ = await run_command_tree(
+                ws.dispatch,
+                ws._registry,
+                ws._namespace,
+                ws.job_table,
+                exec_recursion,
+                agent or "",
+                ast,
+                effective_session,
+                stdin,
+                cancel,
+                routing_decision=decision,
+                handed=handed,
+            )
+            # A record a nested line earned is the line's to report when
+            # its own tree earned none (see NestedRefusal).
+            if io.refusal is None:
+                io.refusal = nested.latest
+            # A question a gate left waiting holds the line exactly as
+            # one the pass left waiting does: the retry has to find the
+            # grants the pass claimed for the other commands standing,
+            # or it asks for them again, and the answer to this one
+            # would be taken by the first spelling the pass reads.
+            held = is_pending_refusal(io.refusal)
+        finally:
+            if held:
+                ws._registry.decisions.release(effective_session.session_id,
+                                               handed)
+            elif handed.parent is not None:
+                # A nested evaluation's claims are the outer line's to
+                # keep for the next evaluation from the same node and
+                # to spend at its own end.
+                ws._registry.decisions.hand_up(effective_session.session_id,
+                                               handed)
+            else:
+                await ws._registry.decisions.revoke(
+                    effective_session.session_id, handed)
+        # The program loop stamped each statement; the line as a whole
+        # is a wrapper around them, like a group.
+        record_status(session, io.exit_code, transparent=True)
+        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
         return io
     except CommandTimeoutError as exc:
         logger.debug("command %r timed out after %ss", exc.command,
@@ -342,11 +471,11 @@ async def execute_line(
         if cancel is not None:
             cancel.set()
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     except RouteDeny as exc:
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     except (MirageAbortError, ContentDriftError, RouteError):
         # The caller's problem, not the line's: an abort it requested,
@@ -356,7 +485,7 @@ async def execute_line(
         # The fold is a failed command like any other (a SecretsError
         # folds here), so $? must report it, mirroring the TS catch.
         io = failure_result(exc, command)
-        session.last_exit_code = io.exit_code
+        record_status(session, io.exit_code)
         return io
     finally:
         # One rule on every path: an op that happened is always

@@ -92,8 +92,8 @@ def test_missing_config_message_names_the_env_vars(tmp_path):
 async def test_build_workspace_from_config(tree):
     ws = await build_workspace_from_config(tree / "other.yaml")
     try:
-        await ws.ops.write("/a.txt", b"hi")
-        assert await ws.ops.read("/a.txt") == b"hi"
+        await ws.fs.write("/a.txt", b"hi")
+        assert await ws.fs.read("/a.txt") == b"hi"
         assert ws.workspace_id
     finally:
         await ws.close()

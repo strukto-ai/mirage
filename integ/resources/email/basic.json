@@ -535,7 +535,7 @@
       "command": "ls -l /mail/INBOX/2026-01-05/Q2_Budget_Review__1",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r--r-- 1 user user 36 Jan  1 00:00 budget.csv\n-rw-r--r-- 1 user user 37 Jan  1 00:00 notes.txt\n",
+        "stdout": "-rw-r--r-- 1 - - 36 Jan  1 00:00 budget.csv\n-rw-r--r-- 1 - - 37 Jan  1 00:00 notes.txt\n",
         "stderr": ""
       }
     },

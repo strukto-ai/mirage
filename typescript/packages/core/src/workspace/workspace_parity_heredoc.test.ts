@@ -166,9 +166,9 @@ describe('workspace: additional fixes', () => {
     await ws.close()
   })
 
-  it('echo bg &; echo fg', async () => {
+  it('echo bg & echo fg', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo bg &; echo fg')
+    const io = await ws.execute('echo bg & echo fg')
     expect(stdoutStr(io)).toContain('fg')
     await ws.close()
   })

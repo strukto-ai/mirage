@@ -14,7 +14,7 @@
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { getDocumentDetail } from './client.ts'
@@ -49,7 +49,8 @@ export async function statLight(
   const modified = resolved.entry.remoteTime
   return new FileStat({
     name: resolved.entry.name,
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     size: null,
     modified: modified !== '' ? modified : null,
     fingerprint: null,
@@ -92,7 +93,8 @@ export async function stat(
   }
   return new FileStat({
     name: resolved.entry.name,
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     size: null,
     modified: timestampToZulu(detail.updated_at),
     fingerprint: null,

@@ -24,10 +24,10 @@ def workspace():
 
 @pytest.mark.asyncio
 async def test_grep_recursive_dir_returns_matches(workspace):
-    await workspace.ops.mkdir("/sub")
-    await workspace.ops.write("/sub/a.txt",
-                              b"hello world\ngoodbye\nhello again")
-    await workspace.ops.write("/sub/b.txt", b"nothing here\n")
+    await workspace.fs.mkdir("/sub")
+    await workspace.fs.write("/sub/a.txt",
+                             b"hello world\ngoodbye\nhello again")
+    await workspace.fs.write("/sub/b.txt", b"nothing here\n")
 
     io = await workspace.execute("grep -rn hello /sub")
     output = (io.stdout or b"").decode()
@@ -41,9 +41,9 @@ async def test_grep_recursive_dir_returns_matches(workspace):
 async def test_grep_recursive_no_operand_searches_cwd(workspace):
     # GNU: `grep -r pat` with no path operand searches the cwd and
     # prints bare relative names (a.txt:hit, not ./a.txt:hit).
-    await workspace.ops.mkdir("/sub")
-    await workspace.ops.write("/a.txt", b"hello\n")
-    await workspace.ops.write("/sub/b.txt", b"hello\n")
+    await workspace.fs.mkdir("/sub")
+    await workspace.fs.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/sub/b.txt", b"hello\n")
 
     io = await workspace.execute("grep -r hello", cwd="/")
     assert io.exit_code == 0
@@ -53,7 +53,7 @@ async def test_grep_recursive_no_operand_searches_cwd(workspace):
 @pytest.mark.asyncio
 async def test_grep_recursive_no_operand_ignores_stdin(workspace):
     # GNU ignores stdin whenever -r has to invent the cwd operand.
-    await workspace.ops.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
 
     io = await workspace.execute("grep -r hello",
                                  cwd="/",
@@ -64,7 +64,7 @@ async def test_grep_recursive_no_operand_ignores_stdin(workspace):
 
 @pytest.mark.asyncio
 async def test_grep_recursive_no_operand_no_match_exits_one(workspace):
-    await workspace.ops.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
 
     io = await workspace.execute("grep -r zzz", cwd="/")
     assert io.exit_code == 1

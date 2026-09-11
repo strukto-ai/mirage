@@ -91,6 +91,17 @@ describe('Session', () => {
     expect(restored.mountModes?.get('/scratch')).toBe(MountMode.WRITE)
   })
 
+  it('round-trips the profile name and omits it when none', () => {
+    expect('profile' in new Session({ sessionId: 'a' }).toJSON()).toBe(false)
+    const original = new Session({ sessionId: 'rt', profile: 'admin' })
+    const json = original.toJSON()
+    expect(json.profile).toBe('admin')
+    expect(Session.fromJSON(json as { session_id: string; profile?: string | null }).profile).toBe(
+      'admin',
+    )
+    expect(original.fork().profile).toBe('admin')
+  })
+
   it('toJSON omits mount_modes when unrestricted', () => {
     const s = new Session({ sessionId: 'x' })
     expect('mount_modes' in s.toJSON()).toBe(false)

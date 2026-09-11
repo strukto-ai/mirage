@@ -14,7 +14,7 @@
 
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 
@@ -46,7 +46,14 @@ vi.mock('./stat.ts', () => ({
         new FileStat({ name: name !== '' ? name : '/', type: FileType.DIRECTORY }),
       )
     }
-    return Promise.resolve(new FileStat({ name, type: FileType.TEXT, size: FILES[key] ?? null }))
+    return Promise.resolve(
+      new FileStat({
+        name,
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+        size: FILES[key] ?? null,
+      }),
+    )
   },
 }))
 

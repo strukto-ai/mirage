@@ -32,7 +32,10 @@ export function notionTransport(
   // omitted it, so a verb reads one flag and never the environment. Every verb
   // passes its flags here rather than building a transport of its own, or the
   // override would work on whichever verbs remembered it.
-  const version = flags === undefined ? undefined : new FlagView(flags).asStr('notion_version')
+  const flagVersion = flags === undefined ? undefined : new FlagView(flags).asStr('notion_version')
+  // An empty flag falls back to the config's own pin, exactly as python's
+  // `notion_config` returns `inv.config` untouched for an empty --notion-version.
+  const version = flagVersion !== undefined && flagVersion !== '' ? flagVersion : cfg.apiVersion
   return new HttpNotionTransport({
     apiKey: cfg.apiKey,
     ...(cfg.baseUrl !== undefined && cfg.baseUrl !== '' ? { baseUrl: cfg.baseUrl } : {}),

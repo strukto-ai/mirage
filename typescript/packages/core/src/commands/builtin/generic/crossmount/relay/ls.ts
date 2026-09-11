@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../ops/types.ts'
+import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
 import type { CommandOpts } from '../../../../config.ts'
@@ -45,6 +45,7 @@ function crossingNs(ns: NamespaceView): NamespaceView {
     ...(ns.links !== undefined ? { links: ns.links } : {}),
     ...(ns.statOverlay !== undefined ? { statOverlay: ns.statOverlay } : {}),
     ...(ns.childMounts !== undefined ? { childMounts: ns.childMounts } : {}),
+    ...(ns.user !== undefined ? { user: ns.user } : {}),
   }
 }
 
@@ -72,10 +73,13 @@ export async function runLs(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   ns?: NamespaceView,
+  // The session plane's door, for the profile the group column renders.
+  sessionView?: SessionView,
 ): Promise<CrossResult> {
   const opts: CommandOpts = {
     ...crossOpts(flagKwargs),
     ...(ns !== undefined ? { ns: crossingNs(ns) } : {}),
+    ...(sessionView !== undefined ? { sessionView } : {}),
   }
   const result = await lsGeneric(
     flatten(scopes),

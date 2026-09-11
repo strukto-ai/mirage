@@ -25,7 +25,7 @@ import { runTar } from './tar.ts'
 import { runUnzip } from './unzip.ts'
 import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import type { NamespaceView } from '../../../../../ops/types.ts'
+import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
 
 // Run a command whose work must see every operand at once. Pure wiring:
 // every operand is read or written through dispatch primitives on its owning
@@ -44,8 +44,11 @@ export async function runRelay(
   // Name-plane facts for the generics that render them (ls: links, attr
   // overlay, child mounts).
   ns?: NamespaceView,
+  // The session plane's door, for the generic that renders the session's
+  // profile (ls -l).
+  sessionView?: SessionView,
 ): Promise<CrossResult> {
-  if (cmdName === Cmd.LS) return runLs(scopes, flagKwargs, dispatch, ns)
+  if (cmdName === Cmd.LS) return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
   if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch, storageKey)
   if (cmdName === Cmd.MV) return runMv(scopes, flagKwargs, dispatch, storageKey)
   if (cmdName === Cmd.DIFF) return runDiff(scopes, flagKwargs, dispatch)

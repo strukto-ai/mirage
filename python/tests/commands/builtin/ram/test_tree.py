@@ -24,9 +24,9 @@ def workspace():
 
 @pytest.mark.asyncio
 async def test_tree_basic(workspace):
-    await workspace.ops.mkdir("/d1")
-    await workspace.ops.write("/d1/a.txt", b"a")
-    await workspace.ops.write("/d1/b.txt", b"b")
+    await workspace.fs.mkdir("/d1")
+    await workspace.fs.write("/d1/a.txt", b"a")
+    await workspace.fs.write("/d1/b.txt", b"b")
     io = await workspace.execute("tree /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -36,10 +36,10 @@ async def test_tree_basic(workspace):
 
 @pytest.mark.asyncio
 async def test_tree_L_max_depth(workspace):
-    await workspace.ops.mkdir("/d1")
-    await workspace.ops.mkdir("/d1/sub")
-    await workspace.ops.mkdir("/d1/sub/deep")
-    await workspace.ops.write("/d1/sub/deep/file.txt", b"d")
+    await workspace.fs.mkdir("/d1")
+    await workspace.fs.mkdir("/d1/sub")
+    await workspace.fs.mkdir("/d1/sub/deep")
+    await workspace.fs.write("/d1/sub/deep/file.txt", b"d")
     io = await workspace.execute("tree -L 1 /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -50,9 +50,9 @@ async def test_tree_L_max_depth(workspace):
 
 @pytest.mark.asyncio
 async def test_tree_a_shows_dotfiles(workspace):
-    await workspace.ops.mkdir("/d1")
-    await workspace.ops.write("/d1/.hidden", b"h")
-    await workspace.ops.write("/d1/visible.txt", b"v")
+    await workspace.fs.mkdir("/d1")
+    await workspace.fs.write("/d1/.hidden", b"h")
+    await workspace.fs.write("/d1/visible.txt", b"v")
     io = await workspace.execute("tree -a /d1")
     assert io.exit_code == 0
     assert ".hidden" in io.stdout.decode()
@@ -60,9 +60,9 @@ async def test_tree_a_shows_dotfiles(workspace):
 
 @pytest.mark.asyncio
 async def test_tree_d_dirs_only(workspace):
-    await workspace.ops.mkdir("/d1")
-    await workspace.ops.mkdir("/d1/sub")
-    await workspace.ops.write("/d1/file.txt", b"x")
+    await workspace.fs.mkdir("/d1")
+    await workspace.fs.mkdir("/d1/sub")
+    await workspace.fs.write("/d1/file.txt", b"x")
     io = await workspace.execute("tree -d /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()

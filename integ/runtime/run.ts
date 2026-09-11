@@ -26,6 +26,7 @@ import {
   PathSpec,
   RAMResource,
   RedisResource,
+  registerRuntime,
   LINE_EXECUTOR,
   type LineExecutor,
   Runtime,
@@ -100,6 +101,7 @@ interface CliSpecJson {
 }
 
 interface World {
+  register_runtimes?: Record<string, string>
   runtimes?: (string | Record<string, unknown>)[]
   route_policy?: string
   policies?: PolicySpec[]
@@ -111,6 +113,7 @@ interface World {
 
 interface PolicySpec {
   name: string
+  sync?: boolean
   command?: string
   flag?: string
   reason?: string
@@ -157,14 +160,45 @@ class EchoBox extends Runtime implements LineExecutor {
   }
 }
 
+// Registered the way a host registers its own runtime, so a case names
+// it by string like a builtin, `buildRuntime` resolves it, and the
+// unknown-name refusal lists it. The registry suite pins that door.
+registerRuntime('echobox', EchoBox)
+
+const RUNTIME_KINDS: Record<string, Parameters<typeof registerRuntime>[1]> = { echobox: EchoBox }
+
+// The world's host-side runtime registrations, `name -> kind`, applied
+// before the world's runtimes are built so a refused registration (a
+// builtin's name) surfaces as the case's build error.
+function registerRuntimes(entries: Record<string, string>): void {
+  for (const [name, kind] of Object.entries(entries)) {
+    const cls = RUNTIME_KINDS[kind]
+    if (cls === undefined) throw new Error(`unknown runtime kind: ${kind}`)
+    registerRuntime(name, cls)
+  }
+}
+
 // Test-only policies, one per hook, mirroring the Python runner: the
 // world's `policies` entries pick a class by `name` and carry its config.
-class DenyFlag implements Policy {
+// Each decides synchronously in `decide`; the hook the engine calls is
+// stamped on per case, returning a promise (the default) or the value
+// itself (`"sync": true`), so one case runs under both shapes on both
+// hosts. The seam awaits whatever a hook returns, which is what let a
+// plain `def` hook stop failing closed on the python side.
+type HookName = 'preCommand' | 'preOps' | 'postOps' | 'postExecute'
+
+interface TestPolicy<C> {
+  readonly hook: HookName
+  decide(ctx: C): Action | null
+}
+
+class DenyFlag implements TestPolicy<CommandContext> {
+  readonly hook = 'preCommand'
   private readonly spec: PolicySpec
   constructor(spec: PolicySpec) {
     this.spec = spec
   }
-  preCommand(ctx: CommandContext): Action | null {
+  decide(ctx: CommandContext): Action | null {
     if (ctx.command === this.spec.command && ctx.argv.includes(this.spec.flag ?? '')) {
       return { kind: 'deny', reason: this.spec.reason ?? '' }
     }
@@ -172,12 +206,13 @@ class DenyFlag implements Policy {
   }
 }
 
-class LockWrites implements Policy {
+class LockWrites implements TestPolicy<OpsContext> {
+  readonly hook = 'preOps'
   private readonly prefix: string
   constructor(spec: PolicySpec) {
     this.prefix = spec.prefix ?? ''
   }
-  preOps(ctx: OpsContext): Action | null {
+  decide(ctx: OpsContext): Action | null {
     if (ctx.write && ctx.path.virtual.startsWith(this.prefix)) {
       return { kind: 'deny', reason: 'locked' }
     }
@@ -185,12 +220,13 @@ class LockWrites implements Policy {
   }
 }
 
-class SealReads implements Policy {
+class SealReads implements TestPolicy<OpsContext> {
+  readonly hook = 'preOps'
   private readonly suffix: string
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
   }
-  preOps(ctx: OpsContext): Action | null {
+  decide(ctx: OpsContext): Action | null {
     if (!ctx.write && ctx.path.virtual.endsWith(this.suffix)) {
       return { kind: 'deny', reason: 'sealed' }
     }
@@ -198,12 +234,13 @@ class SealReads implements Policy {
   }
 }
 
-class RedactReads implements Policy {
+class RedactReads implements TestPolicy<OpsResultContext> {
+  readonly hook = 'postOps'
   private readonly marker: string
   constructor(spec: PolicySpec) {
     this.marker = spec.marker ?? ''
   }
-  postOps(ctx: OpsResultContext): Action | null {
+  decide(ctx: OpsResultContext): Action | null {
     const data = ctx.result instanceof Uint8Array ? DEC.decode(ctx.result) : null
     if (ctx.op === 'read' && data !== null && data.includes(this.marker)) {
       return { kind: 'deny', reason: 'redacted' }
@@ -212,14 +249,15 @@ class RedactReads implements Policy {
   }
 }
 
-class OpReadCap implements Policy {
+class OpReadCap implements TestPolicy<OpsResultContext> {
+  readonly hook = 'postOps'
   private readonly suffix: string
   private readonly maxBytes: number
   constructor(spec: PolicySpec) {
     this.suffix = spec.suffix ?? ''
     this.maxBytes = spec.max_bytes ?? 0
   }
-  postOps(ctx: OpsResultContext): Action | null {
+  decide(ctx: OpsResultContext): Action | null {
     if (ctx.op === 'read' && ctx.path.virtual.endsWith(this.suffix)) {
       return new Limit({ maxBytes: this.maxBytes })
     }
@@ -227,25 +265,27 @@ class OpReadCap implements Policy {
   }
 }
 
-class LineCap implements Policy {
+class LineCap implements TestPolicy<ExecuteResultContext> {
+  readonly hook = 'postExecute'
   private readonly limit: Limit
   constructor(spec: PolicySpec) {
-    const { name: _name, ...fields } = spec
+    const { name: _name, sync: _sync, ...fields } = spec
     this.limit = new Limit(camelizeKeys(fields))
   }
-  postExecute(): Action | null {
+  decide(_ctx: ExecuteResultContext): Action | null {
     return this.limit
   }
 }
 
-class Boom implements Policy {
+class Boom implements TestPolicy<ExecuteResultContext> {
+  readonly hook = 'postExecute'
   constructor(_spec: PolicySpec) {}
-  postExecute(_ctx: ExecuteResultContext): Action | null {
+  decide(_ctx: ExecuteResultContext): Action | null {
     throw new Error('boom')
   }
 }
 
-const POLICY_KINDS: Record<string, new (spec: PolicySpec) => Policy> = {
+const POLICY_KINDS: Record<string, new (spec: PolicySpec) => TestPolicy<never>> = {
   deny_flag: DenyFlag,
   lock_writes: LockWrites,
   seal_reads: SealReads,
@@ -255,10 +295,21 @@ const POLICY_KINDS: Record<string, new (spec: PolicySpec) => Policy> = {
   boom: Boom,
 }
 
+// The hook goes on the instance rather than a wrapper object so the
+// fail-closed refusal still names the class (`policy Boom failed`).
 function buildPolicy(spec: PolicySpec): Policy {
   const cls = POLICY_KINDS[spec.name]
   if (cls === undefined) throw new Error(`unknown policy kind: ${spec.name}`)
-  return new cls(spec)
+  const policy = new cls(spec)
+  const decide = (ctx: never): Action | null => policy.decide(ctx)
+  const hook =
+    spec.sync === true
+      ? decide
+      : (ctx: never): Promise<Action | null> =>
+          new Promise((resolve) => {
+            resolve(decide(ctx))
+          })
+  return Object.assign(policy, { [policy.hook]: hook }) as unknown as Policy
 }
 
 function expand(value: unknown): unknown {
@@ -372,11 +423,11 @@ function buildEntry(entry: string | Record<string, unknown>): RuntimeEntry {
     options.config = camelizeKeys(expand(entry.config) as Record<string, unknown>)
   }
   if (entry.script !== undefined) options.script = new ScriptSource(entry.script as string)
-  if (entry.name === 'echobox') return new EchoBox(options)
   return buildRuntime(entry.name as string, options)
 }
 
 async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
+  registerRuntimes(world.register_runtimes ?? {})
   const mounts: Record<string, MountSpec> = {}
   const seeds: [string, string, string][] = []
   const mountSpecs = world.mounts ?? { '/ram': { resource: 'ram' } }

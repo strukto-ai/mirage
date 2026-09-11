@@ -19,6 +19,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
+from mirage.agents.io_text import with_refusal
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Action, Ask, CommandContext, Decision, Policy, Scope
@@ -971,7 +972,7 @@ REVIEWER_COMMANDS = {
 
 def _commands_ws() -> Workspace:
     # The frozen subtree is seeded on the resource: the pure path rule
-    # holds at every op door, the host's `ws.ops` included.
+    # holds at every op door, the host's `ws.fs` included.
     repo = RAMResource()
     repo._store.dirs.add("/locked")
     repo._store.files["/locked/y"] = b"y\n"
@@ -993,7 +994,8 @@ def _commands_ws() -> Workspace:
 async def _line(ws: Workspace, line: str, sid: str | None = None):
     r = (await ws.execute(line, session_id=sid)
          if sid is not None else await ws.execute(line))
-    return r.exit_code, await r.stdout_str(), await r.stderr_str()
+    return (r.exit_code, await
+            r.stdout_str(), with_refusal(await r.stderr_str(), r.refusal))
 
 
 @pytest.mark.asyncio
@@ -1048,8 +1050,8 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
         assert (await _line(ws, "type git", "rev"))[0] == 0
         assert await _line(
             ws, "git commit -m x",
-            "rev") == (126, "",
-                       "git: policy denied: git commit is not allowed\n")
+            "rev") == (126, "", "git: Permission denied\n"
+                       "policy denied: git commit is not allowed\n")
         # The verb walk normalizes the line: options before the verb are
         # not the verb, so `git -C /repo status` is `git status`.
         code, _, err = await _line(ws, "git -C /repo status", "rev")
@@ -1075,9 +1077,9 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
                               }
                           })
         assert (await _line(ws, "cat /repo/d/x", "tight"))[0] == 0
-        assert await _line(
-            ws, "echo hi",
-            "tight") == (126, "", "echo: policy denied: read-only session\n")
+        assert await _line(ws, "echo hi", "tight") == (
+            126, "",
+            "echo: Permission denied\npolicy denied: read-only session\n")
         code, _, err = await _line(ws, "git log", "tight")
         assert "not allowed" not in err
     finally:
@@ -1100,15 +1102,17 @@ async def test_deny_rules_by_source_scope_and_voice():
             ws,
             "cat /repo/locked/y") == (1, "", "cat: /repo/locked/y: frozen\n")
         with pytest.raises(PermissionError):
-            await ws.ops.write("/repo/locked/y", b"changed")
-        assert await ws.ops.read("/repo/d/x") == b""
+            await ws.fs.write("/repo/locked/y", b"changed")
+        assert await ws.fs.read("/repo/d/x") == b""
         # A mount section's rule applies when the line works inside the
         # mount (cwd under it, or a path under it), whole command; the
         # verb walk reads `-C /repo reset --hard` as `git reset --hard`.
         assert await _line(ws, "cd /repo && git commit -m x") == (
-            126, "", "git: policy denied: history is read-only here\n")
+            126, "", "git: Permission denied\n"
+            "policy denied: history is read-only here\n")
         assert await _line(ws, "cd /scratch && git -C /repo reset --hard") == (
-            126, "", "git: policy denied: history is read-only here\n")
+            126, "", "git: Permission denied\n"
+            "policy denied: history is read-only here\n")
         code, _, err = await _line(ws, "cd /scratch && git commit -m x")
         assert "read-only" not in err
         code, _, err = await _line(ws, "cd /repo && git reset --soft HEAD")
@@ -1133,7 +1137,7 @@ async def test_find_delete_is_gated_at_the_op_door_not_by_a_named_rule():
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
         # The same rule holds for the host's own door, read or write.
         with pytest.raises(PermissionError):
-            await ws.ops.read("/repo/locked/y")
+            await ws.fs.read("/repo/locked/y")
     finally:
         await ws.close()
 
@@ -1261,15 +1265,13 @@ async def test_a_mount_rule_speaks_on_a_walk_from_above():
     try:
         await ws.execute("echo x > /scratch/a && echo x > /elsewhere/a && "
                          "echo x > /scratch/child/c")
-        assert await _line(
-            ws,
-            "grep -r x /scratch") == (126, "", "grep: policy denied: boxed\n")
+        assert await _line(ws, "grep -r x /scratch") == (
+            126, "", "grep: Permission denied\npolicy denied: boxed\n")
         code, out, _ = await _line(ws, "grep -r x /elsewhere")
         assert (code, out) == (0, "/elsewhere/a:x\n")
         # Inside the mount the rule needs no ancestor help.
-        assert await _line(
-            ws, "grep x /scratch/child/c") == (126, "",
-                                               "grep: policy denied: boxed\n")
+        assert await _line(ws, "grep x /scratch/child/c") == (
+            126, "", "grep: Permission denied\npolicy denied: boxed\n")
         # A non-recursive grep of the parent never enters the child.
         code, _, err = await _line(ws, "grep x /scratch")
         assert code == 2 and "Is a directory" in err
@@ -1323,9 +1325,9 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         assert await _line(
             ws, "cat /repo/a | wc -l") == (0, "box:cat /repo/a | wc -l", "")
         ws.create_session("rev", profile="reviewer")
-        assert await _line(
-            ws, "git add x",
-            "rev") == (126, "", "git: policy denied: git add is not allowed\n")
+        assert await _line(ws, "git add x", "rev") == (
+            126, "",
+            "git: Permission denied\npolicy denied: git add is not allowed\n")
         assert (await _line(ws, "git status", "rev"))[0] == 0
         assert box.lines == ["cat /repo/a | wc -l", "git status"]
     finally:
@@ -1364,37 +1366,35 @@ async def test_a_whole_line_runtime_reads_only_literal_words():
                    runtimes=[box, "vfs"])
     ws.register_cli("git", cli_spec_for("git"))
     try:
-        unread = ("policy denied: cannot read {} before the runtime "
+        unread = ("Permission denied\n"
+                  "policy denied: cannot read {} before the runtime "
                   "expands it\n")
-        assert await _line(ws,
-                           "rm /repo/x") == (126, "",
-                                             "rm: policy denied: no deletes\n")
+        assert await _line(ws, "rm /repo/x") == (
+            126, "", "rm: Permission denied\npolicy denied: no deletes\n")
         assert await _line(ws, "$cmd /repo/x") == (126, "", "$cmd: " +
                                                    unread.format("$cmd"))
         assert await _line(ws, "PAYLOAD='rm /repo/x'; eval \"$PAYLOAD\"") == (
             126, "", '"$PAYLOAD": ' + unread.format('"$PAYLOAD"'))
-        assert await _line(
-            ws, "eval 'rm /repo/x'") == (126, "",
-                                         "rm: policy denied: no deletes\n")
+        assert await _line(ws, "eval 'rm /repo/x'") == (
+            126, "", "rm: Permission denied\npolicy denied: no deletes\n")
         assert await _line(ws, 'cat "$f"') == (126, "",
                                                "cat: " + unread.format('"$f"'))
         assert await _line(ws,
                            'git "$verb" origin') == (126, "", "git: " +
                                                      unread.format('"$verb"'))
-        assert await _line(
-            ws, "ls /repo | xargs rm") == (126, "",
-                                           "rm: policy denied: no deletes\n")
+        assert await _line(ws, "ls /repo | xargs rm") == (
+            126, "", "rm: Permission denied\npolicy denied: no deletes\n")
         assert await _line(ws, "ls /repo | xargs cat") == (
-            126, "",
-            "cat: policy denied: runs on operands the gate cannot read\n")
+            126, "", "cat: Permission denied\n"
+            "policy denied: runs on operands the gate cannot read\n")
         assert await _line(ws, "source /repo/env.sh") == (
-            126, "",
-            "source: policy denied: runs lines the gate cannot read\n")
+            126, "", "source: Permission denied\n"
+            "policy denied: runs lines the gate cannot read\n")
         assert await _line(ws, "sh -c 'timeout 5 rm /repo/x'") == (
-            126, "", "rm: policy denied: no deletes\n")
-        assert await _line(
-            ws, "builtin eval 'rm /repo/x'") == (126, "", "rm: policy denied: "
-                                                 "no deletes\n")
+            126, "", "rm: Permission denied\npolicy denied: no deletes\n")
+        assert await _line(ws, "builtin eval 'rm /repo/x'") == (
+            126, "", "rm: Permission denied\npolicy denied: "
+            "no deletes\n")
         assert box.lines == []
         # Literal words, and dynamic ones no rule reads, reach the runtime.
         for line in ('echo "$HOME" $(date)', "git status", "'cat' /repo/a",
@@ -1518,7 +1518,7 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
                           "cat: /repo/sealed/x: No such file or directory\n")
         code, _, err = await _line(ws, "rm /repo/shared/a")
         assert code == 126 and err.startswith(
-            "rm: requires approval: sign-off")
+            "rm: Permission denied\nrequires approval: sign-off")
         assert await _line(ws, "rm /repo/shared/a", "veiled") == (
             1, "",
             "rm: cannot remove '/repo/shared/a': No such file or directory\n")
@@ -1526,9 +1526,10 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
                 ] == [ws._session_mgr.default_id]
         assert await _line(ws, "ls /repo", "veiled") == (0, "", "")
         # A rule with no path in it still speaks: nothing hidden is named.
-        assert await _line(ws, "head /repo/private/k",
-                           "veiled") == (126, "",
-                                         "head: policy denied: no heads\n")
+        assert await _line(
+            ws, "head /repo/private/k",
+            "veiled") == (126, "",
+                          "head: Permission denied\npolicy denied: no heads\n")
     finally:
         await ws.close()
 
@@ -1583,7 +1584,7 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
         code, _, err = await _line(ws, "rm /scratch/z")
         assert code == 126
         (request, ) = ws.decisions.pending()
-        assert err == (f"rm: requires approval: sign-off "
+        assert err == (f"rm: Permission denied\nrequires approval: sign-off "
                        f"(ask {request.id})\n")
         assert (request.command, request.argv, request.cwd,
                 request.paths) == ("rm", ("/scratch/z", ), "/",
@@ -1637,13 +1638,15 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
         # A bare pattern asks with the default reason.
         code, _, err = await _line(ws, "head /repo/d/x")
         assert code == 126
-        assert err.startswith("head: requires approval: no standing approval")
+        assert err.startswith(
+            "head: Permission denied\nrequires approval: no standing approval")
         # Denied: the retry is refused once in the deny voice, then the
         # question is open again.
         pending = {r.command: r for r in ws.decisions.pending()}
         await ws.decisions.answer(pending["head"].id, Outcome.DENY)
         assert await _line(ws, "head /repo/d/x") == (
-            126, "", "head: policy denied: no standing approval\n")
+            126, "",
+            "head: Permission denied\npolicy denied: no standing approval\n")
         code, _, err = await _line(ws, "head /repo/d/x")
         assert code == 126 and "requires approval" in err
     finally:
@@ -1692,8 +1695,9 @@ async def test_a_coded_ask_routes_to_the_same_door():
         code, _, err = await _line(ws, "wc -c /scratch/z")
         assert code == 126
         (request, ) = ws.decisions.pending()
-        assert err == (f"wc: requires approval: looks risky "
-                       f"(ask {request.id})\n")
+        assert err == (
+            f"wc: Permission denied\nrequires approval: looks risky "
+            f"(ask {request.id})\n")
         # The synthesized rule names the program, so a session grant
         # covers every wc line.
         assert request.rule == CommandRule(reason="looks risky",
@@ -1748,8 +1752,8 @@ async def test_a_blocking_host_answers_inside_the_line():
     ws = _ask_ws(on_ask=_host_denies)
     try:
         await ws.execute("touch /scratch/z")
-        assert await _line(
-            ws, "rm /scratch/z") == (126, "", "rm: policy denied: sign-off\n")
+        assert await _line(ws, "rm /scratch/z") == (
+            126, "", "rm: Permission denied\npolicy denied: sign-off\n")
         assert (await _line(ws, "cat /scratch/z"))[0] == 0
     finally:
         await ws.close()
@@ -1943,7 +1947,8 @@ async def test_an_asked_scope_reached_by_a_walk_is_refused_until_named():
             "g") == (2, "", "grep: /data/t/asked/a: Permission denied\n")
         assert ws.decisions.pending() == ()
         code, _, err = await _line(ws, "grep a /data/t/asked/a", "g")
-        assert code == 126 and err.startswith("grep: requires approval: nod")
+        assert code == 126 and err.startswith(
+            "grep: Permission denied\nrequires approval: nod")
         (request, ) = ws.decisions.pending()
         await ws.decisions.answer(request.id, Outcome.ALLOW)
         assert await _line(ws, "grep a /data/t/asked/a", "g") == (0, "a\n", "")
@@ -1965,11 +1970,11 @@ async def test_the_op_door_stats_a_refused_entry_and_withholds_its_content():
         sess = ws.get_session("g")
         token = set_current_session(sess)
         try:
-            assert (await ws.ops.stat("/data/t/locked/y")).size == 2
+            assert (await ws.fs.stat("/data/t/locked/y")).size == 2
             with pytest.raises(PermissionError):
-                await ws.ops.read("/data/t/locked/y")
+                await ws.fs.read("/data/t/locked/y")
             with pytest.raises(FileNotFoundError):
-                await ws.ops.stat("/data/t/ghost/g")
+                await ws.fs.stat("/data/t/ghost/g")
         finally:
             reset_current_session(token)
     finally:
@@ -2041,38 +2046,58 @@ def test_a_misspelled_document_field_fails_at_construction():
         ws.create_session("x", permissions={"command": {"deny": []}})
 
 
-def test_a_script_alone_is_a_whole_profile():
-    # The document is optional beside a script: nothing is hidden, and
-    # the script is the profile's whole admission policy.
+def test_a_policy_alone_is_a_whole_profile():
+    # The document is optional beside a policy: nothing is hidden, and
+    # the policy is the profile's whole admission policy.
     profile = SessionProfile.model_validate({
-        "script": ScriptSource("None"),
-        "runtime": "monty",
+        "policy": {
+            "script": ScriptSource("None"),
+            "runtime": "monty",
+        },
     })
-    assert isinstance(profile.script, ScriptSource)
-    assert profile.runtime == "monty"
+    assert profile.policy is not None
+    assert isinstance(profile.policy.script, ScriptSource)
+    assert profile.policy.runtime == "monty"
     assert profile.commands is None
 
 
-def test_a_script_rides_beside_the_document():
+def test_a_policy_rides_beside_the_document():
     profile = SessionProfile.model_validate({
         "commands": {
             "allow": ["ls"]
         },
-        "script": ScriptSource("None"),
-        "runtime": "monty",
+        "policy": {
+            "script": ScriptSource("None"),
+            "runtime": "monty",
+        },
     })
-    assert isinstance(profile.script, ScriptSource)
-    assert profile.runtime == "monty"
+    assert profile.policy is not None
+    assert isinstance(profile.policy.script, ScriptSource)
     assert profile.commands is not None
 
 
-def test_a_script_without_a_runtime_is_refused():
-    # There is no default engine, so a script that names none is a
+def test_a_policy_without_a_runtime_is_refused():
+    # There is no default engine, so a policy that names none is a
     # config error, not a guess.
-    with pytest.raises(ValidationError, match="set runtime beside script"):
-        SessionProfile.model_validate({"script": ScriptSource("None")})
+    with pytest.raises(ValidationError, match="runtime"):
+        SessionProfile.model_validate(
+            {"policy": {
+                "script": ScriptSource("None")
+            }})
 
 
-def test_a_runtime_without_a_script_is_refused():
-    with pytest.raises(ValidationError, match="states no script"):
+def test_a_policy_is_a_block_not_a_path():
+    with pytest.raises(ValidationError):
+        SessionProfile.model_validate({"policy": "roles/x.py"})
+
+
+def test_the_old_script_and_runtime_keys_are_told_where_they_went():
+    # Shipped first as `script` with `runtime` beside it; the refusal
+    # says where they went.
+    with pytest.raises(ValidationError, match="now one policy block"):
+        SessionProfile.model_validate({
+            "script": ScriptSource("None"),
+            "runtime": "monty",
+        })
+    with pytest.raises(ValidationError, match="now one policy block"):
         SessionProfile.model_validate({"runtime": "monty"})

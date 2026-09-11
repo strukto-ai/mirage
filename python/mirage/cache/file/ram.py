@@ -141,8 +141,9 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
             self._clear_locks()
 
     async def evict_prefix(self, prefix: str) -> None:
-        # Snapshot first: remove() mutates _entries as it goes.
-        for key in [k for k in self._entries if k.startswith(prefix)]:
+        # A pending fill may not have installed an entry yet.
+        keys = self._entries.keys() | self._drain_tasks.keys()
+        for key in [k for k in keys if k.startswith(prefix)]:
             await self.remove(key)
 
     def evict_paths(self, paths: Iterable[str]) -> None:

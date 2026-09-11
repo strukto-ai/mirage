@@ -30,7 +30,7 @@ class MirageEditor(ApplyPatchEditor):
         self._ws = workspace
 
     async def create_file(self, op: ApplyPatchOperation) -> ApplyPatchResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         parent = "/".join(op.path.rstrip("/").split("/")[:-1]) or "/"
         try:
             await ops.mkdir(parent)
@@ -42,7 +42,7 @@ class MirageEditor(ApplyPatchEditor):
         return ApplyPatchResult(status="completed")
 
     async def update_file(self, op: ApplyPatchOperation) -> ApplyPatchResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             data = await ops.read(op.path)
         except (FileNotFoundError, ValueError):
@@ -54,7 +54,7 @@ class MirageEditor(ApplyPatchEditor):
         return ApplyPatchResult(status="completed")
 
     async def delete_file(self, op: ApplyPatchOperation) -> ApplyPatchResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             await ops.unlink(op.path)
         except (FileNotFoundError, ValueError):

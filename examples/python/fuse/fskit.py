@@ -74,7 +74,7 @@ def show_size_warning() -> None:
     """
     print("=== the size warning ===")
     ws = Workspace({"/api": Mount(SizeUnknownRAM(), mode=MountMode.READ)})
-    check_sizes(MountBackend.FSKIT, ws.ops, "")
+    check_sizes(MountBackend.FSKIT, ws.fs, "")
     print("  FSKit has no direct_io: a read is clamped to the size stat")
     print("  reported at lookup, and that clamp is never refreshed. A")
     print("  size-unknown file mounts anyway, stats as 0, and reads as")

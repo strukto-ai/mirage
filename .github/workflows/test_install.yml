@@ -10,6 +10,7 @@ permissions:
       - python/**
       - typescript/**
       - .github/workflows/test_install.yml
+      - .github/actions/setup-node-pnpm/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -35,6 +36,7 @@ jobs:
               - 'python/**'
               - 'typescript/**'
               - '.github/workflows/test_install.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
 
   python-install:
     needs: changes
@@ -46,6 +48,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Base install (no extras) on 3.11 and 3.12
@@ -142,17 +145,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
+          node-version: "24"
 
       - name: Install TypeScript dependencies
         working-directory: typescript

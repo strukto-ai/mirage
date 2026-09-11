@@ -27,7 +27,7 @@ def build() -> tuple[Workspace, MirageNFS]:
     """A seeded workspace and an adapter over its ops."""
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     asyncio.run(ws.execute("tee /a.txt", stdin=b"hello"))
-    return ws, MirageNFS(ws.ops)
+    return ws, MirageNFS(ws.fs)
 
 
 def test_the_declared_attributes_are_exactly_the_bound_ones():
@@ -75,7 +75,7 @@ def test_the_session_reaches_the_op_that_enforces_it():
     # is what makes the grants apply.
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     asyncio.run(ws.execute("tee /a.txt", stdin=b"hello"))
-    ops = RecordingOps(ws.ops)
+    ops = RecordingOps(ws.fs)
     session = ws.create_session("scoped")
     bound = SessionBoundNFS(MirageNFS(ops), session)
 
@@ -86,7 +86,7 @@ def test_the_session_reaches_the_op_that_enforces_it():
 def test_an_unscoped_adapter_reaches_the_op_with_no_session():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     asyncio.run(ws.execute("tee /a.txt", stdin=b"hello"))
-    ops = RecordingOps(ws.ops)
+    ops = RecordingOps(ws.fs)
     fs = MirageNFS(ops)
     asyncio.run(fs.lookup(fs.root_dir(), "a.txt"))
     assert ops.seen == [None]

@@ -15,10 +15,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { SourceBlockSchema } from './config.ts'
+import { SecretSourceSchema } from './config.ts'
 import { SecretsError } from './errors.ts'
 import { fetchSecret, registerSecrets } from './registry.ts'
-import { configValue, resolveSources } from './sources.ts'
+import {
+  configValue,
+  isConfigPointer,
+  resolveConfigSecrets,
+  resolveSources,
+  resolveSourcesFor,
+} from './sources.ts'
 import type { ResolvedSecret, ResolvedSource } from './types.ts'
 
 const DemoConfig = z.strictObject({
@@ -31,8 +37,8 @@ function fetchDemo(config: DemoConfig, _ref: string): Promise<ResolvedSecret> {
   return Promise.resolve({ fields: { credential: `${config.account}:${config.token ?? 'none'}` } })
 }
 
-function block(config: Record<string, unknown>): ReturnType<typeof SourceBlockSchema.parse> {
-  return SourceBlockSchema.parse({ source: 'demo-sources', config })
+function block(config: Record<string, unknown>): ReturnType<typeof SecretSourceSchema.parse> {
+  return SecretSourceSchema.parse({ source: 'demo-sources', config })
 }
 
 function instance(built: Record<string, ResolvedSource>, name: string): ResolvedSource {
@@ -58,6 +64,17 @@ describe('resolveSources', () => {
     registerSecrets('env', EnvConfig, () =>
       Promise.resolve({ fields: { ...process.env } as Record<string, string> }),
     )
+  })
+
+  it('takes a raw declaration, not only a parsed one', async () => {
+    // The config door and a clone override hand over what they were
+    // given; only the constructor parses eagerly.
+    const built = await resolveSources({
+      prod: { source: 'demo-sources', config: { account: 'raw' } },
+    })
+    const prod = instance(built, 'prod')
+    const secret = await prod.fetch(prod.config as never, 'r')
+    expect(secret.fields.credential).toBe('raw:none')
   })
 
   it('carries a literal config to the source', async () => {
@@ -107,7 +124,7 @@ describe('resolveSources', () => {
 
   it('names the known sources for an unknown one', async () => {
     await expect(
-      resolveSources({ prod: SourceBlockSchema.parse({ source: 'nope' }) }),
+      resolveSources({ prod: SecretSourceSchema.parse({ source: 'nope' }) }),
     ).rejects.toThrowError(SecretsError)
   })
 
@@ -137,7 +154,7 @@ describe('resolveSources', () => {
     process.env.SOURCES_PROBE = 'v'
     try {
       const ref = block({ token: { from: 'env', key: 'SOURCES_PROBE' } }).config.token
-      expect(await configValue('prod', 'token', ref as never, new Map())).toBe('v')
+      expect(await configValue('secrets.prod.config.token', ref as never, new Map())).toBe('v')
     } finally {
       delete process.env.SOURCES_PROBE
     }
@@ -165,7 +182,7 @@ describe('resolveSources', () => {
     process.env.SOURCES_LOUD = 's3cr3t-value'
     try {
       const caught = await resolveSources({
-        prod: SourceBlockSchema.parse({
+        prod: SecretSourceSchema.parse({
           source: 'loud-sources',
           config: { token: { from: 'env', key: 'SOURCES_LOUD' } },
         }),
@@ -189,7 +206,7 @@ describe('resolveSources', () => {
       return Promise.resolve({ fields: { A: 'a', B: 'b' } })
     })
     const built = await resolveSources({
-      prod: SourceBlockSchema.parse({
+      prod: SecretSourceSchema.parse({
         source: 'demo-sources',
         config: {
           account: { from: 'dotenv', ref: '/one/file', key: 'A' },
@@ -214,7 +231,7 @@ describe('resolveSources', () => {
     process.env.SOURCES_THROWN = 's3cr3t-value'
     try {
       const caught = await resolveSources({
-        prod: SourceBlockSchema.parse({
+        prod: SecretSourceSchema.parse({
           source: 'throwing-sources',
           config: { token: { from: 'env', key: 'SOURCES_THROWN' } },
         }),
@@ -232,7 +249,7 @@ describe('resolveSources', () => {
   it('reports a bootstrap field named after a prototype member absent', async () => {
     registerSecrets('dotenv', DeadConfig, () => Promise.resolve({ fields: { A: 'a' } }))
     const caught = await resolveSources({
-      prod: SourceBlockSchema.parse({
+      prod: SecretSourceSchema.parse({
         source: 'demo-sources',
         config: { token: { from: 'dotenv', ref: '/f', key: 'constructor' } },
       }),
@@ -248,7 +265,7 @@ describe('resolveSources', () => {
       Promise.reject(new SecretsError('dotenv file not found: /host/only/.env')),
     )
     const caught = await resolveSources({
-      prod: SourceBlockSchema.parse({
+      prod: SecretSourceSchema.parse({
         source: 'demo-sources',
         config: { token: { from: 'dotenv', ref: '/host/only/.env', key: 'TOKEN' } },
       }),
@@ -259,5 +276,146 @@ describe('resolveSources', () => {
     expect(caught).toBeInstanceOf(SecretsError)
     expect(String(caught)).toContain('secrets.prod.config.token: cannot fetch from dotenv')
     expect(String(caught)).not.toContain('/host/only/.env')
+  })
+})
+
+describe('isConfigPointer', () => {
+  it('accepts the three-key grammar', () => {
+    expect(isConfigPointer({ from: 'env', ref: 'r', key: 'K' })).toBe(true)
+    expect(isConfigPointer({ from: 'env', key: 'K' })).toBe(true)
+  })
+
+  it('rejects an ordinary object that merely carries a `from`', () => {
+    // Strict on purpose: python narrows the same set by validating it
+    // as `SecretRef`, extra keys included.
+    expect(isConfigPointer({ from: 'a@b.com', to: 'c@d.com', subject: 'hi' })).toBe(false)
+  })
+
+  it('rejects a plain value, an array and null', () => {
+    expect(isConfigPointer('xoxb-literal')).toBe(false)
+    expect(isConfigPointer([{ from: 'env', key: 'K' }])).toBe(false)
+    expect(isConfigPointer(null)).toBe(false)
+  })
+})
+
+describe('resolveConfigSecrets', () => {
+  beforeEach(() => {
+    process.env.CONFIG_SECRETS_PROBE = 'xoxb-fetched'
+  })
+
+  it('substitutes the fetched secret and keeps every literal', async () => {
+    registerSecrets('env', EnvConfig, (_c: unknown, _r: string) =>
+      Promise.resolve({ fields: { CONFIG_SECRETS_PROBE: 'xoxb-fetched' } }),
+    )
+    const out = await resolveConfigSecrets({
+      token: { from: 'env', key: 'CONFIG_SECRETS_PROBE' },
+      baseUrl: 'https://slack.com/api',
+    })
+    expect(out).toEqual({ token: 'xoxb-fetched', baseUrl: 'https://slack.com/api' })
+  })
+
+  it('leaves a config with no pointer alone', async () => {
+    expect(await resolveConfigSecrets({ token: 'xoxb-literal' })).toEqual({
+      token: 'xoxb-literal',
+    })
+  })
+
+  it('recurses into a nested object', async () => {
+    registerSecrets('env', EnvConfig, (_c: unknown, _r: string) =>
+      Promise.resolve({ fields: { CONFIG_SECRETS_PROBE: 'xoxb-fetched' } }),
+    )
+    const out = await resolveConfigSecrets({
+      inner: { token: { from: 'env', key: 'CONFIG_SECRETS_PROBE' } },
+      n: 1,
+    })
+    expect(out).toEqual({ inner: { token: 'xoxb-fetched' }, n: 1 })
+  })
+
+  it('leaves a class instance whole', async () => {
+    // A config field may hold a live object: rebuilding it from its
+    // own entries drops the methods the resource then calls.
+    class AuthProvider {
+      readonly kind = 'oauth'
+      tokens(): string {
+        return 'from-the-provider'
+      }
+    }
+    const provider = new AuthProvider()
+    const out = await resolveConfigSecrets({ authProvider: provider })
+    expect(out.authProvider).toBe(provider)
+    expect((out.authProvider as AuthProvider).tokens()).toBe('from-the-provider')
+  })
+
+  it('leaves an instance carrying a `from` alone', async () => {
+    class Named {
+      readonly from = 'env'
+      readonly key = 'CONFIG_SECRETS_PROBE'
+    }
+    const named = new Named()
+    expect(isConfigPointer(named)).toBe(false)
+    const out = await resolveConfigSecrets({ authProvider: named })
+    expect(out.authProvider).toBe(named)
+  })
+
+  it('labels an error with the config field path', async () => {
+    registerSecrets('env', EnvConfig, (_c: unknown, _r: string) =>
+      Promise.resolve({ fields: { OTHER: 'x' } }),
+    )
+    const failing = resolveConfigSecrets(
+      { token: { from: 'env', key: 'CONFIG_SECRETS_PROBE' } },
+      undefined,
+      'mounts./slack.config',
+    )
+    await expect(failing).rejects.toThrow("mounts./slack.config.token: wanted field 'CONFIG")
+  })
+})
+
+describe('resolveSourcesFor', () => {
+  beforeEach(() => {
+    registerSecrets('demo-sources', DemoConfig, fetchDemo)
+    registerSecrets('env', EnvConfig, () =>
+      Promise.resolve({ fields: { ...process.env } as Record<string, string> }),
+    )
+    delete process.env.SOURCES_FOR_ABSENT
+  })
+
+  // A declaration whose own config points at a bootstrap value that is
+  // not there, so building it fails.
+  function brokenBootstrap(): Record<string, unknown> {
+    return {
+      prod: {
+        source: 'demo-sources',
+        config: { account: { from: 'env', key: 'SOURCES_FOR_ABSENT' } },
+      },
+    }
+  }
+  const pointer = { from: 'prod', ref: 'r', key: 'credential' }
+
+  it('builds nothing when no config points', async () => {
+    // Building a source reads its bootstrap pointers, and a dotenv file
+    // is I/O; a door whose configs hold no pointer must not pay it, or
+    // a momentarily unreadable file fails a workspace that never
+    // needed the source.
+    expect(await resolveSourcesFor(brokenBootstrap(), [{ token: 'literal' }, {}])).toBeUndefined()
+  })
+
+  it('builds when a config points', async () => {
+    await expect(resolveSourcesFor(brokenBootstrap(), [{ token: pointer }])).rejects.toThrow(
+      'secrets.prod.config.account',
+    )
+    const built = await resolveSourcesFor(
+      { prod: { source: 'demo-sources', config: { account: 'a1' } } },
+      [{ inner: [{ token: pointer }] }],
+    )
+    expect(instance(built ?? {}, 'prod').source).toBe('demo-sources')
+  })
+
+  it('leaves a bad container to the constructor', async () => {
+    expect(await resolveSourcesFor(undefined, [{ token: pointer }])).toBeUndefined()
+    expect(await resolveSourcesFor(null, [{ token: pointer }])).toBeUndefined()
+    expect(await resolveSourcesFor({}, [{ token: pointer }])).toBeUndefined()
+    // A list from an untyped REST override is not a mapping; the
+    // constructor refuses it with the wording every door shares.
+    expect(await resolveSourcesFor([brokenBootstrap()], [{ token: pointer }])).toBeUndefined()
   })
 })

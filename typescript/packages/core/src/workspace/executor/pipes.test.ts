@@ -22,6 +22,7 @@ import { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
+import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 
 function node(text: string): TSNodeLike {
   return { type: 'command', text, children: [], namedChildren: [], isNamed: true }
@@ -92,6 +93,44 @@ describe('handlePipe', () => {
     const right = calls.find((c) => c.text === 'right')
     expect(right?.stdinIsNull).toBe(false)
     expect(right?.stdinBytes).toBe('')
+  })
+
+  it('shows every segment the status the pipeline started with', async () => {
+    const s = new Session({ sessionId: 'test' })
+    s.lastExitCode = 1
+    const seen: number[] = []
+    const execute: ExecuteNodeFn = (nd, session) => {
+      seen.push(session.lastExitCode)
+      // An inner statement of a compound segment lands its own status.
+      session.lastExitCode = 0
+      return Promise.resolve([
+        null,
+        new IOResult({ exitCode: 0 }),
+        new ExecutionNode({ command: nd.text, exitCode: 0 }),
+      ])
+    }
+    await handlePipe(execute, [node('a'), node('b')], [false], s)
+    expect(seen).toEqual([1, 1])
+  })
+
+  it('expands $? in a segment to the pre-pipeline status', async () => {
+    // bash 5.2: each segment is a child of the shell as it stood before
+    // the pipeline, so `$?` is the pre-pipeline status even after a
+    // sibling segment ran a compound command or a function.
+    const { ws } = await makeIntegrationWS()
+    try {
+      for (const line of [
+        'false; { true; } | echo $?',
+        'f() { true; }; false; f | echo $?',
+        'false; true | echo $?',
+      ]) {
+        const io = await ws.execute(line)
+        expect([io.stdoutText, io.exitCode], line).toEqual(['1\n', 0])
+      }
+      expect((await ws.execute('false; { false; } | true; echo $?')).stdoutText).toBe('0\n')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('concatenates stderr from all stages into the final IOResult', async () => {

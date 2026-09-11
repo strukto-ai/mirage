@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+
+from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.store import IndexCacheStore
+from mirage.cache.index.view import IndexView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -31,9 +36,12 @@ class CacheManager:
     pipeline runs instead of after the whole command tree.
     """
 
-    def __init__(self, file_cache: FileCacheMixin | None,
-                 index: IndexCacheStore, prefix: str,
-                 caches_reads: bool) -> None:
+    def __init__(self,
+                 file_cache: FileCacheMixin | None,
+                 index: IndexCacheStore,
+                 prefix: str,
+                 caches_reads: bool,
+                 owns_path: Callable[[str], bool] = lambda _: True) -> None:
         """Args:
             file_cache (FileCacheMixin | None): Workspace file cache
                 store; entries are keyed by mount-absolute path.
@@ -43,11 +51,35 @@ class CacheManager:
             prefix (str): Mount prefix (e.g. "/data/").
             caches_reads (bool): Whether the resource caches reads; the
                 file cache only holds paths for read-caching backends.
+            owns_path: whether this mount still owns a virtual cache key.
         """
         self._file_cache = file_cache
         self._index = index
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
+        self._owns_path = owns_path
+
+    @asynccontextmanager
+    async def mutation(self) -> AsyncIterator[None]:
+        """Drain raw backend index access before mount cache eviction."""
+        if self._file_cache is None:
+            yield
+            return
+        async with mutation_lock(self._file_cache):
+            yield
+
+    async def clear_index(self, index: IndexCacheStore) -> None:
+        """Clear the whole backend index while this mount still owns it."""
+        async with self.mutation():
+            if self._owns_path(self._prefix or "/"):
+                await index.clear()
+
+    def scope_index(self, index: IndexCacheStore) -> IndexCacheStore:
+        """Bind backend metadata writes to this mount's lifetime."""
+        if self._file_cache is None or isinstance(index, IndexView):
+            return index
+        return IndexView(index, self._file_cache, self._prefix,
+                         self._owns_path)
 
     async def _evict_dir(self, key: str) -> None:
         """Drop one directory's cached listing.
@@ -104,11 +136,13 @@ class CacheManager:
         Args:
             path (PathSpec): the path to look up.
         """
-        if not self._caches_reads or self._file_cache is None:
-            return None
         key = self._cache_key(path)
+        if (not self._caches_reads or self._file_cache is None
+                or not self._owns_path(key)):
+            return None
         if await self._file_cache.exists(key):
-            return await self._file_cache.get(key)
+            cached = await self._file_cache.get(key)
+            return cached if self._owns_path(key) else None
         return None
 
     async def invalidate_after_write(self, path: PathSpec) -> None:

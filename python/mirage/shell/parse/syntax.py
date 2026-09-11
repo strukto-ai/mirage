@@ -17,7 +17,8 @@ from collections.abc import Iterator
 import tree_sitter
 
 from mirage.io import IOResult
-from mirage.shell.parse.constants import BASH_KEYWORDS, STRUCTURAL_TOKENS
+from mirage.shell.parse.constants import (BASH_KEYWORDS, CASE_TERMINATORS,
+                                          SEPARATOR_TOKENS, STRUCTURAL_TOKENS)
 
 
 def find_unterminated_backtick(command: str) -> str | None:
@@ -77,11 +78,12 @@ def find_unterminated_backtick(command: str) -> str | None:
 def _is_structural_error(node: tree_sitter.Node) -> bool:
     """True if an ERROR node represents a real syntactic problem.
 
-    Tree-sitter occasionally emits ERROR nodes for stray statement
-    separators that bash itself accepts (notably ``& ;``). A real
-    syntax error contains a bash keyword, a bracket / quote token,
-    or a named subtree the parser tried to recover; stand-alone
-    statement separators (``;``, ``&``, ``|``) are not enough.
+    A real syntax error contains a bash keyword, a bracket / quote
+    token, a statement separator, or a named subtree the parser tried
+    to recover. A separator inside an ERROR node has nothing to
+    separate (``;s``, ``| s``, ``a ; ; b``, ``a &; b``), and GNU bash
+    5.2 refuses every such line with ``syntax error near unexpected
+    token``; an earlier reading that bash accepts ``& ;`` was wrong.
     """
     for child in node.children:
         if child.is_named:
@@ -90,7 +92,30 @@ def _is_structural_error(node: tree_sitter.Node) -> bool:
             return True
         if child.type in STRUCTURAL_TOKENS:
             return True
+        if child.type in SEPARATOR_TOKENS:
+            return True
     return False
+
+
+def _stray_case_terminator(node: tree_sitter.Node) -> str | None:
+    """The text of a ``;;`` / ``;&`` / ``;;&`` token outside a case item.
+
+    The grammar takes them as ordinary statement separators, so
+    ``true;;s`` parses cleanly and would run ``s``; bash refuses the
+    line at the token.
+
+    Args:
+        node (tree_sitter.Node): root node from parse().
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        for child in current.children:
+            if child.type in CASE_TERMINATORS and current.type != "case_item":
+                text = child.text
+                return text.decode(errors="replace") if text else child.type
+            stack.append(child)
+    return None
 
 
 def _walk_named(node: tree_sitter.Node) -> Iterator[tree_sitter.Node]:
@@ -131,6 +156,9 @@ def find_syntax_error(node: tree_sitter.Node) -> str | None:
     Returns:
         str | None: text of the offending region, or None if the AST is clean.
     """
+    stray = _stray_case_terminator(node)
+    if stray is not None:
+        return stray
     if not node.has_error:
         return None
     previous = None

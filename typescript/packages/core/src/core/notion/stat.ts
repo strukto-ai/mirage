@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexEntry } from '../../cache/index/config.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
@@ -29,7 +29,12 @@ function pageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileS
 }
 
 function pageJsonStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({ name: entry.vfsName, type: FileType.JSON, size: entry.size })
+  return new FileStat({
+    name: entry.vfsName,
+    type: FileType.FILE,
+    content: ContentType.JSON,
+    size: entry.size,
+  })
 }
 
 function databaseStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
@@ -44,7 +49,8 @@ function databaseStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
 function databaseJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     size: entry.size,
     extra: { database_id: match.slots.database_id ?? '' },
   })
@@ -62,7 +68,8 @@ function dataSourceStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry):
 function dataSourceJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     size: entry.size,
     extra: { data_source_id: match.slots.data_source_id ?? '' },
   })

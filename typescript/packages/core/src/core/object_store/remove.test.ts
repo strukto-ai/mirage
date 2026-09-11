@@ -51,7 +51,7 @@ describe('object_store remove', () => {
   // marker object, so a prefix delete removes an empty directory correctly
   // and a non-empty one recursively -- which is `rm -r`. The two slots
   // shared one function, so every caller that does not pre-check emptiness
-  // itself (FUSE, `ws.ops`, the sandbox runtimes) destroyed the subtree.
+  // itself (FUSE, `ws.fs`, the sandbox runtimes) destroyed the subtree.
   it('rmdir refuses a non-empty prefix and keeps every key', async () => {
     const store = new FakeStore({ 'a/b/': '', 'a/b/c.txt': 'hi', 'a/b/d/e.txt': 'x' })
     const code = await codeOf(makeRmdir(makeDriver(store))(accessor, spec('/a/b')))
@@ -84,7 +84,7 @@ describe('object_store remove', () => {
   // The whole-store case, which the shared prefix delete got wrong. A mount
   // root resolves to the bare key prefix, so `makeRemovePrefix` in this slot
   // emptied the entire store. MountRootPolicy refuses a mount root as an
-  // operand with EBUSY, but only on the command path; FUSE and `ws.ops`
+  // operand with EBUSY, but only on the command path; FUSE and `ws.fs`
   // reach the op. The root is also the one path that cannot report ENOENT --
   // it exists because it is mounted -- so an empty root is a no-op.
   it('rmdir on a populated mount root destroys nothing', async () => {

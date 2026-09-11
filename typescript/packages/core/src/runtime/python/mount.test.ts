@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './pyodide.ts'
 import type { BridgeDispatchFn } from '../types.ts'
-import { FileStat, FileType } from '../../types.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { PrefixResolver } from '../resolver.ts'
 
 function makeBridge(): {
@@ -64,7 +64,12 @@ function makeBridge(): {
       const found = files.get(path)
       if (found !== undefined) {
         return Promise.resolve(
-          new FileStat({ name: path, size: found.length, type: FileType.TEXT }),
+          new FileStat({
+            name: path,
+            size: found.length,
+            type: FileType.FILE,
+            content: ContentType.TEXT,
+          }),
         )
       }
       const deeper = [...files.keys()].some((p) => p.startsWith(path + '/'))
@@ -290,7 +295,9 @@ describe('PyodideRuntime mount visibility', () => {
       if (op === 'read') return Promise.resolve(new Uint8Array())
       if (op === 'readdir') return Promise.resolve(['/ram/log.txt'])
       if (op === 'stat') {
-        return Promise.resolve(new FileStat({ name: path, size: 4, type: FileType.TEXT }))
+        return Promise.resolve(
+          new FileStat({ name: path, size: 4, type: FileType.FILE, content: ContentType.TEXT }),
+        )
       }
       if (op === 'write' && bytes !== undefined) writes.push(new Uint8Array(bytes))
       return Promise.resolve(undefined)

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-browser",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -40,13 +40,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "node scripts/embed-wasm.mjs && tsup",
+    "build": "node scripts/embed-wasm.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -57,7 +62,6 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "tree-sitter-bash": "^0.25.1",
-    "tsup": "^8.5.0",
     "typescript": "^6.0.0",
     "vitest": "^3.2.6",
     "web-tree-sitter": "^0.26.13"

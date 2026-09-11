@@ -1,0 +1,64 @@
+name: Set up Node and pnpm
+description: >-
+  pnpm plus Node, with the pnpm store and node-gyp's header cache both keyed
+  on the Node version the job actually runs.
+inputs:
+  node-version:
+    description: >-
+      Node major version to install. It is part of both cache keys, so two
+      jobs on different majors never share a store.
+    required: true
+  pnpm-version:
+    description: pnpm version to install.
+    default: "10.32.1"
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v6.0.10
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - name: Set up Node
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Read the installed Node version
+      id: node
+      shell: bash
+      run: echo "node-version=$(node --version)" >> "$GITHUB_OUTPUT"
+
+    - name: Locate the pnpm store
+      id: store
+      shell: bash
+      run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    # Not `cache: pnpm` on setup-node: that keys the store on the lockfile
+    # alone, so every job in the repo shared one store whatever Node it ran.
+    # pnpm caches a package's build side-effects in the store, and those are
+    # per-ABI, so the Node 24 jobs restored a store holding the Node 22 build
+    # of @zkochan/fuse-native (the one onlyBuiltDependencies entry) and
+    # recompiled it, which sends node-gyp to nodejs.org for the headers.
+    # The restore was an exact key hit, so nothing ever re-saved and the Node
+    # 24 build was never kept: every Node 24 job re-fetched, every run.
+    - name: Cache the pnpm store
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.store.outputs.dir }}
+        key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('typescript/pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-store-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-
+
+    # The headers node-gyp downloads, so a cold store still compiles without
+    # reaching the network. node-gyp does not retry that fetch: `attempt 1
+    # failed with ECONNRESET` is the end of the install, and on 2026-09-05 one
+    # reset socket in the integ bootstrap job failed the 13 jobs waiting on
+    # its build artifact. Keyed on the resolved version rather than the major,
+    # so a runner's Node minor bump misses and re-saves instead of pinning the
+    # cache to headers nobody wants any more.
+    - name: Cache the node-gyp headers
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/node-gyp
+        key: node-gyp-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}

@@ -376,8 +376,8 @@ async def test_workspace_read_mode_uses_registered_ops():
     )
     ws = Workspace({"/volume": make_resource(files)}, mode=MountMode.READ)
 
-    assert await ws.ops.read("/volume/latest.md") == b"hello"
-    file_stat = await ws.ops.stat("/volume/latest.md")
+    assert await ws.fs.read("/volume/latest.md") == b"hello"
+    file_stat = await ws.fs.stat("/volume/latest.md")
     assert file_stat.size == 5
 
 
@@ -416,9 +416,9 @@ async def test_workspace_write_mode_uses_file_write_ops():
     seed_directory(files, root)
     ws = Workspace({"/dbx/": make_resource(files)}, mode=MountMode.WRITE)
 
-    await ws.ops.write("/dbx/new.txt", b"hello")
-    await ws.ops.create("/dbx/empty.txt")
-    await ws.ops.unlink("/dbx/new.txt")
+    await ws.fs.write("/dbx/new.txt", b"hello")
+    await ws.fs.create("/dbx/empty.txt")
+    await ws.fs.unlink("/dbx/new.txt")
 
     assert f"{root}/new.txt" not in files.downloads
     assert files.downloads[f"{root}/empty.txt"] == b""
@@ -440,7 +440,7 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
                                            ))])
     assert (await resource.index.list_dir("/dbx")).entries == ["/dbx/old.txt"]
 
-    await ws.ops.write("/dbx/new.txt", b"hello")
+    await ws.fs.write("/dbx/new.txt", b"hello")
     assert (await
             resource.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
@@ -450,7 +450,7 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
                                                name="new.txt",
                                                resource_type="file",
                                            ))])
-    await ws.ops.create("/dbx/empty.txt")
+    await ws.fs.create("/dbx/empty.txt")
     assert (await
             resource.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
@@ -460,7 +460,7 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
                                                name="empty.txt",
                                                resource_type="file",
                                            ))])
-    await ws.ops.unlink("/dbx/empty.txt")
+    await ws.fs.unlink("/dbx/empty.txt")
     assert (await
             resource.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
@@ -473,11 +473,11 @@ async def test_read_only_mount_rejects_file_write_ops():
     ws = Workspace({"/dbx/": make_resource(files)}, mode=MountMode.READ)
 
     with pytest.raises(PermissionError):
-        await ws.ops.write("/dbx/new.txt", b"hello")
+        await ws.fs.write("/dbx/new.txt", b"hello")
     with pytest.raises(PermissionError):
-        await ws.ops.create("/dbx/empty.txt")
+        await ws.fs.create("/dbx/empty.txt")
     with pytest.raises(PermissionError):
-        await ws.ops.unlink("/dbx/new.txt")
+        await ws.fs.unlink("/dbx/new.txt")
 
 
 @pytest.mark.asyncio

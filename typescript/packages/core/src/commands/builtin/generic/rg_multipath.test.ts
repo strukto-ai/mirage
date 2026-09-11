@@ -67,7 +67,7 @@ const stat = (p: PathSpec): Promise<FileStat> => {
   return Promise.resolve(
     new FileStat({
       name: k.split('/').pop() ?? '',
-      type: FOLDERS.has(k) ? FileType.DIRECTORY : FileType.TEXT,
+      type: FOLDERS.has(k) ? FileType.DIRECTORY : FileType.FILE,
     }),
   )
 }

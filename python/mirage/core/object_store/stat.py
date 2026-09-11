@@ -17,7 +17,7 @@ from mirage.core.object_store.driver import A, C, ObjectStoreDriver, StatFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -69,7 +69,7 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
                 size=entry.size,
                 modified=entry.remote_time or None,
                 type=FileType.FILE,
-                content=guess_type(entry.name),
+                content=content_type_for_path(entry.name),
             )
         # If the parent directory was already listed by readdir() but
         # this path is not among its children, it does not exist.
@@ -96,7 +96,7 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
                         size=meta.size,
                         modified=meta.modified,
                         type=FileType.FILE,
-                        content=guess_type(path),
+                        content=content_type_for_path(path),
                         fingerprint=meta.fingerprint,
                         revision=meta.revision,
                         extra=dict(meta.extra),

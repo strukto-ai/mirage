@@ -13,7 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { epochToIso, isoToEpoch, parseDateExpr, utcDateFolder } from './dates.ts'
+import { epochToIso, inMtimeWindow, isoToEpoch, parseDateExpr, utcDateFolder } from './dates.ts'
+
+describe('inMtimeWindow', () => {
+  it('keeps everything under an unbounded window', () => {
+    expect(inMtimeWindow(100, null, null)).toBe(true)
+    expect(inMtimeWindow(null, undefined, undefined)).toBe(true)
+  })
+  it('applies inclusive bounds', () => {
+    expect(inMtimeWindow(100, 100, null)).toBe(true)
+    expect(inMtimeWindow(99, 100, null)).toBe(false)
+    expect(inMtimeWindow(100, null, 100)).toBe(true)
+    expect(inMtimeWindow(101, null, 100)).toBe(false)
+  })
+  it('fails an unknown timestamp against any bound', () => {
+    expect(inMtimeWindow(null, 100, null)).toBe(false)
+    expect(inMtimeWindow(undefined, null, 100)).toBe(false)
+  })
+})
 
 describe('epochToIso', () => {
   it('formats whole seconds as second-precision ISO-Z', () => {
@@ -93,6 +110,13 @@ describe('parseDateExpr', () => {
     )
   })
 
+  it('refuses a zone past a day, as GNU and Python do', () => {
+    for (const zone of ['+99:99', '+24:00', '+23:60']) {
+      expect(parseDateExpr(`2026-01-01T00:00${zone}`, true)).toBeNull()
+    }
+    expect(parseDateExpr('2026-01-01T00:00+23:59', true)).not.toBeNull()
+  })
+
   it('truncates fractional seconds instead of rounding into the next second', () => {
     expect(parseDateExpr('2026-01-01T00:00:00.9999Z', true)).toEqual(
       new Date(Date.UTC(2026, 0, 1, 0, 0, 0, 999)),
@@ -107,5 +131,36 @@ describe('parseDateExpr', () => {
     expect(parseDateExpr('24 hours agoo', true, NOW)).toBeNull()
     expect(parseDateExpr('', true, NOW)).toBeNull()
     expect(parseDateExpr('@abc', true, NOW)).toBeNull()
+  })
+})
+
+describe('parseDateExpr years below 100', () => {
+  it('keeps a year below 100 as itself, as GNU and Python do', () => {
+    // `Date.UTC(42, ...)` is 1942; GNU `date -d 0042-01-01` is year 42.
+    expect(parseDateExpr('0042-01-01', true)?.getUTCFullYear()).toBe(42)
+    expect(parseDateExpr('0042-01-01T00:00:00Z', true)?.getUTCFullYear()).toBe(42)
+    expect(parseDateExpr('0042-01-01T00:00+01:00', true)?.getUTCFullYear()).toBe(41)
+    expect(parseDateExpr('0099-12-31', false)?.getFullYear()).toBe(99)
+    expect(parseDateExpr('0042-01-01', true)?.getTime()).toBe(-60841756800 * 1000)
+  })
+})
+
+describe('parseDateExpr @epoch', () => {
+  it.each([
+    ['@0', true],
+    ['@1', true],
+    ['@-1', true],
+    ['@1.5', true],
+    ['@ 1', true],
+    ['@+1', true],
+    ['@01', true],
+    ['@0x1', false],
+    ['@1e2', false],
+    ['@1.', false],
+    ['@.5', false],
+  ])('%s is %s', (word, accepted) => {
+    // findutils 4.10 (gnulib): Number() would take `0x1`, `1e2`, `1.` and
+    // `.5`, and GNU refuses every one of them.
+    expect(parseDateExpr(word, true) !== null).toBe(accepted)
   })
 })

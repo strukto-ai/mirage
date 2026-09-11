@@ -73,6 +73,6 @@ async def test_recreated_device_is_a_regular_file():
     a.store.files["/null"] = b"recreated\n"  # echo ... > /dev/null
     s = await stat(a, _spec("null"))
     assert s.type is FileType.FILE
-    # "null" has no extension, so guess_type falls back to BINARY.
+    # "null" has no extension, so content_type_for_path falls back to BINARY.
     assert s.content is ContentType.BINARY
     assert await read(a, _spec("null")) == b"recreated\n"

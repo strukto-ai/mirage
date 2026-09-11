@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const LangfuseConfigSchema = z.object({
   publicKey: z.string(),
@@ -34,5 +38,5 @@ export function redactLangfuseConfig(config: LangfuseConfig): LangfuseConfigReda
 }
 
 export function normalizeLangfuseConfig(input: Record<string, unknown>): LangfuseConfig {
-  return normalizeFields(input) as unknown as LangfuseConfig
+  return parseConfigWithSchema(LangfuseConfigSchema, input)
 }

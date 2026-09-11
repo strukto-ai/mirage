@@ -36,15 +36,15 @@ SEED_KEYS = ("/seaweedfs/data/example.jsonl", "/seaweedfs/data/config.json",
 
 
 async def seed(ws: Workspace) -> None:
-    await ws.ops.write(
+    await ws.fs.write(
         "/seaweedfs/data/example.jsonl",
         b'{"event":"queue-operation","tool":"mirage"}\n'
         b'{"event":"read","tool":"mirage"}\n'
         b'{"event":"queue-operation","tool":"other"}\n')
-    await ws.ops.write(
+    await ws.fs.write(
         "/seaweedfs/data/config.json",
         b'{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}')
-    await ws.ops.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
+    await ws.fs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
 
 
 async def cleanup(ws: Workspace) -> None:
@@ -90,6 +90,6 @@ with Workspace(mounts) as ws:
 
     asyncio.run(cleanup(ws))
 
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

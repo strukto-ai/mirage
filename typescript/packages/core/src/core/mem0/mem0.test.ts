@@ -56,7 +56,7 @@ describe('Mem0 filesystem', () => {
       'Mem0-User-ID': '3c6e0b8a9c15224a8228b9a98ca1531d',
     })
     expect(new TextDecoder().decode(await read(accessor, memory))).toContain('"memory": "first"')
-    expect((await stat(accessor, memory)).type).toBe('json')
+    expect((await stat(accessor, memory)).content).toBe('json')
   })
 
   it('translates a missing memory into ENOENT', async () => {

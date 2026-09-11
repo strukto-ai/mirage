@@ -34,6 +34,7 @@ function makeState(): WorkspaceStateDict {
         prefix: '/m',
         mode: 'write',
         resource_class: 'ram',
+        resource_ref: './wiki.mjs:WikiResource',
         resource_state: {
           type: 'ram',
           files: { '/a.txt': enc('hi'), '/sub/b.txt': enc('bee') },
@@ -79,6 +80,9 @@ describe('stateTree', () => {
     ])
     expect(entries['m/a.txt']).toEqual(enc('hi'))
     expect(meta.mounts[0]?.resourceState).not.toHaveProperty('files')
+    // The ref is the only locator that rebuilds a class loaded from a
+    // script file, so a commit carries it beside the class name.
+    expect(meta.mounts[0]?.resourceRef).toBe('./wiki.mjs:WikiResource')
     // Cache is the one exclusion: derived and rebuildable.
     expect(meta.cache.entries).toEqual([])
     for (const data of Object.values(entries)) {
@@ -107,5 +111,13 @@ describe('stateTree', () => {
     ])
     expect(back.default_session_id).toBe('agent_a')
     expect(back.cache.entries).toEqual([])
+    expect(back.mounts[0]?.resource_ref).toBe('./wiki.mjs:WikiResource')
+  })
+
+  it('a meta committed before the ref was recorded reads as constructed in code', () => {
+    const { entries, meta } = treeInputsFromState(makeState())
+    for (const mount of meta.mounts) delete mount.resourceRef
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.mounts[0]?.resource_ref).toBeNull()
   })
 })

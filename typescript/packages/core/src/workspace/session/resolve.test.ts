@@ -247,6 +247,20 @@ describe('compileProfile', () => {
     expect(out.cwd).toBe('/scratch')
   })
 
+  it('carries the name, which narrow stamps onto the session', () => {
+    const profile = parseSessionProfile({ cwd: '/scratch' })
+    expect(compileProfile(profile, 'reviewer').profile).toBe('reviewer')
+    const session = new Session({ sessionId: 's1' })
+    narrow(session, compileProfile(profile, 'reviewer'))
+    expect(session.profile).toBe('reviewer')
+    // A document passed without a name, and no document at all, leave
+    // the session with no profile to report.
+    expect(compileProfile(profile).profile).toBeNull()
+    expect(compileProfile(null).profile).toBeNull()
+    narrow(session, compileProfile(null))
+    expect(session.profile).toBeNull()
+  })
+
   it('collects the hides of every mount section, anchored to it', () => {
     const out = compileProfile(
       parseSessionProfile({
@@ -283,6 +297,7 @@ describe('compileProfile', () => {
       script: null,
       shownPaths: null,
       hideReasons: [],
+      profile: null,
     })
     expect(compileProfile({})).toEqual(empty)
     // A profile that names a mount without a mode narrows nothing: the

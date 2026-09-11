@@ -10,6 +10,7 @@ permissions:
       - python/**
       - typescript/**
       - .github/workflows/test_cli.yml
+      - .github/actions/setup-node-pnpm/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -17,6 +18,12 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# uv times a request out after 30s by default, which a hosted runner has
+# hit on one stalled wheel download (numpy, pulled in by the lancedb
+# extra) before any test ran.
+env:
+  UV_HTTP_TIMEOUT: 120
 
 jobs:
   changes:
@@ -41,8 +48,13 @@ jobs:
               - 'integ/cli_config.sh'
               - 'integ/cli_env.sh'
               - 'integ/cli_ref.sh'
+              - 'integ/resource_ref.sh'
+              - 'integ/runtime_ref.sh'
               - 'integ/fixtures/cli/**'
+              - 'integ/fixtures/resource/**'
+              - 'integ/fixtures/runtime/**'
               - '.github/workflows/test_cli.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
 
   typescript-build:
     needs: changes
@@ -52,17 +64,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
+          node-version: "24"
 
       - name: Install node-gyp
         run: npm install -g node-gyp
@@ -99,6 +104,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
@@ -369,17 +375,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
+          node-version: "24"
 
       - name: Install node-gyp
         run: npm install -g node-gyp
@@ -685,23 +684,17 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: "24"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install TypeScript dependencies
         working-directory: typescript
@@ -716,12 +709,12 @@ jobs:
       - name: Start MinIO
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:latest && break
+            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:latest server /data
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
@@ -763,6 +756,18 @@ jobs:
       - name: Run CLI ref battery (a program tree installed from a file)
         run: |
           bash integ/cli_ref.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Run resource ref battery (a backend mounted from a file, snapshotted and reloaded)
+        run: |
+          bash integ/resource_ref.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Run runtime ref battery (a runtime loaded from a file, both tiers)
+        run: |
+          bash integ/runtime_ref.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 

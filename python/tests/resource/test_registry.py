@@ -324,3 +324,18 @@ def test_entry_point_does_not_shadow_registered(clean_registry, monkeypatch):
 def test_unknown_resource_lists_known(clean_registry):
     with pytest.raises(KeyError, match="unknown resource"):
         build_resource("nope_not_real")
+
+
+def test_a_refused_config_value_is_not_in_the_error():
+    """`mounts.*.config` is where a fetched credential lands, and the
+    create route answers `str(e)` as its 400 detail. Pydantic puts the
+    value it refused in `input_value`, so an unparseable secret came
+    back to a caller whose only way to name it was a pointer."""
+    secret = "sk-live-notanumber"
+    with pytest.raises(ValueError) as caught:
+        build_resource("ssh", {"host": "example.com", "port": secret})
+    message = str(caught.value)
+    assert secret not in message
+    assert "port" in message
+    # The chain would carry the value into any logged traceback.
+    assert caught.value.__cause__ is None

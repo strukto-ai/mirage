@@ -34,7 +34,7 @@ ws = Workspace({"/b2/": resource}, mode=MountMode.READ)
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     return f"{len(records)} ops, {sum(r.bytes for r in records)} bytes"
 
 

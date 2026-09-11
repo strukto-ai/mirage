@@ -21,9 +21,13 @@ import { TrelloResource } from './trello/trello.ts'
 
 type Ctor = new (...args: never[]) => unknown
 
+// The contract itself is exported too, for authors extending it; it is the
+// one `*Resource` name that is not a resource.
 const RESOURCE_CLASSES = Object.entries(browserPkg as Record<string, unknown>).filter(
   (entry): entry is [string, Ctor] =>
-    /^[A-Z]\w*Resource$/.test(entry[0]) && typeof entry[1] === 'function',
+    /^[A-Z]\w*Resource$/.test(entry[0]) &&
+    typeof entry[1] === 'function' &&
+    entry[1] !== BaseResource,
 )
 
 // Inheriting the contract is what makes it reachable, not a style choice.

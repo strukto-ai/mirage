@@ -20,16 +20,22 @@ from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
+from mirage.policy.decisions import Decisions
+from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.descriptors import unreadable_stdin
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (divert_statement,
+                                                     stdout_to_stderr)
 from mirage.workspace.executor.jobs import handle_background
-from mirage.workspace.executor.statement import finish_statement
+from mirage.workspace.executor.statement import (carry_status,
+                                                 finish_statement,
+                                                 record_status)
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -48,9 +54,19 @@ async def handle_pipe(
     child_nodes: list[ExecutionNode] = []
     ios: list[IOResult] = []
     intermediate_streams: list[ByteSource] = []
+    # Every segment is a child shell forked before the pipeline ran, so
+    # each expands `$?` to the status the pipeline started with, not to
+    # what a sibling's inner statements left behind (`false; { true; } |
+    # echo $?` prints 1). The snapshot does not carry it: after a child
+    # shell `$?` is the child's status, which is the one thing it
+    # reports back. Seeded through the status door, which leaves
+    # `${PIPESTATUS[@]}` alone.
+    before = session.last_exit_code
 
     try:
         for i, cmd in enumerate(commands):
+            saved = session.snapshot()
+            record_status(session, before, transparent=True)
             try:
                 stdout, io, child_exec = await execute_node(
                     cmd, session, current_stdin, call_stack)
@@ -63,6 +79,8 @@ async def handle_pipe(
                 child_exec = ExecutionNode(command=get_text(cmd),
                                            exit_code=sig.contained_code,
                                            stderr=sig.stderr)
+            finally:
+                session.restore(saved)
             ios.append(io)
             child_nodes.append(child_exec)
 
@@ -91,6 +109,10 @@ async def handle_pipe(
             await close_quietly(s)
 
     last_io = ios[-1]
+    # Parked for the boundary that closes this statement to claim as
+    # `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
+    # rewrites the pipeline's own.
+    session._pipe_status_pending = tuple(io.exit_code for io in ios)
     if session.shell_options.get("pipefail"):
         rightmost_failure = next(
             (io.exit_code for io in reversed(ios) if io.exit_code != 0), 0)
@@ -149,11 +171,14 @@ async def handle_connection(
     children = [left_exec]
 
     if op == NT.AND:
-        left_bytes = await finish_statement(left_stdout, left_io, session)
+        left_bytes = await finish_statement(left_stdout, left_io, session,
+                                            left)
         if left_io.exit_code != 0:
             # The failing command is left of the final `&&`, which bash
-            # exempts from `set -e`.
+            # exempts from `set -e`. The list ran only its left side, so
+            # the list boundary reports that pipeline.
             session.errexit_immune = True
+            carry_status(session)
             return left_bytes, left_io, ExecutionNode(
                 op="&&", exit_code=left_io.exit_code, children=children)
         try:
@@ -170,8 +195,10 @@ async def handle_connection(
                                                children=children)
 
     if op == NT.OR:
-        left_bytes = await finish_statement(left_stdout, left_io, session)
+        left_bytes = await finish_statement(left_stdout, left_io, session,
+                                            left)
         if left_io.exit_code == 0:
+            carry_status(session)
             return left_bytes, left_io, ExecutionNode(
                 op="||", exit_code=left_io.exit_code, children=children)
         try:
@@ -188,7 +215,7 @@ async def handle_connection(
                                                children=children)
 
     # semicolon or other
-    left_bytes = await finish_statement(left_stdout, left_io, session)
+    left_bytes = await finish_statement(left_stdout, left_io, session, left)
     try:
         right_stdout, right_io, right_exec = await execute_node(
             right, session, stdin, call_stack)
@@ -215,6 +242,8 @@ async def handle_subshell(
     job_table: JobTable | None = None,
     agent_id: str | None = None,
     dispatch: DispatchFn | None = None,
+    handed: HandOff | None = None,
+    decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute body in isolated env.
 
@@ -255,17 +284,19 @@ async def handle_subshell(
             if is_bg and job_table is not None:
                 stdout, io, last_exec = await handle_background(
                     execute_node, child, None, session, job_table, agent_id
-                    or "", stdin, call_stack)
+                    or "", stdin, call_stack, handed, decisions)
                 merged_io = await merged_io.merge(io)
                 # Seed $? for later body commands (mirrors program loop).
-                session.last_exit_code = io.exit_code
+                record_status(session, io.exit_code)
                 if stdout is not None:
                     all_stdout.append(stdout)
                 i += 2
                 continue
             i += 1
             child_stdin = stdin
-            if child_stdin is None and session.exec_stdin is not None:
+            if child_stdin is None and session.exec_stdin_unreadable:
+                child_stdin = unreadable_stdin()
+            elif child_stdin is None and session.exec_stdin is not None:
                 child_stdin = session.exec_stdin
             try:
                 stdout, io, last_exec = await execute_node(
@@ -279,17 +310,23 @@ async def handle_subshell(
                                   stderr=sig.stderr or None)
                 merged_io = await merged_io.merge(sig_io)
                 merged_io.exit_code = sig.contained_code
-                session.last_exit_code = sig.contained_code
+                record_status(session, sig.contained_code)
                 last_exec = ExecutionNode(command="()",
                                           exit_code=sig.contained_code,
                                           stderr=sig.stderr)
                 break
-            stdout = await finish_statement(stdout, io, session)
+            stdout = await finish_statement(stdout, io, session, child,
+                                            last_exec)
             if dispatch is not None and (session.exec_stdout is not None
                                          or session.exec_stderr is not None):
                 materialized = await materialize(stdout)
+                before_divert = io.exit_code
                 stdout = await divert_statement(dispatch, session,
-                                                materialized, io)
+                                                materialized, io,
+                                                last_exec.command or "",
+                                                stdout_to_stderr(child))
+                if io.exit_code != before_divert:
+                    record_status(session, io.exit_code)
             if stdout is not None:
                 all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)

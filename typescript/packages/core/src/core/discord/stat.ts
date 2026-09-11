@@ -15,9 +15,9 @@
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { filetypeFromMimetype } from '../../utils/filetype.ts'
+import { contentTypeForMime } from '../../utils/filetype.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -52,7 +52,8 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
     ...(entry.size !== null ? { size: entry.size } : {}),
-    type: filetypeFromMimetype(mimetype),
+    type: FileType.FILE,
+    content: contentTypeForMime(mimetype),
     extra: { content_type: mimetype, attachment_id: entry.id },
   })
 }
@@ -119,12 +120,13 @@ async function statChat(
   if (entry !== null) {
     return new FileStat({
       name: 'chat.jsonl',
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       ...(entry.size !== null ? { size: entry.size } : {}),
     })
   }
   await channelProven(accessor, path, index, 2)
-  return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+  return new FileStat({ name: 'chat.jsonl', type: FileType.FILE, content: ContentType.TEXT })
 }
 
 export const stat = makeStat<DiscordAccessor>(detectScope, readdir, {
@@ -133,7 +135,7 @@ export const stat = makeStat<DiscordAccessor>(detectScope, readdir, {
     channels_dir: dirStat,
     members_dir: dirStat,
     channel: channelStat,
-    member: entryStat('user_id', FileType.JSON),
+    member: entryStat('user_id', ContentType.JSON),
     files: dirStat,
     file_blob: fileBlobStat,
   },

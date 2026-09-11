@@ -14,7 +14,7 @@
 
 import { Codec, DATE } from '../hierarchy/codec.ts'
 import { makeDetectScope, ROOT, Scope, Slot } from '../hierarchy/scope.ts'
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 
 export const GMAIL_JSON = new Codec({ suffix: '.gmail.json' })
 
@@ -33,7 +33,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'message',
     segments: [...DAY, new Slot('message', GMAIL_JSON, 'message_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'attachment_dir',

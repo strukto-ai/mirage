@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexEntry } from '../../cache/index/config.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
@@ -22,7 +22,8 @@ import { detectScope } from './scope.ts'
 function fileStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     modified: entry.remoteTime,
     size: entry.size,
     extra: {

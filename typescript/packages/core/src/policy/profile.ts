@@ -133,31 +133,41 @@ export interface SessionProfile {
   readonly vars?: VarsBlock | null
   readonly commands?: CommandsBlock | null
   /**
-   * The profile's per-command program, evaluated at the admission gate
-   * for every command a session under the profile runs; its last
-   * expression answers allow (no opinion), deny or ask. The document is
-   * optional beside it: a profile stating only `script` and `runtime`
-   * hides nothing, and the script is its whole admission policy. A
-   * string is the path form the config door accepts and loads; code
-   * passes the loaded ScriptSource, so a path still spelled as a string
-   * when the workspace reads it means the config layer never saw it.
+   * The profile's policy: a program defining the admission hooks it
+   * answers at, the way a coded Policy defines only the hooks it cares
+   * about: `preCommand(ctx)` per command, `preOps(ctx)` per VFS op,
+   * `preSession(ctx)` per env write (`pre_command`, `pre_ops`,
+   * `pre_session` in python). Each is handed the door's facts as `ctx`
+   * and answers with `return`: null or 'allow' for no opinion, 'deny' /
+   * {deny: reason}, and at the command gate 'ask' / {ask: reason}. A block
+   * naming the program and the engine it runs on, the shape a `clis`
+   * entry has. The document is optional beside it: a profile stating
+   * only a policy hides nothing, and the policy is its whole admission
+   * policy.
    */
-  readonly script?: ScriptSource | string | null
-  /**
-   * The engine `script` runs on, required beside it: there is no
-   * default engine, because an engine the operator never chose should
-   * not be the one their policy runs on. Meaningless without a script,
-   * so stating one there is an error rather than a knob that does
-   * nothing.
-   */
-  readonly runtime?: string | null
+  readonly policy?: ProfilePolicySpec | null
+}
+
+/**
+ * A profile's policy as the document states it: the program, and the
+ * engine that runs it.
+ *
+ * `script` is the path form the config door accepts and loads; code
+ * passes the loaded ScriptSource, so a path still spelled as a string
+ * when the workspace reads it means the config layer never saw it.
+ * `runtime` is required: there is no default engine, because an engine
+ * the operator never chose should not be the one their policy runs on.
+ */
+export interface ProfilePolicySpec {
+  readonly script: ScriptSource | string
+  readonly runtime: string
 }
 
 /**
  * The session fields a profile compiles to. `commands` is the profile's
  * admission rules, its own and its mount sections' in one list;
- * `script` is its per-command program, which `ScriptPolicy` evaluates
- * at the admission gate.
+ * `script` is its policy program, which `ScriptPolicy` calls at the
+ * admission gate.
  */
 export interface CompiledProfile {
   readonly mountModes: ReadonlyMap<string, MountMode> | null
@@ -171,6 +181,8 @@ export interface CompiledProfile {
   readonly shownPaths?: ShownPaths | null
   /** The operator's reasons for grouped hides, never rendered to the agent. */
   readonly hideReasons?: readonly HideReason[]
+  /** The profile's name, null for a document passed without one; the session's group. */
+  readonly profile?: string | null
 }
 
 const RULE_FIELDS = ['reason', 'commands', 'paths'] as const
@@ -179,16 +191,8 @@ const VARS_FIELDS = ['hide'] as const
 const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
 const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
 const PROFILE_MOUNT_FIELDS = ['mode', 'commands', 'paths'] as const
-const PROFILE_FIELDS = [
-  'cwd',
-  'env',
-  'mounts',
-  'paths',
-  'vars',
-  'commands',
-  'script',
-  'runtime',
-] as const
+const PROFILE_FIELDS = ['cwd', 'env', 'mounts', 'paths', 'vars', 'commands', 'policy'] as const
+const POLICY_FIELDS = ['script', 'runtime'] as const
 
 // A document mapping, not merely "an object": a Set, a Date or any class
 // instance has no own enumerable string keys, so Object.entries would read
@@ -514,8 +518,47 @@ export function parseProfileMounts(
 }
 
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */
+/**
+ * Validate a profile's `policy` block: the program and the engine that
+ * runs it, both required. A block, not a path: with no default engine
+ * a path alone would name a program nothing could run.
+ */
+export function parseProfilePolicy(raw: unknown, where: string): ProfilePolicySpec {
+  if (typeof raw === 'string' || raw instanceof ScriptSource) {
+    throw new Error(
+      `${where} names the program and the engine that runs it: ` +
+        `{script: <file>, runtime: <engine>}`,
+    )
+  }
+  const obj = asObject(raw, where)
+  rejectUnknownKeys(obj, POLICY_FIELDS, where)
+  if (obj.script === undefined || obj.script === null) {
+    throw new Error(`${where}.script names the policy's program, and is required`)
+  }
+  if (!(obj.script instanceof ScriptSource) && typeof obj.script !== 'string') {
+    throw new Error(`${where}.script must be a script path or source`)
+  }
+  if (obj.runtime === undefined || obj.runtime === null) {
+    throw new Error(`${where}.runtime names the engine the policy runs on, and is required`)
+  }
+  if (typeof obj.runtime !== 'string') throw new Error(`${where}.runtime must be a string`)
+  return { script: obj.script, runtime: obj.runtime }
+}
+
+/** Validate one profile (a `profiles.<name>` block, or an inline document). */
 export function parseSessionProfile(raw: unknown, where = 'profile'): SessionProfile {
   const obj = asObject(raw, where)
+  // The keys this was first shipped under, a `script` named for what
+  // the file is rather than what it does and a `runtime` beside it
+  // that read as the profile's own; refused with the new spelling
+  // rather than as two more unknown keys.
+  if (obj.script !== undefined || obj.runtime !== undefined) {
+    throw new Error(
+      `${where}: script and runtime are now one policy block, ` +
+        `policy: {script: <file>, runtime: <engine>}; its program defines ` +
+        `pre_command(ctx) and answers with return`,
+    )
+  }
   rejectUnknownKeys(obj, PROFILE_FIELDS, where)
   const out: {
     cwd?: string | null
@@ -524,30 +567,10 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     paths?: PathsBlock | null
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
-    script?: ScriptSource | string | null
-    runtime?: string | null
+    policy?: ProfilePolicySpec | null
   } = {}
-  if (obj.script !== undefined && obj.script !== null) {
-    if (!(obj.script instanceof ScriptSource) && typeof obj.script !== 'string') {
-      throw new Error(`${where}.script must be a script path or source`)
-    }
-    out.script = obj.script
-  }
-  if (obj.runtime !== undefined && obj.runtime !== null) {
-    if (typeof obj.runtime !== 'string') throw new Error(`${where}.runtime must be a string`)
-    if (out.script === undefined) {
-      throw new Error(
-        `${where}.runtime names the engine a script runs on, and this profile states no script`,
-      )
-    }
-    out.runtime = obj.runtime
-  }
-  // The pair travels together: a script must say what runs it (no
-  // default engine exists to guess one).
-  if (out.script !== undefined && out.runtime === undefined) {
-    throw new Error(
-      `${where}: a profile script states the engine it runs on; set runtime beside script`,
-    )
+  if (obj.policy !== undefined && obj.policy !== null) {
+    out.policy = parseProfilePolicy(obj.policy, `${where}.policy`)
   }
   if (obj.cwd !== undefined && obj.cwd !== null) {
     if (typeof obj.cwd !== 'string') throw new Error(`${where}.cwd must be a string`)

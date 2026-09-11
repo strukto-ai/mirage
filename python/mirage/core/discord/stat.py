@@ -22,7 +22,7 @@ from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat, make_stat
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import filetype_from_mimetype
+from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
@@ -57,7 +57,7 @@ def _file_blob_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name or entry.name,
         size=entry.size,
         type=FileType.FILE,
-        content=filetype_from_mimetype(mimetype),
+        content=content_type_for_mime(mimetype),
         extra={
             "content_type": mimetype,
             "attachment_id": entry.id,

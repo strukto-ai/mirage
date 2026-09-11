@@ -21,7 +21,7 @@ import { getMetadata, type DropboxEntry } from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent, isEnoent } from '../../utils/errors.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 
 function statFromEntry(entry: DropboxEntry): FileStat {
   const modified = entry.server_modified ?? entry.client_modified ?? ''
@@ -36,7 +36,8 @@ function statFromEntry(entry: DropboxEntry): FileStat {
   return new FileStat({
     name: entry.name,
     size: typeof entry.size === 'number' ? entry.size : null,
-    type: guessType(entry.name),
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.name),
     modified,
     fingerprint: modified !== '' ? modified : null,
     extra: {
@@ -111,7 +112,8 @@ export async function stat(
   return new FileStat({
     name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
     size: result.entry.size,
-    type: guessType(result.entry.vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
     fingerprint: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
     extra: {

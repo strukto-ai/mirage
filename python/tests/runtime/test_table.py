@@ -18,9 +18,10 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.table import (DEFAULT_ENTRIES, DEFAULT_PYTHON, NAMED,
-                                  RUNTIMES, VFSRuntime, bind_commands,
-                                  build_runtime, runtime_bindings_for,
+from mirage.runtime.table import (BUILTIN_RUNTIMES, DEFAULT_ENTRIES,
+                                  DEFAULT_PYTHON, NAMED, RUNTIMES, VFSRuntime,
+                                  bind_commands, build_runtime, known_runtimes,
+                                  register_runtime, runtime_bindings_for,
                                   whole_line_runtime)
 from mirage.runtime.types import RunArgs, RunResult
 
@@ -154,3 +155,35 @@ def test_default_world_reaches_only_the_vfs():
     # its effects behind the workspace gate; `local` (process reach)
     # is deliberately not a default entry.
     assert all(NAMED[name].reach == "vfs" for name in DEFAULT_ENTRIES)
+
+
+def test_register_runtime_makes_a_host_class_buildable_by_name():
+    try:
+        register_runtime("fake", FakeRuntime)
+        assert "fake" in known_runtimes()
+        built = build_runtime("fake", captures=("python3", ))
+        assert isinstance(built, FakeRuntime)
+        assert built.captures == ("python3", )
+    finally:
+        NAMED.pop("fake", None)
+
+
+def test_register_runtime_refuses_a_builtin_name():
+    assert {"monty", "vfs", "docker"} <= BUILTIN_RUNTIMES
+    with pytest.raises(ValueError, match="shadows a builtin"):
+        register_runtime("monty", FakeRuntime)
+    with pytest.raises(ValueError, match="shadows a builtin"):
+        register_runtime("docker", FakeRuntime)
+
+
+def test_register_runtime_replaces_a_custom_name():
+
+    class Other(FakeRuntime):
+        name = "fake"
+
+    try:
+        register_runtime("fake", FakeRuntime)
+        register_runtime("fake", Other)
+        assert isinstance(build_runtime("fake"), Other)
+    finally:
+        NAMED.pop("fake", None)

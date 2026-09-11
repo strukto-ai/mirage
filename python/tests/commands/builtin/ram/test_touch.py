@@ -40,7 +40,7 @@ async def test_touch_into_missing_parent_leaves_no_orphan(workspace):
 
 @pytest.mark.asyncio
 async def test_touch_under_a_plain_file_reports_not_a_directory(workspace):
-    await workspace.ops.write("/plain", b"x")
+    await workspace.fs.write("/plain", b"x")
     io = await workspace.execute("touch /plain/f.txt")
     assert io.exit_code == 1
     assert io.stderr == (b"touch: cannot touch '/plain/f.txt': "
@@ -50,7 +50,7 @@ async def test_touch_under_a_plain_file_reports_not_a_directory(workspace):
 @pytest.mark.asyncio
 async def test_touch_deep_under_a_plain_file_reports_not_a_directory(
         workspace):
-    await workspace.ops.write("/plain", b"x")
+    await workspace.fs.write("/plain", b"x")
     io = await workspace.execute("touch /plain/sub/f.txt")
     assert io.exit_code == 1
     assert io.stderr == (b"touch: cannot touch '/plain/sub/f.txt': "
@@ -81,8 +81,8 @@ async def test_touch_reports_every_failed_operand(workspace):
 
 @pytest.mark.asyncio
 async def test_touch_into_an_existing_dir_succeeds(workspace):
-    await workspace.ops.mkdir("/d")
+    await workspace.fs.mkdir("/d")
     io = await workspace.execute("touch /d/f.txt")
     assert io.exit_code == 0
     assert io.stderr in (b"", None)
-    assert await workspace.ops.read("/d/f.txt") == b""
+    assert await workspace.fs.read("/d/f.txt") == b""

@@ -4,7 +4,7 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.core.sharepoint.resolve import _drive_cache, _site_cache, resolve
+from mirage.core.sharepoint.resolve import resolve, site_entries
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -15,18 +15,6 @@ _SITES_RE = re.compile(r".*/sites\??.*")
 
 def _accessor() -> SharePointAccessor:
     return SharePointAccessor(SharePointConfig(access_token="tok"))
-
-
-def _clear_caches():
-    _site_cache.clear()
-    _drive_cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _reset_caches():
-    _clear_caches()
-    yield
-    _clear_caches()
 
 
 @pytest.mark.asyncio
@@ -40,37 +28,40 @@ async def test_resolve_root():
 
 @pytest.mark.asyncio
 async def test_resolve_site():
-    _site_cache["Engineering"] = _SITE_ID
+    accessor = _accessor()
+    accessor.site_cache["Engineering"] = _SITE_ID
     path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
                     virtual="/sp/Engineering",
                     directory="/sp/Engineering")
-    result = await resolve(_accessor(), path)
+    result = await resolve(accessor, path)
     assert result.level == "site"
     assert result.site_id == _SITE_ID
 
 
 @pytest.mark.asyncio
 async def test_resolve_drive():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    accessor = _accessor()
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
     path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
                                             "/sp"),
                     virtual="/sp/Engineering/Documents",
                     directory="/sp/Engineering/Documents")
-    result = await resolve(_accessor(), path)
+    result = await resolve(accessor, path)
     assert result.level == "drive"
     assert result.drive_id == _DRIVE_ID
 
 
 @pytest.mark.asyncio
 async def test_resolve_item():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    accessor = _accessor()
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
     path = PathSpec(resource_path=mount_key(
         "/sp/Engineering/Documents/sub/file.txt", "/sp"),
                     virtual="/sp/Engineering/Documents/sub/file.txt",
                     directory="/sp/Engineering/Documents/sub/file.txt")
-    result = await resolve(_accessor(), path)
+    result = await resolve(accessor, path)
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path == "sub/file.txt"
@@ -97,6 +88,24 @@ async def test_resolve_unknown_site():
     assert result.site_id is None
 
 
+@pytest.mark.asyncio
+async def test_site_entries_caches_display_name_and_name():
+    accessor = _accessor()
+    with aioresponses() as m:
+        m.get(_SITES_RE,
+              payload={
+                  "value": [{
+                      "id": _SITE_ID,
+                      "displayName": "Engineering",
+                      "name": "eng"
+                  }]
+              })
+        entries = await site_entries(accessor)
+    assert entries == [("Engineering", _SITE_ID)]
+    assert accessor.site_cache["Engineering"] == _SITE_ID
+    assert accessor.site_cache["eng"] == _SITE_ID
+
+
 def _scoped_accessor() -> SharePointAccessor:
     return SharePointAccessor(
         SharePointConfig(access_token="tok",
@@ -112,9 +121,9 @@ def _prefix_scoped_accessor() -> SharePointAccessor:
                          key_prefix="/team/reports/"))
 
 
-def _seed_scoped():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+def _seed_scoped(accessor: SharePointAccessor) -> None:
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -125,8 +134,9 @@ def _spec(virtual: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_scoped_resolve_root_is_drive_level():
-    _seed_scoped()
-    result = await resolve(_scoped_accessor(), _spec("/sp/"))
+    accessor = _scoped_accessor()
+    _seed_scoped(accessor)
+    result = await resolve(accessor, _spec("/sp/"))
     assert result.level == "drive"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path is None
@@ -134,8 +144,9 @@ async def test_scoped_resolve_root_is_drive_level():
 
 @pytest.mark.asyncio
 async def test_scoped_resolve_path_is_drive_relative_item():
-    _seed_scoped()
-    result = await resolve(_scoped_accessor(), _spec("/sp/sub/a.txt"))
+    accessor = _scoped_accessor()
+    _seed_scoped(accessor)
+    result = await resolve(accessor, _spec("/sp/sub/a.txt"))
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path == "sub/a.txt"
@@ -143,8 +154,9 @@ async def test_scoped_resolve_path_is_drive_relative_item():
 
 @pytest.mark.asyncio
 async def test_prefix_scoped_resolve_root_is_prefix_item():
-    _seed_scoped()
-    result = await resolve(_prefix_scoped_accessor(), _spec("/sp/"))
+    accessor = _prefix_scoped_accessor()
+    _seed_scoped(accessor)
+    result = await resolve(accessor, _spec("/sp/"))
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path == "team/reports"
@@ -152,8 +164,9 @@ async def test_prefix_scoped_resolve_root_is_prefix_item():
 
 @pytest.mark.asyncio
 async def test_prefix_scoped_resolve_path_is_prefix_relative_item():
-    _seed_scoped()
-    result = await resolve(_prefix_scoped_accessor(), _spec("/sp/sub/a.txt"))
+    accessor = _prefix_scoped_accessor()
+    _seed_scoped(accessor)
+    result = await resolve(accessor, _spec("/sp/sub/a.txt"))
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
     assert result.item_path == "team/reports/sub/a.txt"
@@ -169,10 +182,11 @@ def test_prefix_scoped_config_rejects_parent_segments():
 
 @pytest.mark.asyncio
 async def test_scoped_resolve_unknown_drive():
-    _site_cache["Engineering"] = _SITE_ID
+    accessor = _scoped_accessor()
+    accessor.site_cache["Engineering"] = _SITE_ID
     drives_url = re.compile(r".*/sites/.*/drives.*")
     with aioresponses() as m:
         m.get(drives_url, payload={"value": [{"id": "x", "name": "Other"}]})
-        result = await resolve(_scoped_accessor(), _spec("/sp/a.txt"))
+        result = await resolve(accessor, _spec("/sp/a.txt"))
     assert result.level == "drive"
     assert result.drive_id is None

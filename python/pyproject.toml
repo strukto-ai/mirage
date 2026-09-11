@@ -1,6 +1,6 @@
 [project]
 name = "mirage-ai"
-version = "0.0.5"
+version = "0.0.6"
 description = "A unified virtual filesystem for AI agents. Mount S3, Google Drive, Slack, Gmail, GitHub, Linear, Notion, Postgres, MongoDB, SSH, and more behind one filesystem so agents read, write, and pipe across services with familiar shell commands."
 readme = "README.md"
 license = "Apache-2.0"
@@ -245,6 +245,7 @@ e2b = [
 ]
 
 [tool.uv]
+constraint-dependencies = ["pypdf>=6.16.1"]
 conflicts = [
     [
         { extra = "camel" },

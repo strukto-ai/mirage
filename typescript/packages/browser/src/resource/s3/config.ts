@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { S3ConfigSchema } from '@struktoai/mirage-core/resource/s3/config'
 import type { S3Config } from '@struktoai/mirage-core/resource/s3/config'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/resource/secrets'
 
 // The one field whose camelCase spelling is not what `snakeToCamel` would
 // produce, so it is the whole rename map for the browser's S3 family. Every
@@ -23,7 +24,7 @@ export const S3_BROWSER_RENAME: Record<string, string> = { endpoint_url: 'endpoi
 
 /** Translate a python-style S3 config blob to the browser's camelCase one. */
 export function normalizeS3Config(input: Record<string, unknown>): S3Config {
-  return normalizeFields(input, { rename: S3_BROWSER_RENAME }) as unknown as S3Config
+  return parseConfigWithSchema(S3ConfigSchema, input, { rename: S3_BROWSER_RENAME })
 }
 
 export { redactConfig } from '@struktoai/mirage-core/resource/s3/config'

@@ -31,7 +31,7 @@ async def test_chgrp_renders_group_keeps_default_owner():
     code, _, err = await _run(ws, "chgrp staff /data/f.txt")
     assert code == 0, err
     _, out, _ = await _run(ws, "ls -l /data")
-    assert " user staff " in out
+    assert " - staff " in out
 
 
 @pytest.mark.asyncio

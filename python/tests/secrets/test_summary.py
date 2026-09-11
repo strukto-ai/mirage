@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.secrets.summary import MAX_LISTED_FIELDS, field_summary
+import pytest
+from pydantic import BaseModel, ValidationError, field_validator
+
+from mirage.secrets.summary import (MAX_LISTED_FIELDS, error_summary,
+                                    field_summary)
 
 
 def test_field_summary_lists_a_secret_sized_secret():
@@ -43,3 +47,40 @@ def test_field_summary_never_lists_the_process_environment():
     fields = {"HOME": "/root", "AWS_SESSION_TOKEN": "t"}
     assert field_summary(fields, "env") == "2 fields"
     assert "AWS_SESSION_TOKEN" not in field_summary(fields, "env")
+
+
+class Refusing(BaseModel):
+    port: int
+    token: str = ""
+
+    @field_validator("token")
+    @classmethod
+    def _v_token(cls, value: str) -> str:
+        if value.startswith("sk-"):
+            raise ValueError(f"a live key is not allowed here: {value}")
+        return value
+
+
+def refusal(**fields) -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        Refusing(**fields)
+    return caught.value
+
+
+def test_error_summary_names_the_field_and_the_type_only():
+    assert error_summary(refusal(port="x")) == "port: int_parsing"
+
+
+def test_error_summary_never_carries_the_input():
+    """Pydantic renders the refused value as `input_value`, and the
+    field validator above spells it inside its own message. Neither
+    may reach a 400 body."""
+    secret = "sk-live-SUPERSECRET"
+    summary = error_summary(refusal(port=1, token=secret))
+    assert summary == "token: value_error"
+    assert "SUPERSECRET" not in summary
+
+
+def test_error_summary_joins_every_issue():
+    assert error_summary(refusal(
+        port="x", token="sk-1")) == ("port: int_parsing; token: value_error")

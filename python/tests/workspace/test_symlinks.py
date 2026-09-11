@@ -1194,7 +1194,7 @@ async def test_readlink_answers_the_target_for_a_link():
     ws = _ws()
     await ws.execute("echo hi > /data/a.txt")
     await ws.execute("ln -s a.txt /data/l")
-    assert await ws.ops.readlink("/data/l") == "a.txt"
+    assert await ws.fs.readlink("/data/l") == "a.txt"
 
 
 @pytest.mark.asyncio
@@ -1204,7 +1204,7 @@ async def test_readlink_of_something_that_is_there_is_einval(path: str):
     await ws.execute("echo hi > /data/a.txt")
     await ws.execute("mkdir /data/d")
     with pytest.raises(OSError) as caught:
-        await ws.ops.readlink(path)
+        await ws.fs.readlink(path)
     assert caught.value.errno == errno.EINVAL
     assert not isinstance(caught.value, FileNotFoundError)
 
@@ -1218,7 +1218,7 @@ async def test_readlink_of_something_absent_is_enoent(path: str):
     ws = _ws()
     await ws.execute("mkdir /data/d")
     with pytest.raises(FileNotFoundError) as caught:
-        await ws.ops.readlink(path)
+        await ws.fs.readlink(path)
     assert caught.value.errno == errno.ENOENT
 
 
@@ -1250,11 +1250,11 @@ async def test_readlink_reads_the_listing_channel_for_a_marker_less_dir():
 
     mount.execute_op = prefix_store
     with pytest.raises(OSError) as caught:
-        await ws.ops.readlink("/data/d")
+        await ws.fs.readlink("/data/d")
     assert caught.value.errno == errno.EINVAL
     await ws.execute("mkdir /data/hollow")
     with pytest.raises(FileNotFoundError):
-        await ws.ops.readlink("/data/hollow")
+        await ws.fs.readlink("/data/hollow")
 
 
 @pytest.mark.asyncio
@@ -1278,7 +1278,7 @@ async def test_readlink_does_not_probe_past_a_policy_that_denies_stat():
                    mode=MountMode.WRITE,
                    policies=[NoStat()])
     with pytest.raises(OSError) as caught:
-        await ws.ops.readlink("/data/missing")
+        await ws.fs.readlink("/data/missing")
     assert caught.value.errno == errno.EINVAL
 
 

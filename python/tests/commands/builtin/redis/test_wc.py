@@ -36,7 +36,7 @@ async def workspace():
 
 @pytest.mark.asyncio
 async def test_wc_default(workspace):
-    await workspace.ops.write("/f.txt", b"hello world\nfoo bar\n")
+    await workspace.fs.write("/f.txt", b"hello world\nfoo bar\n")
     io = await workspace.execute("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().split()
@@ -47,7 +47,7 @@ async def test_wc_default(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_l(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\nc\n")
+    await workspace.fs.write("/f.txt", b"a\nb\nc\n")
     io = await workspace.execute("wc -l /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
@@ -55,7 +55,7 @@ async def test_wc_l(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_c(workspace):
-    await workspace.ops.write("/f.txt", b"hello\n")
+    await workspace.fs.write("/f.txt", b"hello\n")
     io = await workspace.execute("wc -c /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "6"
@@ -63,8 +63,8 @@ async def test_wc_c(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_multi_file_emits_total(workspace):
-    await workspace.ops.write("/a.txt", b"hello\n")
-    await workspace.ops.write("/b.txt", b"world\nfoo\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/b.txt", b"world\nfoo\n")
     io = await workspace.execute("wc /a.txt /b.txt")
     assert io.exit_code == 0
     assert io.stdout.endswith(b"\n")

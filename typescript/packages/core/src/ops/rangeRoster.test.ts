@@ -24,6 +24,7 @@ import { S3_IO } from '../commands/builtin/s3/io.ts'
 import { SHAREPOINT_IO } from '../commands/builtin/sharepoint/io.ts'
 import { SLACK_IO } from '../commands/builtin/slack/io.ts'
 import { RAM_IO } from '../commands/builtin/ram/io.ts'
+import { REDIS_IO } from '../commands/builtin/redis/io.ts'
 import { NOTION_IO } from '../commands/builtin/notion/io.ts'
 import { POSTGRES_IO } from '../commands/builtin/postgres/io.ts'
 
@@ -41,6 +42,7 @@ const NATIVE = {
   dify: DIFY_IO,
   discord: DISCORD_IO,
   ram: RAM_IO,
+  redis: REDIS_IO,
   dropbox: DROPBOX_IO,
   gdrive: GDRIVE_IO,
   onedrive: ONEDRIVE_IO,

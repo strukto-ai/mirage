@@ -13,13 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithRedirectPaths } from '../../context/session_context.ts'
-import { fsStrerror, isFsError } from '../../utils/errors.ts'
+import { formatFsError, fsStrerror, isFsError } from '../../utils/errors.ts'
+import { readFailExitCode } from '../../commands/spec/usage.ts'
+import { concatBytes } from '../../core/jq/format.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from '../../shell/constants.ts'
+import {
+  badDescriptorLine,
+  unreadableStdin,
+  unsupportedDescriptor,
+} from '../../shell/descriptors.ts'
+import { getText } from '../../shell/helpers.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -27,13 +36,25 @@ import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile } from './create.ts'
+import {
+  CLOSED as EXEC_CLOSED,
+  OPEN_FOR_READING,
+  TO_STDERR as EXEC_TO_STDERR,
+  TO_STDIN as EXEC_TO_STDIN,
+  TO_STDOUT as EXEC_TO_STDOUT,
+} from './builtins/exec/constants.ts'
+import { readOpenSource } from './builtins/exec/exec.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const TO_STDOUT = Symbol('stdout')
 const TO_STDERR = Symbol('stderr')
-type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
+// Where `>&-` points a descriptor: bytes written there are dropped, and a
+// command whose stdout was closed reports the write failure the way GNU
+// echo does.
+const CLOSED = Symbol('closed')
+type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | string
 
 /**
  * Handle all redirect patterns: >, >>, <, 2>, 2>&1, &>, >&2, <<<.
@@ -45,6 +66,16 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
  * truncated unless appending) when the redirect is processed, even if
  * the stream ends up empty — including the command-less `> file` form
  * (command is null).
+ *
+ * A redirect naming a descriptor above 2 is refused before anything opens,
+ * in bash's own words for a descriptor that is not open (`3: Bad file
+ * descriptor`, exit 1, the command never runs and the rest of the line
+ * goes on). bash would open `3>f` itself; mirage models no descriptor
+ * table, so claiming fd 3 and duplicating from it are refused alike rather
+ * than silently aliased onto stdout. `>&-` closes a stream for the
+ * command: its stdout is dropped and, if it wrote any, `<cmd>: write
+ * error: Bad file descriptor` exits 1; a closed stdin reads as empty, a
+ * documented approximation of EBADF.
  *
  * A redirect target that cannot be opened is a shell error, not a command
  * error — on both the `<` read and the `>` write side. bash reports it itself
@@ -69,6 +100,9 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | string
  * bash fails at open time and never runs it; the write error and exit 1 are
  * reported either way.
  */
+// A descriptor a read cannot use: closed, or open for writing only.
+const UNREADABLE: unique symbol = Symbol('unreadable')
+
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -78,9 +112,61 @@ export async function handleRedirect(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
-  let cmdStdin: ByteSource | null = stdin
+  const badFd = unsupportedDescriptor(redirects)
+  for (const r of redirects) {
+    // bash's word: `3>&foo` is refused before any descriptor is judged or
+    // any file opened, and the command never runs.
+    if (r.kind === RedirectKind.AMBIGUOUS) {
+      const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
+      return shellFailure(new TextEncoder().encode(`${word}: ambiguous redirect\n`))
+    }
+  }
+  if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
+  // What each descriptor would yield to a read: stdin as given, and the
+  // two output descriptors nothing, since they are open for writing
+  // only. A dup copies the entry, so `1<&0 0<&1` hands stdin's file back
+  // to stdin while `0<&1` alone leaves stdin unreadable, and a closed
+  // descriptor is unreadable too. The command sees the unreadable entry
+  // as a source that fails on its first read, as in bash (`cat 0<&1`,
+  // `cat <&-`), while one that never reads is untouched (`true 0<&1`).
+  const inputs: (ByteSource | null | typeof UNREADABLE)[] = [stdin, UNREADABLE, UNREADABLE]
+  // A stream `exec 1<f` opened for reading answers a read through it
+  // (`cat <&1`) with the file, from its start, and one `exec 1<&0` aliased
+  // onto stdin's own read end reads what stdin reads.
+  for (const [fd, binding] of [
+    [FD_STDOUT, session.execStdout],
+    [FD_STDERR, session.execStderr],
+  ] as [number, string | null][]) {
+    if (binding?.startsWith(OPEN_FOR_READING)) {
+      inputs[fd] = await readOpenSource(dispatch, binding)
+    } else if (binding === EXEC_TO_STDIN) {
+      inputs[fd] = inputs[FD_STDIN] ?? null
+    }
+  }
+  // A descriptor an earlier redirect closed, or an `exec` closed for the
+  // shell, is not merely write-only: a later dup from it is bash's `0: Bad
+  // file descriptor`, and the command never runs (`touch marker 0<&- 1<&0`
+  // and `exec 1>&-; touch marker 2>&1` create nothing). A dup of a closed
+  // descriptor onto itself stays the no-op it is, and a redirect that
+  // opens or dups onto the descriptor takes it out of the set again.
+  const closed = persistentlyClosed(session)
 
   for (const r of redirects) {
+    if (typeof r.target === 'number') {
+      if (r.target === FD_CLOSE) {
+        closed.add(r.fd)
+        inputs[r.fd] = UNREADABLE
+        continue
+      }
+      // A self-dup changes nothing: a closed descriptor stays closed, so
+      // `touch m 1>&- 1>&1 2>&1` is still refused.
+      if (r.target === r.fd) continue
+      if (closed.has(r.target)) return shellFailure(badDescriptorLine(r.target))
+      inputs[r.fd] = inputs[r.target] ?? null
+      closed.delete(r.fd)
+      continue
+    }
+    for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) closed.delete(fd)
     if (r.kind === RedirectKind.STDIN) {
       const scope = ensureScope(r.target)
       let data: unknown
@@ -90,9 +176,9 @@ export async function handleRedirect(
         if (!isFsError(err)) throw err
         return redirectFailure(scope, err)
       }
-      cmdStdin = data as ByteSource | null
+      inputs[r.fd] = data as ByteSource | null
     } else if (r.kind === RedirectKind.HEREDOC) {
-      cmdStdin = typeof r.target === 'string' ? encodeText(r.target) : (r.target as ByteSource)
+      inputs[r.fd] = typeof r.target === 'string' ? encodeText(r.target) : (r.target as ByteSource)
     } else if (r.kind === RedirectKind.HERESTRING) {
       const text = r.target
       if (typeof text === 'string') {
@@ -100,9 +186,16 @@ export async function handleRedirect(
         if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
           t = t.slice(1, -1)
         }
-        cmdStdin = encodeText(`${t}\n`)
+        inputs[r.fd] = encodeText(`${t}\n`)
       } else {
-        cmdStdin = text as ByteSource
+        inputs[r.fd] = text as ByteSource
+      }
+    } else {
+      // An output redirect opens its target for writing only, so the
+      // descriptor stays unreadable: `cat 1>out 0<&1` reads from out's
+      // write end and fails with EBADF, as bash's does.
+      for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) {
+        inputs[fd] = UNREADABLE
       }
     }
   }
@@ -138,45 +231,60 @@ export async function handleRedirect(
           typeof r.target !== 'number',
       )
       .map((r) => ensureScope(r.target))
+    const given = inputs[FD_STDIN] ?? null
+    const commandStdin = given === UNREADABLE ? unreadableStdin() : given
     const [stdout, execIo, execNode] = await runWithRedirectPaths(command, targets, () =>
-      executeNode(command, session, cmdStdin, callStack),
+      executeNode(command, session, commandStdin, callStack),
     )
     io = execIo
     refused = execNode.refused
-    stdoutData =
-      ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
-      new Uint8Array()
+    try {
+      stdoutData =
+        ((await applyBarrier(stdout, io, BarrierPolicy.VALUE)) as Uint8Array | null) ??
+        new Uint8Array()
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      // stdin bound to a closed or write-only descriptor fails only once
+      // the command reads it, which is this drain; that is the command's
+      // failure in its own voice (`cat: -: Bad file descriptor`), and the
+      // line goes on.
+      const name = (execNode.command ?? '').split(' ')[0] ?? ''
+      stdoutData = new Uint8Array()
+      io.stderr = concatBytes([
+        await materialize(io.stderr),
+        formatFsError(name, err, execNode.paths),
+      ])
+      io.exitCode = readFailExitCode(name, err)
+    }
     stderrData = await materialize(io.stderr)
   }
 
-  let fd1: FdDest = TO_STDOUT
-  let fd2: FdDest = TO_STDERR
+  const fds: FdDest[] = [stdinDest(session), TO_STDOUT, TO_STDERR]
   const fileBufs = new Map<string, Uint8Array>()
   const fileScopes = new Map<string, PathSpec>()
 
   for (const r of redirects) {
+    if (typeof r.target === 'number') {
+      const dest = r.target === FD_CLOSE ? CLOSED : (fds[r.target] ?? CLOSED)
+      fds[r.fd] = dest
+      if (typeof dest === 'string' && !fileBufs.has(dest) && !refused) {
+        // fd 0 holds a file's write end (`exec 0>f`), which `exec`
+        // truncated when it opened it, so a dup from it appends, as writes
+        // through bash's shared offset do.
+        const scope = ensureScope(dest)
+        fileScopes.set(dest, scope)
+        fileBufs.set(dest, await readExisting(dispatch, scope))
+      }
+      continue
+    }
     if (
       r.kind === RedirectKind.STDIN ||
       r.kind === RedirectKind.HEREDOC ||
       r.kind === RedirectKind.HERESTRING
     ) {
+      fds[r.fd] = CLOSED
       continue
     }
-
-    // 2>&1 — fd2 follows wherever fd1 points right now
-    if (r.kind === RedirectKind.STDERR_TO_STDOUT && typeof r.target === 'number') {
-      fd2 = fd1
-      continue
-    }
-
-    // >&2 or 1>&2 — fd1 follows wherever fd2 points right now
-    if (r.fd === 1 && r.target === 2) {
-      fd1 = fd2
-      continue
-    }
-
-    // other numeric dups (3>&1, ...) are not simulated
-    if (typeof r.target === 'number') continue
 
     if (refused) {
       // The gate refused the line, so it performs no file I/O: the
@@ -199,28 +307,29 @@ export async function handleRedirect(
       fileBufs.set(path, new Uint8Array())
     }
 
-    if (r.fd === -1) {
-      // &> / &>>
-      fd1 = path
-      fd2 = path
-    } else if (r.kind === RedirectKind.STDERR) {
-      fd2 = path
+    if (r.fd === FD_BOTH) {
+      fds[FD_STDOUT] = path
+      fds[FD_STDERR] = path
     } else {
-      fd1 = path
+      fds[r.fd] = path
     }
   }
 
+  if (fds[FD_STDOUT] === CLOSED && stdoutData.byteLength > 0 && command !== null) {
+    stderrData = concat([stderrData, closedWriteLine(command)])
+    io.exitCode = 1
+  }
   let outStdout: Uint8Array = new Uint8Array()
   let outStderr: Uint8Array = new Uint8Array()
   for (const [data, dest] of [
-    [stdoutData, fd1],
-    [stderrData, fd2],
+    [stdoutData, fds[FD_STDOUT]],
+    [stderrData, fds[FD_STDERR]],
   ] as [Uint8Array, FdDest][]) {
     if (dest === TO_STDOUT) {
       outStdout = concat([outStdout, data])
     } else if (dest === TO_STDERR) {
       outStderr = concat([outStderr, data])
-    } else {
+    } else if (dest !== CLOSED) {
       fileBufs.set(dest, concat([fileBufs.get(dest) ?? new Uint8Array(), data]))
     }
   }
@@ -281,15 +390,29 @@ function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
   return new TextEncoder().encode(strerror !== null ? `${label}: ${strerror}\n` : `${label}\n`)
 }
 
+/** GNU's line for a write onto a closed stdout, in the command's name. */
+function closedWriteLine(command: TSNodeLike): Uint8Array {
+  const words = getText(command)
+    .split(/\s+/)
+    .filter((w) => w !== '')
+  const name = words[0] ?? 'redirect'
+  return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
+}
+
+/** Shell-attributed IOResult for a `<` source that cannot be read. */
+function redirectFailure(scope: PathSpec, err: unknown): Result {
+  return shellFailure(redirectErrorLine(scope, err))
+}
+
 /**
- * Shell-attributed IOResult for a `<` source that cannot be read.
+ * Shell-attributed IOResult that replaces the command's whole run.
  *
  * bash never runs the command and stops processing redirects at the first
  * failure, so this replaces the whole result. Returning an IOResult rather
  * than rethrowing is what keeps the rest of the line alive.
  */
-function redirectFailure(scope: PathSpec, err: unknown): Result {
-  const io = new IOResult({ exitCode: 1, stderr: redirectErrorLine(scope, err) })
+function shellFailure(line: Uint8Array): Result {
+  const io = new IOResult({ exitCode: 1, stderr: line })
   return [null, io, new ExecutionNode({ command: 'redirect', exitCode: 1 })]
 }
 
@@ -401,6 +524,31 @@ async function applyPendingOpens(dispatch: DispatchFn, pending: PathSpec[]): Pro
       if (!isFsError(err)) throw err
     }
   }
+}
+
+/** The descriptors an `exec` closed for the shell, which a line's dup
+ * from refuses before the command runs. */
+function persistentlyClosed(session: Session): Set<number> {
+  const closed = new Set<number>()
+  if (session.execStdinIdentity === EXEC_CLOSED) closed.add(FD_STDIN)
+  if (session.execStdout === EXEC_CLOSED) closed.add(FD_STDOUT)
+  if (session.execStderr === EXEC_CLOSED) closed.add(FD_STDERR)
+  return closed
+}
+
+/**
+ * Where a write through fd 0 lands, read off the shell's bindings. Its
+ * own read end, a closed descriptor and a file's read end take no write
+ * (`echo x >&0` is bash's `write error: Bad file descriptor` with stdin a
+ * pipe); a terminal stream dup'd onto it (`exec 0<&1`) writes where that
+ * stream goes; a file opened for writing (`exec 0>f`) is the file.
+ */
+function stdinDest(session: Session): FdDest {
+  const id = session.execStdinIdentity
+  if (id === null || id === EXEC_CLOSED || id.startsWith(OPEN_FOR_READING)) return CLOSED
+  if (id === EXEC_TO_STDOUT) return TO_STDOUT
+  if (id === EXEC_TO_STDERR) return TO_STDERR
+  return id
 }
 
 async function readExisting(dispatch: DispatchFn, scope: PathSpec): Promise<Uint8Array> {

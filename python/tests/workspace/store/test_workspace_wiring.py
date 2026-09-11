@@ -159,6 +159,69 @@ async def test_explicit_session_id_is_not_adopted_away():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["default", "named"])
+async def test_profile_change_targets_the_session_after_hydration(target):
+    store = RAMWorkspaceStateStore()
+    writer = Workspace({}, workspace_id="shared", store=store)
+    writer.create_session("named")
+    await writer.ensure_sessions_loaded()
+    await writer.flush_sessions()
+    attached = Workspace({}, workspace_id="shared", store=store)
+    provisional = attached.default_session_id
+    requested = provisional if target == "default" else "named"
+    expected = writer.default_session_id if target == "default" else "named"
+    try:
+        session = await attached.set_session_profile(
+            requested, {"commands": {
+                "allow": ["cat"]
+            }})
+        assert session.session_id == expected
+        assert attached.default_session_id == writer.default_session_id
+        assert attached.default_session_id != provisional
+        assert session.commands.allow == ("cat", )
+        persisted = await store.sessions("shared").load()
+        assert persisted[expected]["commands"]["allow"] == ["cat"]
+    finally:
+        await writer.close()
+        await attached.close()
+
+
+@pytest.mark.asyncio
+async def test_profile_change_refuses_shutdown_during_hydration(monkeypatch):
+    store = RAMWorkspaceStateStore()
+    ws = Workspace({}, workspace_id="shared", store=store)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    sessions = store.sessions("shared")
+    load = sessions.load
+
+    async def blocked_load():
+        entered.set()
+        await release.wait()
+        return await load()
+
+    monkeypatch.setattr(sessions, "load", blocked_load)
+    session = ws.get_session(ws.default_session_id)
+    commands = session.commands
+    changing = asyncio.create_task(
+        ws.set_session_profile(ws.default_session_id,
+                               {"commands": {
+                                   "allow": ["cat"]
+                               }}))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await ws.close()
+    finally:
+        release.set()
+        await asyncio.gather(changing, return_exceptions=True)
+        await ws.close()
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        await changing
+    assert session.commands is commands
+    assert await load() == {}
+
+
+@pytest.mark.asyncio
 async def test_existing_meta_wins():
     store = RAMWorkspaceStateStore()
     await store.set_meta("ws-a", {

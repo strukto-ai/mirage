@@ -32,7 +32,7 @@ def _argv(inner: InnerLine) -> list[str]:
         ("eval", ["rm", "/x", "&&", "ls"], [("line", "rm /x && ls", False)]),
         ("sh", ["-c", "rm /x"], [("line", "rm /x", False)]),
         ("bash", ["-xc", "rm /x", "a"], [("line", "rm /x", False)]),
-        ("mapfile", ["-C", "rm /x", "arr"], [("line", "rm /x", False)]),
+        ("mapfile", ["-C", "rm /x", "arr"], [("line", "rm /x", True)]),
         # A command already split into words.
         ("command", ["-p", "rm", "/x"], [("argv", ["rm", "/x"], False)]),
         ("exec", ["-a", "name", "rm", "/x"], [("argv", ["rm", "/x"], False)]),

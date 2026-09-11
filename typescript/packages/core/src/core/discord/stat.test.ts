@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { stat } from './stat.ts'
 
@@ -190,7 +190,7 @@ describe('stat member file', () => {
       spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
       idx,
     )
-    expect(out.type).toBe(FileType.JSON)
+    expect(out.content).toBe(ContentType.JSON)
     expect(out.name).toBe('alice__U1.json')
     expect(out.extra.user_id).toBe('U1')
   })
@@ -231,7 +231,7 @@ describe('stat history chat.jsonl', () => {
       new DiscordAccessor(t),
       spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
     )
-    expect(out.type).toBe(FileType.TEXT)
+    expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('chat.jsonl')
     expect(out.size).not.toBeNull()
   })

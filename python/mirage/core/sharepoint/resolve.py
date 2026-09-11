@@ -19,10 +19,6 @@ class ResolvedPath:
     item_path: str | None = None
 
 
-_site_cache: dict[str, str] = {}
-_drive_cache: dict[tuple[str, str], str] = {}
-
-
 def _scoped_item_path(key_prefix: str | None, raw: str) -> str:
     prefix = (key_prefix or "").strip("/")
     if prefix and raw:
@@ -50,26 +46,28 @@ async def _list_drives(accessor: SharePointAccessor,
 
 async def _resolve_site_id(accessor: SharePointAccessor,
                            site_name: str) -> str | None:
-    if site_name in _site_cache:
-        return _site_cache[site_name]
+    cache = accessor.site_cache
+    if site_name in cache:
+        return cache[site_name]
     sites = await _list_sites(accessor)
     for s in sites:
         display = s.get("displayName", "")
         name = s.get("name", "")
-        _site_cache[display] = s["id"]
-        _site_cache[name] = s["id"]
-    return _site_cache.get(site_name)
+        cache[display] = s["id"]
+        cache[name] = s["id"]
+    return cache.get(site_name)
 
 
 async def _resolve_drive_id(accessor: SharePointAccessor, site_id: str,
                             drive_name: str) -> str | None:
+    cache = accessor.drive_cache
     key = (site_id, drive_name)
-    if key in _drive_cache:
-        return _drive_cache[key]
+    if key in cache:
+        return cache[key]
     drives = await _list_drives(accessor, site_id)
     for d in drives:
-        _drive_cache[(site_id, d.get("name", ""))] = d["id"]
-    return _drive_cache.get(key)
+        cache[(site_id, d.get("name", ""))] = d["id"]
+    return cache.get(key)
 
 
 async def resolve(accessor: SharePointAccessor,
@@ -152,7 +150,10 @@ async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
     for s in await _list_sites(accessor):
         display = s.get("displayName", s.get("name", ""))
         entries.append((display, s["id"]))
-        _site_cache[display] = s["id"]
+        accessor.site_cache[display] = s["id"]
+        name = s.get("name", "")
+        if name:
+            accessor.site_cache[name] = s["id"]
     return sorted(entries)
 
 
@@ -183,7 +184,7 @@ async def drive_entries(accessor: SharePointAccessor,
     for d in await _list_drives(accessor, site_id):
         name = d.get("name", "")
         entries.append((name, d["id"]))
-        _drive_cache[(site_id, name)] = d["id"]
+        accessor.drive_cache[(site_id, name)] = d["id"]
     return sorted(entries)
 
 

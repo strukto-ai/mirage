@@ -63,12 +63,30 @@ export interface ResourceStateBase {
   type: string
   config?: unknown
   // Set by a backend whose mount cannot be rebuilt from this state alone,
-  // so `Workspace.load` refuses instead of substituting an empty
-  // RAMResource. See `resourceStateRequiresOverride`.
+  // so `Workspace.load` asks for the live resource back instead of
+  // rebuilding one. See `resourceStateRequiresOverride`.
   needs_override?: boolean
 }
 
+// The `resource:` value the registry built an instance from: a name
+// (`s3`, `wiki`) or a code reference (`./wiki.mjs:WikiResource`). Python
+// keeps this on `BaseResource.resource_ref`; `Resource` is an interface
+// here, so the fact lives beside it. A snapshot records it so the loader
+// can rebuild the mount through the same door config used, which is the
+// only door that knows a class loaded from a script file.
+const RESOURCE_REFS = new WeakMap<object, string>()
+
+export function recordResourceRef(resource: Resource, ref: string): void {
+  RESOURCE_REFS.set(resource, ref)
+}
+
+export function resourceRefOf(resource: Resource): string | null {
+  return RESOURCE_REFS.get(resource) ?? null
+}
+
 export interface Resource {
+  /** Closed resource instances cannot be mounted again. */
+  readonly isClosed?: boolean
   readonly kind: string
   readonly prompt?: string
   readonly writePrompt?: string
@@ -238,6 +256,10 @@ export abstract class BaseResource {
    */
   loadState(_state: ResourceStateBase): void | Promise<void> {
     // Nothing to take back.
+  }
+
+  get isClosed(): boolean {
+    return this.#closed
   }
 
   /**

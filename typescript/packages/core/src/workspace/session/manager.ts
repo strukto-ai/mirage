@@ -22,6 +22,7 @@ import type { AdmissionRules, Decision, HideReason, ProfileScript } from '../../
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
+import { KeyLock } from '../../cache/lock.ts'
 
 type StoredSession = Parameters<typeof Session.fromJSON>[0]
 
@@ -59,6 +60,7 @@ function mergeSeedVars(session: Session, seedVars: Record<string, ShellVar>): vo
  */
 export class SessionManager {
   private readonly sessions = new Map<string, Session>()
+  private readonly persistLock = new KeyLock()
   private readonly sessionStore: SessionStore
   private defaultIdInternal: string
   private loaded = false
@@ -140,6 +142,20 @@ export class SessionManager {
   set defaultProfile(compiled: CompiledProfile | null) {
     this.defaultProfileInternal = compiled
     if (compiled !== null) applyProfile(this.defaultSession(), compiled)
+  }
+
+  /** Replace an existing, hydrated session's restrictions, preserving its scratch state. */
+  async setProfile(sessionId: string, compiled: CompiledProfile): Promise<Session> {
+    return this.persistLock.withLock(sessionId, async () => {
+      const session = this.get(sessionId)
+      const candidate = Session.fromJSON(session.toJSON() as StoredSession)
+      narrow(candidate, compiled)
+      await this.flushOne(candidate)
+      narrow(session, compiled)
+      session.generation = candidate.generation
+      if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
+      return session
+    })
   }
 
   /**
@@ -312,7 +328,14 @@ export class SessionManager {
   /** Write dirty sessions through the store's generation gate. */
   async flush(): Promise<void> {
     for (const session of [...this.sessions.values()]) {
-      await this.flushOne(session)
+      await this.persistLock.withLock(session.sessionId, () => this.flushOne(session))
+    }
+  }
+
+  /** Wait for admitted session writes before their store closes. */
+  async settle(): Promise<void> {
+    for (const sessionId of this.sessions.keys()) {
+      await this.persistLock.withLock(sessionId, () => Promise.resolve())
     }
   }
 
@@ -394,15 +417,17 @@ export class SessionManager {
   }
 
   async close(sessionId: string): Promise<void> {
-    if (sessionId === this.defaultId) {
-      throw new Error('Cannot close the default session')
-    }
-    if (!this.sessions.has(sessionId)) {
-      throw new Error(`unknown session: ${sessionId}`)
-    }
-    this.sessions.delete(sessionId)
-    this.persisted.delete(sessionId)
-    await this.sessionStore.delete([sessionId])
+    await this.persistLock.withLock(sessionId, async () => {
+      if (sessionId === this.defaultId) {
+        throw new Error('Cannot close the default session')
+      }
+      if (!this.sessions.has(sessionId)) {
+        throw new Error(`unknown session: ${sessionId}`)
+      }
+      this.sessions.delete(sessionId)
+      this.persisted.delete(sessionId)
+      await this.sessionStore.delete([sessionId])
+    })
   }
 
   async closeAll(): Promise<void> {

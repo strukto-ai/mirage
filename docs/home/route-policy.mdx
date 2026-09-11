@@ -84,7 +84,8 @@ can store one and replay a decision in tests.
 - **`None`**: no opinion; the first capturer in the `runtimes` list order
   serves each command (here, `monty`).
 - **`{"deny": reason}`**: the line is refused before anything runs. It
-  exits 126 with `<command>: policy denied: <reason>` on stderr.
+  exits 126 with `<command>: Permission denied` on stderr and the reason
+  in the result's `refusal` record.
 - Anything else is a routing error; the line fails rather than guessing.
 
 `{"runtime": "docker"}` is the dict spelling of a name, and the dict is
@@ -121,7 +122,7 @@ of it, and every VFS op the runtime performs still clears `pre_ops`.
 
 A route deny therefore short-circuits: the line dies whole and the
 admission hooks are never consulted, so one line produces at most one
-refusal. Both layers refuse in the same voice — `<command>: policy denied: <reason>` at exit 126 — on purpose: an agent reads one
+refusal. Both layers refuse in the same voice, `<command>: Permission denied` at exit 126 with the reason in the `refusal` record, on purpose: an agent reads one
 grammar, and the host tells the layers apart by what they judge (the
 route policy speaks once per line; the policy engine per command, per
 op, per env write, and only it can [ask](/home/permissions#asks) instead

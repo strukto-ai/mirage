@@ -152,11 +152,16 @@ await ctx.plugin(MirageService, { workspace: ws }).await()
 
 Building the handler before the plugins load is fine: it reads `ctx.approval` at ask time, not at construction, so an approval plugin composed later is still found.
 
-A **deny** refuses the line at 126. A command entry is a token-prefix pattern, so `rm` would cover every `rm` line while `rm -rf` covers only the recursive ones:
+A **deny** refuses the line at 126 in bash's voice, and the reason rides on the result as its `refusal` record, which is also what dsh reads to tell a policy refusal from a command that failed on its own. A command entry is a token-prefix pattern, so `rm` would cover every `rm` line while `rm -rf` covers only the recursive ones:
 
 ```
 $ rm -rf /data/build
-rm: policy denied: no recursive deletes
+rm: Permission denied
+```
+
+```ts
+result.refusal
+// { kind: 'deny', reason: 'no recursive deletes', policy: 'PermissionsPolicy', scope: 'command', askId: null }
 ```
 
 An **ask** is put to the human through dsh's own approval channel, `ctx.approval` — the same prompt dsh already shows for its escalations, so nothing new appears in the UI. The bridge maps dsh's answer onto Mirage's ledger:
@@ -196,13 +201,18 @@ With **no approval plugin composed** — a headless run, a cron job, CI — an a
 
 ```
 $ rm /data/notes.txt
-rm: requires approval: deletes are reviewed (ask 0efc4a8f6280)
+rm: Permission denied
+```
+
+```ts
+result.refusal
+// { kind: 'pending', reason: 'deletes are reviewed', policy: '', scope: 'command', askId: '0efc4a8f6280' }
 ```
 
 This is deliberate: the document says `ask`, and silently rewriting that as `deny` would change what the operator wrote. The question is real and answerable, through `ctx.mirage.decisions`:
 
 ```ts
-import { Outcome, Scope } from '@struktoai/mirage-core/policy/types'
+import { Outcome, Scope } from '@struktoai/mirage-core'
 
 const [waiting] = ctx.mirage.decisions.pending('agent')
 await ctx.mirage.decisions.answer(waiting.id, Outcome.ALLOW, Scope.SESSION)

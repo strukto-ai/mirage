@@ -16,6 +16,12 @@ import importlib
 import importlib.util
 from typing import Any
 
+# The module name a class loaded from a script file runs under. A snapshot
+# records a resource's class as ``module.Class``, and this name is the one
+# the loader cannot import back, so the snapshot loader keys on it to fall
+# back to the ``resource:`` reference the registry built the class from.
+SCRIPT_MODULE_NAME = "_mirage_user_backend"
+
 
 def load_attr(spec: str) -> Any:
     """Load a module attribute from a reference string.
@@ -40,7 +46,7 @@ def load_attr(spec: str) -> Any:
 
     if "/" in source or source.endswith(".py"):
         module_spec = importlib.util.spec_from_file_location(
-            "_mirage_user_backend", source)
+            SCRIPT_MODULE_NAME, source)
         if module_spec is None or module_spec.loader is None:
             raise ValueError(f"cannot load script {source!r}")
         module = importlib.util.module_from_spec(module_spec)

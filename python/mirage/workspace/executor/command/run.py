@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from typing import Any
 
 from mirage.commands.config import ExecContext
 from mirage.commands.errors import CommandTimeoutError, UsageError
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.context import path_allowed
 from mirage.io import IOResult
@@ -35,7 +34,7 @@ from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
                                                       path_exists,
                                                       path_readdir, path_stat)
-from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
+from mirage.workspace.executor.command.flags import parse_flags
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
@@ -106,6 +105,27 @@ def line_runtime_for(
     if isinstance(runtime, VFSRuntime):
         return None, None
     return runtime, None
+
+
+def find_start_points(argv: list[str | PathSpec], expr_tokens: list[str],
+                      spec: CommandSpec | None, cwd: str) -> list[PathSpec]:
+    """find's start points: the path operands typed before its expression.
+
+    The expression tail is the parser's, so a word inside it (an
+    ``-exec`` command word, a ``-newer`` reference) is never a start
+    point even when the rest slot's PATH kind would have read it as one.
+    Only the head is parsed against the spec, so what it yields as path
+    operands is exactly the start points.
+
+    Args:
+        argv (list[str | PathSpec]): the classified words after `find`.
+        expr_tokens (list[str]): the expression tail, as `find_expr_tail`
+            cut it off the same words.
+        spec (CommandSpec | None): find's spec on the mount.
+        cwd (str): the session's working directory.
+    """
+    head = argv[:len(argv) - len(expr_tokens)]
+    return parse_flags(head, spec, "find", cwd).paths
 
 
 def scalar_find_flags(
@@ -257,7 +277,8 @@ def namespace_view_of(registry: MountRegistry, namespace: Namespace | None,
         stat_overlay=(functools.partial(namespace_stat_overlay, namespace)
                       if namespace is not None else None),
         child_mounts=functools.partial(registry_child_mounts, registry,
-                                       namespace))
+                                       namespace),
+        user=namespace.user if namespace is not None else None)
 
 
 async def drop_service_caches(registry: MountRegistry,
@@ -296,7 +317,7 @@ async def drop_service_caches(registry: MountRegistry,
         # listing (github seeds the whole tree once) cannot tell the drop
         # from an empty repository and reports the mount as gone. Expiring
         # keeps that distinction and the next read refetches.
-        await mount.resource.index.invalidate()
+        await mount.index.invalidate()
         if mount.cache_manager is not None:
             await mount.cache_manager.drop_prefix()
 
@@ -305,26 +326,18 @@ def namespace_stat_overlay(namespace: Namespace, virtual: str,
                            stat: FileStat) -> FileStat:
     """Merge namespace attr overlays into one stat row (ls/stat rendering).
 
-    A path never chown'd defaults its owner to the workspace user (the
-    launch agent, what ``whoami`` reports), so ``ls -l`` and ``stat -c``
-    agree on ownership. An unclaimed workspace leaves uid/gid None and the
-    formatters fall back to the neutral ``user`` placeholder.
+    Only what ``chmod``/``chown``/``chgrp``/``touch`` recorded: a path
+    never chown'd keeps uid and gid None, and the owner-rendering
+    commands fall back through ``Identity`` (the workspace user for the
+    owner, the session's profile for the group), which is the one rule
+    ``ls -l``, ``stat -c`` and ``find -printf`` share.
 
     Args:
         namespace (Namespace): addressing authority holding the overlay.
         virtual (str): absolute virtual path of the statted entry.
         stat (FileStat): backend stat result.
     """
-    merged = merge_overlay_stat(namespace.meta_for(virtual), stat)
-    user = namespace.user
-    if user is None:
-        return merged
-    update: dict[str, Any] = {}
-    if merged.uid is None:
-        update["uid"] = user
-    if merged.gid is None:
-        update["gid"] = user
-    return merged.model_copy(update=update) if update else merged
+    return merge_overlay_stat(namespace.meta_for(virtual), stat)
 
 
 async def run_on_mount(
@@ -441,20 +454,6 @@ async def run_on_mount(
         # and the TypeScript executor.
         return None, IOResult(exit_code=read_fail_exit(cmd_name, exc),
                               stderr=format_fs_error(cmd_name, exc, paths))
-
-    if cmd_name == "find":
-        stdout, action_err = await _apply_find_actions(
-            stdout,
-            flag_kwargs,
-            registry,
-            session.cwd,
-            child_mounts=ns.child_mounts,
-            stat_path=stat_path)
-        if action_err:
-            existing = await materialize(io.stderr) if io.stderr else b""
-            io.stderr = existing + action_err
-            if io.exit_code == 0:
-                io.exit_code = 1
 
     prefix = mount.prefix.rstrip("/")
     if prefix:

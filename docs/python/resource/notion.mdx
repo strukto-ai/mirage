@@ -6,7 +6,7 @@ description: Mount Notion pages as a virtual filesystem.
 The Notion resource exposes a Notion workspace as a virtual filesystem
 mounted at a prefix such as `/notion/`.
 
-For API key setup, see [Notion Setup](/python/setup/notion).
+For API key setup, see [Notion Setup](/home/setup/notion).
 
 ## Config
 
@@ -25,6 +25,7 @@ ws = Workspace({"/notion": resource}, mode=MountMode.WRITE)
 | ---------- | -------- | ------------------------------ | ----------------------- |
 | `api_key`  | yes      |                                | Notion integration token |
 | `base_url` | no       | `https://api.notion.com/v1`    | API base URL            |
+| `api_version` | no    | the client's generation         | Pins the `Notion-Version` header |
 
 ## Filesystem Layout
 

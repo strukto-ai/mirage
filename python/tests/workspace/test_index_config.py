@@ -15,10 +15,12 @@
 import pytest
 
 from mirage import Workspace
-from mirage.cache.index import (RAMIndexCacheStore, RedisIndexCacheStore,
-                                RedisIndexConfig)
+from mirage.cache.index import (IndexConfig, RAMIndexCacheStore,
+                                RedisIndexCacheStore, RedisIndexConfig)
+from mirage.cache.index.config import LookupStatus
 from mirage.config import MountBlock, RedisIndexBlock, WorkspaceConfig
 from mirage.resource.ram import RAMResource
+from mirage.types import MountMode
 
 
 def test_redis_index_config_default_key_prefix():
@@ -47,3 +49,55 @@ async def test_config_index_redis_block_builds_redis_config():
     kwargs = cfg.to_workspace_kwargs()
     assert isinstance(kwargs["index"], RedisIndexConfig)
     assert kwargs["index"].key_prefix == "mirage:index:"
+
+
+@pytest.mark.asyncio
+async def test_added_mount_inherits_redis_index():
+    ws = Workspace({}, index=RedisIndexConfig(key_prefix="shared:"))
+    resource = RAMResource()
+    ws.add_mount("/late", resource)
+    try:
+        assert isinstance(resource.index, RedisIndexCacheStore)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_added_mount_inherits_index_ttl():
+    initial = RAMResource()
+    ws = Workspace({"/initial": initial}, index=IndexConfig(ttl=-1))
+    added = RAMResource()
+    ws.add_mount("/late", added)
+    try:
+        for resource in (initial, added):
+            await resource.index.set_dir("/listing", [])
+            assert (await resource.index.list_dir("/listing")).status == \
+                LookupStatus.EXPIRED
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_added_mount_keeps_index_coherent_across_aliases_and_duplicates(
+):
+    ws = Workspace({}, index=IndexConfig(ttl=3600))
+    resource = RAMResource()
+    ws.add_mount("/late", resource, MountMode.WRITE)
+    index = resource.index
+    rejected = RAMResource()
+    rejected_index = rejected.index
+    try:
+        await index.set_dir("/late", [])
+        ws.add_mount("/alias", resource)
+        assert resource.index is index
+        assert (await index.list_dir("/late")).entries == []
+        with pytest.raises(ValueError, match="duplicate mount prefix"):
+            ws.add_mount("late/", rejected)
+        assert rejected.index is rejected_index
+        # The manager must invalidate the configured index, not the store
+        # the resource had before it was attached to the workspace.
+        await ws.fs.write("/late/new.txt", b"new")
+        assert (await index.list_dir("/late")).status == LookupStatus.NOT_FOUND
+    finally:
+        await ws.close()
+        await rejected.close()

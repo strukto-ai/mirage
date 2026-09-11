@@ -123,6 +123,11 @@ export interface SessionView {
   mark(name: string, attr: VarAttr | null, on: boolean): Promise<void>
   // Whether `readonly` has marked the name.
   isReadonly(name: string): boolean
+  // The name of the profile the session runs under, null for an
+  // unrestricted session. What an owner-rendering command (ls -l, stat
+  // %g, find -printf %g) prints in the group column: the profile is the
+  // permission set the session acts with, which is what a group is.
+  profile(): string | null
 }
 
 // The symlink facts a command may consult, as one injected object.
@@ -174,4 +179,8 @@ export interface NamespaceView {
   statOverlay?: StatOverlay
   // Child names the namespace owes a directory (mounts and links).
   childMounts?: ChildMounts
+  // The workspace user (what whoami prints), absent when no agent ever
+  // claimed the workspace. What an owner-rendering command prints in the
+  // owner column for an entry whose backend reports no uid.
+  user?: string
 }

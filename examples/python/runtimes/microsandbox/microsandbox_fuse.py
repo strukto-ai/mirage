@@ -76,7 +76,7 @@ async def main():
                       file=sys.stderr)
                 sys.exit(result.exit_code)
 
-        records = ws.ops.records
+        records = ws.fs.records
         total = sum(rec.bytes for rec in records)
         print(
             f"\nMirage served {len(records)} ops, {total} bytes to the sandbox"

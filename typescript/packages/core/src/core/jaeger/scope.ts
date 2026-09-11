@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { Codec } from '../hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
 import { isTraceId } from './client.ts'
@@ -34,14 +34,14 @@ const SCOPES: readonly Scope[] = [
     kind: 'operations',
     segments: ['services', new Slot('service'), OPERATIONS_FILE],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'traces', segments: ['services', new Slot('service'), 'traces'] }),
   new Scope({
     kind: 'trace',
     segments: ['services', new Slot('service'), 'traces', new Slot('trace_id', TRACE_FILE)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 

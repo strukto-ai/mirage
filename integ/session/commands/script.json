@@ -39,7 +39,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: written by scripted\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -94,7 +94,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: sealed by scriptedjs\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -108,7 +108,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: sealed by scriptedjs\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -136,7 +136,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: written by scripted\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -150,7 +150,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: written by scripted\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -164,7 +164,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: policy denied: written by scripted\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -191,7 +191,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: scripted sign-off (ask a288d3df2ca1)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -206,6 +206,200 @@
       "expect": {
         "exit": 0,
         "stdout": "b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptops_prep",
+      "seq": 923270,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "mkdir -p /scratch/cold && echo keep > /scratch/cold/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptops_read_passes_the_op_door",
+      "seq": 923271,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "cat /scratch/cold/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptops_write_is_refused_at_the_op_door",
+      "seq": 923272,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "echo x > /scratch/cold/f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/scratch/cold/f: Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptops_unlink_is_refused_at_the_op_door",
+      "seq": 923273,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "rm /scratch/cold/k",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rm: cannot remove '/scratch/cold/k': Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptops_the_refused_writes_left_nothing",
+      "seq": 923274,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "ls /scratch/cold",
+      "expect": {
+        "exit": 0,
+        "stdout": "k\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptops_content_deny_at_the_command_gate",
+      "seq": 923275,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "echo marker > /scratch/m && cat /scratch/m",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "cat: Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptops_env_write_is_refused_at_the_session_door",
+      "seq": 923276,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "export AWS_SECRET=x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "credentials are set by the operator\n"
+      }
+    },
+    {
+      "id": "scriptops_other_env_writes_land",
+      "seq": 923277,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "scriptedops",
+      "command": "export SAFE_X=1 && echo $SAFE_X",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptopsjs_prep",
+      "seq": 923278,
+      "targets": [
+        "ram-scripted"
+      ],
+      "command": "mkdir -p /scratch/cold && echo keep > /scratch/cold/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptopsjs_undefined_command_hook_is_silence",
+      "seq": 923279,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "echo judged-by-js-ops",
+      "expect": {
+        "exit": 0,
+        "stdout": "judged-by-js-ops\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptopsjs_write_is_refused_at_the_op_door",
+      "seq": 923280,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "echo x > /scratch/cold/f",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/scratch/cold/f: Permission denied\n"
+      }
+    },
+    {
+      "id": "scriptopsjs_read_passes_the_op_door",
+      "seq": 923281,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "cat /scratch/cold/k",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "scriptopsjs_env_write_is_refused_at_the_session_door",
+      "seq": 923282,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "export AWS_SECRET=x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "credentials are set by the operator\n"
+      }
+    },
+    {
+      "id": "scriptopsjs_other_env_writes_land",
+      "seq": 923283,
+      "targets": [
+        "ram-scripted"
+      ],
+      "session": "scriptedopsjs",
+      "command": "export SAFE_X=1 && echo $SAFE_X",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
         "stderr": ""
       }
     }

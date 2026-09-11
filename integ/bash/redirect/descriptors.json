@@ -1,0 +1,573 @@
+{
+  "cases": [
+    {
+      "id": "redirect_fd3_claim_refused",
+      "seq": 980001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x 3>/data/fd3.txt; echo code=$?; test -e /data/fd3.txt; echo exists=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\nexists=1\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_dup_from_fd3_refused",
+      "seq": 980002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x >&3 && echo and || echo or",
+      "expect": {
+        "exit": 0,
+        "stdout": "or\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_stderr_to_fd3_refused",
+      "seq": 980003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x 2>&3; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_stdin_from_fd3_refused",
+      "seq": 980004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat <&3; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "3: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_close_stdout_write_error",
+      "seq": 980005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x >&-; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_close_stderr_is_quiet",
+      "seq": 980006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x 2>&-; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ncode=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_self_dups_are_noops",
+      "seq": 980007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x 1>&1; echo y 2>&2",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ny\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_close_routes_by_claimed_fd",
+      "seq": 980008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/missing 2<&-; echo code=$?; echo y 1<&-; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\ncode=1\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_bare_zero_is_the_descriptor",
+      "seq": 980009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x 0>&-; echo code=$?; echo 0 >&-; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\ncode=0\ncode=1\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "stdout_from_stdin_fails_write",
+      "seq": 980109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo x 1>&0; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "echo: write error: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "stdin_dup_tracks_output_route",
+      "seq": 980110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo x 0>&1 1>&0; echo x 2>&0 1>&2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stdin_dup_file_route",
+      "seq": 980111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "echo x 0>/data/fd0-out 1>&0; cat /data/fd0-out; rm /data/fd0-out",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_stdin_from_a_closed_or_write_only_descriptor_is_unreadable",
+      "seq": 980112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat 0<&1; echo rc=$?; cat <&-; echo rc=$?; true 0<&1; echo rc=$?; echo hi 0<&1; read zrd 0<&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=0\nhi\nrc=1\n",
+        "stderr": "cat: -: Bad file descriptor\ncat: -: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_output_descriptor_stays_unreadable",
+      "seq": 980113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "cat 1>/data/ro 0<&1; echo rc=$?; wc -c < /data/ro; rm /data/ro",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n0\n",
+        "stderr": "cat: -: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_dup_from_a_closed_descriptor_refuses_the_line",
+      "seq": 980114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "touch /data/mk 0<&- 1<&0; echo rc=$?; test -e /data/mk; echo $?; echo hi 1>&- 2>&1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\nrc=1\n",
+        "stderr": "0: Bad file descriptor\n1: Bad file descriptor\n"
+      }
+    },
+    {
+      "id": "redirect_word_dup_on_another_descriptor_is_ambiguous",
+      "seq": 980115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "touch /data/mk 3>&/data/foo; echo rc=$?; test -e /data/mk; echo $?; test -e /data/foo; echo $?; ( exec 3>&/data/foo ); echo rc=$?; ( echo out; echo err >&2 ) 1>&/data/both; cat /data/both; rm /data/both",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n1\n1\nrc=1\nout\nerr\n",
+        "stderr": "/data/foo: ambiguous redirect\n/data/foo: ambiguous redirect\n"
+      }
+    },
+    {
+      "id": "redirect_dup_from_a_persistently_closed_descriptor_refuses_the_line",
+      "seq": 980116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "( exec 1>&-; touch /data/pcm 2>&1; echo rc=$? >&2; test -e /data/pcm; echo e=$? >&2 ); echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
+      },
+      "note": "bash 5.2: a descriptor `exec` closed for the shell refuses a later dup from it before the command runs. In a subshell so the battery's shared session keeps its streams."
+    },
+    {
+      "id": "redirect_self_dup_keeps_a_closed_descriptor_closed",
+      "seq": 980117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "touch /data/sdm 1>&- 1>&1 2>&1; echo rc=$? >&2; test -e /data/sdm; echo e=$? >&2",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
+      },
+      "note": "bash 5.2: a self-dup is a no-op, so a descriptor closed earlier on the line stays closed and the later dup from it is refused before the command runs."
+    }
+  ]
+}

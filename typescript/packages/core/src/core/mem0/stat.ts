@@ -14,7 +14,7 @@
 
 import type { Mem0Accessor } from '../../accessor/mem0.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { jsonBytes } from '../render/json.ts'
@@ -25,7 +25,8 @@ import { detectScope } from './scope.ts'
 function fileStat(memory: Record<string, unknown>): FileStat {
   return new FileStat({
     name: `${String(memory.id)}.json`,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     size: jsonBytes(memory).length,
     modified:
       typeof memory.updated_at === 'string'

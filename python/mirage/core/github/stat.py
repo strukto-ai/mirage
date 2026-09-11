@@ -19,7 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ async def stat(
             name=result.entry.name,
             size=result.entry.size,
             type=FileType.FILE,
-            content=guess_type(result.entry.name),
+            content=content_type_for_path(result.entry.name),
             fingerprint=result.entry.id,
             extra={"sha": result.entry.id},
         )

@@ -83,7 +83,7 @@ export class Reconciler {
     try {
       remoteStat = await this.opsRegistry.call(
         'stat',
-        resource.kind,
+        resource,
         resource.accessor ?? NOOP_ACCESSOR,
         scope,
       )

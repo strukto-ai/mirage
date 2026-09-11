@@ -524,3 +524,35 @@ async def test_load_with_a_non_mapping_secrets_override_is_a_bad_request(
                                   },
                               })
         assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_load_with_an_unbuildable_resource_override_is_a_bad_request(
+        tmp_path):
+    """A ref the daemon cannot load is the caller's mistake, so it is
+    answered like the other bad overrides; it used to escape as a 500."""
+    app, _ = _make_app_with_short_grace(grace=10.0, snapshot_root=tmp_path)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+        wid = r.json()["id"]
+        target = tmp_path / "snap.tar"
+        r = await client.post(f"/v1/workspaces/{wid}/snapshot",
+                              json={"path": str(target)})
+        assert r.status_code == 200, r.text
+        r = await client.post("/v1/workspaces/load",
+                              json={
+                                  "path": str(target),
+                                  "override": {
+                                      "mounts": {
+                                          "/": {
+                                              "resource":
+                                              f"{tmp_path}/gone.py:Wiki"
+                                          }
+                                      }
+                                  },
+                              })
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"].startswith("override build failed: ")
+        assert "gone.py" in r.json()["detail"]

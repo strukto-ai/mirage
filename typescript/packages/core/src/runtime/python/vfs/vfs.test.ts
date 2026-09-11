@@ -22,7 +22,7 @@ import { changedAttrs, MirageFs } from './vfs.ts'
 import { MirageFsSeed } from './seed.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
 import type { FSNode } from './types.ts'
-import { FileStat, FileType, type SetAttrFields } from '../../../types.ts'
+import { ContentType, FileStat, FileType, type SetAttrFields } from '../../../types.ts'
 
 const enc = new TextEncoder()
 
@@ -116,7 +116,8 @@ describe('MirageFs', () => {
           new FileStat({
             name: path,
             size: found.length,
-            type: FileType.TEXT,
+            type: FileType.FILE,
+            content: ContentType.TEXT,
             // Deliberately not the tree's own defaults, so a test can
             // tell which of the two a guest's stat answered from.
             mode: STORE_MODE,

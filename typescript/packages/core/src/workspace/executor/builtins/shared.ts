@@ -231,7 +231,7 @@ export async function expandOperands(
           resolved: spec.resolved,
           resourcePath: mountKey(spec.virtual, prefix),
         })
-        const expanded = await mount.resource.glob([withPrefix], prefix)
+        const expanded = await mount.expandGlob([withPrefix], prefix)
         for (const p of expanded) if (p instanceof PathSpec) out.push(p)
         continue
       }

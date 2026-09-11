@@ -323,14 +323,42 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
  * boundary; merge keeps the rightmost producer, so this names the
  * command whose stream the caller actually sees. Post-layer policies
  * (output caps today; budgets and attribution later) read it as
- * context. Facts only: policy decisions never travel on the envelope.
- * `declared` is the bound the command's own registration declared,
+ * context. Facts only: no policy reads a decision off the envelope;
+ * the one a chain hands down is written beside it as
+ * `IOResult.refusal` after the last hook has spoken. `declared` is
+ * the bound the command's own registration declared,
  * when the dispatch site knows it (e.g. a CLI leaf).
  */
 export interface Producer {
   readonly command: string
   readonly prefixes: readonly string[]
   readonly declared: Limit | null
+}
+
+export type RefusalKind = 'deny' | 'pending' | 'failed'
+export type RefusalScope = 'command' | 'operand'
+
+/**
+ * Why a line did not run, for the caller that reads the result.
+ *
+ * stderr keeps bash's voice (`<cmd>: Permission denied`), which says
+ * nothing about who refused or why; this record carries that beside
+ * the envelope, so a host or an agent adapter can show the reason
+ * without the shell having to. null on every run that was not
+ * refused, and absent on the 127 `command not found` row, which must
+ * not reveal that the word names anything. `kind` is `deny` for a
+ * policy's refusal, `pending` for an ask the host has not answered,
+ * `failed` for a policy that raised and so refused by default;
+ * `policy` is the class name of the policy that spoke, empty for an
+ * ask, which belongs to the host; `askId` is the approval to quote,
+ * for `pending`. Mirrors the Python `Refusal`.
+ */
+export interface Refusal {
+  readonly kind: RefusalKind
+  readonly reason: string
+  readonly policy: string
+  readonly scope: RefusalScope
+  readonly askId: string | null
 }
 
 export const ResourceName = Object.freeze({
@@ -392,10 +420,40 @@ export const ResourceName = Object.freeze({
 
 export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
 
+/**
+ * POSIX file type (the `st_mode` kind), the switch behavior branches on.
+ *
+ * One per entry, always present. Directory and symlink are their own
+ * kinds; every regular file is FILE and carries its content shape on
+ * `FileStat.content`. Distinct from ContentType, which is only a
+ * rendering hint for a FILE. Mirrors `FileType` in `mirage/types.py`.
+ *
+ * The full POSIX set is enumerated so the model is comprehensive.
+ * DIRECTORY, FILE, SYMLINK and CHAR_DEVICE (the /dev mount) are produced
+ * today; BLOCK_DEVICE, FIFO and SOCKET are declared but not yet emitted,
+ * and the render/derivation tables (find letter, st_mode bits, ls char)
+ * grow a row for one the moment a backend starts producing it.
+ */
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
+  FILE: 'file',
   SYMLINK: 'symlink',
   CHAR_DEVICE: 'char_device',
+  BLOCK_DEVICE: 'block_device',
+  FIFO: 'fifo',
+  SOCKET: 'socket',
+} as const)
+
+export type FileType = (typeof FileType)[keyof typeof FileType]
+
+/**
+ * A regular file's content shape: the rendering hint (file/ls color).
+ *
+ * Only meaningful for a FILE; a directory or symlink carries none. Not a
+ * node kind: nothing branches control flow on it. Mirrors `ContentType`
+ * in `mirage/types.py`.
+ */
+export const ContentType = Object.freeze({
   TEXT: 'text',
   BINARY: 'binary',
   JSON: 'json',
@@ -408,7 +466,7 @@ export const FileType = Object.freeze({
   PDF: 'application/pdf',
 } as const)
 
-export type FileType = (typeof FileType)[keyof typeof FileType]
+export type ContentType = (typeof ContentType)[keyof typeof ContentType]
 
 // FileStat.extra key holding a symlink's target, verbatim as it was
 // typed. A link has no backend inode, so this is the only place the
@@ -444,7 +502,8 @@ export interface FileStatInit {
   modified?: string | null
   fingerprint?: string | null
   revision?: string | null
-  type?: FileType | null
+  type: FileType
+  content?: ContentType | null
   mode?: number | null
   uid?: number | string | null
   gid?: number | string | null
@@ -458,7 +517,8 @@ export class FileStat {
   readonly modified: string | null
   readonly fingerprint: string | null
   readonly revision: string | null
-  readonly type: FileType | null
+  readonly type: FileType
+  readonly content: ContentType | null
   readonly mode: number | null
   readonly uid: number | string | null
   readonly gid: number | string | null
@@ -471,7 +531,14 @@ export class FileStat {
     this.modified = init.modified ?? null
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
-    this.type = init.type ?? null
+    this.type = init.type
+    // content is a FILE's rendering hint; a directory or symlink has
+    // none. null on a FILE means "unknown", which is allowed.
+    const content = init.content ?? null
+    if (content !== null && init.type !== FileType.FILE) {
+      throw new Error(`content must be null for ${init.type}, got ${content}`)
+    }
+    this.content = content
     this.mode = init.mode ?? null
     this.uid = init.uid ?? null
     this.gid = init.gid ?? null
@@ -495,6 +562,7 @@ export class FileStat {
       fingerprint: this.fingerprint,
       revision: this.revision,
       type: this.type,
+      content: this.content,
       mode: this.mode,
       uid: this.uid,
       gid: this.gid,

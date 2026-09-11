@@ -18,7 +18,7 @@ import { LinearAccessor } from '../../accessor/linear.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { FileStat } from '../../types.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import type { LinearTransport } from './client.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
@@ -75,7 +75,7 @@ describe('linear stat modified', () => {
       spec('/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1/issue.json'),
       idx,
     )
-    expect(s.type).toBe(FileType.JSON)
+    expect(s.content).toBe(ContentType.JSON)
     expect(s.size).toBe(321)
     expect(s.modified).toBe('2026-04-05T00:00:00Z')
     expect(s.extra.issue_id).toBe('ISSUE1')

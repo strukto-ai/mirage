@@ -246,7 +246,7 @@ class MountCore:
         return link_stat(target, row, self._uid, self._gid, self._now)
 
     def drain_ops(self) -> list[dict[str, Any]]:
-        records = [asdict(r) for r in self._ops.records]
+        records = [r.to_dict() for r in self._ops.records]
         self._ops.records.clear()
         return records
 

@@ -191,3 +191,20 @@ async def test_data_persists_across_commands(ws):
     result1 = await _run(ws, "cat /data/p.txt")
     result2 = await _run(ws, "cat /data/p.txt")
     assert result1 == result2 == "persistent\n"
+
+
+@pytest.mark.asyncio
+async def test_get_state_reads_only_a_metacharacter_prefix():
+    mine = RedisResource(url=REDIS_URL, key_prefix="test:[ab]?:")
+    neighbour = RedisResource(url=REDIS_URL, key_prefix="test:ax:")
+    try:
+        await mine._store.clear()
+        await neighbour._store.clear()
+        await neighbour._store.set_file("/other", b"x")
+        await mine._store.set_file("/mine", b"y")
+        assert sorted(mine.get_state()["files"]) == ["/mine"]
+    finally:
+        await mine._store.clear()
+        await neighbour._store.clear()
+        await mine._store.close()
+        await neighbour._store.close()

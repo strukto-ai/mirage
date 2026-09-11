@@ -202,7 +202,7 @@ class TestReads:
         run(resource.write(PathSpec.from_str_path("/fixed.txt"), b"ro"))
         ws = Workspace({"/ro/": (resource, MountMode.READ)},
                        mode=MountMode.WRITE)
-        patched = make_os_module(ws.ops)
+        patched = make_os_module(ws.fs)
         assert patched.access("/ro/fixed.txt", os.R_OK) is True
         assert patched.access("/ro/fixed.txt", os.W_OK) is False
 
@@ -466,8 +466,8 @@ class TestProcessPatch:
 
     def test_a_module_level_import_routes_inside_the_block(self):
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.mkdir("/mem/dir"))
-        run(ws.ops.write("/mem/dir/a.txt", b"a"))
+        run(ws.fs.mkdir("/mem/dir"))
+        run(ws.fs.write("/mem/dir/a.txt", b"a"))
         host_listdir = os.listdir
         with ws:
             # `os` here is the module this test file imported before the
@@ -481,8 +481,8 @@ class TestProcessPatch:
 
     def test_pathlib_routes_for_content_and_metadata(self):
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.mkdir("/mem/dir"))
-        run(ws.ops.write("/mem/dir/a.txt", b"hello"))
+        run(ws.fs.mkdir("/mem/dir"))
+        run(ws.fs.write("/mem/dir/a.txt", b"hello"))
         with ws:
             path = Path("/mem/dir/a.txt")
             assert path.exists() is True
@@ -499,15 +499,15 @@ class TestProcessPatch:
         # interpreter that is not in UTF-8 mode, which is the normal
         # case. This is that call, spelled out.
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.write("/mem/a.txt", b"hello"))
+        run(ws.fs.write("/mem/a.txt", b"hello"))
         with ws:
             with open("/mem/a.txt", "r", -1, "locale", None, None) as f:
                 assert f.read() == "hello"
 
     def test_shutil_copies_across_the_boundary(self, tmp_path):
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.mkdir("/mem/dir"))
-        run(ws.ops.write("/mem/dir/a.txt", b"hello"))
+        run(ws.fs.mkdir("/mem/dir"))
+        run(ws.fs.write("/mem/dir/a.txt", b"hello"))
         with ws:
             out = tmp_path / "copied.txt"
             shutil.copy("/mem/dir/a.txt", str(out))
@@ -517,13 +517,13 @@ class TestProcessPatch:
 
     def test_a_hidden_path_reads_as_absent_through_os(self):
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.write("/mem/open.txt", b"public"))
-        run(ws.ops.mkdir("/mem/secrets"))
-        run(ws.ops.write("/mem/secrets/token.txt", b"s3cret"))
+        run(ws.fs.write("/mem/open.txt", b"public"))
+        run(ws.fs.mkdir("/mem/secrets"))
+        run(ws.fs.write("/mem/secrets/token.txt", b"s3cret"))
         session = ws.create_session("agent")
         session.hidden_paths = HiddenPaths(paths=("/mem/secrets", ),
                                            patterns=("*.key", ))
-        run(ws.ops.write("/mem/note.key", b"key"))
+        run(ws.fs.write("/mem/note.key", b"key"))
         with ws:
             set_current_session(session)
             try:
@@ -540,7 +540,7 @@ class TestProcessPatch:
         # to be the readlink probe in front of it: the table itself has
         # no session.
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.write("/mem/a.txt", b"hello"))
+        run(ws.fs.write("/mem/a.txt", b"hello"))
         session = ws.create_session("agent")
         session.hidden_paths = HiddenPaths(paths=(), patterns=("*.key", ))
         with ws:

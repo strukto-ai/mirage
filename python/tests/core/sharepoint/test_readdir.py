@@ -6,7 +6,6 @@ from aioresponses import aioresponses
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint.readdir import readdir
-from mirage.core.sharepoint.resolve import _drive_cache, _site_cache
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -19,24 +18,10 @@ _DRIVES_RE = re.compile(r".*/sites/.*/drives\??.*")
 
 
 def _accessor() -> SharePointAccessor:
-    return SharePointAccessor(SharePointConfig(access_token="tok"))
-
-
-def _seed_caches():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-
-
-def _clear_caches():
-    _site_cache.clear()
-    _drive_cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _reset_caches():
-    _clear_caches()
-    yield
-    _clear_caches()
+    accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    return accessor
 
 
 @pytest.mark.asyncio
@@ -68,7 +53,6 @@ async def test_readdir_root_lists_sites():
 
 @pytest.mark.asyncio
 async def test_readdir_site_lists_drives():
-    _site_cache["Engineering"] = _SITE_ID
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(_DRIVES_RE,
@@ -94,7 +78,6 @@ async def test_readdir_site_lists_drives():
 
 @pytest.mark.asyncio
 async def test_readdir_drive_root_lists_children():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -129,7 +112,6 @@ async def test_readdir_drive_root_lists_children():
 
 @pytest.mark.asyncio
 async def test_readdir_populates_index_with_metadata():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -157,7 +139,6 @@ async def test_readdir_populates_index_with_metadata():
 
 @pytest.mark.asyncio
 async def test_readdir_subfolder():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root:/src:/children",
@@ -181,7 +162,6 @@ async def test_readdir_subfolder():
 
 @pytest.mark.asyncio
 async def test_readdir_of_file_raises_not_a_directory():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root:/a.txt:/children",
@@ -207,7 +187,6 @@ async def test_readdir_of_file_raises_not_a_directory():
 
 @pytest.mark.asyncio
 async def test_readdir_cache_hit():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root/children",

@@ -22,7 +22,7 @@ from mirage.resource.ram import RAMResource
 def _make_ops() -> tuple[Ops, RAMResource]:
     mem = RAMResource()
     ws = Workspace({"/data/": mem}, mode=MountMode.WRITE)
-    return ws.ops, mem
+    return ws.fs, mem
 
 
 def test_append_creates_file():

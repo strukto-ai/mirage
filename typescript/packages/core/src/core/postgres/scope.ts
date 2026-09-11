@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { Codec } from '../hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
 
@@ -35,7 +35,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'database_json',
     segments: ['database.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
     probed: false,
   }),
   new Scope({ kind: 'schema', segments: [new Slot('schema')] }),
@@ -48,19 +48,19 @@ export const SCOPES: readonly Scope[] = [
     kind: 'entity_schema',
     segments: [new Slot('schema'), new Slot('kind', KIND), new Slot('entity'), 'schema.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'entity_semantic',
     segments: [new Slot('schema'), new Slot('kind', KIND), new Slot('entity'), 'semantic.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'entity_rows',
     segments: [new Slot('schema'), new Slot('kind', KIND), new Slot('entity'), 'rows.jsonl'],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
 ]
 

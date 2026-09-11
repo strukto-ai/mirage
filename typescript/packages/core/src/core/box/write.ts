@@ -121,7 +121,7 @@ export async function rmdir(accessor: BoxAccessor, path: PathSpec): Promise<void
   // The refusal is the service's, but naming it is ours: BoxApiError is a
   // bare Error with no code, so an unmapped 409 reached the caller as a
   // condition `classify` could not name -- EIO over FUSE, no code at all for
-  // `ws.ops` and the sandbox runtimes.
+  // `ws.fs` and the sandbox runtimes.
   try {
     await deleteFolder(accessor.tokenManager, item.id, false)
   } catch (error) {

@@ -50,8 +50,11 @@ export class NotionResource extends BaseResource implements Resource {
   constructor(config: NotionConfig) {
     super()
     this.config = config
-    const transportOpts: { apiKey: string; baseUrl?: string } = { apiKey: config.apiKey }
+    const transportOpts: { apiKey: string; baseUrl?: string; apiVersion?: string } = {
+      apiKey: config.apiKey,
+    }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
+    if (config.apiVersion !== undefined) transportOpts.apiVersion = config.apiVersion
     this.accessor = new NotionAccessor(new HttpNotionTransport(transportOpts))
   }
 

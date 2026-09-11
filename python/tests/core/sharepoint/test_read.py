@@ -3,7 +3,6 @@ from aioresponses import CallbackResult, aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.read import read_bytes
-from mirage.core.sharepoint.resolve import _drive_cache, _site_cache
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -13,25 +12,10 @@ _DRIVE_ID = "b!driveXYZ"
 
 
 def _accessor() -> SharePointAccessor:
-    return SharePointAccessor(SharePointConfig(access_token="tok"))
-
-
-def _seed_caches():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-
-
-def _clear_caches():
-    _site_cache.clear()
-    _drive_cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _reset_caches():
-    _clear_caches()
-    _seed_caches()
-    yield
-    _clear_caches()
+    accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    return accessor
 
 
 @pytest.mark.asyncio

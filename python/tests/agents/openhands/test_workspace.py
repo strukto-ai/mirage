@@ -19,9 +19,18 @@ import pytest
 pytest.importorskip("openhands")
 
 from mirage.agents.openhands import MirageWorkspace  # noqa: E402
+from mirage.policy import Action, CommandContext, Deny, Policy  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.types import MountMode  # noqa: E402
 from mirage.workspace import Workspace  # noqa: E402
+
+
+class _NoDeletes(Policy):
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        if ctx.command == "rm":
+            return Deny(reason="no deletes")
+        return None
 
 
 def _make_backing() -> Workspace:
@@ -106,3 +115,16 @@ def test_git_methods_not_supported():
             mw.git_changes("/")
         with pytest.raises(NotImplementedError):
             mw.git_diff("/some/path")
+
+
+def test_execute_command_names_the_reason_beside_a_refusal():
+    # stderr is bash's bare `Permission denied`; the reason rides the
+    # refusal record, and a text surface appends it as one more line.
+    backing = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+                        mode=MountMode.WRITE,
+                        policies=[_NoDeletes()])
+    with MirageWorkspace(workspace=backing) as mw:
+        result = mw.execute_command("rm /x")
+        assert result.exit_code == 126
+        assert result.stderr == (
+            "rm: Permission denied\npolicy denied: no deletes\n")

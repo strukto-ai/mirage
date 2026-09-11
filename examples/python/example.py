@@ -46,7 +46,7 @@ ws = Workspace(
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 

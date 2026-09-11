@@ -48,7 +48,7 @@
       "command": "stat -c \"%U:%G\" /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent:mirage-agent\n",
+        "stdout": "mirage-agent:ops\n",
         "stderr": ""
       }
     },
@@ -127,6 +127,87 @@
       "expect": {
         "exit": 0,
         "stdout": "size=49%\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_owner_group_session",
+      "seq": 202010,
+      "targets": [
+        "statvfs"
+      ],
+      "session": "auditor",
+      "command": "stat -c \"%U:%G\" /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-agent:auditor\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_whoami_is_owner",
+      "seq": 202011,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "whoami",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-agent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_ls_long_owner_group",
+      "seq": 202012,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "ls -l /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r----- 1 mirage-agent ops 49 Jan  2  2026 /vfs/settings.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_ls_long_session_group",
+      "seq": 202013,
+      "targets": [
+        "statvfs"
+      ],
+      "session": "auditor",
+      "command": "ls -l /vfs/settings.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r----- 1 mirage-agent auditor 49 Jan  2  2026 /vfs/settings.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_find_printf_owner_group",
+      "seq": 202014,
+      "targets": [
+        "statvfs"
+      ],
+      "command": "find /vfs -name settings.json -printf \"%u %g %U %G\\n\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-agent ops mirage-agent ops\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "vfs_find_printf_session_group",
+      "seq": 202015,
+      "targets": [
+        "statvfs"
+      ],
+      "session": "auditor",
+      "command": "find /vfs -name settings.json -printf \"%u %g\\n\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "mirage-agent auditor\n",
         "stderr": ""
       }
     }

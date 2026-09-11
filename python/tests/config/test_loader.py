@@ -21,7 +21,7 @@ from mirage import MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (DiskStoreBlock, RamCacheBlock, RedisCacheBlock,
                            RedisStoreBlock, S3StoreBlock, WorkspaceConfig,
-                           load_config)
+                           _build_runtime_entries, load_config)
 from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
@@ -596,6 +596,43 @@ async def test_clis_section_parses_and_maps_to_kwargs():
     }
 
 
+def test_clis_script_entry_refuses_a_secrets_pointer():
+    """A script's config is opaque: nothing declares which key is a
+    credential, so the snapshot captures it verbatim, and a pointer
+    resolved into it would be written out as the value it fetched. A
+    script reads a credential from a managed env var instead."""
+    with pytest.raises(ValueError, match="opaque"):
+        load_config({
+            "mounts": {},
+            "clis": {
+                "pager": {
+                    "script": "pager.py",
+                    "config": {
+                        "token": {
+                            "from": "env",
+                            "key": "PAGER_TOKEN"
+                        }
+                    },
+                }
+            },
+        })
+    # A literal in a script's config is the script's own business.
+    cfg = load_config({
+        "mounts": {},
+        "clis": {
+            "pager": {
+                "script": "pager.py",
+                "config": {
+                    "verbose": True
+                }
+            }
+        },
+    })
+    assert cfg.clis is not None and cfg.clis["pager"].config == {
+        "verbose": True
+    }
+
+
 @pytest.mark.asyncio
 async def test_clis_script_entry_synthesizes_a_spec(tmp_path):
     (tmp_path / "pager.py").write_text("print('page')")
@@ -721,6 +758,78 @@ mounts:
 """)
     cfg = load_config(cfg_file)
     assert cfg.mounts["/wiki"].resource == "mypkg.backends:WikiResource"
+
+
+BOX_RUNTIME = """\
+from mirage import LineExecutorMixin, RunResult, Runtime
+
+
+class EchoBox(Runtime, LineExecutorMixin):
+    name = "echobox"
+    captures = ("nvidia-smi", )
+
+    async def run_line(self, line, stdin, env, cwd):
+        return RunResult(stdout=f"box:{line}\\n".encode(), stderr=None,
+                         exit_code=0)
+
+
+NOT_A_RUNTIME = {"name": "nope"}
+"""
+
+
+def test_runtimes_path_form_reference_rebases_and_builds(
+        tmp_path, monkeypatch):
+    # A runtime entry's `name: ./box.py:EchoBox` reads the way `resource:`
+    # and `cli:` do: rebased onto the config dir, then constructed with
+    # the entry's uniform options, so a deployment ships a runtime as a
+    # file with no host program calling register_runtime.
+    (tmp_path / "box.py").write_text(BOX_RUNTIME)
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+runtimes:
+  - name: ./box.py:EchoBox
+    captures: [nvidia-smi, rocm-smi]
+  - ./box.py:EchoBox
+  - vfs
+""")
+    monkeypatch.chdir(tmp_path.parent)
+    cfg = load_config(cfg_file)
+    assert cfg.runtimes is not None
+    # Both spellings rebase: the keyed entry and the bare string beside
+    # a bare builtin name.
+    assert cfg.runtimes[0]["name"] == f"{tmp_path / 'box.py'}:EchoBox"
+    assert cfg.runtimes[1] == f"{tmp_path / 'box.py'}:EchoBox"
+    box, bare, vfs = cfg.to_workspace_kwargs()["runtimes"]
+    assert type(box).__name__ == "EchoBox"
+    assert box.name == "echobox"
+    assert box.captures == ("nvidia-smi", "rocm-smi")
+    assert type(bare).__name__ == "EchoBox"
+    assert bare.captures == ("nvidia-smi", )
+    assert vfs == "vfs"
+
+
+def test_runtimes_reference_must_name_a_runtime_subclass(tmp_path):
+    (tmp_path / "box.py").write_text(BOX_RUNTIME)
+    ref = f"{tmp_path / 'box.py'}:NOT_A_RUNTIME"
+    with pytest.raises(ValueError, match="is not a Runtime subclass"):
+        _build_runtime_entries([{"name": ref}])
+    with pytest.raises(ValueError, match="cannot load script"):
+        _build_runtime_entries([f"{tmp_path / 'missing.py'}:EchoBox"])
+
+
+def test_runtimes_reference_refuses_an_unknown_entry_key(tmp_path):
+    # A referenced class is constructed with the entry's keys as kwargs,
+    # so a typo fails the way it does for a builtin name instead of
+    # leaving the runtime on its class defaults; TypeScript's loader runs
+    # the same check by hand (checkRuntimeOptions).
+    (tmp_path / "box.py").write_text(BOX_RUNTIME)
+    ref = f"{tmp_path / 'box.py'}:EchoBox"
+    with pytest.raises(TypeError,
+                       match="unexpected keyword argument 'captuers'"):
+        _build_runtime_entries([{"name": ref, "captuers": ["nvidia-smi"]}])
 
 
 @pytest.mark.asyncio
@@ -920,30 +1029,33 @@ def test_shared_acceptance_fixture_is_accepted(fixture: str):
         load_config(case["config"])
 
 
-def test_profile_script_path_rebases_on_the_config_dir(tmp_path, monkeypatch):
-    # `script: roles/x.py` means "next to the config file", the same
+def test_profile_policy_path_rebases_on_the_config_dir(tmp_path, monkeypatch):
+    # `policy: roles/x.py` means "next to the config file", the same
     # build-context rule the cli path form follows; without rebasing it
     # resolves against the process cwd and only works by luck.
     (tmp_path / "roles").mkdir()
-    (tmp_path / "roles" / "x.py").write_text("None\n")
+    (tmp_path / "roles" /
+     "x.py").write_text("def pre_command(ctx):\n    return None\n")
     cfg_file = tmp_path / "ws.yaml"
     cfg_file.write_text("""\
 mounts:
   /data:
     resource: ram
 profiles:
-  release: {script: roles/x.py, runtime: monty}
+  release: {policy: {script: roles/x.py, runtime: monty}}
 """)
     monkeypatch.chdir(tmp_path.parent)
     cfg = load_config(cfg_file)
     release = cfg.to_workspace_kwargs()["profiles"]["release"]
-    assert isinstance(release.script, ScriptSource)
-    assert release.script.source == "None\n"
-    assert release.runtime == "monty"
+    assert release.policy is not None
+    assert isinstance(release.policy.script, ScriptSource)
+    assert release.policy.script.source == \
+        "def pre_command(ctx):\n    return None\n"
+    assert release.policy.runtime == "monty"
 
 
-def test_profile_script_states_its_runtime(tmp_path):
-    # There is no default engine: a script the config does not pin to an
+def test_profile_policy_states_its_runtime(tmp_path):
+    # There is no default engine: a policy the config does not pin to an
     # engine is refused at load, not guessed at the gate.
     (tmp_path / "roles").mkdir()
     (tmp_path / "roles" / "x.py").write_text("None\n")
@@ -953,9 +1065,22 @@ mounts:
   /data:
     resource: ram
 profiles:
-  release: {script: roles/x.py}
+  release: {policy: {script: roles/x.py}}
 """)
-    with pytest.raises(ValueError, match="set runtime beside script"):
+    with pytest.raises(ValueError, match="runtime"):
+        load_config(cfg_file)
+
+
+def test_a_profile_written_with_script_is_told_where_the_keys_went(tmp_path):
+    cfg_file = tmp_path / "ws.yaml"
+    cfg_file.write_text("""\
+mounts:
+  /data:
+    resource: ram
+profiles:
+  release: {script: roles/x.py, runtime: monty}
+""")
+    with pytest.raises(ValueError, match="now one policy block"):
         load_config(cfg_file)
 
 
@@ -1012,8 +1137,8 @@ def test_env_entry_refusals_surface_as_config_errors():
     base = {"mounts": {"/": {"resource": "ram"}}}
     with pytest.raises(ValueError, match="not both"):
         load_config({**base, "env": {"X": {"value": "v", "from": "env"}}})
-    with pytest.raises(ValueError, match="readonly"):
-        load_config({**base, "env": {"X": {"from": "env", "readonly": True}}})
+    with pytest.raises(ValueError, match="always exported"):
+        load_config({**base, "env": {"X": {"from": "env", "export": False}}})
     with pytest.raises(ValueError, match="managed entries"):
         load_config({**base, "env": {"X": {"value": "v", "key": "k"}}})
 

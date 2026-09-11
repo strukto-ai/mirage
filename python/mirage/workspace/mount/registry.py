@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from typing import Protocol
+from weakref import WeakValueDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
@@ -70,6 +72,9 @@ class MountRegistry:
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
+        self.retiring_resources: dict[int, asyncio.Task[None]] = {}
+        self.retired_resources: WeakValueDictionary[int, BaseResource] = (
+            WeakValueDictionary())
         self._root: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
         # capturer wins), set by Workspace after construction (same
@@ -140,8 +145,20 @@ class MountRegistry:
             self._attach_manager(m)
 
     def _attach_manager(self, m: MountEntry) -> None:
-        m.cache_manager = CacheManager(self._file_cache, m.resource.index,
-                                       m.prefix, m.resource.caches_reads)
+        m.cache_manager = CacheManager(
+            self._file_cache, m.resource.index, m.prefix,
+            m.resource.caches_reads,
+            lambda path: not m.retiring and self.try_mount_for(path) is m)
+
+    def check_resource_available(self, resource: BaseResource) -> None:
+        """A removed resource instance cannot start a second lifecycle."""
+        if id(resource) in self.retiring_resources or any(
+                m.resource is resource and m.retiring for m in self._mounts):
+            raise ValueError("resource is being unmounted")
+        if (resource.is_closed
+                or self.retired_resources.get(id(resource)) is resource):
+            raise ValueError(
+                "resource is closed; create a new resource instance")
 
     def mount(
         self,
@@ -151,6 +168,7 @@ class MountRegistry:
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
     ) -> MountEntry:
         """Mount a resource and return the Mount object."""
+        self.check_resource_available(resource)
         stripped = prefix.strip("/")
         norm_prefix = ("/" + stripped + "/" if stripped else "/")
         for existing in self._mounts:
@@ -158,6 +176,10 @@ class MountRegistry:
                 raise ValueError(f"duplicate mount prefix: "
                                  f"{norm_prefix!r}")
         m = MountEntry(norm_prefix, resource, mode, consistency)
+        for existing in self._mounts:
+            if existing.resource is resource:
+                m.activity = existing.activity
+                break
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
@@ -403,6 +425,7 @@ class MountRegistry:
         if mount is None:
             return None
 
+        await mount.ensure_ready()
         resolved = mount.resolve_command(cmd_name)
         # Warm reads are served in place by with_read_cache, so a read-only
         # command stays on its real mount. Single-mount reads do not go

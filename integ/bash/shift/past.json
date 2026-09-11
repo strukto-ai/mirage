@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "id": "shift_past_count_silent_one",
+      "seq": 980030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shift; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shift_past_count_leaves_args",
+      "seq": 980031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "set -- a b; shift 3; echo code=$? n=$#; shift 2; echo code=$? n=$#",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1 n=2\ncode=0 n=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shift_negative_out_of_range",
+      "seq": 980032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shift -1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": "shift: -1: shift count out of range\n"
+      }
+    }
+  ]
+}

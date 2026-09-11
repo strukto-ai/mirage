@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
@@ -156,8 +157,10 @@ export async function handleBash(
   session.sourceDepth = 0
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   let io
+  // A nested shell is a program of its own: the builtins it runs are its
+  // builtins again, whatever `find -exec` marked the outer line.
   try {
-    io = await executeFn(script, { sessionId: session.sessionId, stdin })
+    io = await runAsShell(() => executeFn(script, { sessionId: session.sessionId, stdin }))
   } finally {
     session.restore(saved)
   }

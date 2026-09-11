@@ -21,7 +21,8 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { ArithError, ReadonlyError } from '../../shell/errors.ts'
-import { finishStatement } from './statement.ts'
+import { finishStatement, recordStatus } from './statement.ts'
+import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { PathSpec } from '../../types.ts'
@@ -90,7 +91,7 @@ async function executeBody(
     try {
       const [rawStdout, io, execNode] = await executeNode(cmd, session, stdin, callStack)
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, cmd)
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       if (
@@ -104,12 +105,17 @@ async function executeBody(
       }
     } catch (sig) {
       if (sig instanceof BreakSignal) {
+        // The control builtin is a statement the loop leaves through
+        // rather than closes, so its own status (0) is recorded here:
+        // bash leaves `${PIPESTATUS[@]}` at `0` after `break`.
+        recordStatus(session, 0)
         if (sig.stdout !== null) allStdout.push(sig.stdout)
         mergedIo = await mergedIo.merge(sig.io)
         const combined = chainNonNull(allStdout)
         throw new BreakSignal(combined, mergedIo, sig.levels)
       }
       if (sig instanceof ContinueSignal) {
+        recordStatus(session, 0)
         if (sig.stdout !== null) allStdout.push(sig.stdout)
         mergedIo = await mergedIo.merge(sig.io)
         const combined = chainNonNull(allStdout)
@@ -149,7 +155,7 @@ export async function handleIf(
   for (const [condition, body] of branches) {
     const [condStdout, condIo] = await executeNode(condition, session, stdin, callStack)
     await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-    session.lastExitCode = condIo.exitCode
+    recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
     if (condIo.exitCode === 0) {
       return executeBody(executeNode, body, session, stdin, callStack)
     }
@@ -267,7 +273,7 @@ async function conditionLoop(
       }
       const [condStdout, condIo] = await executeNode(condition, session, stdin, callStack)
       await applyBarrier(condStdout, condIo, BarrierPolicy.STATUS)
-      session.lastExitCode = condIo.exitCode
+      recordStatus(session, condIo.exitCode, pipelineTransparent(condition))
       if (breakOnZero && condIo.exitCode === 0) {
         hitLimit = false
         break
@@ -322,7 +328,7 @@ async function conditionLoop(
   }
 }
 
-export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number>
+export type CforEval = (exprs: readonly TSNodeLike[], dflt: number) => Promise<number>
 
 /**
  * Run bash's C-style for: ((init; cond; update)) around a body.
@@ -336,7 +342,7 @@ export type CforEval = (expr: TSNodeLike | null, dflt: number) => Promise<number
  */
 export async function handleCfor(
   executeNode: ExecuteNodeFn,
-  exprs: readonly (TSNodeLike | null)[],
+  exprs: readonly (readonly TSNodeLike[])[],
   body: readonly TSNodeLike[],
   evalExpr: CforEval,
   session: Session,
@@ -351,13 +357,13 @@ export async function handleCfor(
 
   try {
     try {
-      await evalExpr(exprs[0] ?? null, 0)
+      await evalExpr(exprs[0] ?? [], 0)
       for (let i = 0; i < MAX_WHILE; i++) {
         if (session.shellOptions.noexec === true) {
           hitLimit = false
           break
         }
-        if ((await evalExpr(exprs[1] ?? null, 1)) === 0) {
+        if ((await evalExpr(exprs[1] ?? [], 1)) === 0) {
           hitLimit = false
           break
         }
@@ -381,12 +387,12 @@ export async function handleCfor(
             if (sig.levels > 1) {
               throw new ContinueSignal(chainNonNull(allStdout), mergedIo, sig.levels - 1)
             }
-            await evalExpr(exprs[2] ?? null, 0)
+            await evalExpr(exprs[2] ?? [], 0)
             continue
           }
           throw sig
         }
-        await evalExpr(exprs[2] ?? null, 0)
+        await evalExpr(exprs[2] ?? [], 0)
       }
     } catch (err) {
       // PolicyDenied is a header expression assigning a hidden name,
@@ -467,7 +473,7 @@ export async function handleCase(
       const [rawStdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
       stageStdin = null
       lastExec = execNode
-      const stdout = await finishStatement(rawStdout, io, session)
+      const stdout = await finishStatement(rawStdout, io, session, stmt)
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
     }

@@ -26,7 +26,7 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
@@ -61,7 +61,7 @@ describe('stat', () => {
         resourcePath: mountKey('/pg/database.json', '/pg'),
       }),
     )
-    expect(r.type).toBe(FileType.JSON)
+    expect(r.content).toBe(ContentType.JSON)
     expect(r.name).toBe('database.json')
   })
 
@@ -92,7 +92,7 @@ describe('stat', () => {
         resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
-    expect(r.type).toBe(FileType.TEXT)
+    expect(r.content).toBe(ContentType.TEXT)
     expect(r.size).toBeNull()
     expect(r.extra.size_bytes).toBe(4096)
     expect(r.fingerprint).toMatch(/^[a-f0-9]{64}$/)

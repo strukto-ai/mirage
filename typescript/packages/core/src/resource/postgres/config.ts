@@ -12,17 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '../../utils/normalize.ts'
-import { REDACTED_SECRET, type RedactedConfig } from '../secrets.ts'
+import { z } from 'zod'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  REDACTED_SECRET,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
-export interface PostgresConfig {
-  dsn: string
-  schemas?: readonly string[]
-  defaultRowLimit?: number
-  maxReadRows?: number
-  maxReadBytes?: number
-  defaultSearchLimit?: number
-}
+// `dsn` is the credential, so it carries the secret marker the redactor
+// reads; the rest are the knobs python's `PostgresConfig` declares.
+const PostgresConfigSchema = z.object({
+  dsn: secretStr(),
+  schemas: z.array(z.string()).readonly().optional(),
+  defaultRowLimit: z.number().optional(),
+  maxReadRows: z.number().optional(),
+  maxReadBytes: z.number().optional(),
+  defaultSearchLimit: z.number().optional(),
+})
+
+export type PostgresConfig = ConfigOf<typeof PostgresConfigSchema>
 
 export interface PostgresConfigResolved {
   dsn: string
@@ -34,7 +44,7 @@ export interface PostgresConfigResolved {
 }
 
 export function normalizePostgresConfig(input: Record<string, unknown>): PostgresConfig {
-  return normalizeFields(input) as unknown as PostgresConfig
+  return parseConfigWithSchema(PostgresConfigSchema, input)
 }
 
 export function resolvePostgresConfig(config: PostgresConfig): PostgresConfigResolved {

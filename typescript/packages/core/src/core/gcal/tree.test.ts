@@ -15,7 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GCalAccessor } from '../../accessor/gcal.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec, type JsonValue } from '../../types.ts'
+import { ContentType, FileType, type JsonValue, PathSpec } from '../../types.ts'
 import { TokenManager } from '../google/client.ts'
 import { eventSpan } from './day.ts'
 
@@ -282,7 +282,7 @@ describe('gcal stat', () => {
       spec('/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'),
       index,
     )
-    expect(row.type).toBe(FileType.JSON)
+    expect(row.content).toBe(ContentType.JSON)
     expect(row.extra.event_id).toBe('aaaa1')
     expect(row.size).toBeGreaterThan(0)
   })

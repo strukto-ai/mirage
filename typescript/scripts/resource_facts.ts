@@ -501,3 +501,489 @@ function numeric(value: number | boolean | string | undefined, fallback: number)
   if (value === undefined) return fallback
   return typeof value === 'number' ? value : null
 }
+
+// ---------------------------------------------------------------------------
+// Config field sets: what a mount can be told.
+//
+// Python dumps its pydantic wire names off the model. TypeScript's twin is
+// the zod schema behind each `normalize*Config` door, and it is read from
+// the source rather than observed, for the same reason capabilities are:
+// most schemas are module-private, and constructing a resource to reach one
+// is not inert. The walk follows exactly the forms the config modules use --
+// a door call in the exported function, `alias.normalize` off one of the
+// S3 factories, a re-exported normalizer -- and throws on any other, so a
+// new form fails the dump rather than emitting a row that reads as "no
+// divergence here".
+// ---------------------------------------------------------------------------
+
+export interface ConfigFacts {
+  fields: Record<string, { required: boolean }>
+  rename: Record<string, string>
+  validates: boolean
+}
+
+const DOOR = 'parseConfigWithSchema'
+const NORMALIZER_RE = /^normalize\w*Config$/
+
+type Bound = { expr: ts.Expression; source: ts.SourceFile }
+type Env = Map<string, Bound>
+
+function moduleFile(fromFile: string, specifier: string, packagesRoot: string): string | undefined {
+  if (specifier.startsWith('.')) {
+    const file = resolve(fromFile, '..', specifier)
+    return existsSync(file) ? file : undefined
+  }
+  const m = /^@struktoai\/mirage-(core|node|browser)\/(.+)$/.exec(specifier)
+  if (m === null) return undefined
+  const file = resolve(packagesRoot, m[1] as string, 'src', `${m[2] as string}.ts`)
+  return existsSync(file) ? file : undefined
+}
+
+// The normalizer a registry entry calls, and the module it imports it from.
+function registryNormalizers(
+  registryFile: string,
+  packagesRoot: string,
+): Map<string, { file: string; name: string } | null> {
+  const source = parse(registryFile)
+  const out = new Map<string, { file: string; name: string } | null>()
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'REGISTRY' &&
+      node.initializer !== undefined &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      for (const prop of node.initializer.properties) {
+        if (!ts.isPropertyAssignment(prop)) continue
+        const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
+        let found: { file: string; name: string } | null = null
+        const scan = (child: ts.Node): void => {
+          // `const { normalizeX } = await import('...')`
+          if (
+            ts.isVariableDeclaration(child) &&
+            ts.isObjectBindingPattern(child.name) &&
+            child.initializer !== undefined &&
+            ts.isAwaitExpression(child.initializer) &&
+            ts.isCallExpression(child.initializer.expression) &&
+            child.initializer.expression.expression.kind === ts.SyntaxKind.ImportKeyword
+          ) {
+            const spec = child.initializer.expression.arguments[0]
+            for (const el of child.name.elements) {
+              const local = el.name.getText(source)
+              if (!NORMALIZER_RE.test(local) || spec === undefined || !ts.isStringLiteral(spec)) {
+                continue
+              }
+              const file = moduleFile(registryFile, spec.text, packagesRoot)
+              if (file === undefined) {
+                throw new Error(
+                  `registry entry ${name} imports ${spec.text}, which does not resolve`,
+                )
+              }
+              found = { file, name: (el.propertyName ?? el.name).getText(source) }
+            }
+          }
+          ts.forEachChild(child, scan)
+        }
+        scan(prop.initializer)
+        out.set(name, found)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return out
+}
+
+// The file a local name was imported from, and the name it has there,
+// following both the relative specifiers `importedFrom` handles and the
+// `@struktoai/mirage-core/...` subpaths the node and browser packages use.
+function importOrigin(
+  source: ts.SourceFile,
+  local: string,
+  packagesRoot: string,
+): { file: string; exported: string } | undefined {
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) continue
+    const bindings = statement.importClause?.namedBindings
+    if (bindings === undefined || !ts.isNamedImports(bindings)) continue
+    for (const element of bindings.elements) {
+      if (element.name.text !== local) continue
+      const specifier = (statement.moduleSpecifier as ts.StringLiteral).text
+      const file = moduleFile(source.fileName, specifier, packagesRoot)
+      if (file === undefined) return undefined
+      return { file, exported: (element.propertyName ?? element.name).text }
+    }
+  }
+  return undefined
+}
+
+function topLevelConst(source: ts.SourceFile, name: string): ts.Expression | undefined {
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const decl of statement.declarationList.declarations) {
+      if (ts.isIdentifier(decl.name) && decl.name.text === name) return decl.initializer
+    }
+  }
+  return undefined
+}
+
+function topLevelFunction(
+  source: ts.SourceFile,
+  name: string,
+): ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression | undefined {
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) return statement
+  }
+  const init = topLevelConst(source, name)
+  if (init !== undefined && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) return init
+  return undefined
+}
+
+// A re-export (`export { a as b } from './x.ts'`) naming `name`, if any.
+function reExportOf(
+  source: ts.SourceFile,
+  name: string,
+  packagesRoot: string,
+): { file: string; name: string } | undefined {
+  for (const statement of source.statements) {
+    if (!ts.isExportDeclaration(statement) || statement.moduleSpecifier === undefined) continue
+    const clause = statement.exportClause
+    if (clause === undefined || !ts.isNamedExports(clause)) continue
+    for (const el of clause.elements) {
+      if (el.name.text !== name) continue
+      const spec = (statement.moduleSpecifier as ts.StringLiteral).text
+      const file = moduleFile(source.fileName, spec, packagesRoot)
+      if (file === undefined)
+        throw new Error(`${source.fileName} re-exports from ${spec}, which does not resolve`)
+      return { file, name: (el.propertyName ?? el.name).text }
+    }
+  }
+  return undefined
+}
+
+// Where an identifier is declared: the enclosing env (a factory's parameter
+// bound at its call site), a top-level const in this file, or the file it
+// was imported from.
+function bindingOf(
+  name: string,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+): Bound | undefined {
+  const bound = env.get(name)
+  if (bound !== undefined) return bound
+  const local = topLevelConst(source, name)
+  if (local !== undefined) return { expr: local, source }
+  const origin = importOrigin(source, name, packagesRoot)
+  if (origin !== undefined) {
+    const imported = parse(origin.file)
+    const expr = topLevelConst(imported, origin.exported)
+    if (expr !== undefined) return { expr, source: imported }
+  }
+  return undefined
+}
+
+function propertyKey(prop: ts.ObjectLiteralElementLike, source: ts.SourceFile): string | undefined {
+  return prop.name?.getText(source).replace(/^['"]|['"]$/g, '')
+}
+
+const OPTIONAL_RE = /\.optional\(\)|\.default\(|\.nullish\(\)/
+
+// The field set of a schema expression, following the forms in use.
+function shapeOf(
+  expr: ts.Expression,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  label: string,
+): Record<string, { required: boolean }> {
+  if (ts.isParenthesizedExpression(expr))
+    return shapeOf(expr.expression, source, env, packagesRoot, label)
+  if (ts.isIdentifier(expr)) {
+    const bound = bindingOf(expr.text, source, env, packagesRoot)
+    if (bound === undefined)
+      throw new Error(`${label}: cannot resolve schema identifier ${expr.text}`)
+    return shapeOf(bound.expr, bound.source, env, packagesRoot, label)
+  }
+  if (ts.isObjectLiteralExpression(expr))
+    return shapeOfLiteral(expr, source, env, packagesRoot, label)
+  if (ts.isCallExpression(expr)) {
+    const callee = expr.expression
+    if (ts.isPropertyAccessExpression(callee)) {
+      const method = callee.name.text
+      if (
+        method === 'object' &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === 'z'
+      ) {
+        const arg = expr.arguments[0]
+        if (arg === undefined || !ts.isObjectLiteralExpression(arg)) {
+          throw new Error(`${label}: z.object() without an object literal`)
+        }
+        return shapeOfLiteral(arg, source, env, packagesRoot, label)
+      }
+      if (method === 'extend' || method === 'safeExtend') {
+        const base = shapeOf(callee.expression, source, env, packagesRoot, label)
+        const arg = expr.arguments[0]
+        if (arg === undefined || !ts.isObjectLiteralExpression(arg)) {
+          throw new Error(`${label}: .${method}() without an object literal`)
+        }
+        return { ...base, ...shapeOfLiteral(arg, source, env, packagesRoot, label) }
+      }
+      // .refine / .superRefine / .strict / .describe / .meta keep the shape.
+      return shapeOf(callee.expression, source, env, packagesRoot, label)
+    }
+    if (ts.isIdentifier(callee)) {
+      // A schema-building helper such as `browserAliasSchema(extra)`: its
+      // return expression, with its parameters bound to this call's
+      // arguments.
+      const fn = resolveFunction(callee.text, source, packagesRoot)
+      if (fn === undefined) throw new Error(`${label}: cannot resolve schema helper ${callee.text}`)
+      const inner: Env = new Map(env)
+      fn.decl.parameters.forEach((param, i) => {
+        const arg = expr.arguments[i]
+        if (arg !== undefined && ts.isIdentifier(param.name)) {
+          inner.set(param.name.text, { expr: arg, source })
+        }
+      })
+      const returned = returnExpression(fn.decl)
+      if (returned === undefined) throw new Error(`${label}: helper ${callee.text} has no return`)
+      return shapeOf(returned, fn.source, inner, packagesRoot, label)
+    }
+  }
+  throw new Error(`${label}: unsupported schema expression ${expr.getText(source).slice(0, 60)}`)
+}
+
+function shapeOfLiteral(
+  literal: ts.ObjectLiteralExpression,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  label: string,
+): Record<string, { required: boolean }> {
+  const out: Record<string, { required: boolean }> = {}
+  for (const prop of literal.properties) {
+    if (ts.isSpreadAssignment(prop)) {
+      Object.assign(out, shapeOf(prop.expression, source, env, packagesRoot, label))
+      continue
+    }
+    const key = propertyKey(prop, source)
+    if (key === undefined) continue
+    if (ts.isPropertyAssignment(prop)) {
+      out[key] = { required: !OPTIONAL_RE.test(prop.initializer.getText(source)) }
+    } else if (ts.isShorthandPropertyAssignment(prop)) {
+      const bound = bindingOf(key, source, env, packagesRoot)
+      out[key] = {
+        required: bound === undefined || !OPTIONAL_RE.test(bound.expr.getText(bound.source)),
+      }
+    }
+  }
+  return out
+}
+
+function resolveFunction(
+  name: string,
+  source: ts.SourceFile,
+  packagesRoot: string,
+):
+  | {
+      decl: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression
+      source: ts.SourceFile
+    }
+  | undefined {
+  const local = topLevelFunction(source, name)
+  if (local !== undefined) return { decl: local, source }
+  const origin = importOrigin(source, name, packagesRoot)
+  if (origin === undefined) return undefined
+  const imported = parse(origin.file)
+  const decl = topLevelFunction(imported, origin.exported)
+  return decl === undefined ? undefined : { decl, source: imported }
+}
+
+function returnExpression(
+  fn: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
+): ts.Expression | undefined {
+  if (ts.isArrowFunction(fn) && !ts.isBlock(fn.body)) return fn.body
+  let found: ts.Expression | undefined
+  const visit = (node: ts.Node): void => {
+    if (ts.isReturnStatement(node) && node.expression !== undefined && found === undefined) {
+      found = node.expression
+    }
+    if (!ts.isFunctionLike(node) || node === fn) ts.forEachChild(node, visit)
+  }
+  if (fn.body !== undefined) visit(fn.body)
+  return found
+}
+
+// The `rename` map a door applies, resolved through any const or spread.
+function renameOf(
+  expr: ts.Expression | undefined,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  label: string,
+): Record<string, string> {
+  if (expr === undefined) return {}
+  if (ts.isIdentifier(expr)) {
+    const bound = bindingOf(expr.text, source, env, packagesRoot)
+    if (bound === undefined) throw new Error(`${label}: cannot resolve normalizer ${expr.text}`)
+    return renameOf(bound.expr, bound.source, env, packagesRoot, label)
+  }
+  if (!ts.isObjectLiteralExpression(expr)) {
+    throw new Error(
+      `${label}: unsupported normalizer expression ${expr.getText(source).slice(0, 60)}`,
+    )
+  }
+  // Either the normalizer literal (`{ rename: {...}, transform: ... }`) or,
+  // one level down, the rename map itself.
+  const renameProp = expr.properties.find(
+    (p) => ts.isPropertyAssignment(p) && propertyKey(p, source) === 'rename',
+  )
+  if (renameProp !== undefined && ts.isPropertyAssignment(renameProp)) {
+    return renameOf(renameProp.initializer, source, env, packagesRoot, label)
+  }
+  const out: Record<string, string> = {}
+  for (const prop of expr.properties) {
+    if (ts.isSpreadAssignment(prop)) {
+      Object.assign(out, renameOf(prop.expression, source, env, packagesRoot, label))
+      continue
+    }
+    const key = propertyKey(prop, source)
+    if (key === undefined || !ts.isPropertyAssignment(prop)) continue
+    if (ts.isStringLiteral(prop.initializer)) out[key] = prop.initializer.text
+  }
+  return out
+}
+
+// The `parseConfigWithSchema(schema, input, normalizer?)` call inside a body.
+function doorCall(body: ts.Node): ts.CallExpression | undefined {
+  let found: ts.CallExpression | undefined
+  const visit = (node: ts.Node): void => {
+    if (
+      found === undefined &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === DOOR
+    ) {
+      found = node
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(body)
+  return found
+}
+
+function factsOfDoor(
+  call: ts.CallExpression,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  label: string,
+): ConfigFacts {
+  const schema = call.arguments[0]
+  if (schema === undefined) throw new Error(`${label}: ${DOOR} without a schema`)
+  return {
+    fields: shapeOf(schema, source, env, packagesRoot, label),
+    rename: renameOf(call.arguments[2], source, env, packagesRoot, label),
+    validates: true,
+  }
+}
+
+// The facts behind one exported normalizer.
+function factsOfNormalizer(
+  file: string,
+  name: string,
+  packagesRoot: string,
+  label: string,
+  depth = 0,
+): ConfigFacts {
+  if (depth > 6) throw new Error(`${label}: normalizer resolution did not converge at ${name}`)
+  const source = parse(file)
+  const reExport = reExportOf(source, name, packagesRoot)
+  if (reExport !== undefined)
+    return factsOfNormalizer(reExport.file, reExport.name, packagesRoot, label, depth + 1)
+  const fn = topLevelFunction(source, name)
+  if (fn !== undefined) {
+    const call = fn.body === undefined ? undefined : doorCall(fn.body)
+    if (call === undefined) return { fields: {}, rename: {}, validates: false }
+    return factsOfDoor(call, source, new Map(), packagesRoot, label)
+  }
+  const init = topLevelConst(source, name)
+  if (init === undefined) {
+    const origin = importOrigin(source, name, packagesRoot)
+    if (origin !== undefined)
+      return factsOfNormalizer(origin.file, origin.exported, packagesRoot, label, depth + 1)
+    throw new Error(`${label}: no declaration of ${name} in ${file}`)
+  }
+  // `export const normalizeX = normalizeY`
+  if (ts.isIdentifier(init)) {
+    const origin = importOrigin(source, init.text, packagesRoot)
+    if (origin !== undefined)
+      return factsOfNormalizer(origin.file, origin.exported, packagesRoot, label, depth + 1)
+    return factsOfNormalizer(file, init.text, packagesRoot, label, depth + 1)
+  }
+  // `export const normalizeX = alias.normalize`, `alias = makeSomething(...)`
+  if (ts.isPropertyAccessExpression(init) && ts.isIdentifier(init.expression)) {
+    const aliasInit = topLevelConst(source, init.expression.text)
+    if (
+      aliasInit === undefined ||
+      !ts.isCallExpression(aliasInit) ||
+      !ts.isIdentifier(aliasInit.expression)
+    ) {
+      throw new Error(`${label}: ${init.expression.text} is not a factory call`)
+    }
+    const factory = resolveFunction(aliasInit.expression.text, source, packagesRoot)
+    if (factory === undefined)
+      throw new Error(`${label}: cannot resolve factory ${aliasInit.expression.text}`)
+    // Bind the factory's parameters to the call site: a positional
+    // parameter by name, and every property of an options object.
+    const env: Env = new Map()
+    factory.decl.parameters.forEach((param, i) => {
+      const arg = aliasInit.arguments[i]
+      if (arg === undefined) return
+      if (ts.isIdentifier(param.name)) env.set(param.name.text, { expr: arg, source })
+      if (ts.isObjectLiteralExpression(arg)) {
+        for (const prop of arg.properties) {
+          const key = propertyKey(prop, source)
+          if (key !== undefined && ts.isPropertyAssignment(prop))
+            env.set(key, { expr: prop.initializer, source })
+          if (key !== undefined && ts.isShorthandPropertyAssignment(prop))
+            env.set(key, { expr: prop.name, source })
+        }
+      }
+    })
+    const body = factory.decl.body
+    const call = body === undefined ? undefined : doorCall(body)
+    if (call === undefined) return { fields: {}, rename: {}, validates: false }
+    return factsOfDoor(call, factory.source, env, packagesRoot, label)
+  }
+  throw new Error(
+    `${label}: unsupported normalizer declaration ${init.getText(source).slice(0, 60)}`,
+  )
+}
+
+/**
+ * Per registry name, the config field set behind its normalizer.
+ *
+ * Args:
+ *   registryFile: absolute path to the variant's `resource/registry.ts`.
+ *   packagesRoot: absolute path to `typescript/packages`.
+ *
+ * A name whose factory calls no `normalize*Config` (ram, disk, redis take
+ * raw kwargs, as their python twins do) dumps null.
+ */
+export function configFacts(
+  registryFile: string,
+  packagesRoot: string,
+): Record<string, ConfigFacts | null> {
+  const out: Record<string, ConfigFacts | null> = {}
+  const entries = registryNormalizers(registryFile, packagesRoot)
+  for (const [resource, normalizer] of [...entries].sort(([a], [b]) => a.localeCompare(b))) {
+    out[resource] =
+      normalizer === null
+        ? null
+        : factsOfNormalizer(normalizer.file, normalizer.name, packagesRoot, `configs[${resource}]`)
+  }
+  return out
+}

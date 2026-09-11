@@ -34,7 +34,7 @@ ws = Workspace({"/minio/": resource}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -43,14 +43,14 @@ async def main():
     print(f"=== MinIO at {config.endpoint_url} (bucket {config.bucket}) ===")
 
     # Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.ops.write(
+    await ws.fs.write(
         "/minio/data/example.jsonl",
         b'{"event":"queue-operation","tool":"mirage"}\n'
         b'{"event":"read","tool":"mirage"}\n'
         b'{"event":"queue-operation","tool":"other"}\n')
-    await ws.ops.write("/minio/data/config.json",
-                       b'{"name":"mirage","version":1,"tags":["s3","minio"]}')
-    await ws.ops.write("/minio/notes.txt", b"hello from minio\n")
+    await ws.fs.write("/minio/data/config.json",
+                      b'{"name":"mirage","version":1,"tags":["s3","minio"]}')
+    await ws.fs.write("/minio/notes.txt", b"hello from minio\n")
 
     # chmod/chown/touch never hit the MinIO API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into

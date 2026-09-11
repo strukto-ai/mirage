@@ -12,24 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { REDACTED_SECRET, type RedactedConfig } from '../secrets.ts'
+import { z } from 'zod'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  REDACTED_SECRET,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
-export interface QdrantConfig {
-  url?: string
-  host?: string
-  port?: number
-  https?: boolean
-  apiKey?: string
-  collection?: string
-  groupBy?: string[]
-  idField?: string
-  textField?: string
-  blobField?: string
-  blobExt?: string
-  vectorField?: string
-  searchLimit?: number
-  maxRows?: number
-  embeddingModel?: string
+const QdrantConfigSchema = z.object({
+  url: z.string().optional(),
+  host: z.string().optional(),
+  port: z.number().optional(),
+  https: z.boolean().optional(),
+  apiKey: secretStr().optional(),
+  collection: z.string().optional(),
+  groupBy: z.array(z.string()).optional(),
+  idField: z.string().optional(),
+  textField: z.string().optional(),
+  blobField: z.string().optional(),
+  blobExt: z.string().optional(),
+  vectorField: z.string().optional(),
+  searchLimit: z.number().optional(),
+  maxRows: z.number().optional(),
+  embeddingModel: z.string().optional(),
+})
+
+export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>
+
+export function normalizeQdrantConfig(input: Record<string, unknown>): QdrantConfig {
+  return parseConfigWithSchema(QdrantConfigSchema, input)
 }
 
 export interface QdrantConfigResolved {

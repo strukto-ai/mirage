@@ -177,18 +177,14 @@ describe('an asked line with an approval channel', () => {
     const first = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(first.exitCode).toBe(126)
     expect(asked).toHaveLength(1)
-    // The refusal was recorded, and a ONCE answer covers the exact line it
-    // was given for: the retry is refused from that record rather than
-    // putting the same question to the human again.
+    // Keep a refusal for the immediate retry, then spend it.
     const retry = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(126)
     expect(asked).toHaveLength(1)
-    // Having answered that retry, the ONCE record is spent, so the line is
-    // an open question once more rather than refused forever.
     const third = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(third.exitCode).toBe(126)
     expect(asked).toHaveLength(2)
-    // Both questions were the same line, so both quote one identity.
+    // Both questions were the same line, so they quote one identity.
     expect(asked[0]?.callId).toBe(asked[1]?.callId)
   })
 
@@ -209,7 +205,7 @@ describe('an asked line with an approval channel', () => {
     const { shell, ws } = await world(ASK_RM, outcome)
     const run = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(126)
-    expect(run.stderr.text).toBe('rm: policy denied: deletes are reviewed\n')
+    expect(run.stderr.text).toBe('rm: Permission denied\n')
     expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
     // A refusal is a refusal however it was reached: no pending question
     // is left behind for a host to answer instead.
@@ -232,7 +228,7 @@ describe('an asked line with no approval channel', () => {
     expect(run.exitCode).toBe(126)
     // The operator's document said `ask`; the refusal says so too, and
     // names the approval a host can grant.
-    expect(run.stderr.text).toMatch(/^rm: requires approval: deletes are reviewed \(ask \w+\)$/m)
+    expect(run.stderr.text).toBe('rm: Permission denied\n')
     expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
     const pending = ws.decisions.pending('agent')
     expect(pending).toHaveLength(1)
@@ -259,7 +255,8 @@ describe('an asked line with no approval channel', () => {
     await ws.decisions.answer(waiting?.id ?? '', Outcome.DENY, Scope.ONCE)
     const retry = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(126)
-    expect(retry.stderr.text).toContain('deletes are reviewed')
+    expect(retry.stderr.text).toBe('rm: Permission denied\n')
+    expect(retry.sandbox?.denied).toBe(true)
     expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
   })
 })
@@ -381,19 +378,18 @@ describe('a refusal the line redirected away from stderr', () => {
     const run = await shell.run(shell.resolve({ command: 'rm /data/notes.txt 2>&1' }))
     expect(run.exitCode).toBe(126)
     expect(run.stderr.text).toBe('')
-    expect(run.stdout.text).toBe('rm: policy denied: no removes\n')
-    // Read off stderr alone this run looked allowed, so dsh offered no
-    // escalation for a refusal it never saw.
+    expect(run.stdout.text).toBe('rm: Permission denied\n')
+    // The ruling rides the result, not the streams, so where the line
+    // sent its diagnostics changes nothing.
     expect(run.sandbox?.denied).toBe(true)
   })
 
   it('does not read the same words as a refusal when a line prints them as data', async () => {
     const { shell } = await world(ASK_RM, 'allowed-once')
-    const run = await shell.run(shell.resolve({ command: "echo 'rm: policy denied: not really'" }))
+    const run = await shell.run(shell.resolve({ command: "echo 'rm: Permission denied'" }))
     expect(run.exitCode).toBe(0)
-    expect(run.stdout.text).toBe('rm: policy denied: not really\n')
-    // Stdout is the command's own data channel, so the exit code has to
-    // agree before the words there are read as a ruling.
+    expect(run.stdout.text).toBe('rm: Permission denied\n')
+    // The words are data; only the result's own record is a ruling.
     expect(run.sandbox?.denied).toBe(false)
   })
 })

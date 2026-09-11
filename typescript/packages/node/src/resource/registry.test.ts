@@ -85,6 +85,66 @@ describe('node resource registry', () => {
     await expect(buildResource('mem0', { api_key: 'key', user_id: 3 })).rejects.toThrow()
   })
 
+  // Every normalizer is `parseConfigWithSchema` now, so a wrong-typed mount
+  // config is refused at the door the way pydantic refuses it on the python
+  // side, and the refusal names the field and the code the way
+  // `build_resource` does -- never the value it refused.
+  it('refuses a wrong-typed config for every backend, naming field and code', async () => {
+    await expect(buildResource('s3', { bucket: 123 })).rejects.toThrow(/^s3: bucket: invalid_type$/)
+    await expect(buildResource('ssh', { host: 'h', port: '22' })).rejects.toThrow(
+      /^ssh: port: invalid_type$/,
+    )
+    await expect(buildResource('github', { token: [], owner: 'o', repo: 'r' })).rejects.toThrow(
+      /^github: token: invalid_type$/,
+    )
+    await expect(buildResource('postgres', { dsn: 'd', max_read_rows: 'many' })).rejects.toThrow(
+      /^postgres: maxReadRows: invalid_type$/,
+    )
+    // A Google mount naming no credential is refused here, not on its first
+    // read; the model-level check reports as `config`, as python's does.
+    await expect(buildResource('gdrive', { api_base: 'http://127.0.0.1:1' })).rejects.toThrow(
+      /^gdrive: config: custom$/,
+    )
+  })
+
+  it('serves a pre-minted Google access token without the refresh grant', async () => {
+    const resource = await buildResource('gdrive', { access_token: 'sa-token' })
+    const { accessor } = resource as unknown as { accessor: { tokenManager: TokenManager } }
+    expect(await accessor.tokenManager.getToken()).toBe('sa-token')
+  })
+
+  // The python wire spelling of every field reaches the resource and the
+  // credentials among them redact out of snapshot state.
+  it('keeps every declared field through the door and redacts the secrets', async () => {
+    const ssh = await buildResource('ssh', {
+      host: 'h',
+      username: 'u',
+      password: 'pw',
+      identity_file: '~/k',
+      passphrase: 'pp',
+    })
+    expect(await ssh.getState()).toMatchObject({
+      type: 'ssh',
+      config: {
+        host: 'h',
+        username: 'u',
+        password: '<REDACTED>',
+        identityFile: '~/k',
+        passphrase: '<REDACTED>',
+      },
+    })
+    const notion = await buildResource('notion', { api_key: 'k', api_version: '2025-09-03' })
+    expect((await notion.getState()).config).toMatchObject({ apiVersion: '2025-09-03' })
+    const oci = await buildResource('oci', {
+      bucket: 'b',
+      namespace: 'ns',
+      region: 'us-ashburn-1',
+      path_style: false,
+    })
+    const { aliasConfig } = oci as unknown as { aliasConfig: { forcePathStyle?: boolean } }
+    expect(aliasConfig.forcePathStyle).toBe(false)
+  })
+
   // getState() used to hand-write the redacted literal, so a field added to
   // the config later would silently leak or vanish from snapshot state. It is
   // schema-driven now, so the config shape is the single source of truth.

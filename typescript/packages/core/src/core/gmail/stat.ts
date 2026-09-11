@@ -15,9 +15,9 @@
 import type { GmailAccessor } from '../../accessor/gmail.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -67,7 +67,8 @@ async function statDay(
 function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     size: entry.size,
     extra: { message_id: entry.id, ...entry.extra },
   })
@@ -84,7 +85,8 @@ function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntr
 function attachmentStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: guessType(entry.vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.vfsName),
     size: entry.size,
     extra: { attachment_id: entry.id },
   })

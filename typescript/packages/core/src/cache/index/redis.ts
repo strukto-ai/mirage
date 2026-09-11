@@ -121,6 +121,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       indexTime?: string
       vfsName?: string
       size?: number | null
+      extra?: Record<string, unknown>
     }
     return { entry: new IndexEntry(parsed) }
   }
@@ -248,6 +249,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       indexTime: e.indexTime,
       vfsName: e.vfsName,
       size: e.size,
+      extra: e.extra,
     }
   }
 }

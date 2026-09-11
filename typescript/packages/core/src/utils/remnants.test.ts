@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
 import { VisibleRemnant, childSpec, entryName, removeRemnants, visibleBelow } from './remnants.ts'
 
 function spec(virtual: string): PathSpec {
@@ -64,7 +64,9 @@ class TreeChannel {
       return Promise.resolve(new FileStat({ name: at.virtual, type: FileType.DIRECTORY }))
     }
     if (this.files.has(at.virtual)) {
-      return Promise.resolve(new FileStat({ name: at.virtual, type: FileType.TEXT }))
+      return Promise.resolve(
+        new FileStat({ name: at.virtual, type: FileType.FILE, content: ContentType.TEXT }),
+      )
     }
     return Promise.reject(miss(at.virtual))
   }

@@ -36,7 +36,7 @@ class _RenderingOps:
 class _RenderingWorkspace:
 
     def __init__(self, ws):
-        self.ops = _RenderingOps(ws.ops)
+        self.fs = _RenderingOps(ws.fs)
         self.namespace = ws.namespace
 
 
@@ -50,29 +50,29 @@ def test_fingerprint_is_stable_and_url_safe():
 @pytest.mark.asyncio
 async def test_write_after_read_of_unchanged_file(workspace):
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
     await tracker.write("/a.txt", "two")
-    assert await workspace.ops.read("/a.txt") == b"two"
+    assert await workspace.fs.read("/a.txt") == b"two"
 
 
 @pytest.mark.asyncio
 async def test_write_refuses_after_outside_change(workspace):
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"moved underneath")
+    await workspace.fs.write("/a.txt", b"moved underneath")
     with pytest.raises(StaleMirageFileError):
         await tracker.write("/a.txt", "two")
-    assert await workspace.ops.read("/a.txt") == b"moved underneath"
+    assert await workspace.fs.read("/a.txt") == b"moved underneath"
 
 
 @pytest.mark.asyncio
 async def test_edit_refuses_after_outside_change(workspace):
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"moved underneath")
+    await workspace.fs.write("/a.txt", b"moved underneath")
     with pytest.raises(StaleMirageFileError):
         await tracker.read_for_edit("/a.txt")
 
@@ -80,11 +80,11 @@ async def test_edit_refuses_after_outside_change(workspace):
 @pytest.mark.asyncio
 async def test_write_after_own_write_is_allowed(workspace):
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
     await tracker.write("/a.txt", "two")
     await tracker.write("/a.txt", "three")
-    assert await workspace.ops.read("/a.txt") == b"three"
+    assert await workspace.fs.read("/a.txt") == b"three"
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_write_stamps_what_a_later_read_returns(workspace):
     tracker = FileVersionTracker(_RenderingWorkspace(workspace))
     await tracker.write("/a.txt", "one")
     await tracker.write("/a.txt", "two")
-    assert await workspace.ops.read("/a.txt") == b"two"
+    assert await workspace.fs.read("/a.txt") == b"two"
 
 
 @pytest.mark.asyncio
@@ -111,22 +111,22 @@ async def test_alias_and_target_share_one_stamp(workspace):
     # file. Keyed by spelling, the write below would find no stamp for
     # "/a.txt" and clobber a change the agent never saw.
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     assert (await workspace.execute("ln -s /a.txt /alias.txt")).exit_code == 0
     await tracker.read("/alias.txt")
-    await workspace.ops.write("/a.txt", b"moved underneath")
+    await workspace.fs.write("/a.txt", b"moved underneath")
     with pytest.raises(StaleMirageFileError):
         await tracker.write("/a.txt", "two")
-    assert await workspace.ops.read("/a.txt") == b"moved underneath"
+    assert await workspace.fs.read("/a.txt") == b"moved underneath"
 
 
 @pytest.mark.asyncio
 async def test_edit_through_an_alias_sees_the_read_of_the_target(workspace):
     tracker = FileVersionTracker(workspace)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     assert (await workspace.execute("ln -s /a.txt /alias.txt")).exit_code == 0
     await tracker.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"moved underneath")
+    await workspace.fs.write("/a.txt", b"moved underneath")
     with pytest.raises(StaleMirageFileError):
         await tracker.read_for_edit("/alias.txt")
 
@@ -134,31 +134,31 @@ async def test_edit_through_an_alias_sees_the_read_of_the_target(workspace):
 @pytest.mark.asyncio
 async def test_disabled_tracker_allows_clobber(workspace):
     tracker = FileVersionTracker(workspace, enabled=False)
-    await workspace.ops.write("/a.txt", b"one")
+    await workspace.fs.write("/a.txt", b"one")
     await tracker.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"moved underneath")
+    await workspace.fs.write("/a.txt", b"moved underneath")
     await tracker.write("/a.txt", "two")
-    assert await workspace.ops.read("/a.txt") == b"two"
+    assert await workspace.fs.read("/a.txt") == b"two"
 
 
 @pytest.mark.asyncio
 async def test_edit_tool_reports_a_stale_file(workspace):
     ops = MirageToolOperations(workspace)
-    await workspace.ops.write("/a.txt", b"hello world")
+    await workspace.fs.write("/a.txt", b"hello world")
     await ops.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"hello there")
+    await workspace.fs.write("/a.txt", b"hello there")
     result = await ops.edit("/a.txt", "hello", "goodbye")
     assert result.is_error is True
     assert "changed since it was last read" in result.text
-    assert await workspace.ops.read("/a.txt") == b"hello there"
+    assert await workspace.fs.read("/a.txt") == b"hello there"
 
 
 @pytest.mark.asyncio
 async def test_edit_tool_without_protection_overwrites(workspace):
     ops = MirageToolOperations(workspace, stale_write_protection=False)
-    await workspace.ops.write("/a.txt", b"hello world")
+    await workspace.fs.write("/a.txt", b"hello world")
     await ops.read("/a.txt")
-    await workspace.ops.write("/a.txt", b"hello there")
+    await workspace.fs.write("/a.txt", b"hello there")
     result = await ops.edit("/a.txt", "hello", "goodbye")
     assert result.is_error is False
-    assert await workspace.ops.read("/a.txt") == b"goodbye there"
+    assert await workspace.fs.read("/a.txt") == b"goodbye there"

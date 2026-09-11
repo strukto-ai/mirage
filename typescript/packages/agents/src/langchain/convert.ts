@@ -13,11 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ExecuteResponse, FileInfo, GrepMatch } from 'deepagents'
+import type { Refusal } from '@struktoai/mirage-core/types'
+import { withRefusal } from '../io-text.ts'
 
 interface IOLike {
   stdoutText: string
   stderrText: string
   exitCode: number | null
+  refusal?: Refusal | null
 }
 
 export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
@@ -27,7 +30,11 @@ export function ioToExecuteResponse(io: IOLike): ExecuteResponse {
   if (stderr.length > 0) {
     output = stdout.length > 0 ? `${stdout}\n${stderr}` : stderr
   }
-  return { output, exitCode: io.exitCode, truncated: false }
+  return {
+    output: withRefusal(output, io.refusal ?? null),
+    exitCode: io.exitCode,
+    truncated: false,
+  }
 }
 
 export function ioToGrepMatches(io: IOLike): GrepMatch[] {

@@ -33,7 +33,7 @@
     "                                                      a deny leaves the name where it is",
     "oncall     cat /vault/aws.token                       [1] cat: /vault/aws.token: credentials are never read by hand",
     "                                                      and refuses the read: paths, depth 1",
-    "oncall     rm /runbook/steps.md                       [126] rm: requires approval: a runbook edit needs a nod (ask ...)",
+    "oncall     rm /runbook/steps.md                       [126] rm: Permission denied",
     "                                                      ask at depth 1",
     "oncall     rm /runbook/frozen/rollback.md             [1] rm: /runbook/frozen/rollback.md: the rollback plan is frozen",
     "                                                      deny at depth 2 outranks it",

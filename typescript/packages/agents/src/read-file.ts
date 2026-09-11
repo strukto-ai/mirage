@@ -1,6 +1,6 @@
 import { detectFileType } from '@struktoai/mirage-core/commands/builtin/file_sniff'
 import { FileType } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
+import type { ContentType, FileStat } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   MIME_FOR_EXTENSION,
@@ -46,7 +46,7 @@ function mimeForExtension(path: string): ReadFileMime | undefined {
   )
 }
 
-function mimeForDetectedType(type: FileType): ReadFileMime {
+function mimeForDetectedType(type: ContentType): ReadFileMime {
   return MIME_FOR_FILE_TYPE[type] ?? READ_FILE_MIME.BINARY
 }
 

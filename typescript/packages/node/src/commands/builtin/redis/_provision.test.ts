@@ -16,10 +16,14 @@ import type { CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { Precision } from '@struktoai/mirage-core/provision/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RedisAccessor } from '../../../accessor/redis.ts'
-import { writeBytes } from '../../../core/redis/write.ts'
+import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
+import { writeBytes } from '@struktoai/mirage-core/core/redis/write'
 import { RedisStore } from '../../../resource/redis/store.ts'
-import { fileReadProvision, headTailProvision, metadataProvision } from './_provision.ts'
+import {
+  fileReadProvision,
+  headTailProvision,
+  metadataProvision,
+} from '@struktoai/mirage-core/commands/builtin/redis/_provision'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

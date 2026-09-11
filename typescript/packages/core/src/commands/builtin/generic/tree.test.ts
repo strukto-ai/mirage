@@ -14,7 +14,7 @@
 
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import { treeGeneric } from './tree.ts'
@@ -50,7 +50,7 @@ const stat = (p: PathSpec): Promise<FileStat> =>
   Promise.resolve(
     new FileStat({
       name: key(p).split('/').pop() ?? '',
-      type: FOLDERS.has(key(p)) ? FileType.DIRECTORY : FileType.TEXT,
+      type: FOLDERS.has(key(p)) ? FileType.DIRECTORY : FileType.FILE,
     }),
   )
 
@@ -124,7 +124,12 @@ describe('treeGeneric operand that is not a directory', () => {
     throw new Error('a non-directory operand must not be listed')
   }
 
-  const fileStat = new FileStat({ name: 'a.txt', size: 6, type: FileType.TEXT })
+  const fileStat = new FileStat({
+    name: 'a.txt',
+    size: 6,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+  })
 
   it('counts a file operand and exits 0', async () => {
     const [out, io] = (await treeGeneric(
@@ -185,15 +190,15 @@ describe('treeGeneric operand that is not a directory', () => {
 describe('treeGeneric across a nested mount', () => {
   const PARENT: Record<string, FileType> = {
     '/base': FileType.DIRECTORY,
-    '/base/top.txt': FileType.TEXT,
+    '/base/top.txt': FileType.FILE,
     '/base/inner': FileType.DIRECTORY,
-    '/base/inner/leftover.txt': FileType.TEXT,
+    '/base/inner/leftover.txt': FileType.FILE,
   }
   const CHILD: Record<string, FileType> = {
     '/base/inner': FileType.DIRECTORY,
-    '/base/inner/real.txt': FileType.TEXT,
+    '/base/inner/real.txt': FileType.FILE,
     '/base/inner/deep': FileType.DIRECTORY,
-    '/base/inner/deep/d.txt': FileType.TEXT,
+    '/base/inner/deep/d.txt': FileType.FILE,
   }
   const ROOT = '/base/inner'
 
@@ -281,7 +286,7 @@ describe('treeGeneric across a nested mount', () => {
     // root here, so the only way `inner` could be drawn is the table.
     const bare: Record<string, FileType> = {
       '/base': FileType.DIRECTORY,
-      '/base/top.txt': FileType.TEXT,
+      '/base/top.txt': FileType.FILE,
     }
     const [out, io] = (await treeGeneric(
       [spec('/base')],

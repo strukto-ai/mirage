@@ -137,8 +137,10 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   }
 
   async evictPrefix(prefix: string): Promise<void> {
-    // Snapshot first: remove() mutates entries as it goes.
-    const keys = [...this.entries.keys()].filter((k) => k.startsWith(prefix))
+    // A pending fill may not have installed an entry yet.
+    const keys = [...new Set([...this.entries.keys(), ...this.drainTasks.keys()])].filter((k) =>
+      k.startsWith(prefix),
+    )
     for (const key of keys) await this.remove(key)
   }
 

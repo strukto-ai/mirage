@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { HandOff } from '../../policy/types.ts'
 import type { CacheConfig } from '../../cache/file/config.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
@@ -20,10 +21,10 @@ import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
-import type { EnvEntries, SourceEntries } from '../../secrets/config.ts'
+import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
-import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode } from '../../types.ts'
+import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode, Refusal } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
@@ -166,18 +167,30 @@ export interface WorkspaceOptions {
    * instance here, or a source directly when the deployment has one
    * account of it and nothing to configure.
    */
-  secrets?: SourceEntries
+  secrets?: SecretEntries
 }
 
 export class ExecuteResult {
   readonly stdout: Uint8Array
   readonly stderr: Uint8Array
   readonly exitCode: number
+  /**
+   * Why the line did not run, when a policy or an unanswered ask refused
+   * it; null on every ordinary run. stderr stays in bash's voice, this
+   * carries the reason.
+   */
+  readonly refusal: Refusal | null
 
-  constructor(stdout: Uint8Array, stderr: Uint8Array, exitCode: number) {
+  constructor(
+    stdout: Uint8Array,
+    stderr: Uint8Array,
+    exitCode: number,
+    refusal: Refusal | null = null,
+  ) {
     this.stdout = stdout
     this.stderr = stderr
     this.exitCode = exitCode
+    this.refusal = refusal
   }
 
   get stdoutText(): string {
@@ -256,4 +269,10 @@ export interface ExecuteOptions {
    * evals so inner lines never re-route.
    */
   routingDecision?: RouteDecision
+  /**
+   * @internal The hand-off the line runs on, made by the executor's
+   * nested evals under the outer line's so an inner line spends the
+   * grants the outer line's pass claimed for it.
+   */
+  handed?: HandOff
 }

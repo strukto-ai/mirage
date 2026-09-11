@@ -30,7 +30,7 @@ from mirage.workspace.expand import (classify_parts, expand_and_classify,
                                      expand_parts, expand_redirects)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.admission import Refusal, gate
+from mirage.workspace.node.admission import Refused, gate
 from mirage.workspace.provision.command import handle_command_provision
 from mirage.workspace.provision.control import (handle_for_provision,
                                                 handle_function_provision,
@@ -169,7 +169,7 @@ async def _gate_command(
                          agent_id,
                          redirects=redirects,
                          defined_fn=name in plan_scope.functions)
-    if isinstance(verdict, Refusal) or verdict[1] is not None:
+    if isinstance(verdict, Refused) or verdict[1] is not None:
         cmd_str = " ".join([cmd_name, *cmd_args])
         return ProvisionResult(command=cmd_str,
                                precision=Precision.UNKNOWN), classified

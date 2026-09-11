@@ -189,7 +189,8 @@ describe('MirageService', () => {
     // patch file's plain YAML became a live permission document.
     const denied = await ws.execute('rm /data/x.txt')
     expect(denied.exitCode).toBe(126)
-    expect(denied.stderrText).toContain('no removes')
+    expect(denied.stderrText).toBe('rm: Permission denied\n')
+    expect(denied.refusal?.reason).toBe('no removes')
     await fiber.dispose()
   })
 

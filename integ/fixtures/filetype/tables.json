@@ -1,5 +1,5 @@
 {
-  "extension_map": {
+  "content_by_extension": {
     "json": "json",
     "jsonl": "json",
     "csv": "csv",
@@ -22,6 +22,16 @@
     "gzip": "application/gzip",
     "pdf": "application/pdf"
   },
+  "content_by_mime": {
+    "application/pdf": "application/pdf",
+    "application/zip": "application/zip",
+    "application/gzip": "application/gzip",
+    "application/json": "json",
+    "image/png": "image/png",
+    "image/jpeg": "image/jpeg",
+    "image/gif": "image/gif",
+    "text/csv": "csv"
+  },
   "mime_by_extension": {
     "csv": "text/csv",
     "gif": "image/gif",
@@ -39,21 +49,5 @@
     "txt": "text/plain",
     "xml": "text/xml",
     "zip": "application/zip"
-  },
-  "mimetype_map": {
-    "application/pdf": "application/pdf",
-    "application/zip": "application/zip",
-    "application/gzip": "application/gzip",
-    "application/json": "json",
-    "image/png": "image/png",
-    "image/jpeg": "image/jpeg",
-    "image/gif": "image/gif",
-    "text/csv": "csv"
-  },
-  "image_type_by_extension": {
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "gif": "image/gif"
   }
 }

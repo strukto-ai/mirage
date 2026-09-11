@@ -68,38 +68,6 @@ function hasPattern(p: PathSpec): boolean {
   return p.pattern !== null && p.pattern !== ''
 }
 
-/**
- * Backend readdir/resolveGlob follow the executor's contract: specs
- * arrive in the resource view (virtual == mountPath). Planner specs
- * are full-virtual, so rebase before the call and restore after.
- */
-function resourceView(p: PathSpec): PathSpec {
-  if (p.virtual === p.mountPath) return p
-  const mp = p.mountPath
-  return new PathSpec({
-    virtual: mp,
-    directory: mp.slice(0, mp.lastIndexOf('/') + 1) || '/',
-    pattern: p.pattern,
-    resolved: p.resolved,
-    resourcePath: p.resourcePath,
-  })
-}
-
-function virtualPrefix(p: PathSpec): string {
-  return p.virtual.slice(0, p.virtual.length - p.mountPath.length)
-}
-
-function restoreView(m: PathSpec, prefix: string): PathSpec {
-  if (prefix === '') return m
-  return new PathSpec({
-    virtual: prefix + m.virtual,
-    directory: prefix + m.directory,
-    pattern: m.pattern,
-    resolved: m.resolved,
-    resourcePath: m.resourcePath,
-  })
-}
-
 async function expandGlobs<A extends Accessor>(
   resolveGlob: ResolveGlobOp<A> | undefined,
   accessor: A,
@@ -109,17 +77,7 @@ async function expandGlobs<A extends Accessor>(
   if (resolveGlob === undefined) return paths
   if (!paths.some(hasPattern)) return paths
   try {
-    const out: PathSpec[] = []
-    for (const p of paths) {
-      if (!hasPattern(p)) {
-        out.push(p)
-        continue
-      }
-      const prefix = virtualPrefix(p)
-      const matched = await resolveGlob(accessor, [resourceView(p)], index)
-      for (const m of matched) out.push(restoreView(m, prefix))
-    }
-    return out
+    return await resolveGlob(accessor, paths, index)
   } catch {
     return paths
   }
@@ -159,15 +117,13 @@ async function walkFiles<A extends Accessor>(
     if (s.type === FileType.DIRECTORY) {
       let entries
       try {
-        entries = await readdir(accessor, resourceView(p), index)
+        entries = await readdir(accessor, p, index)
       } catch {
         complete = false
         continue
       }
-      const prefix = virtualPrefix(p)
-      for (const e of entries) {
-        const full = e.startsWith(prefix) && prefix !== '' ? e : prefix + e
-        queue.push(PathSpec.fromStrPath(full, rekey(p.virtual, p.resourcePath, full)))
+      for (const entry of entries) {
+        queue.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
       }
       continue
     }
@@ -199,7 +155,7 @@ async function resolveSizes<A extends Accessor>(
     }
     if (size === null) {
       try {
-        const fileStat = await stat(accessor, p)
+        const fileStat = await stat(accessor, p, index ?? undefined)
         size = fileStat.size ?? null
       } catch {
         // unresolved paths degrade precision below

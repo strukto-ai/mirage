@@ -81,6 +81,8 @@ sout() { jq -r '.stdout // .result.stdout // empty'; }
 # mode, owner, size and `name -> target` are all stable.
 no_ls_time() { sed -E 's/ [A-Z][a-z]{2} +[0-9]+ [0-9]{2}:[0-9]{2} / /'; }
 serr() { jq -r '.stderr // .result.stderr // empty'; }
+# The reason a refused line carries beside bash's bare `Permission denied`.
+sreason() { jq -r '.refusal.reason // .result.refusal.reason // empty'; }
 sexit() { jq -r '.exit_code // .exitCode // .result.exit_code // empty'; }
 verdict() { jq -r 'if (.exit_code // .exitCode // .result.exit_code // 1) == 0 then "allowed" else "denied" end'; }
 
@@ -173,7 +175,7 @@ probe() {
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
 
   # ── asks: an ask rule pends at 126; allow passes the retry once, deny refuses it ──
-  local ask_id
+  local ask_id denied
   $cli workspace delete aw >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$ASKS_YAML" --id aw >/dev/null </dev/null
   $cli execute -w aw -c 'touch /f.txt /g.txt' </dev/null >/dev/null
@@ -187,7 +189,9 @@ probe() {
   $cli execute -w aw -c 'rm /g.txt' </dev/null >/dev/null
   ask_id="$($cli workspace list-asks aw </dev/null | jq -r '.[0].id')"
   echo "ask.deny_outcome=$($cli workspace deny aw "$ask_id" --note veto </dev/null | jq -r '.outcome')"
-  echo "ask.denied_err=$($cli execute -w aw -c 'rm /g.txt' </dev/null | serr)"
+  denied="$($cli execute -w aw -c 'rm /g.txt' </dev/null)"
+  echo "ask.denied_err=$(printf '%s' "$denied" | serr)"
+  echo "ask.denied_reason=$(printf '%s' "$denied" | sreason)"
   echo "ask.drained=$($cli workspace list-asks aw </dev/null | jq 'length')"
   $cli workspace delete aw >/dev/null 2>&1 </dev/null || true
 
@@ -299,7 +303,8 @@ expect "ask.allow_scope" "once"
 expect "ask.retry" "0"
 expect "ask.spent" "0"
 expect "ask.deny_outcome" "deny"
-expect "ask.denied_err" "rm: policy denied: removal needs sign-off"
+expect "ask.denied_err" "rm: Permission denied"
+expect "ask.denied_reason" "removal needs sign-off"
 expect "ask.drained" "0"
 expect "version.log" "second,first"
 expect "version.branch_log" "first"
@@ -315,7 +320,7 @@ expect "sym.cat_follow" "sym1"
 expect "sym.write_through" "via"
 # A link row is a real GNU row now: lrwxrwxrwx (a link carries no
 # permission bits of its own) and the size is the target's length.
-expect "sym.ls_arrow" "lrwxrwxrwx 1 user user 11 link.txt -> /data/s.txt"
+expect "sym.ls_arrow" "lrwxrwxrwx 1 - - 11 link.txt -> /data/s.txt"
 expect "sym.mv_entry" "/data/s.txt"
 expect "sym.rm_entry" "1"
 expect "sym.dangle" "1"

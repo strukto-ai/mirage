@@ -72,7 +72,7 @@ async def main():
                         print(f"  title: {data.get('title')}")
                         print(f"  state: {data.get('state_name')}")
 
-        records = ws.ops.records
+        records = ws.fs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes")
 

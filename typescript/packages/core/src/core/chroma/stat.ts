@@ -14,7 +14,7 @@
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { resolvePath } from './path.ts'
 import { ensureDirSizes } from './sizes.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -48,7 +48,8 @@ export async function stat(
   const updatedAt = entry.extra.updated_at
   return new FileStat({
     name: entry.name,
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     size: entry.size,
     modified: typeof updatedAt === 'string' ? updatedAt : null,
     extra: { ...entry.extra },

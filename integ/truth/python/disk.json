@@ -77,7 +77,7 @@
     "=== sort /data/example.jsonl ===",
     {
       "count": 5768,
-      "sha256": "de91a827510348adec9341a9ee3697c7163fb4fd2dc152e1d0a499099906ddeb"
+      "sha256": "a0e57126a033f370bc981ad12ba61b7687e597015d7d014d21de16b2cc618970"
     },
     "",
     "=== cp /data/example.json /data/copy.json ===",

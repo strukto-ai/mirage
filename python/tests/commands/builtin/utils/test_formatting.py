@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.utils.formatting import format_number, to_number
+from mirage.commands.builtin.utils.formatting import (format_find_ls,
+                                                      format_ls_long,
+                                                      format_number, to_number)
+from mirage.types import FileStat, FileType
 
 
 def test_to_number_gnu_awk_coercion():
@@ -26,3 +29,21 @@ def test_to_number_gnu_awk_coercion():
 def test_format_number_collapses_integral_floats():
     assert format_number(60.0) == "60"
     assert format_number(5.5) == "5.5"
+
+
+def test_find_ls_and_ls_show_the_year_for_an_old_or_future_time():
+    # GNU: a time older than the recent window, or in the future, shows
+    # `Mon DD  YYYY` in place of `HH:MM`. findutils' window is 180 days
+    # back and an hour ahead; ls's is half a year back and never ahead.
+    old = FileStat(name="old",
+                   size=1,
+                   modified="2020-01-02T03:04:00Z",
+                   type=FileType.FILE)
+    assert format_find_ls(old, None).endswith("        1 Jan  2  2020 old")
+    assert format_ls_long([old])[0].endswith(" 1 Jan  2  2020 old")
+    far = FileStat(name="far",
+                   size=1,
+                   modified="2999-09-06T04:49:00Z",
+                   type=FileType.FILE)
+    assert format_find_ls(far, None).endswith(" Sep  6  2999 far")
+    assert format_ls_long([far])[0].endswith(" Sep  6  2999 far")

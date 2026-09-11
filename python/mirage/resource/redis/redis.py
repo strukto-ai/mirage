@@ -45,7 +45,7 @@ from mirage.core.redis.write import write_bytes
 from mirage.ops.redis import OPS as REDIS_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.redis.prompt import PROMPT
-from mirage.resource.redis.store import RedisStore
+from mirage.resource.redis.store import RedisStore, escape_glob
 from mirage.resource.secrets import REDACTED_SECRET
 from mirage.types import PathSpec, ResourceName
 from mirage.utils.glob_walk import make_resolve_glob
@@ -127,7 +127,7 @@ class RedisResource(BaseResource):
         client = sync_redis.Redis.from_url(url)
         try:
             files: dict[str, bytes] = {}
-            file_pattern = f"{prefix}file:*"
+            file_pattern = f"{escape_glob(prefix)}file:*"
             strip = len(f"{prefix}file:")
             for key in client.scan_iter(file_pattern):
                 if isinstance(key, bytes):
@@ -142,7 +142,7 @@ class RedisResource(BaseResource):
             dirs = sorted(m.decode() if isinstance(m, bytes) else m
                           for m in members)
             attrs: dict[str, dict[str, str]] = {}
-            attrs_pattern = f"{prefix}attrs:*"
+            attrs_pattern = f"{escape_glob(prefix)}attrs:*"
             astrip = len(f"{prefix}attrs:")
             for key in client.scan_iter(attrs_pattern):
                 if isinstance(key, bytes):
@@ -154,7 +154,7 @@ class RedisResource(BaseResource):
                     for k, v in raw.items()
                 }
             modified: dict[str, str] = {}
-            mod_pattern = f"{prefix}modified:*"
+            mod_pattern = f"{escape_glob(prefix)}modified:*"
             mstrip = len(f"{prefix}modified:")
             for key in client.scan_iter(mod_pattern):
                 if isinstance(key, bytes):

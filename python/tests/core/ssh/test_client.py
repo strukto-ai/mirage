@@ -55,3 +55,23 @@ def test_connect_kwargs_defaults():
     assert "username" not in kw
     assert kw["known_hosts"] is None
     assert kw["login_timeout"] == 30
+
+
+def test_connect_kwargs_password_and_passphrase():
+    # Both used to be dropped by pydantic's extra="ignore" without a word, so
+    # a password-only host and an encrypted key were unreachable.
+    cfg = SSHConfig(host="dev",
+                    password="pw",
+                    identity_file="~/k",
+                    passphrase="pp")
+    kw = _connect_kwargs(cfg)
+    assert kw["password"] == "pw"
+    assert kw["passphrase"] == "pp"
+
+
+def test_connect_kwargs_passphrase_rides_the_identity_file():
+    # A passphrase unlocks the named key; with no identity_file there is no
+    # key to hand it to, which is the TypeScript accessor's rule as well.
+    kw = _connect_kwargs(SSHConfig(host="dev", passphrase="pp"))
+    assert "passphrase" not in kw
+    assert "password" not in kw

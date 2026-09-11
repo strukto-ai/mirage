@@ -24,7 +24,7 @@ def workspace():
 
 @pytest.mark.asyncio
 async def test_rm_v_terminates_verbose_output(workspace):
-    await workspace.ops.write("/a.txt", b"a")
+    await workspace.fs.write("/a.txt", b"a")
 
     io = await workspace.execute("rm -v /a.txt")
 

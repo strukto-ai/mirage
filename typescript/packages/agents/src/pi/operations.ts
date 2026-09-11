@@ -25,6 +25,7 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import picomatch from 'picomatch'
 import { FileVersionTracker } from '../file-version.ts'
+import { decode, refusalLine } from '../io-text.ts'
 
 export { StaleMirageFileError } from '../file-version.ts'
 
@@ -139,6 +140,10 @@ export function mirageOperations(
       if (result.stderr.length > 0) {
         options.onData(Buffer.from(result.stderr))
       }
+      // The record, described once, unless what was just streamed
+      // already says why (an operand-scoped refusal's own line).
+      const why = refusalLine(decode(result.stdout) + decode(result.stderr), result.refusal)
+      if (why.length > 0) options.onData(Buffer.from(why))
       return { exitCode: result.exitCode }
     },
   }

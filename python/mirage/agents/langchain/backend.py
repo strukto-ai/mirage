@@ -25,6 +25,7 @@ from deepagents.backends.protocol import (EditResult, ExecuteResponse,
                                           ReadResult, SandboxBackendProtocol,
                                           WriteResult)
 
+from mirage.agents.io_text import with_refusal
 from mirage.agents.langchain._convert import (io_to_execute_response,
                                               io_to_file_infos,
                                               io_to_grep_matches)
@@ -99,7 +100,7 @@ async def _command_error(
 ) -> str | None:
     if io.exit_code in success_exit_codes:
         return None
-    stderr = (await io.stderr_str()).strip()
+    stderr = with_refusal((await io.stderr_str()).strip(), io.refusal).strip()
     if stderr:
         return stderr
     return f"Command failed with exit code {io.exit_code}"
@@ -186,7 +187,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
                     file_path: str,
                     offset: int = 0,
                     limit: int = 2000) -> ReadResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError) as exc:
@@ -199,7 +200,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         return self._run(self.awrite(file_path, content))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             await ops.stat(file_path)
             return WriteResult(
@@ -235,7 +236,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError):
@@ -329,7 +330,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def aupload_files(
             self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        ops = self._ws.ops
+        ops = self._ws.fs
         results: list[FileUploadResponse] = []
         for path, data in files:
             parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
@@ -347,7 +348,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def adownload_files(self,
                               paths: list[str]) -> list[FileDownloadResponse]:
-        ops = self._ws.ops
+        ops = self._ws.fs
         results: list[FileDownloadResponse] = []
         for path in paths:
             try:

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 ShellArray = list[str | None]
 
@@ -35,9 +35,9 @@ def keyed_word(word: str) -> tuple[str, str] | None:
     return word[1:pos], word[pos + 2:]
 
 
-def build_indexed_literal(base: ShellArray | None, words: list[str],
-                          append: bool, index_of: Callable[[str],
-                                                           int]) -> ShellArray:
+async def build_indexed_literal(
+        base: ShellArray | None, words: list[str], append: bool,
+        index_of: Callable[[str], Awaitable[int]]) -> ShellArray:
     """The indexed array a compound literal produces.
 
     A ``[i]=v`` element places at ``i`` and moves the cursor past it, a
@@ -50,14 +50,16 @@ def build_indexed_literal(base: ShellArray | None, words: list[str],
         base (ShellArray | None): the existing array, for ``+=``.
         words (list[str]): the expanded element words.
         append (bool): extend rather than replace.
-        index_of (Callable[[str], int]): arithmetic subscript resolver.
+        index_of (Callable[[str], Awaitable[int]]): arithmetic subscript
+            resolver; async because a subscript may assign, and the
+            assignment lands through the session door.
     """
     arr: ShellArray = list(base) if append and base is not None else []
     cursor = array_extent(arr) if append else 0
     for word in words:
         keyed = keyed_word(word)
         if keyed is not None:
-            idx = index_of(keyed[0])
+            idx = await index_of(keyed[0])
             if idx < 0:
                 idx += array_extent(arr)
             if idx < 0:

@@ -23,7 +23,7 @@ from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.core.dropbox.readdir import readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
         name=name,
         size=size if isinstance(size, int) else None,
         type=FileType.FILE,
-        content=guess_type(name),
+        content=content_type_for_path(name),
         modified=modified,
         fingerprint=modified or None,
         extra={
@@ -118,7 +118,7 @@ async def stat(
         name=result.entry.vfs_name or result.entry.name,
         size=result.entry.size,
         type=FileType.FILE,
-        content=guess_type(result.entry.vfs_name),
+        content=content_type_for_path(result.entry.vfs_name),
         modified=result.entry.remote_time,
         fingerprint=result.entry.remote_time or None,
         extra={

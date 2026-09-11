@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { RAW } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope } from '../hierarchy/scope.ts'
 
@@ -36,28 +36,28 @@ export const SCOPES: readonly Scope[] = [
     kind: 'page_json',
     segments: ['pages', PAGE, 'page.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'page', segments: ['pages', PAGE] }),
   new Scope({
     kind: 'database_json',
     segments: [...DB, 'database.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'database', segments: DB }),
   new Scope({
     kind: 'data_source_json',
     segments: [...DS, 'data_source.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'data_source', segments: DS }),
   new Scope({
     kind: 'page_json',
     segments: [...DS, PAGE, 'page.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'page', segments: [...DS, PAGE] }),
 ]

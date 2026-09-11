@@ -14,7 +14,7 @@
 
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
 import type { LinkView, MountView } from '../../../ops/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -56,7 +56,7 @@ const stat = (p: PathSpec): Promise<FileStat> => {
   return Promise.resolve(
     new FileStat({
       name,
-      type: key(p) === '/' ? FileType.DIRECTORY : FileType.TEXT,
+      type: key(p) === '/' ? FileType.DIRECTORY : FileType.FILE,
       modified: MODIFIED[name] ?? null,
     }),
   )
@@ -99,13 +99,13 @@ describe('lsGeneric', () => {
 // is in play, blank-line separated.
 const TREE: Record<string, FileType> = {
   '/a': FileType.DIRECTORY,
-  '/a/f.txt': FileType.TEXT,
+  '/a/f.txt': FileType.FILE,
   '/a/sub': FileType.DIRECTORY,
   '/b': FileType.DIRECTORY,
-  '/b/g.txt': FileType.TEXT,
+  '/b/g.txt': FileType.FILE,
   '/c': FileType.DIRECTORY,
-  '/mfile': FileType.TEXT,
-  '/zfile': FileType.TEXT,
+  '/mfile': FileType.FILE,
+  '/zfile': FileType.FILE,
 }
 
 const treeStat = (p: PathSpec): Promise<FileStat> => {
@@ -113,7 +113,7 @@ const treeStat = (p: PathSpec): Promise<FileStat> => {
   const type = TREE[path]
   if (type === undefined) return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
   return Promise.resolve(
-    new FileStat({ name: path.split('/').pop() ?? '', type, size: type === FileType.TEXT ? 3 : 0 }),
+    new FileStat({ name: path.split('/').pop() ?? '', type, size: type === FileType.FILE ? 3 : 0 }),
   )
 }
 
@@ -220,7 +220,8 @@ const tiedStat = (p: PathSpec): Promise<FileStat> => {
   return Promise.resolve(
     new FileStat({
       name: path.slice(1),
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       size: 2,
       modified: '2024-01-01T00:00:00Z',
     }),
@@ -286,7 +287,7 @@ const codeStat = (p: PathSpec): Promise<FileStat> => {
   return Promise.resolve(
     new FileStat({
       name: k.split('/').pop() ?? '',
-      type: dir ? FileType.DIRECTORY : FileType.TEXT,
+      type: dir ? FileType.DIRECTORY : FileType.FILE,
     }),
   )
 }
@@ -496,7 +497,7 @@ describe('structure-only directories', () => {
   it('-R lists a mount root without descending it', async () => {
     const served: Record<string, FileType> = {
       '/base': FileType.DIRECTORY,
-      '/base/top.txt': FileType.TEXT,
+      '/base/top.txt': FileType.FILE,
     }
     const servedStat = (p: PathSpec): Promise<FileStat> => {
       const type = served[rstripSlash(p.virtual)]
@@ -534,7 +535,7 @@ describe('structure-only directories', () => {
   it('does not render a child mount serving one file as a directory', async () => {
     const served: Record<string, FileType> = {
       '/base': FileType.DIRECTORY,
-      '/base/top.txt': FileType.TEXT,
+      '/base/top.txt': FileType.FILE,
     }
     const servedStat = (p: PathSpec): Promise<FileStat> => {
       const type = served[rstripSlash(p.virtual)]
@@ -553,7 +554,9 @@ describe('structure-only directories', () => {
         // The child mount answers its own root with its name for it.
         statPath: (virtual: string) =>
           Promise.resolve(
-            virtual === '/base/hist' ? new FileStat({ name: '/', type: FileType.TEXT }) : null,
+            virtual === '/base/hist'
+              ? new FileStat({ name: '/', type: FileType.FILE, content: ContentType.TEXT })
+              : null,
           ),
         ns: {
           childMounts: (parent: string) => (parent === '/base' ? ['hist'] : []),

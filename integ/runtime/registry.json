@@ -1,0 +1,68 @@
+{
+  "suite": "registry",
+  "cases": [
+    {
+      "id": "registered_runtime_named_like_a_builtin",
+      "note": "register_runtime / registerRuntime is the host-side door for a runtime mirage does not ship (the harness registers `echobox` through it). Once registered the name works where a builtin's does: a bare string entry resolves through the same table, and the lines it captures route to it while everything else stays with the workspace.",
+      "world": {
+        "runtimes": [
+          "echobox",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nvidia-smi -L",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nvidia-smi -L\n"
+          }
+        },
+        {
+          "command": "echo routed",
+          "expect": {
+            "exit": 0,
+            "stdout": "routed\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "registered_runtime_is_listed_as_known",
+      "note": "The unknown-name refusal lists every name the table can resolve, the registered one included, so a typo is answered with the real vocabulary. The registration is spelled out here because it is the case's subject, and because it marks the case sdk-only for cli.sh: no host registers anything on the yaml path.",
+      "world": {
+        "register_runtimes": {
+          "echobox": "echobox"
+        },
+        "runtimes": [
+          "ghost",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "'echobox'"
+      }
+    },
+    {
+      "id": "a_builtin_name_cannot_be_shadowed",
+      "note": "A host cannot take a shipped name: registering under `monty` is refused the way register_resource and register_cli_spec refuse a builtin resource or CLI name, in both languages with one wording.",
+      "world": {
+        "register_runtimes": {
+          "monty": "echobox"
+        },
+        "runtimes": [
+          "monty",
+          "vfs"
+        ]
+      },
+      "build_error": {
+        "contains": "cannot register 'monty': shadows a builtin"
+      }
+    }
+  ]
+}

@@ -14,7 +14,7 @@
 
 import { DATE, JSON_NAME } from '../hierarchy/codec.ts'
 import { makeDetectScope, Scope, Slot } from '../hierarchy/scope.ts'
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 
 const GUILD = [new Slot('guild', undefined, 'guild_id')] as const
 const CHANNEL = [...GUILD, 'channels', new Slot('channel', undefined, 'channel_id')] as const
@@ -34,14 +34,14 @@ export const SCOPES: readonly Scope[] = [
     kind: 'member',
     segments: [...GUILD, 'members', new Slot('member', JSON_NAME, 'user_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'day', segments: DAY }),
   new Scope({
     kind: 'messages',
     segments: [...DAY, 'chat.jsonl'],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
   new Scope({ kind: 'files', segments: [...DAY, 'files'] }),
   new Scope({

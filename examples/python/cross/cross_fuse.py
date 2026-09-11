@@ -163,6 +163,6 @@ with Workspace({
     except EOFError:
         pass
 
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

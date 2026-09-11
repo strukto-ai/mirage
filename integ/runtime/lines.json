@@ -119,35 +119,35 @@
           "command": "rm /ram/x",
           "expect": {
             "exit": 126,
-            "stderr": "rm: policy denied: no deletes\n"
+            "stderr": "rm: Permission denied\n"
           }
         },
         {
           "command": "$cmd /ram/x",
           "expect": {
             "exit": 126,
-            "stderr": "$cmd: policy denied: cannot read $cmd before the runtime expands it\n"
+            "stderr": "$cmd: Permission denied\n"
           }
         },
         {
           "command": "PAYLOAD='rm /ram/x'; eval \"$PAYLOAD\"",
           "expect": {
             "exit": 126,
-            "stderr": "\"$PAYLOAD\": policy denied: cannot read \"$PAYLOAD\" before the runtime expands it\n"
+            "stderr": "\"$PAYLOAD\": Permission denied\n"
           }
         },
         {
           "command": "eval 'rm /ram/x'",
           "expect": {
             "exit": 126,
-            "stderr": "rm: policy denied: no deletes\n"
+            "stderr": "rm: Permission denied\n"
           }
         },
         {
           "command": "cat \"$f\"",
           "expect": {
             "exit": 126,
-            "stderr": "cat: policy denied: cannot read \"$f\" before the runtime expands it\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
@@ -161,28 +161,28 @@
           "command": "ls /ram | xargs rm",
           "expect": {
             "exit": 126,
-            "stderr": "rm: policy denied: no deletes\n"
+            "stderr": "rm: Permission denied\n"
           }
         },
         {
           "command": "ls /ram | xargs cat",
           "expect": {
             "exit": 126,
-            "stderr": "cat: policy denied: runs on operands the gate cannot read\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
           "command": "sh -c 'timeout 5 rm /ram/x'",
           "expect": {
             "exit": 126,
-            "stderr": "rm: policy denied: no deletes\n"
+            "stderr": "rm: Permission denied\n"
           }
         },
         {
           "command": "source /ram/env.sh",
           "expect": {
             "exit": 126,
-            "stderr": "source: policy denied: runs lines the gate cannot read\n"
+            "stderr": "source: Permission denied\n"
           }
         },
         {

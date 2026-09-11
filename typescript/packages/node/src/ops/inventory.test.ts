@@ -17,7 +17,6 @@ import { expect, test } from 'vitest'
 import { DISK_OPS } from './disk/index.ts'
 import { EMAIL_OPS } from './email/index.ts'
 import { HF_OPS } from './hf/index.ts'
-import { REDIS_OPS } from './redis/index.ts'
 import { SSH_OPS } from './ssh/index.ts'
 
 // Golden snapshot of every backend's registered op surface, taken before
@@ -31,7 +30,6 @@ const TABLES = {
   disk: DISK_OPS,
   email: EMAIL_OPS,
   hf: HF_OPS,
-  redis: REDIS_OPS,
   ssh: SSH_OPS,
 }
 
@@ -84,20 +82,6 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['write', 'hf_datasets', '', true],
     ['write', 'hf_models', '', true],
     ['write', 'hf_spaces', '', true],
-  ],
-  redis: [
-    ['append', 'redis', '', true],
-    ['create', 'redis', '', true],
-    ['mkdir', 'redis', '', true],
-    ['read', 'redis', '', false],
-    ['readdir', 'redis', '', false],
-    ['rename', 'redis', '', true],
-    ['rmdir', 'redis', '', true],
-    ['setattr', 'redis', '', true],
-    ['stat', 'redis', '', false],
-    ['truncate', 'redis', '', true],
-    ['unlink', 'redis', '', true],
-    ['write', 'redis', '', true],
   ],
   ssh: [
     ['append', 'ssh', '', true],

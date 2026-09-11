@@ -37,8 +37,8 @@ def _make_ws():
 
 
 def _seed(ws):
-    asyncio.run(ws.ops.write("/m1/a.txt", b"aaa\n"))
-    asyncio.run(ws.ops.write("/m2/b.txt", b"bbb\n"))
+    asyncio.run(ws.fs.write("/m1/a.txt", b"aaa\n"))
+    asyncio.run(ws.fs.write("/m2/b.txt", b"bbb\n"))
 
 
 async def _noop_fn(store, paths, *texts, stdin=None, **kw):
@@ -115,9 +115,9 @@ def test_cross_resource_three_mounts():
         },
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.ops.write("/m1/a.txt", b"a"))
-    asyncio.run(ws.ops.write("/m2/b.txt", b"b"))
-    asyncio.run(ws.ops.write("/m3/c.txt", b"c"))
+    asyncio.run(ws.fs.write("/m1/a.txt", b"a"))
+    asyncio.run(ws.fs.write("/m2/b.txt", b"b"))
+    asyncio.run(ws.fs.write("/m3/c.txt", b"c"))
     rc = RegisteredCommand("nocross",
                            spec=_SPEC,
                            resource="ram",

@@ -40,7 +40,7 @@ async def main():
     body = b"hello from mirage\nline two\nthird line\n"
 
     print(f"\n=== write {test_file} ===")
-    await ws.ops.write(test_file, body)
+    await ws.fs.write(test_file, body)
     print(f"  wrote {len(body)} bytes")
 
     print(f"\n=== cat {test_file} ===")

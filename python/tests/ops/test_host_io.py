@@ -94,8 +94,8 @@ class TestDoors:
 
     def test_the_patched_doors_answer_nothing_while_a_backend_serves(self):
         ws = Workspace({"/mem/": RAMResource()}, mode=MountMode.WRITE)
-        run(ws.ops.mkdir("/mem/dir"))
-        run(ws.ops.write("/mem/dir/a.txt", b"a"))
+        run(ws.fs.mkdir("/mem/dir"))
+        run(ws.fs.write("/mem/dir/a.txt", b"a"))
         with ws:
             assert os.listdir("/mem/dir") == ["a.txt"]
             with host_io():

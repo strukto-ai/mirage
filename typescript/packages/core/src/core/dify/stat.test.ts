@@ -22,7 +22,7 @@ vi.mock('./client.ts', async () => {
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import * as clientMod from './client.ts'
 import { stat, statLight } from './stat.ts'
@@ -75,7 +75,7 @@ describe('dify stat', () => {
     const item = await statLight(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
 
     expect(item.name).toBe('quickstart')
-    expect(item.type).toBe(FileType.TEXT)
+    expect(item.content).toBe(ContentType.TEXT)
     expect(item.size).toBeNull()
     expect(item.extra.source_size).toBe(123)
     expect(item.modified).toBe('2024-05-21T09:00:00.000Z')
@@ -118,7 +118,7 @@ describe('dify stat', () => {
 
     expect(clientMod.getDocumentDetail).toHaveBeenCalledWith(ACCESSOR, 'doc-1')
     expect(item.name).toBe('quickstart')
-    expect(item.type).toBe(FileType.TEXT)
+    expect(item.content).toBe(ContentType.TEXT)
     expect(item.size).toBeNull()
     expect(item.extra.document_id).toBe('doc-1')
     expect(item.extra.source_size).toBe(456)

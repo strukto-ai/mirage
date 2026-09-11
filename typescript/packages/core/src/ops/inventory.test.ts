@@ -36,6 +36,7 @@ import { ONEDRIVE_OPS } from './onedrive/index.ts'
 import { POSTGRES_OPS } from './postgres/index.ts'
 import { QDRANT_OPS } from './qdrant/index.ts'
 import { RAM_OPS } from './ram/index.ts'
+import { REDIS_OPS } from './redis/index.ts'
 import { SLACK_OPS } from './slack/index.ts'
 import { SHAREPOINT_OPS } from './sharepoint/index.ts'
 import { TRELLO_OPS } from './trello/index.ts'
@@ -70,6 +71,7 @@ const TABLES = {
   postgres: POSTGRES_OPS,
   qdrant: QDRANT_OPS,
   ram: RAM_OPS,
+  redis: REDIS_OPS,
   slack: SLACK_OPS,
   sharepoint: SHAREPOINT_OPS,
   trello: TRELLO_OPS,
@@ -228,6 +230,20 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['truncate', 'ram', '', true],
     ['unlink', 'ram', '', true],
     ['write', 'ram', '', true],
+  ],
+  redis: [
+    ['append', 'redis', '', true],
+    ['create', 'redis', '', true],
+    ['mkdir', 'redis', '', true],
+    ['read', 'redis', '', false],
+    ['readdir', 'redis', '', false],
+    ['rename', 'redis', '', true],
+    ['rmdir', 'redis', '', true],
+    ['setattr', 'redis', '', true],
+    ['stat', 'redis', '', false],
+    ['truncate', 'redis', '', true],
+    ['unlink', 'redis', '', true],
+    ['write', 'redis', '', true],
   ],
   slack: [
     ['read', 'slack', '', false],

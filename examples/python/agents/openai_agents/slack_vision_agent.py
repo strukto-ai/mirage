@@ -126,7 +126,7 @@ async def main():
 #   rendered pages.
 # - input_text: any non-binary content the agent might want pre-loaded.
 #
-# Resource-agnostic: ws.ops.read(path) routes via the workspace mount
+# Resource-agnostic: ws.fs.read(path) routes via the workspace mount
 # registry, so the same flow works for /s3/...png, /disk/...pdf,
 # /slack/.../files/..., etc.
 

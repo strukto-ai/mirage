@@ -16,7 +16,7 @@ import type { FastifyInstance } from 'fastify'
 import { Errors } from 'isomorphic-git'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { Workspace } from '@struktoai/mirage-node'
-import type { SourceEntries } from '@struktoai/mirage-core/secrets/config'
+import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { z } from '@struktoai/mirage-core/resource/secrets'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { cloneWorkspaceWithOverride } from '../clone.ts'
@@ -66,7 +66,7 @@ interface CloneBody {
    * be gone (a restart), so a historical clone that restores managed
    * pointers names their declarations here.
    */
-  secrets?: SourceEntries
+  secrets?: SecretEntries
 }
 
 interface IdParams {

@@ -1031,7 +1031,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "h2: policy denied: beta is read-only\n"
+        "stderr": "h2: Permission denied\n"
       }
     },
     {
@@ -1045,7 +1045,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "h1: requires approval: outbound mail needs a nod (ask 987968c5e0ff)\n"
+        "stderr": "h1: Permission denied\n"
       }
     },
     {

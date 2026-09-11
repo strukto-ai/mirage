@@ -15,8 +15,8 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { getExtension } from '../../commands/resolve.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -28,13 +28,6 @@ function stripPrefix(path: PathSpec): string {
     p = p.slice(prefix.length) || '/'
   }
   return p
-}
-
-function guessFileType(name: string): FileType {
-  const ext = getExtension(name)
-  if (ext === 'json') return FileType.JSON
-  if (ext === 'csv') return FileType.CSV
-  return FileType.TEXT
 }
 
 export async function stat(
@@ -81,7 +74,8 @@ export async function stat(
   return new FileStat({
     name: result.entry.name,
     size: result.entry.size,
-    type: guessFileType(result.entry.name),
+    type: FileType.FILE,
+    content: contentTypeForPath(result.entry.name),
     fingerprint: result.entry.id,
     extra: { sha: result.entry.id },
   })

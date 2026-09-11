@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from collections.abc import Mapping, Sequence
 
 import tree_sitter
@@ -37,8 +36,6 @@ from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import deref
-
-logger = logging.getLogger(__name__)
 
 # Appended to an alias value before parsing it for the read walk: the
 # rest of the invoking line lands there at dispatch, so the trailing
@@ -689,8 +686,9 @@ async def fill_env(
         try:
             secret = await fetch_secret(source, ref, sources)
         except Exception as exc:
-            logger.warning("secret fetch for %s from %s failed: %s", listed,
-                           source, exc)
+            # Not logged, the rule the whole secrets plane keeps: a log
+            # is a copy nobody redacted, and the source's own words
+            # ride `from exc`.
             raise SecretsError(
                 f"{listed}: cannot fetch from {source}") from exc
         for name in group:

@@ -97,3 +97,18 @@ def test_grep_files(toolkit):
     out = toolkit.grep_files(pattern="needle", path="/q")
     assert "needle" in out
     assert "a.txt" in out
+
+
+def test_search_files_names_the_reason_beside_a_refusal():
+    # stderr is bash's bare `Permission denied`; the reason rides the
+    # refusal record, and a text surface appends it as one more line.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   route_policy=lambda ctx: {"deny": "no walks"}
+                   if ctx.command == "find" else None)
+    tk = MirageFileToolkit(ws)
+    try:
+        out = tk.search_files(file_name="a.txt", path="/")
+    finally:
+        tk.close()
+    assert out == "find: Permission denied\npolicy denied: no walks\n"

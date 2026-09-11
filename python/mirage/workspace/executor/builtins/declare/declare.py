@@ -29,8 +29,8 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        readonly_refusal,
                                                        refusal)
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (element_index, session_elements,
-                                            set_attr, visible_env)
+from mirage.workspace.session.state import (conversion_scalar, set_attr,
+                                            shadow_local, subscript_index)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -135,25 +135,27 @@ async def store_staged_arrays(
         except PolicyDenied as exc:
             return refusal(cmd, exc)
         base: ShellValue
-        if assoc or name in session.assocs:
-            built, bad_words = build_assoc_literal(session.assocs.get(name),
-                                                   items, append)
-            if errors is not None:
-                errors.extend(f"bash: {name}: '{word}': must use subscript "
-                              "when assigning associative array"
-                              for word in bad_words)
-            base = built
-        else:
-            held = session.arrays.get(name)
-            if append and held is None:
-                scalar = session.env.get(name)
-                held = None if scalar is None else [scalar]
-            base = build_indexed_literal(
-                held, items, append,
-                functools.partial(element_index,
-                                  env=visible_env(session),
-                                  elements=session_elements(session)))
+        # One try around the literal and the write: a subscript in the
+        # literal may assign (`([x=2]=v)`), and that lands through the
+        # same door.
         try:
+            if assoc or name in session.assocs:
+                built, bad_words = build_assoc_literal(
+                    session.assocs.get(name), items, append)
+                if errors is not None:
+                    errors.extend(
+                        f"bash: {name}: '{word}': must use subscript "
+                        "when assigning associative array"
+                        for word in bad_words)
+                base = built
+            else:
+                held = session.arrays.get(name)
+                if append and held is None:
+                    scalar = conversion_scalar(session, name)
+                    held = None if scalar is None else [scalar]
+                base = await build_indexed_literal(
+                    held, items, append,
+                    functools.partial(subscript_index, session, view=view))
             if global_scope:
                 await write_global(session, view, name, base)
             else:
@@ -490,8 +492,7 @@ def note_local_array(session: Session, name: str) -> bool:
     local_vars = session._local_vars
     if local_vars is None:
         return False
-    if name not in local_vars:
-        local_vars[name] = session.vars.get(name)
+    shadow_local(session, local_vars, name)
     return True
 
 

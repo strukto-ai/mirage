@@ -192,6 +192,7 @@ async function levelMatches(
 ): Promise<string[]> {
   const real = listingDir(links, dirVirtual)
   const owner = mountOf(registry, real, mount)
+  await owner.ensureReady()
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
   if (owner.resource.glob !== undefined) {
@@ -203,7 +204,7 @@ async function levelMatches(
       resolved: false,
     })
     try {
-      const matches = await owner.resource.glob([spec], prefix)
+      const matches = await owner.expandGlob([spec], prefix)
       // A descent step yields children, so a match that is the parent
       // itself is not one. A backend asked to list a path that is really
       // a file answers with that file, which walked back out as a
@@ -423,6 +424,7 @@ export async function resolveGlobs(
         resourcePath: mountKey(item.virtual, prefix),
         rawPath: item.rawPath,
       })
+      await mount.ensureReady()
       try {
         let resolved: PathSpec[]
         if (opts.globstar && hasGlobstarSegment(withPrefix)) {
@@ -445,10 +447,7 @@ export async function resolveGlobs(
           // to `xa.txt` lost its first match to that ambiguity. The
           // directory-shaped spec has no literal to reinstate, so an
           // empty list means no match and every spec returned is one.
-          const own =
-            mount.resource.glob !== undefined
-              ? await mount.resource.glob([withPrefix.dir], prefix)
-              : []
+          const own = await mount.expandGlob([withPrefix.dir], prefix)
           resolved = mergeNamespace(own, extra, directory, registry, mount)
         }
         if (resolved.length === 0) {

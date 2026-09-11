@@ -235,6 +235,54 @@ async def test_no_drain_if_already_cached():
     assert await cache.get("/f.txt") == b"cached"
 
 
+@pytest.mark.asyncio
+async def test_prefix_eviction_retires_a_fill_before_a_replacement_starts():
+    cache = RAMFileCacheStore()
+    started = asyncio.Event()
+    release_old = asyncio.Event()
+    release_new = asyncio.Event()
+
+    async def old_stream():
+        started.set()
+        try:
+            await release_old.wait()
+        except asyncio.CancelledError:
+            await release_old.wait()
+        yield b"old account"
+
+    async def new_stream():
+        await release_new.wait()
+        yield b"new account"
+
+    path = "/data/file"
+    await cache_io.apply_io(
+        cache,
+        IOResult(reads={path: CachableAsyncIterator(old_stream())},
+                 cache=[path]))
+    old = cache._drain_tasks[path]
+    await started.wait()
+    await cache.evict_prefix("/data/")
+    assert path not in cache._drain_tasks
+    await cache_io.apply_io(
+        cache,
+        IOResult(reads={path: CachableAsyncIterator(new_stream())},
+                 cache=[path]))
+    new = cache._drain_tasks[path]
+    try:
+        release_old.set()
+        await old
+        await asyncio.sleep(0)
+        assert await cache.get(path) is None
+        assert cache._drain_tasks[path] is new
+        release_new.set()
+        await new
+        assert await cache.get(path) == b"new account"
+    finally:
+        release_old.set()
+        release_new.set()
+        await asyncio.gather(old, new, return_exceptions=True)
+
+
 # ── max_drain_bytes (cancellable cache drain) ───────────────────────────
 
 

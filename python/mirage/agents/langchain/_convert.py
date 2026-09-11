@@ -14,7 +14,7 @@
 
 from deepagents.backends.protocol import ExecuteResponse, FileInfo, GrepMatch
 
-from mirage.agents.io_text import decode
+from mirage.agents.io_text import decode, with_refusal
 from mirage.io.types import IOResult
 
 
@@ -24,7 +24,8 @@ def io_to_execute_response(io: IOResult) -> ExecuteResponse:
     output = stdout
     if stderr:
         output = f"{stdout}\n{stderr}" if stdout else stderr
-    return ExecuteResponse(output=output, exit_code=io.exit_code)
+    return ExecuteResponse(output=with_refusal(output, io.refusal),
+                           exit_code=io.exit_code)
 
 
 def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:

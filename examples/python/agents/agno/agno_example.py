@@ -40,7 +40,7 @@ async def main() -> None:
     await ws.execute('echo "hello from mirage" | tee /data/hello.txt')
     await agent.aprint_response(TASK)
 
-    records = ws.ops.records
+    records = ws.fs.records
     if records:
         total = sum(r.bytes for r in records)
         print(f"\n--- {len(records)} ops, {total:,} bytes ---")

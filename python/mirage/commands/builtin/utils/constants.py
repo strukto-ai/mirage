@@ -48,3 +48,25 @@ DEFAULT_MODES = {
 
 NUMERIC_PREFIX = re.compile(
     r"^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?")
+
+# GNU ls's window of "recent" times: half a Gregorian year of 365.2425
+# days, in seconds (ls.c). findutils draws its own line (listfile.c):
+# old past 180 days, future past an hour.
+LS_RECENT_SECONDS = 31556952 // 2
+FIND_OLD_SECONDS = 180 * 24 * 60 * 60
+FIND_FUTURE_SECONDS = 60 * 60
+
+# How `find -ls` spells a name: findutils escapes these so the row
+# stays one line and re-parseable.
+FIND_LS_ESCAPES = {
+    "\\": "\\\\",
+    " ": "\\ ",
+    '"': '\\"',
+    "\n": "\\n",
+    "\t": "\\t",
+    "\r": "\\r",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\f": "\\f",
+    "\v": "\\v",
+}

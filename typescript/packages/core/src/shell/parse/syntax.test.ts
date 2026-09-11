@@ -32,13 +32,26 @@ beforeAll(async () => {
 })
 
 describe('findSyntaxError', () => {
-  it.each(['if then fi', 'echo (', 'for x do done', 'for', 'if', 'if; fi', 'echo "unterm'])(
-    'flags structural syntax error in %j',
-    (cmd) => {
-      const root = parser.parse(cmd)
-      expect(findSyntaxError(root)).not.toBeNull()
-    },
-  )
+  it.each([
+    'if then fi',
+    'echo (',
+    'for x do done',
+    'for',
+    'if',
+    'if; fi',
+    'echo "unterm',
+    ';s',
+    '| s',
+    '&& s',
+    '& s',
+    'echo a ; ; echo b',
+    'echo bg &; echo fg',
+    'true;;s',
+    'echo a ;& echo b',
+  ])('flags structural syntax error in %j', (cmd) => {
+    const root = parser.parse(cmd)
+    expect(findSyntaxError(root)).not.toBeNull()
+  })
 
   it.each([
     'echo hi',
@@ -46,11 +59,27 @@ describe('findSyntaxError', () => {
     'if true; then echo y; fi',
     'cat /tmp/x | sort',
     "cat <<EN'D'\n$v\nEND",
-    'echo bg &; echo fg',
+    'echo bg & echo fg',
+    'echo a &',
+    'echo a;',
+    'case x in a) echo a;; esac',
+    'case x in a) echo a;& b) echo b;;& c) echo c;; esac',
     'for x in; do echo $x; done',
   ])('returns null for valid / recoverable %j', (cmd) => {
     const root = parser.parse(cmd)
     expect(findSyntaxError(root)).toBeNull()
+  })
+
+  it.each([
+    [';s', ';'],
+    ['| s', '|'],
+    ['&& s', '&&'],
+    ['echo a ; ; echo b', ';'],
+    ['echo bg &; echo fg', ';'],
+    ['true;;s', ';;'],
+  ])('names the stray separator in %j', (cmd, token) => {
+    const root = parser.parse(cmd)
+    expect(findSyntaxError(root)?.trim()).toBe(token)
   })
 })
 

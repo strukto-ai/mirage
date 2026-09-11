@@ -14,10 +14,10 @@
 
 from mirage.secrets.config import (AWSAuth, AWSSMConfig, DotenvConfig,
                                    EnvConfig, EnvVar, OnePasswordConfig,
-                                   SecretRef, SourceBlock)
+                                   SecretRef, SecretSource)
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import known_sources, register_secrets, source_for
-from mirage.secrets.sources import resolve_sources
+from mirage.secrets.sources import resolve_config_secrets, resolve_sources
 from mirage.secrets.types import ResolvedSecret, ResolvedSource, SecretFetchFn
 
 __all__ = [
@@ -31,10 +31,11 @@ __all__ = [
     "ResolvedSource",
     "SecretFetchFn",
     "SecretRef",
+    "SecretSource",
     "SecretsError",
-    "SourceBlock",
     "known_sources",
     "register_secrets",
+    "resolve_config_secrets",
     "resolve_sources",
     "source_for",
 ]

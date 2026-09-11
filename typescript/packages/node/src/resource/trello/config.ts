@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const TrelloConfigSchema = z.object({
   apiKey: secretStr(),
@@ -33,5 +37,5 @@ export function redactTrelloConfig(config: TrelloConfig): TrelloConfigRedacted {
 }
 
 export function normalizeTrelloConfig(input: Record<string, unknown>): TrelloConfig {
-  return normalizeFields(input) as unknown as TrelloConfig
+  return parseConfigWithSchema(TrelloConfigSchema, input)
 }

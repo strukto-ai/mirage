@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { JSON_NAME } from '../hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../hierarchy/scope.ts'
 
@@ -23,7 +23,7 @@ const SCOPES: readonly Scope[] = [
     kind: 'memory',
     segments: [new Slot('memory_id', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 

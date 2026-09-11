@@ -17,14 +17,14 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { FileType } from '../types.ts'
+import { ContentType } from '../types.ts'
 import {
-  EXTENSION_MAP,
-  IMAGE_TYPE_BY_EXTENSION,
-  MIMETYPE_MAP,
+  CONTENT_BY_EXTENSION,
+  CONTENT_BY_MIME,
   MIME_BY_EXTENSION,
-  guessType,
-  imageTypeForExtension,
+  contentTypeForExtension,
+  contentTypeForMime,
+  contentTypeForPath,
   mimeTypeFor,
 } from './filetype.ts'
 
@@ -32,23 +32,39 @@ const FIXTURE = fileURLToPath(
   new URL('../../../../../integ/fixtures/filetype/tables.json', import.meta.url),
 )
 
-describe('guessType', () => {
+describe('contentTypeForPath', () => {
   it('maps extensions to their own types (jpg is JPEG, not PNG)', () => {
-    expect(guessType('photo.jpg')).toBe(FileType.IMAGE_JPEG)
-    expect(guessType('photo.jpeg')).toBe(FileType.IMAGE_JPEG)
-    expect(guessType('image.png')).toBe(FileType.IMAGE_PNG)
-    expect(guessType('data.jsonl')).toBe(FileType.JSON)
-    expect(guessType('build.log')).toBe(FileType.TEXT)
-    expect(guessType('dump.gzip')).toBe(FileType.GZIP)
-    expect(guessType('unknown.blob')).toBe(FileType.BINARY)
+    expect(contentTypeForPath('photo.jpg')).toBe(ContentType.IMAGE_JPEG)
+    expect(contentTypeForPath('photo.jpeg')).toBe(ContentType.IMAGE_JPEG)
+    expect(contentTypeForPath('image.png')).toBe(ContentType.IMAGE_PNG)
+    expect(contentTypeForPath('data.jsonl')).toBe(ContentType.JSON)
+    expect(contentTypeForPath('build.log')).toBe(ContentType.TEXT)
+    expect(contentTypeForPath('dump.gzip')).toBe(ContentType.GZIP)
+    expect(contentTypeForPath('unknown.blob')).toBe(ContentType.BINARY)
+  })
+
+  it('reads the extension off the last segment only', () => {
+    expect(contentTypeForPath('/v1.2/README')).toBe(ContentType.BINARY)
+    expect(contentTypeForPath('/v1.2/notes.md')).toBe(ContentType.TEXT)
   })
 })
 
-describe('imageTypeForExtension', () => {
-  it('types bare image extensions and defaults to BINARY', () => {
-    expect(imageTypeForExtension('png')).toBe(FileType.IMAGE_PNG)
-    expect(imageTypeForExtension('JPG')).toBe(FileType.IMAGE_JPEG)
-    expect(imageTypeForExtension('txt')).toBe(FileType.BINARY)
+describe('contentTypeForExtension', () => {
+  it('types a bare extension and defaults to BINARY', () => {
+    expect(contentTypeForExtension('png')).toBe(ContentType.IMAGE_PNG)
+    expect(contentTypeForExtension('JPG')).toBe(ContentType.IMAGE_JPEG)
+    expect(contentTypeForExtension('txt')).toBe(ContentType.TEXT)
+    expect(contentTypeForExtension('blob')).toBe(ContentType.BINARY)
+  })
+})
+
+describe('contentTypeForMime', () => {
+  it('maps the table, any text/* to TEXT, and the rest to BINARY', () => {
+    expect(contentTypeForMime('image/png')).toBe(ContentType.IMAGE_PNG)
+    expect(contentTypeForMime('application/pdf')).toBe(ContentType.PDF)
+    expect(contentTypeForMime('text/markdown')).toBe(ContentType.TEXT)
+    expect(contentTypeForMime('')).toBe(ContentType.BINARY)
+    expect(contentTypeForMime('application/octet-stream')).toBe(ContentType.BINARY)
   })
 })
 
@@ -58,17 +74,13 @@ describe('shared parity fixture', () => {
   // one side fails the other until the fixture moves with it.
   const tables = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Record<string, Record<string, string>>
 
-  it('pins the extension table', () => {
-    expect({ ...EXTENSION_MAP }).toEqual(tables.extension_map)
+  it('pins the content tables', () => {
+    expect({ ...CONTENT_BY_EXTENSION }).toEqual(tables.content_by_extension)
+    expect({ ...CONTENT_BY_MIME }).toEqual(tables.content_by_mime)
   })
 
-  it('pins the mime tables', () => {
+  it('pins the wire mime table', () => {
     expect({ ...MIME_BY_EXTENSION }).toEqual(tables.mime_by_extension)
-    expect({ ...MIMETYPE_MAP }).toEqual(tables.mimetype_map)
-  })
-
-  it('pins the image extension table', () => {
-    expect({ ...IMAGE_TYPE_BY_EXTENSION }).toEqual(tables.image_type_by_extension)
   })
 })
 

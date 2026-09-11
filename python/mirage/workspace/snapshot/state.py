@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import importlib
+import logging
 import tempfile
 from typing import Any, cast, get_args
 
@@ -21,7 +22,9 @@ from pydantic import BaseModel
 from mirage.commands.cli.types import CLISpec
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.resource.history import HISTORY_PREFIX
-from mirage.resource.registry import REGISTRY, resolve_class
+from mirage.resource.loader import SCRIPT_MODULE_NAME
+from mirage.resource.registry import (ResourceEntry, resolve_class,
+                                      resolve_entry)
 from mirage.resource.secrets import (has_redacted_secret, redacted_config_dump,
                                      revealed_config_dump)
 from mirage.runtime.types import Language, ScriptSource
@@ -42,6 +45,8 @@ from mirage.workspace.snapshot.keys import (CacheKey, CLIKey, JobKey, MountKey,
                                             SessionKey, StateKey)
 from mirage.workspace.snapshot.utils import FORMAT_VERSION, norm_mount_prefix
 
+logger = logging.getLogger(__name__)
+
 # A per-name override for restoring installed CLIs: a plain mapping is a
 # fresh config (the spec resolves from the snapshot's registry key); a
 # (spec, config) tuple carries a live spec too, which is how copy()
@@ -58,8 +63,10 @@ def cli_config_dump(config: BaseModel | dict[str, JsonValue] | None,
     its schema-declared secrets. A script install's config is an opaque
     mapping instead: with no ``config_model`` nothing declares which
     keys are secret, so it is captured verbatim rather than guessed at,
-    and a script CLI that needs a credential should read it from the
-    environment.
+    and a script CLI that needs a credential reads it from a managed
+    env var. The yaml door refuses a secrets pointer in a script's
+    config for exactly this reason (``CLIBlock``): resolved, the value
+    would sit in this verbatim capture.
 
     Args:
         config (BaseModel | dict[str, JsonValue] | None): the validated
@@ -136,9 +143,14 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLISpec:
 async def to_state_dict(ws) -> dict[str, Any]:
     auto_prefixes = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
 
+    mounted = ws._registry.mounts()
+    for mount in mounted:
+        await mount.ensure_ready()
     mounts_state = []
-    for idx, m in enumerate(mt for mt in ws._registry.mounts()
+    for idx, m in enumerate(mt for mt in mounted
                             if mt.prefix not in auto_prefixes):
+        async with m.use():
+            resource_state = m.resource.get_state()
         mounts_state.append({
             MountKey.INDEX: idx,
             MountKey.PREFIX: m.prefix,
@@ -146,7 +158,8 @@ async def to_state_dict(ws) -> dict[str, Any]:
             MountKey.CONSISTENCY: m.consistency.value,
             MountKey.RESOURCE_CLASS:
             f"{type(m.resource).__module__}.{type(m.resource).__name__}",
-            MountKey.RESOURCE_STATE: m.resource.get_state(),
+            MountKey.RESOURCE_REF: m.resource.resource_ref,
+            MountKey.RESOURCE_STATE: resource_state,
         })
 
     cache = ws._cache
@@ -174,6 +187,8 @@ async def to_state_dict(ws) -> dict[str, Any]:
         if j.status != JobStatus.RUNNING
     ]
 
+    if mounted != ws._registry.mounts() or any(m.retiring for m in mounted):
+        raise RuntimeError("mounts changed during snapshot")
     fingerprints = capture_fingerprints(ws)
     live_only_mounts = live_only_mount_prefixes(ws)
 
@@ -233,8 +248,10 @@ def build_mount_args(state: dict[str, Any],
     if missing:
         raise ValueError(
             "Workspace.load: resources= must include overrides for: "
-            f"{missing}. These mounts were saved with redacted creds "
-            "or transient connection state and need fresh resources.")
+            f"{missing}. A listed mount was saved with redacted "
+            "credentials, asked to be handed back live (needs_override), "
+            "or names a class this process cannot import; register the "
+            "class (register_resource) or pass a live instance.")
 
     cli_overrides = clis or {}
     cli_entries = state.get(StateKey.CLIS) or []
@@ -468,33 +485,66 @@ def _job_from_dict(d: dict[str, Any]):
 
 
 def _construct_resource(mount_state: dict[str, Any]):
-    cls = _resource_class_for(mount_state)
+    """Rebuild a saved mount's resource the way ``build_resource`` would.
+
+    Args:
+        mount_state (dict[str, Any]): one captured ``mounts`` entry that
+            ``requires_resource_override`` answered False for.
+    """
+    cls, entry = _saved_class(mount_state)
+    if cls is None:
+        raise ValueError(
+            f"cannot rebuild the mount at {mount_state[MountKey.PREFIX]}: "
+            f"{mount_state[MountKey.RESOURCE_CLASS]} is not importable")
     resource_state = mount_state[MountKey.RESOURCE_STATE]
     ptype = resource_state.get(ResourceStateKey.TYPE, "")
 
     if ptype == ResourceName.RAM:
-        return cls()
-    if ptype == ResourceName.DISK:
-        return cls(root=tempfile.mkdtemp(prefix="mirage-disk-"))
-    if ptype == ResourceName.REDIS:
+        built = cls()
+    elif ptype == ResourceName.DISK:
+        built = cls(root=tempfile.mkdtemp(prefix="mirage-disk-"))
+    elif ptype == ResourceName.REDIS:
         raise ValueError(
             f"Redis mount at {mount_state[MountKey.PREFIX]} requires "
             "resources= override")
-
-    config = resource_state.get(ResourceStateKey.CONFIG)
-    if config is None:
-        return cls()
-    config_cls = _config_class_for(cls)
-    if config_cls is not None:
-        return cls(config_cls(**config))
-    return cls()
+    else:
+        config = resource_state.get(ResourceStateKey.CONFIG)
+        config_cls = _saved_config_class(cls, entry)
+        if config is None:
+            built = cls()
+        elif config_cls is not None:
+            built = cls(config_cls(**config))
+        else:
+            built = cls(**config)
+    # Carried forward so a second round trip rebuilds through the same
+    # reference; None when the original was constructed in code.
+    built.resource_ref = mount_state.get(MountKey.RESOURCE_REF)
+    return built
 
 
 def requires_resource_override(mount_state: dict[str, Any]) -> bool:
+    """Whether a saved mount must be handed back live rather than rebuilt.
+
+    Three reasons, and TypeScript's ``resourceStateRequiresOverride``
+    reads the first two the same way: the resource said so
+    (``needs_override``, which ``GenericResource`` writes by default
+    because the base cannot know a subclass's constructor), a config
+    secret was redacted, or the class is one this process cannot import
+    (a script file loaded under the loader's module name with no
+    reference recorded, or a class from a package that is not
+    installed).
+
+    Args:
+        mount_state (dict[str, Any]): one captured ``mounts`` entry.
+    """
     resource_state = mount_state[MountKey.RESOURCE_STATE]
+    if resource_state.get(ResourceStateKey.NEEDS_OVERRIDE) is True:
+        return True
+    cls, entry = _saved_class(mount_state)
+    if cls is None:
+        return True
     config = resource_state.get(ResourceStateKey.CONFIG)
-    config_cls = _config_class_for(_resource_class_for(mount_state))
-    return has_redacted_secret(config, config_cls)
+    return has_redacted_secret(config, _saved_config_class(cls, entry))
 
 
 def reusable_clis(ws) -> CLIOverrides:
@@ -538,19 +588,74 @@ def reusable_resources(mounts: list[Any], state: dict[str,
     }
 
 
-def _resource_class_for(mount_state: dict[str, Any]):
+def _saved_entry(mount_state: dict[str, Any]) -> ResourceEntry | None:
+    """The registry entry a saved mount rebuilds through, or None.
+
+    The ``resource_ref`` the registry built the mount from when one was
+    recorded (a registered name, or a colon reference, which is how a
+    mount declared as ``./wiki.py:WikiResource`` comes back), else the
+    resource's ``type``, the one locator a resource constructed in code
+    leaves. The ref comes first because ``type`` is the class's ``name``
+    and a subclass inherits it: an alias registered over a builtin, or a
+    script subclassing one, reports the builtin's type and rebuilt as
+    the builtin while the type was consulted first. A recorded ref this
+    process cannot resolve is not a reason to fall back to that guess;
+    ``_saved_class`` imports the class the snapshot names as the last
+    resort, and the loader asks for an override when even that fails.
+
+    Args:
+        mount_state (dict[str, Any]): one captured ``mounts`` entry.
+    """
+    ref = mount_state.get(MountKey.RESOURCE_REF)
+    if ref:
+        return resolve_entry(ref)
     ptype = mount_state[MountKey.RESOURCE_STATE].get(ResourceStateKey.TYPE, "")
-    if ptype in REGISTRY:
-        return resolve_class(REGISTRY[ptype].resource_path)
+    return resolve_entry(ptype) if ptype else None
+
+
+def _saved_class(
+        mount_state: dict[str,
+                          Any]) -> tuple[type | None, ResourceEntry | None]:
+    """The class a saved mount is rebuilt from, with its registry entry.
+
+    ``(None, None)`` when this process cannot reach the class: it ran
+    from a script file with no reference recorded, or its package is not
+    installed. The caller decides what that means (an override is
+    required); nothing here guesses.
+
+    Args:
+        mount_state (dict[str, Any]): one captured ``mounts`` entry.
+    """
+    entry = _saved_entry(mount_state)
+    if entry is not None:
+        return resolve_class(entry.resource_path), entry
     cls_path = mount_state[MountKey.RESOURCE_CLASS]
     mod_name, cls_name = cls_path.rsplit(".", 1)
-    return getattr(importlib.import_module(mod_name), cls_name)
+    if mod_name == SCRIPT_MODULE_NAME:
+        return None, None
+    try:
+        module = importlib.import_module(mod_name)
+    except ImportError as exc:
+        logger.debug("saved resource class %s is not importable: %s", cls_path,
+                     exc)
+        return None, None
+    return getattr(module, cls_name, None), None
 
 
-def _config_class_for(resource_cls):
-    mod = importlib.import_module(resource_cls.__module__)
-    for name in dir(mod):
-        obj = getattr(mod, name)
-        if isinstance(obj, type) and name.endswith("Config"):
-            return obj
-    return None
+def _saved_config_class(resource_cls: type,
+                        entry: ResourceEntry | None) -> type | None:
+    """The typed config a saved mount's constructor takes, or None.
+
+    The registry entry's config class when the entry declares one, else
+    the class's own ``CONFIG_CLS``: exactly what ``build_resource``
+    reads. It used to scan the class's module for the first name ending
+    in ``Config``, which picked a neighbour by alphabet.
+
+    Args:
+        resource_cls (type): the resource class being rebuilt.
+        entry (ResourceEntry | None): its registry entry, when it has one.
+    """
+    if entry is not None and entry.config_path is not None:
+        return resolve_class(entry.config_path)
+    ref = getattr(resource_cls, "CONFIG_CLS", None)
+    return None if ref is None else resolve_class(ref)

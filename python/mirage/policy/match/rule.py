@@ -58,7 +58,7 @@ class RuleMatch:
     about) the whole line, and a RuleMatch naming the operand when the
     rule is path-scoped and one operand fell under its paths, so the
     refusal is scoped to that operand (``rm: x: <reason>``, exit 1)
-    rather than to the command (``rm: policy denied: <reason>``, 126).
+    rather than to the command (``rm: Permission denied``, 126).
 
     Args:
         operand (str | None): the operand as typed that a path-scoped

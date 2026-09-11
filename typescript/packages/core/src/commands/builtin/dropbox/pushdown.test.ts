@@ -31,7 +31,7 @@ import { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import type { DropboxTokenManager } from '../../../core/dropbox/client.ts'
 import * as searchModule from '../../../core/dropbox/search.ts'
 import * as statModule from '../../../core/dropbox/stat.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { narrowScope } from './pushdown.ts'
 
 const STUB_TM = {} as DropboxTokenManager
@@ -39,7 +39,7 @@ const narrow = vi.mocked(searchModule.narrowPaths)
 const stat = vi.mocked(statModule.stat)
 
 const DIR_STAT = new FileStat({ name: 'data', type: FileType.DIRECTORY })
-const FILE_STAT = new FileStat({ name: 'x.txt', type: FileType.TEXT })
+const FILE_STAT = new FileStat({ name: 'x.txt', type: FileType.FILE, content: ContentType.TEXT })
 
 function makeAccessor(contentSearch = true): DropboxAccessor {
   return new DropboxAccessor({ tokenManager: STUB_TM, contentSearch })

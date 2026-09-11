@@ -127,7 +127,7 @@ def _two_mount_ops() -> Ops:
         "/a/": RAMResource(),
         "/b/": RAMResource()
     },
-                     mode=MountMode.WRITE).ops
+                     mode=MountMode.WRITE).fs
 
 
 class TestRename:
@@ -187,11 +187,11 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
     },
                    mode=MountMode.WRITE)
     try:
-        ws.ops.records.clear()
-        assert await ws.ops.readdir("/m/inner") == ["/m/inner/deep"]
+        ws.fs.records.clear()
+        assert await ws.fs.readdir("/m/inner") == ["/m/inner/deep"]
         assert [(r.source, r.is_cache)
-                for r in ws.ops.records] == [("ram", True)]
-        assert ws.ops.network_records == []
+                for r in ws.fs.records] == [("ram", True)]
+        assert ws.fs.network_records == []
     finally:
         await ws.close()
 
@@ -217,12 +217,12 @@ async def test_a_denied_namespace_answer_is_not_a_backend_op(
                    mode=MountMode.WRITE)
     try:
         ws.policies.add(DenyInner())
-        ws.ops.records.clear()
+        ws.fs.records.clear()
         with pytest.raises(PermissionError):
-            await ws.ops.readdir("/m/inner")
+            await ws.fs.readdir("/m/inner")
         assert [(r.source, r.is_cache)
-                for r in ws.ops.records] == [("ram", True)]
-        assert ws.ops.network_records == []
+                for r in ws.fs.records] == [("ram", True)]
+        assert ws.fs.network_records == []
     finally:
         await ws.close()
 
@@ -313,7 +313,7 @@ class TestMultiMount:
         ops = Workspace({
             "/mem1/": one,
             "/mem2/": two
-        }, mode=MountMode.WRITE).ops
+        }, mode=MountMode.WRITE).fs
         run(ops.mkdir("/mem1/dir"))
         run(ops.mkdir("/mem2/dir"))
         run(ops.write("/mem1/dir/a.txt", b"from store1"))
@@ -334,7 +334,7 @@ class TestOpsAgainstSeededStore:
         store.files["/test.txt"] = b"hello"
         store.modified["/test.txt"] = "2024-01-01T00:00:00"
         ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
-        return ws.ops, store
+        return ws.fs, store
 
     def test_read(self, memory_ops):
         ops, _ = memory_ops
@@ -366,7 +366,7 @@ def _structure_only_ops(policies: list[Policy]) -> Ops:
         "/data/inner/deep/": RAMResource()
     },
                      mode=MountMode.WRITE,
-                     policies=policies).ops
+                     policies=policies).fs
 
 
 class TestStructureFallbackGates:
@@ -393,7 +393,7 @@ def _granted_child_ops() -> Ops:
             "/data/": RAMResource(),
             "/data/inner/deep/": RAMResource()
         },
-        mode=MountMode.WRITE).ops
+        mode=MountMode.WRITE).fs
 
 
 @pytest.fixture
@@ -456,10 +456,10 @@ class TestAttachedOpsOneDoor:
         ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
         try:
             ws.policies.add(counter)
-            await ws.ops.write("/data/x.txt", b"body")
+            await ws.fs.write("/data/x.txt", b"body")
             assert counter.calls.count(("write", "/data/x.txt")) == 1
             counter.calls.clear()
-            assert await ws.ops.read("/data/x.txt") == b"body"
+            assert await ws.fs.read("/data/x.txt") == b"body"
             assert counter.calls.count(("read", "/data/x.txt")) == 1
         finally:
             await ws.close()
@@ -468,9 +468,9 @@ class TestAttachedOpsOneDoor:
     async def test_records_survive_the_delegation(self):
         ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
         try:
-            await ws.ops.write("/data/x.txt", b"12345")
-            assert await ws.ops.read("/data/x.txt") == b"12345"
-            recorded = {(r.op, r.path, r.bytes) for r in ws.ops.records}
+            await ws.fs.write("/data/x.txt", b"12345")
+            assert await ws.fs.read("/data/x.txt") == b"12345"
+            recorded = {(r.op, r.path, r.bytes) for r in ws.fs.records}
             assert ("write", "/data/x.txt", 5) in recorded
             assert ("read", "/data/x.txt", 5) in recorded
         finally:
@@ -485,8 +485,8 @@ class TestAttachedOpsOneDoor:
         try:
             ws.policies.add(_DenyEverything())
             with pytest.raises(PolicyDenied):
-                await ws.ops.write("/data/x.txt", b"body")
-            assert ws.ops.records == []
+                await ws.fs.write("/data/x.txt", b"body")
+            assert ws.fs.records == []
         finally:
             await ws.close()
 
@@ -495,7 +495,7 @@ class TestAttachedOpsOneDoor:
         ws = Workspace({"/data/": RAMResource()}, mode=MountMode.READ)
         try:
             with pytest.raises(PermissionError):
-                await ws.ops.write("/data/x.txt", b"body")
+                await ws.fs.write("/data/x.txt", b"body")
         finally:
             await ws.close()
 
@@ -507,13 +507,13 @@ class TestAttachedOpsOneDoor:
         },
                        mode=MountMode.WRITE)
         try:
-            await ws.ops.write("/a/x.txt", b"body")
-            await ws.ops.rename("/a/x.txt", "/a/y.txt")
-            assert await ws.ops.read("/a/y.txt") == b"body"
+            await ws.fs.write("/a/x.txt", b"body")
+            await ws.fs.rename("/a/x.txt", "/a/y.txt")
+            assert await ws.fs.read("/a/y.txt") == b"body"
             with pytest.raises(OSError) as exc:
-                await ws.ops.rename("/a/y.txt", "/b/x.txt")
+                await ws.fs.rename("/a/y.txt", "/b/x.txt")
             assert exc.value.errno == errno.EXDEV
-            assert await ws.ops.read("/a/y.txt") == b"body"
+            assert await ws.fs.read("/a/y.txt") == b"body"
         finally:
             await ws.close()
 

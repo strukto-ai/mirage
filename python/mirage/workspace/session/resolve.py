@@ -213,7 +213,7 @@ def with_inline(base: SessionProfile | None,
     Modes take the weaker of the two, ``cwd`` and ``env`` are the
     inline document's when it states them (they are session presets,
     not permissions). Either side None returns the other unchanged; the
-    profile's script survives the merge, since the inline document can
+    profile's policy survives the merge, since the inline document can
     only add rules beside it.
 
     Args:
@@ -228,9 +228,9 @@ def with_inline(base: SessionProfile | None,
         return base
     refuse_allow(inline.commands)
     refuse_show(inline)
-    if inline.script is not None:
+    if inline.policy is not None:
         raise PolicyError("inline permissions may add ask and deny rules, "
-                          "not a script; state one on the profile")
+                          "not a policy; state one on the profile")
     if base is None:
         return inline
     hide_paths = _union_hide(base.paths, inline.paths)
@@ -260,8 +260,7 @@ def with_inline(base: SessionProfile | None,
         vars=(VarsBlock(hide=hide_vars) if
               (base.vars is not None or inline.vars is not None) else None),
         commands=_add_commands(base.commands, inline.commands),
-        script=base.script,
-        runtime=base.runtime,
+        policy=base.policy,
     )
 
 
@@ -430,23 +429,21 @@ def compile_script(effective: SessionProfile,
             without one; what the script reads as ``ctx["profile"]``.
 
     Raises:
-        PolicyError: the script is still a path, which means it reached
+        PolicyError: the policy is still a path, which means it reached
             the workspace without passing the config door that loads
             one.
     """
-    if effective.script is None:
+    policy = effective.policy
+    if policy is None:
         return None
-    if isinstance(effective.script, str):
+    if isinstance(policy.script, str):
         raise PolicyError(
-            f"profile {name!r} names a script by path "
-            f"({effective.script!r}); only the config door loads one, pass "
+            f"profile {name!r} names a policy by path "
+            f"({policy.script!r}); only the config door loads one, pass "
             f"ScriptSource in code")
-    # The validator refuses a script without a runtime, so this narrows
-    # a fact already established.
-    assert effective.runtime is not None
     return ProfileScript(profile=name,
-                         script=effective.script,
-                         runtime=effective.runtime)
+                         script=policy.script,
+                         runtime=policy.runtime)
 
 
 def compile_profile(effective: SessionProfile | None,
@@ -458,8 +455,9 @@ def compile_profile(effective: SessionProfile | None,
             inline document already added; None is an unrestricted
             session.
         name (str): the profile's name, empty for a document passed
-            without one; carried onto its script for ``ctx["profile"]``
-            and for refusals to print.
+            without one; carried onto its script for ``ctx["profile"]``,
+            for refusals to print, and onto the session as the group an
+            owner-rendering command shows.
     """
     if effective is None:
         return CompiledProfile(mount_modes=None,
@@ -467,7 +465,8 @@ def compile_profile(effective: SessionProfile | None,
                                hidden_vars=None,
                                env=None,
                                cwd=None,
-                               commands=None)
+                               commands=None,
+                               profile=name or None)
     commands = compile_commands(effective)
     check_rules(commands)
     return CompiledProfile(
@@ -481,6 +480,7 @@ def compile_profile(effective: SessionProfile | None,
         script=compile_script(effective, name),
         shown_paths=_shown(effective),
         hide_reasons=_hide_reasons(effective),
+        profile=name or None,
     )
 
 
@@ -489,7 +489,7 @@ def narrow(session: Session, compiled: CompiledProfile) -> None:
 
     The fields no shell line can edit: the per-mount modes, hidden
     paths, show entries, hidden variables, hide reasons, the admission
-    rules, the profile's script. Applied at creation
+    rules, the profile's policy, the profile's name. Applied at creation
     and again whenever a stored record could carry a stale copy (the
     default session after hydration), so the document, not the store,
     is what an agent runs under.
@@ -506,6 +506,7 @@ def narrow(session: Session, compiled: CompiledProfile) -> None:
     session.hide_reasons = compiled.hide_reasons
     session.commands = compiled.commands
     session.script = compiled.script
+    session.profile = compiled.profile
 
 
 def apply_profile(session: Session, compiled: CompiledProfile) -> None:

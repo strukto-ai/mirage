@@ -40,5 +40,5 @@ for text in extract_text(result["messages"][-1:]):
     print(text)
 
 pdf_read_count = sum(record.op == "read" and record.path == "/example.pdf"
-                     for record in ws.ops.records)
+                     for record in ws.fs.records)
 print(f"\nPDF reads through Mirage: {pdf_read_count}")

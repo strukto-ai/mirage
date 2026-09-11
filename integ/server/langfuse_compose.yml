@@ -45,7 +45,7 @@ services:
       retries: 30
 
   langfuse-minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data
     environment:
       MINIO_ROOT_USER: minio
@@ -57,7 +57,7 @@ services:
       retries: 30
 
   langfuse-minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       langfuse-minio:
         condition: service_healthy
@@ -68,7 +68,7 @@ services:
       echo minio-init-done"
 
   langfuse-worker:
-    image: langfuse/langfuse-worker:3
+    image: langfuse/langfuse-worker:3.225.5
     depends_on:
       langfuse-postgres:
         condition: service_healthy
@@ -100,7 +100,7 @@ services:
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
 
   langfuse-web:
-    image: langfuse/langfuse:3
+    image: langfuse/langfuse:3.225.5
     depends_on:
       langfuse-worker:
         condition: service_started

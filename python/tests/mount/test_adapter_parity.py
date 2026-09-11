@@ -79,7 +79,7 @@ class Pair:
             await ws.execute("tee /a.txt", stdin=HELLO)
             await ws.execute("mkdir /sub")
             await ws.execute("tee /sub/b.txt", stdin=b"nested")
-            trees.append(SizelessOps(ws.ops) if sizeless else ws.ops)
+            trees.append(SizelessOps(ws.fs) if sizeless else ws.fs)
         return cls(MountCore(trees[0]), MirageNFS(trees[1]))
 
     async def nfs_id(self, *parts: str) -> int:

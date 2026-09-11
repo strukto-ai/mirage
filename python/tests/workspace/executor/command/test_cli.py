@@ -50,6 +50,21 @@ async def send(inv: CLIInvocation[TokenConfig]):
     return f"sent[{inv.config.token}]\n".encode(), IOResult()
 
 
+def send_sync(inv: CLIInvocation[TokenConfig]):
+    return f"sync[{inv.config.token}]\n".encode(), IOResult()
+
+
+def raise_sync(inv: CLIInvocation[TokenConfig]):
+    raise RuntimeError("sync boom")
+
+
+def make_sync_install(fn) -> CLIInstall:
+    spec = CLISpec(name="prog",
+                   config_model=TokenConfig,
+                   subcommands=(CLISpec(name="go", fn=fn), ))
+    return CLIInstall(name="prog", spec=spec, config=TokenConfig(token="tok"))
+
+
 def make_install(name: str = "prog") -> CLIInstall:
     spec = CLISpec(
         name="prog",
@@ -92,6 +107,24 @@ async def test_leaf_runs_with_config_group_flags_and_texts():
     # `$PWD` is exported, so a CLI subprocess inherits it as bash's would.
     assert inv.env == {"EDITOR": "vi", "PWD": "/"}
     assert node.command == "prog -vv message send -t #eng hello world"
+
+
+@pytest.mark.asyncio
+async def test_a_sync_leaf_runs_like_an_async_one():
+    stdout, io, node = await handle_cli(make_sync_install(send_sync),
+                                        ["prog", "go"], Session("t"))
+    assert io.exit_code == 0
+    assert await materialize(stdout) == b"sync[tok]\n"
+    assert node.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_a_sync_leaf_that_raises_lands_in_the_generic_arm():
+    _, io, node = await handle_cli(make_sync_install(raise_sync),
+                                   ["prog", "go"], Session("t"))
+    assert io.exit_code == 1
+    assert io.stderr == b"prog go: sync boom\n"
+    assert node.exit_code == 1
 
 
 @pytest.mark.asyncio

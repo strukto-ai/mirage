@@ -197,7 +197,7 @@ describe('CLIRegistry zod config schemas', () => {
     const reg = new CLIRegistry()
     expect(() =>
       reg.install('prog', tree(z.strictObject({ token: z.string() })), { token: 'x', typo: 'y' }),
-    ).toThrow(/Unrecognized key/)
+    ).toThrow(/^CLI 'prog': typo: unrecognized_keys$/)
   })
 
   it('refuses a normalizer that returns a non-object', () => {

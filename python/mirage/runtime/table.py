@@ -90,6 +90,43 @@ SANDBOX_MODULES: dict[str, str] = {
     "ssh": "mirage.runtime.sandbox.ssh:SSHRuntime",
 }
 
+# The names mirage ships, frozen before any host registers its own, so
+# `register_runtime` can refuse to shadow one the way `register_resource`
+# and `register_cli_spec` refuse a builtin resource or CLI name.
+BUILTIN_RUNTIMES: frozenset[str] = frozenset({*NAMED, *SANDBOX_MODULES})
+
+
+def register_runtime(name: str, cls: type[Runtime]) -> None:
+    """Register a host's runtime class under a config name.
+
+    Host-side only, like ``register_resource`` and ``register_cli_spec``:
+    the embedding program calls it, never a line the agent types. Once
+    registered the name works everywhere a builtin's does: a ``runtimes:``
+    entry in workspace YAML, a string in ``Workspace(runtimes=[...])``,
+    and ``execute(runtime=name)``. Mirrors ``registerRuntime`` in
+    ``runtime/table.ts``. A builtin name cannot be shadowed;
+    re-registering a custom name replaces it.
+
+    Args:
+        name (str): the name config spells; also what ``build_runtime``
+            resolves.
+        cls (type[Runtime]): the runtime class, constructed with the
+            uniform ``(captures, config, script)`` shape every runtime
+            takes, which is how a yaml entry's keys reach it.
+
+    Raises:
+        ValueError: ``name`` is one mirage ships.
+    """
+    if name in BUILTIN_RUNTIMES:
+        raise ValueError(f"cannot register {name!r}: shadows a builtin")
+    NAMED[name] = cls
+
+
+def known_runtimes() -> list[str]:
+    """Every name ``build_runtime`` can resolve, builtin and registered."""
+    return sorted({*NAMED, *SANDBOX_MODULES})
+
+
 # The python engine a default world registers, named rather than left
 # to a slot in DEFAULT_ENTRIES because it is the one entry the two
 # implementations disagree on: Python registers monty, TypeScript
@@ -138,7 +175,7 @@ def build_runtime(name: str, **options: Any) -> Runtime:
     if cls is None:
         if name in TS_ONLY_HINTS:
             raise ValueError(TS_ONLY_HINTS[name])
-        known = ", ".join(repr(n) for n in (*NAMED, *SANDBOX_MODULES))
+        known = ", ".join(repr(n) for n in known_runtimes())
         raise ValueError(f"unknown runtime: {name!r} "
                          f"(expected one of {known})")
     return cls(**options)

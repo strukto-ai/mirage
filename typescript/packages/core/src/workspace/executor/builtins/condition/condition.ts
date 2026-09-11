@@ -26,6 +26,8 @@ import type { CondContext, CondNode } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
+import { sessionView } from '../../../session/state.ts'
+import type { SessionView } from '../../../../ops/types.ts'
 
 /**
  * Evaluate test/[ (flat argv) or [[ (condition tree). `name` is the
@@ -37,8 +39,15 @@ export async function handleTest(
   args: (string | PathSpec)[] | CondNode,
   session: Session,
   name = 'test',
+  view?: SessionView,
 ): Promise<Result> {
-  const ctx: CondContext = { dispatch, namespace, session, name }
+  const ctx: CondContext = {
+    dispatch,
+    namespace,
+    session,
+    name,
+    ...(view !== undefined ? { view } : {}),
+  }
   let result: boolean
   try {
     if (Array.isArray(args)) {
@@ -49,15 +58,15 @@ export async function handleTest(
   } catch (exc) {
     if (!(exc instanceof CondError)) throw exc
     const stderr = new TextEncoder().encode(exc.message + '\n')
-    if (name === '[[') {
+    if (name === '[[' && exc.fatal) {
       // A bad [[ ]] operator is a bash PARSE error: the whole input
       // line dies, not just this command.
       throw new ExitSignal(2, stderr, null, 2)
     }
     return [
       null,
-      new IOResult({ exitCode: 2, stderr }),
-      new ExecutionNode({ command: 'test', exitCode: 2, stderr }),
+      new IOResult({ exitCode: exc.exitCode, stderr }),
+      new ExecutionNode({ command: 'test', exitCode: exc.exitCode, stderr }),
     ]
   }
   const code = result ? 0 : 1
@@ -86,5 +95,12 @@ export async function testBuiltin(call: BuiltinCall): Promise<Result> {
       ]
     }
   }
-  return handleTest(call.dispatch, call.namespace, testArgs, call.session, testName)
+  return handleTest(
+    call.dispatch,
+    call.namespace,
+    testArgs,
+    call.session,
+    testName,
+    sessionView(call.session, call.registry.policies),
+  )
 }

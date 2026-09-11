@@ -67,6 +67,10 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       // keep tearing down; swallow subsystem-cleanup failures
     }
   }
+  const retirements = await Promise.allSettled([...deps.registry.retiringResources.values()])
+  for (const result of retirements) {
+    if (result.status === 'rejected') throw result.reason as Error
+  }
   const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
   for (const task of drainTasks) {
     await task

@@ -14,6 +14,7 @@
 
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { IOResult } from '../../io/types.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
@@ -43,11 +44,12 @@ import {
   buildMountArgs,
   type CLIOverrides,
   toStateDict,
+  withRebuiltResources,
 } from '../snapshot/state.ts'
 import { readSnapshotTar } from '../snapshot/tar_io.ts'
-import type { WorkspaceStateDict } from '../snapshot/types.ts'
+import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
-import { ConsistencyPolicy, DriftPolicy, MountMode, PathSpec } from '../../types.ts'
+import { ConsistencyPolicy, DriftPolicy, MountMode, PathSpec, parseMountMode } from '../../types.ts'
 import type { Explanation, Policies } from '../../policy/index.ts'
 import type { RoutePolicy } from '../../runtime/routing/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -69,15 +71,20 @@ import { explainLine } from '../node/explain.ts'
 import { provisionNode } from '../node/provision_node.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
-import { SourceBlockSchema, type SourceBlock } from '../../secrets/config.ts'
+import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { sourceFor } from '../../secrets/registry.ts'
 import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
+import { DEFAULT_PROFILE } from '../session/constants.ts'
 import { SessionManager } from '../session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
 import { varsFromEntries, type Session } from '../session/session.ts'
-import { parseProfileMounts, type SessionProfile } from '../../policy/profile.ts'
+import {
+  parseProfileMounts,
+  parseProfilePolicy,
+  type SessionProfile,
+} from '../../policy/profile.ts'
 import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
@@ -86,7 +93,7 @@ import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
-import { normalizeResources, unmountPrefix } from './mounts.ts'
+import { normalizeResources, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import type { ExecuteResult } from './types.ts'
@@ -106,6 +113,7 @@ export class Workspace {
   private readonly sharedResources = new Set<Resource>()
   private readonly meta: WorkspaceMeta
   private readonly opsRegistry: OpsRegistry
+  private readonly indexConfig: IndexConfig | undefined
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
@@ -130,15 +138,16 @@ export class Workspace {
    * runtime can still replay its journal, and that window would otherwise let
    * a caller start a job after `killAll`, or add a mount after the close list
    * was taken. Internal dispatch and recursive execution stay open until
-   * teardown finishes; their public doors do not.
+   * teardown finishes; their public doors do not. A method keeps TypeScript
+   * from treating a pre-await check as proof that the state is still open.
    */
-  private get shuttingDown(): boolean {
+  private isShuttingDown(): boolean {
     return this.closing !== null || this.closed
   }
   private readonly watchManager: WatchManager
   private readonly runtimes: Runtimes
   // Named for what it holds: the source declarations, never a secret.
-  private readonly sourceBlocks: Readonly<Record<string, SourceBlock>>
+  private readonly declaredSecretSources: Readonly<Record<string, SecretSource>>
   private secretSourcesBuilt: Readonly<Record<string, ResolvedSource>> | null = null
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
@@ -158,6 +167,7 @@ export class Workspace {
 
   constructor(resources: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     const normalized = normalizeResources(resources)
+    this.indexConfig = options.index
     this.registry = new MountRegistry(
       normalized.bare,
       options.mode ?? MountMode.READ,
@@ -199,18 +209,18 @@ export class Workspace {
     ) {
       throw new SecretsError('config `secrets` must be a mapping')
     }
-    this.sourceBlocks = Object.fromEntries(
+    this.declaredSecretSources = Object.fromEntries(
       Object.entries(options.secrets ?? {}).map(([name, block]) => [
         name,
-        SourceBlockSchema.parse(block),
+        SecretSourceSchema.parse(block),
       ]),
     )
-    for (const block of Object.values(this.sourceBlocks)) sourceFor(block.source)
+    for (const block of Object.values(this.declaredSecretSources)) sourceFor(block.source)
     const seedVars = options.env !== undefined ? varsFromEntries(options.env) : undefined
     for (const seeded of Object.values(seedVars ?? {})) {
       if (
         seeded.managed !== undefined &&
-        !Object.hasOwn(this.sourceBlocks, seeded.managed.source)
+        !Object.hasOwn(this.declaredSecretSources, seeded.managed.source)
       ) {
         sourceFor(seeded.managed.source)
       }
@@ -259,30 +269,35 @@ export class Workspace {
     // does not pass that door, and the python host refuses the same
     // profiles at construction.
     for (const [name, profile] of Object.entries(this.profiles)) {
-      if (profile.script != null && profile.runtime == null) {
+      // A typed caller does not pass the parser, so this door repeats
+      // its two checks: the old keys are told where they went, and a
+      // policy block is whole.
+      const legacy = profile as { script?: unknown; runtime?: unknown }
+      if (legacy.script !== undefined || legacy.runtime !== undefined) {
         throw new PolicyError(
-          `profile '${name}': a profile script states the engine it runs on; ` +
-            `set runtime beside script`,
+          `profile '${name}': script and runtime are now one policy block, ` +
+            `policy: {script: <file>, runtime: <engine>}; its program defines ` +
+            `pre_command(ctx) and answers with return`,
         )
       }
-      if (profile.script == null && profile.runtime != null) {
-        throw new PolicyError(
-          `profile '${name}': runtime names the engine a script runs on, ` +
-            `and this profile states no script`,
-        )
-      }
+      if (profile.policy != null) parseProfilePolicy(profile.policy, `profile '${name}' policy`)
     }
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
     // (PermissionsPolicy, reading each session's compiled layers from
     // the manager by the id the door puts in the context), the
-    // profile's script (ScriptPolicy, evaluated per command through the
-    // same manager), then Policy instances, then anything added later
+    // profile's policy (ScriptPolicy, calling its hook per command through
+    // the same manager), then Policy instances, then anything added later
     // through ws.policies.add(). The runtime policy (policy option) is
     // the line-level counterpart until it is absorbed as a hook.
     this.registry.policies.add(new PermissionsPolicy(this.sessionManager))
-    this.scriptPolicy = new ScriptPolicy(this.sessionManager, () =>
-      this.mounts().map((entry) => entry.prefix),
+    this.scriptPolicy = new ScriptPolicy(
+      this.sessionManager,
+      () => this.mounts().map((entry) => entry.prefix),
+      // The doors the runtime world attaches, so a profile policy reads
+      // the mounts an agent's program would, and through the same gate,
+      // with its ops stamped as its own for its `preOps` to recognize.
+      { bridge: (issuer) => this.buildWorkspaceBridge(issuer), resolver: sandboxResolver },
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
@@ -341,11 +356,7 @@ export class Workspace {
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
     for (const resource of [...this.registry.allMounts().map((m) => m.resource), this.cache]) {
-      const resourceOps = resource.ops?.()
-      if (resourceOps === undefined) continue
-      for (const op of resourceOps) {
-        this.opsRegistry.register(op)
-      }
+      this.opsRegistry.registerResource(resource)
     }
     for (const mount of this.registry.allMounts()) {
       const cmds = mount.resource.commands?.()
@@ -378,7 +389,7 @@ export class Workspace {
     // ledger, which is its own; the sink is only the observer's copy.
     this.fs = new Ops(
       (op, path, args, kwargs, report) => {
-        if (this.shuttingDown) throw new Error('Workspace is closed')
+        if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
       },
       async (rec) => {
@@ -418,6 +429,7 @@ export class Workspace {
 
   /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
   addRuntime(runtime: RuntimeEntry): Runtime {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.runtimes.add(runtime)
   }
 
@@ -437,11 +449,13 @@ export class Workspace {
     spec: CLISpec,
     config: Record<string, unknown> | null = null,
   ): CLIInstall {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.registry.clis.install(name, spec, config)
   }
 
   /** Remove an installed CLI; its head word stops resolving (127). */
   unregisterCli(name: string): void {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.clis.uninstall(name)
   }
 
@@ -464,24 +478,40 @@ export class Workspace {
   // the same path as shell commands — cache read-through on
   // reads, post-write invalidation, and mount-mode enforcement narrowed
   // by the current session all come from the Dispatcher. Reads are raw
-  // bytes (no filetype rendering), matching the Python WasmVFS.
-  private buildWorkspaceBridge(): BridgeDispatchFn {
+  // bytes (no filetype rendering), matching the Python WasmVFS. An
+  // `issuer` rides every op as the `issuer` kwarg, which the dispatcher
+  // lifts onto the op door's context and never forwards to a backend:
+  // it is how a profile policy's own reads reach its `preOps` marked as
+  // its own, as an argument rather than ambient state.
+  private buildWorkspaceBridge(issuer?: symbol): BridgeDispatchFn {
+    const dispatch = (
+      opName: string,
+      path: string,
+      args: readonly unknown[] = [],
+      kwargs: OpKwargs = {},
+    ): Promise<unknown> =>
+      this.dispatchInternal(
+        opName,
+        path,
+        args,
+        issuer === undefined ? kwargs : { ...kwargs, issuer },
+      )
     return async (op, path, bytes, dst, attrs) => {
       switch (op) {
         case 'read':
-          return (await this.dispatchInternal('read', path)) as Uint8Array
+          return (await dispatch('read', path)) as Uint8Array
         case 'write': {
           if (bytes === undefined) throw new Error('write op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          await this.dispatchInternal('write', path, [buf])
+          await dispatch('write', path, [buf])
           return undefined
         }
         case 'append': {
           if (bytes === undefined) throw new Error('append op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          await this.dispatchInternal('append', path, [buf])
+          await dispatch('append', path, [buf])
           return undefined
         }
         case 'stat':
@@ -490,37 +520,32 @@ export class Workspace {
           // tiers cannot drift into two translations of one fact.
           // `nofollow` is the only attrs field a stat carries, and it
           // is the caller's lstat; the dispatcher consumes it.
-          return await this.dispatchInternal(
+          return await dispatch(
             'stat',
             path,
             [],
             attrs?.nofollow === true ? { nofollow: true } : undefined,
           )
         case 'create':
-          await this.dispatchInternal('create', path)
+          await dispatch('create', path)
           return undefined
         case 'truncate':
-          await this.dispatchInternal('truncate', path, [0])
+          await dispatch('truncate', path, [0])
           return undefined
         case 'unlink':
-          await this.dispatchInternal('unlink', path)
+          await dispatch('unlink', path)
           return undefined
         case 'mkdir':
           // `parents` is pathlib's mkdir(parents=True), riding to the
           // backend op as a kwarg the way python's dispatch carries it.
-          await this.dispatchInternal(
-            'mkdir',
-            path,
-            [],
-            attrs?.parents === true ? { parents: true } : {},
-          )
+          await dispatch('mkdir', path, [], attrs?.parents === true ? { parents: true } : {})
           return undefined
         case 'rmdir':
-          await this.dispatchInternal('rmdir', path)
+          await dispatch('rmdir', path)
           return undefined
         case 'rename': {
           if (dst === undefined) throw new Error('rename op requires dst')
-          await this.dispatchInternal('rename', path, [PathSpec.fromStrPath(dst)])
+          await dispatch('rename', path, [PathSpec.fromStrPath(dst)])
           return undefined
         }
         case 'symlink': {
@@ -528,14 +553,14 @@ export class Workspace {
           // relative or dangling, and resolving it here would record a
           // different link than the guest asked for.
           if (dst === undefined) throw new Error('symlink op requires dst')
-          await this.dispatchInternal('symlink', path, [], { target: dst })
+          await dispatch('symlink', path, [], { target: dst })
           return undefined
         }
         case 'readlink':
-          return (await this.dispatchInternal('readlink', path)) as string
+          return (await dispatch('readlink', path)) as string
         case 'setattr': {
           if (attrs === undefined) throw new Error('setattr op requires attrs')
-          await this.dispatchInternal('setattr', path, [], attrs as Record<string, unknown>)
+          await dispatch('setattr', path, [], attrs as Record<string, unknown>)
           return undefined
         }
         case 'readdir':
@@ -543,7 +568,7 @@ export class Workspace {
           // runtime door (`RuntimeVFS.readdir`) stats each entry and
           // marks the links, so a row is built in one tier and in one
           // shape in both languages.
-          return ((await this.dispatchInternal('readdir', path)) as string[] | null) ?? []
+          return ((await dispatch('readdir', path)) as string[] | null) ?? []
       }
     }
   }
@@ -620,6 +645,7 @@ export class Workspace {
   private profileName(profile: string | SessionProfile | null): string {
     if (typeof profile === 'string') return profile
     if (profile === null && this.defaultProfileName !== null) return this.defaultProfileName
+    if (profile === null && DEFAULT_PROFILE in this.profiles) return DEFAULT_PROFILE
     return ''
   }
 
@@ -679,6 +705,27 @@ export class Workspace {
 
   getSession(sessionId: string): Session {
     return this.sessionManager.get(sessionId)
+  }
+
+  /**
+   * Replace a live session's permissions, including its policy runtime.
+   * Compilation succeeds before anything changes. Cwd/env presets apply only
+   * at creation; cwd, variables, functions and history survive this change.
+   * Null selects the workspace default; an empty document clears restrictions.
+   * This is a host-side operation, like creating a session.
+   */
+  async setSessionProfile(
+    sessionId: string,
+    profile: string | SessionProfile | null,
+  ): Promise<Session> {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
+    checkCliVerbs(compiled.commands, this.cliVerbs())
+    const wasDefault = sessionId === this.defaultSessionId
+    await this.ensureSessionsLoaded()
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    if (wasDefault) sessionId = this.defaultSessionId
+    return this.sessionManager.setProfile(sessionId, compiled)
   }
 
   listSessions(): Session[] {
@@ -764,7 +811,7 @@ export class Workspace {
   }
 
   attachWatchRuntime(runtime: WatchRuntime): void {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.watchManager.attach(runtime)
   }
 
@@ -773,12 +820,12 @@ export class Workspace {
   }
 
   watch(path: string | PathSpec | readonly (string | PathSpec)[]): AsyncIterable<FileEvent> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.watchManager.watch(path)
   }
 
   async notify(change: FileEvent): Promise<void> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await this.watchManager.notify(change)
   }
 
@@ -787,30 +834,48 @@ export class Workspace {
    * on this workspace's OpsRegistry so dispatch can find them.
    */
   addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): MountEntry {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
-    const m = this.registry.mount(prefix, resource, mode)
-    this.opsRegistry.registerResource(resource)
-    const resourceOps = resource.ops?.()
-    if (resourceOps !== undefined) {
-      for (const op of resourceOps) this.opsRegistry.register(op)
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    this.registry.checkResourceAvailable(resource)
+    const previous = this.registry.allMounts()
+    // Configure before mount() captures the index in its CacheManager.
+    // An alias must retain the index used by the resource's other mounts.
+    if (
+      this.indexConfig !== undefined &&
+      this.registry.tryMountForPrefix(prefix) === null &&
+      !this.registry.allMounts().some((mount) => mount.resource === resource)
+    ) {
+      resource.setIndex?.(this.indexConfig)
     }
+    const m = this.registry.mount(prefix, resource, mode)
+    prepareAddedMount(this.registry, m, previous)
+    this.opsRegistry.registerResource(resource)
     return m
   }
 
+  /** Change an exact mount's ceiling, retaining its data and every session's cap. */
+  setMountMode(prefix: string, mode: MountMode): void {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const parsed = parseMountMode(mode)
+    this.registry.mountForPrefix(prefix).mode = parsed
+  }
+
   /**
-   * Remove a mount by prefix. Closes the resource if the workspace had opened
-   * it and no other mount still references it. Drops cache entries under the
+   * Remove a mount by prefix. Closes the owned resource when its last alias
+   * leaves, including resources used without an explicit open. Drops cache entries under the
    * unmounted prefix. Forbidden prefixes: cache root, history view, /dev/.
-   * In-flight ops that already resolved their Mount are not interrupted.
+   * Waits for admitted calls and returned streams before closing the resource.
+   * Callers must consume or close streams; closed instances cannot be remounted.
    */
   async unmount(prefix: string): Promise<void> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     await unmountPrefix(
       {
         registry: this.registry,
         opsRegistry: this.opsRegistry,
         opened: this.opened,
         openOrder: this.openOrder,
+        sharedResources: this.sharedResources,
+        isShuttingDown: () => this.isShuttingDown(),
       },
       prefix,
     )
@@ -905,7 +970,7 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.dispatchInternal(opName, path, args, kwargs)
   }
 
@@ -932,7 +997,7 @@ export class Workspace {
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.resolveInternal(path)
   }
 
@@ -942,15 +1007,20 @@ export class Workspace {
     }
     const result = this.registry.resolve(path)
     const [resource] = result
+    await this.registry.mountFor(path).ensureReady()
     await this.ensureOpen(resource)
     return result
   }
 
   private async ensureOpen(resource: Resource): Promise<void> {
     if (this.opened.has(resource)) return
-    await resource.open()
-    this.opened.add(resource)
-    this.openOrder.push(resource)
+    const mount = this.registry.allMounts().find((m) => m.resource === resource && !m.retiring)
+    if (mount === undefined) throw new Error('resource is no longer mounted')
+    await mount.use(async () => {
+      await resource.open()
+      this.opened.add(resource)
+      this.openOrder.push(resource)
+    })
   }
 
   /**
@@ -963,7 +1033,8 @@ export class Workspace {
   private async invalidateAllAfterRemote(): Promise<void> {
     await this.dispatcher.clearFileCache()
     for (const m of this.registry.allMounts()) {
-      await m.resource.index?.clear()
+      if (m.cacheManager !== null) await m.cacheManager.clearIndex(m.resource.index)
+      else await m.use(() => m.resource.index?.clear() ?? Promise.resolve())
     }
   }
 
@@ -1031,8 +1102,8 @@ export class Workspace {
    * the restored pointers name instances the new workspace never heard
    * of.
    */
-  get declaredSources(): Readonly<Record<string, SourceBlock>> {
-    return this.sourceBlocks
+  get declaredSources(): Readonly<Record<string, SecretSource>> {
+    return this.declaredSecretSources
   }
 
   private async secretSources(): Promise<Readonly<Record<string, ResolvedSource>>> {
@@ -1043,7 +1114,7 @@ export class Workspace {
     // rotation between the two reads would leave the loser's config on
     // one of the lines. Cleared either way, so a failed resolution is
     // retried by the next line rather than pinned forever.
-    const pending = this.secretSourcesPending ?? resolveSources(this.sourceBlocks)
+    const pending = this.secretSourcesPending ?? resolveSources(this.declaredSecretSources)
     this.secretSourcesPending = pending
     let built
     try {
@@ -1103,7 +1174,7 @@ export class Workspace {
     // teardown then never stops, and resources would close under it. The
     // internal dispatch path stays open, which is what the journal replay
     // uses.
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.executeInternal(command, options)
   }
 
@@ -1132,7 +1203,7 @@ export class Workspace {
    * runtime throws.
    */
   async executePythonRepl(code: string, options: { sessionId?: string } = {}): Promise<EvalResult> {
-    if (this.shuttingDown) throw new Error('Workspace is closed')
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
     const sessionId = options.sessionId ?? this.sessionManager.defaultId
     const bound = this.runtimes.bindings.python3
     if (bound === undefined || !isEvaluator(bound)) {
@@ -1182,6 +1253,18 @@ export class Workspace {
     return ws
   }
 
+  /**
+   * Build the resource a saved mount names, or null when this package
+   * cannot. Core holds no resource registry, so it never can; the node
+   * and browser workspaces answer through theirs (`buildResource`), which
+   * is what lets `load` rebuild a registered custom backend from its
+   * `type` the way Python's loader does, instead of substituting an
+   * empty RAMResource.
+   */
+  protected static buildSavedResource(_entry: MountSnapshot): Promise<Resource | null> {
+    return Promise.resolve(null)
+  }
+
   protected static async _fromState<T extends typeof Workspace>(
     this: T,
     state: WorkspaceStateDict,
@@ -1189,7 +1272,8 @@ export class Workspace {
     overrides: Record<string, Resource> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
-    const args = buildMountArgs(state, overrides, cliOverrides)
+    const rebuilt = await withRebuiltResources(state, overrides, (m) => this.buildSavedResource(m))
+    const args = buildMountArgs(state, rebuilt, cliOverrides)
     const resources: Record<string, MountSpec> = {}
     for (const [prefix, [resource, mode]] of Object.entries(args.mountArgs)) {
       resources[prefix] = [resource, mode]
@@ -1220,7 +1304,7 @@ export class Workspace {
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
       // first read with "unknown secrets source".
-      secrets: options.secrets ?? this.sourceBlocks,
+      secrets: options.secrets ?? this.declaredSecretSources,
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId
@@ -1259,6 +1343,7 @@ export class Workspace {
   }
 
   private async runClose(): Promise<void> {
+    await this.sessionManager.settle()
     await this.scriptPolicy.close()
     await closeWorkspace({
       watch: this.watchManager,

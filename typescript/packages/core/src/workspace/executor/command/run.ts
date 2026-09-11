@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../../io/types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat, ResourceName } from '../../../types.ts'
@@ -37,7 +37,6 @@ import { VFSRuntime } from '../../../runtime/table.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import type { Session } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { applyFindActions } from '../find_action_dispatch.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -46,6 +45,8 @@ import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 import type { Flags } from './types.ts'
+import { parseFlags } from './flags.ts'
+import type { CommandSpec } from '../../../commands/spec/types.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
@@ -55,6 +56,24 @@ export interface RunOnMountCtx {
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
+}
+
+/**
+ * find's start points: the path operands typed before its expression.
+ * The expression tail is the parser's, so a word inside it (an `-exec`
+ * command word, a `-newer` reference) is never a start point even when
+ * the rest slot's PATH kind would have read it as one. Only the head is
+ * parsed against the spec, so what it yields as path operands is exactly
+ * the start points.
+ */
+export function findStartPoints(
+  argv: readonly (string | PathSpec)[],
+  exprTokens: readonly string[],
+  spec: CommandSpec | null,
+  cwd: string,
+): PathSpec[] {
+  const head = argv.slice(0, argv.length - exprTokens.length)
+  return parseFlags(head, spec, 'find', cwd).paths
 }
 
 interface RunOnMountOpts {
@@ -113,15 +132,13 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
   return out
 }
 
-// Merge namespace attr overlays into one stat row (ls/stat rendering). A path
-// never chown'd defaults its owner to the workspace user (the launch agent,
-// what whoami reports) so ls -l and stat -c agree; an unclaimed workspace
-// leaves uid/gid null and the formatters fall back to the neutral "user".
+// Merge namespace attr overlays into one stat row (ls/stat rendering). Only
+// what chmod/chown/chgrp/touch recorded: a path never chown'd keeps uid and
+// gid null, and the owner-rendering commands fall back through `Identity`
+// (the workspace user for the owner, the session's profile for the group),
+// which is the one rule ls -l, stat -c and find -printf share.
 function namespaceStatOverlay(namespace: Namespace, virtual: string, stat: FileStat): FileStat {
-  const merged = mergeOverlayStat(namespace.metaFor(virtual), stat)
-  const user = namespace.user
-  if (user === null || (merged.uid !== null && merged.gid !== null)) return merged
-  return merged.with({ uid: merged.uid ?? user, gid: merged.gid ?? user })
+  return mergeOverlayStat(namespace.metaFor(virtual), stat)
 }
 
 /**
@@ -193,7 +210,7 @@ export async function dropServiceCaches(
     // that was never filled, so a backend whose index *is* its listing
     // (github seeds the whole tree once) cannot tell the drop from an empty
     // repository. Expiring keeps that distinction and the next read refetches.
-    await mount.resource.index?.invalidate()
+    await mount.index?.invalidate()
     await mount.cacheManager?.dropPrefix()
   }
 }
@@ -268,7 +285,6 @@ export async function runOnMount(
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a resource its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
-  const childMounts = ns.childMounts ?? null
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
@@ -295,26 +311,7 @@ export async function runOnMount(
       ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
       limitOverride,
     })
-    let stdout = initialStdout
-    if (cmdName === 'find') {
-      const [newStdout, actionErr] = await applyFindActions(
-        stdout,
-        flags,
-        registry,
-        session.cwd,
-        childMounts,
-        statPath,
-      )
-      stdout = newStdout
-      if (actionErr.length > 0) {
-        const existing = await materialize(io.stderr)
-        const merged = new Uint8Array(existing.length + actionErr.length)
-        merged.set(existing, 0)
-        merged.set(actionErr, existing.length)
-        io.stderr = merged
-        if (io.exitCode === 0) io.exitCode = 1
-      }
-    }
+    const stdout = initialStdout
     const prefix = rstripSlash(mount.prefix)
     if (prefix !== '') {
       io.reads = prefixKeys(io.reads, prefix)
@@ -384,8 +381,8 @@ function linkView(
 }
 
 // The name plane's facts on offer, bundled as one view: symlinks, mount
-// boundaries, the attr overlay, and the child names the namespace owes a
-// directory. Which commands receive it is decided by whether the handler
+// boundaries, the attr overlay, the child names the namespace owes a
+// directory, and the workspace user. Which commands receive it is decided by whether the handler
 // reads `ns` off its context, so there is no list of aware commands to
 // keep in step here or anywhere else. Exported for the mount fan-out,
 // which reaches `executeCmd` without going through `runOnMount` and
@@ -405,5 +402,6 @@ export function namespaceViewOf(
     mounts: mountView(registry),
     ...(statOverlay !== null ? { statOverlay } : {}),
     childMounts: (parent: string) => namespaceNames(registry.mountPrefixes(), namespace, parent),
+    ...(namespace !== null && namespace.user !== null ? { user: namespace.user } : {}),
   }
 }

@@ -57,7 +57,7 @@ ws = Workspace(
 
 
 def ops_summary() -> str:
-    ops = ws.ops
+    ops = ws.fs
     net = ops.network_bytes
     cache = ops.cache_bytes
     return (f"{len(ops.records)} ops, "

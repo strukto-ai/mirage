@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
-import { guessType } from '@struktoai/mirage-core/utils/filetype'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { dirStatEntry, keyOf, lookup } from './lookup.ts'
@@ -45,7 +45,8 @@ function statOf(entry: IndexEntry): FileStat {
     modified,
     // A file's FileType *is* its content type here; there is no FILE member,
     // so the extension decides, exactly as every other backend spells it.
-    type: guessType(entry.name),
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.name),
     // git is content-addressed, so the object id is the strongest fingerprint
     // any backend here has: identical bytes carry an identical oid, and a
     // rewrite that changed nothing correctly reports nothing.

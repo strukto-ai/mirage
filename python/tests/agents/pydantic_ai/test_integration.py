@@ -91,7 +91,7 @@ def test_no_real_filesystem(backend, workspace):
     import asyncio
     asyncio.run(backend.awrite("/test.txt", "in-memory content"))
 
-    content = asyncio.run(workspace.ops.read("/test.txt"))
+    content = asyncio.run(workspace.fs.read("/test.txt"))
     assert content == b"in-memory content"
 
     import os

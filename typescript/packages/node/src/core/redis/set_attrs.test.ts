@@ -14,12 +14,12 @@
 
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RedisAccessor } from '../../accessor/redis.ts'
+import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { RedisStore } from '../../resource/redis/store.ts'
-import { rename } from './rename.ts'
-import { setAttrs } from './set_attrs.ts'
-import { stat } from './stat.ts'
-import { unlink } from './unlink.ts'
+import { rename } from '@struktoai/mirage-core/core/redis/rename'
+import { setAttrs } from '@struktoai/mirage-core/core/redis/set_attrs'
+import { stat } from '@struktoai/mirage-core/core/redis/stat'
+import { unlink } from '@struktoai/mirage-core/core/redis/unlink'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

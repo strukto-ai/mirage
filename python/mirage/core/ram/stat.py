@@ -16,7 +16,7 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import norm
 
 
@@ -46,7 +46,7 @@ async def stat(accessor: RAMAccessor,
             size=len(data),
             modified=store.modified.get(p),
             type=FileType.FILE,
-            content=guess_type(p),
+            content=content_type_for_path(p),
             mode=attrs.get("mode"),
             uid=attrs.get("uid"),
             gid=attrs.get("gid"),

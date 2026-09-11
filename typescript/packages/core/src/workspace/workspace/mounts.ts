@@ -19,6 +19,10 @@ import type { Limit, MountMode } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
+import type { MountEntry } from '../mount/mount.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FileCache } from '../../cache/file/mixin.ts'
+import { withCacheMutation } from '../../cache/file/io.ts'
 
 /**
  * The `resources` mapping in resolved form: every accepted spelling
@@ -53,18 +57,50 @@ export function normalizeResources(resources: Record<string, MountSpec>): Normal
   return { bare, modes, commandLimits }
 }
 
+/** Drop mount cache state atomically with deferred file-cache fills. */
+async function clearMountCache(
+  cache: FileCache | null,
+  prefix: string,
+  indices: readonly IndexCacheStore[],
+): Promise<void> {
+  const clearIndices = async (): Promise<void> => {
+    for (const index of new Set(indices)) await index.invalidatePrefix(prefix.slice(0, -1))
+  }
+  if (cache === null) return clearIndices()
+  await withCacheMutation(cache, async () => {
+    await cache.remove(prefix.slice(0, -1))
+    await cache.evictPrefix(prefix)
+    await clearIndices()
+  })
+}
+
+/** Keep synchronous registration; I/O awaits removal of shadowed state. */
+export function prepareAddedMount(
+  registry: MountRegistry,
+  entry: MountEntry,
+  previous: readonly MountEntry[],
+): void {
+  const indices = [
+    entry.resource.index,
+    ...previous.filter((m) => entry.prefix.startsWith(m.prefix)).map((m) => m.resource.index),
+  ].filter((index): index is IndexCacheStore => index !== undefined)
+  entry.beforeUse = () => clearMountCache(registry.fileCache, entry.prefix, indices)
+}
+
 export interface UnmountDeps {
   registry: MountRegistry
   opsRegistry: OpsRegistry
   opened: Set<Resource>
   openOrder: Resource[]
+  sharedResources: Set<Resource>
+  isShuttingDown: () => boolean
 }
 
 /**
- * Remove one mount, closing its resource if the workspace had opened it
- * and no other mount still references it. The virtual root, the device
- * mount, and the history view are permanent. Mirrors the Python
- * `unmount` in `workspace/mounts.py`.
+ * Remove one mount, closing its owned resource when its last alias leaves. Operations are shared by kind,
+ * so they remain registered while any mount uses that kind. The virtual
+ * root, the device mount, and the history view are permanent. Mirrors the
+ * Python `unmount` in `workspace/mounts.py`.
  */
 export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<void> {
   const stripped = stripSlash(prefix)
@@ -78,16 +114,54 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (norm === HISTORY_PREFIX + '/') {
     throw new Error(`cannot unmount history view: ${HISTORY_PREFIX}`)
   }
-  const removed = deps.registry.unmount(prefix)
-  const resource = removed.resource
-  const stillMounted = deps.registry.allMounts().some((m) => m.resource === resource)
-  if (!stillMounted) {
-    deps.opsRegistry.unregisterResource(resource.kind)
-    const idx = deps.openOrder.indexOf(resource)
-    if (idx !== -1) deps.openOrder.splice(idx, 1)
-    if (deps.opened.has(resource)) {
-      deps.opened.delete(resource)
-      await resource.close()
+  const entry = deps.registry.tryMountForPrefix(prefix)
+  if (entry === null) throw new Error(`no mount at prefix: ${norm}`)
+  if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
+  entry.retiring = true
+  try {
+    await clearMountCache(
+      deps.registry.fileCache,
+      norm,
+      entry.resource.index === undefined ? [] : [entry.resource.index],
+    )
+    if (deps.isShuttingDown()) throw new Error('Workspace is closed')
+    if (deps.registry.tryMountForPrefix(prefix) !== entry) {
+      throw new Error(`mount changed while unmounting: ${prefix}`)
+    }
+    deps.registry.unmount(prefix)
+  } catch (error) {
+    entry.retiring = false
+    throw error
+  }
+  const resource = entry.resource
+  const remaining = deps.registry.allMounts()
+  const stillMounted = remaining.some((m) => m.resource === resource)
+  const kindStillMounted = remaining.some((m) => m.resource.kind === resource.kind)
+  deps.opsRegistry.unregisterResource(kindStillMounted ? resource : resource.kind)
+  for (const survivor of remaining) {
+    if (survivor.resource.kind === resource.kind) {
+      deps.opsRegistry.registerResource(survivor.resource, false)
     }
   }
+  if (!stillMounted) {
+    const closing = closeResource(deps, entry)
+    deps.registry.retiringResources.set(resource, closing)
+    try {
+      await closing
+    } finally {
+      deps.registry.retiringResources.delete(resource)
+    }
+  }
+}
+
+async function closeResource(deps: UnmountDeps, entry: MountEntry): Promise<void> {
+  const resource = entry.resource
+  const shared = deps.sharedResources.has(resource)
+  if (!shared) await entry.activity.wait()
+  const idx = deps.openOrder.indexOf(resource)
+  if (idx !== -1) deps.openOrder.splice(idx, 1)
+  deps.opened.delete(resource)
+  if (shared) return
+  deps.registry.retiredResources.add(resource)
+  await resource.close()
 }

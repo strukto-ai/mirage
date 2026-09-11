@@ -23,7 +23,7 @@ from mirage.resource.disk import DiskResource
 def _make_ops(tmp_path: Path) -> tuple[Ops, DiskResource]:
     disk = DiskResource(root=tmp_path)
     ws = Workspace({"/disk/": disk}, mode=MountMode.WRITE)
-    return ws.ops, disk
+    return ws.fs, disk
 
 
 def test_append_creates_file(tmp_path):

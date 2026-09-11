@@ -14,7 +14,7 @@
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { sha256Hex } from '../../utils/hash.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import { makeStat } from '../hierarchy/stat.ts'
@@ -58,7 +58,8 @@ async function rowsStat(
   // see the CLAUDE.md FUSE rules). The storage size remains in extra.
   return new FileStat({
     name: 'rows.jsonl',
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     size: null,
     fingerprint,
     extra: {

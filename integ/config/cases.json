@@ -1,0 +1,211 @@
+{
+  "suite": "config",
+  "cases": [
+    {
+      "id": "ssh_password_and_passphrase_reach_the_host",
+      "resource": "ssh",
+      "config": {
+        "host": "h",
+        "username": "u",
+        "password": "pw",
+        "identity_file": "~/k",
+        "passphrase": "pp"
+      },
+      "expect": {
+        "state": {
+          "host": "h",
+          "username": "u",
+          "password": "<REDACTED>",
+          "identity_file": "~/k",
+          "passphrase": "<REDACTED>"
+        }
+      }
+    },
+    {
+      "id": "ssh_port_must_be_numeric",
+      "resource": "ssh",
+      "config": {
+        "host": "h",
+        "port": "twenty-two"
+      },
+      "expect": {
+        "refused": "ssh: port"
+      }
+    },
+    {
+      "id": "s3_bucket_must_be_a_string",
+      "resource": "s3",
+      "config": {
+        "bucket": 123
+      },
+      "expect": {
+        "refused": "s3: bucket"
+      }
+    },
+    {
+      "id": "github_token_must_be_a_string",
+      "resource": "github",
+      "config": {
+        "token": [],
+        "owner": "o",
+        "repo": "r"
+      },
+      "expect": {
+        "refused": "github: token"
+      }
+    },
+    {
+      "id": "google_access_token_is_a_credential",
+      "resource": "gdrive",
+      "config": {
+        "access_token": "sa-token"
+      },
+      "expect": {
+        "state": {
+          "access_token": "<REDACTED>"
+        }
+      }
+    },
+    {
+      "id": "google_refresh_grant_still_works",
+      "resource": "gdrive",
+      "config": {
+        "client_id": "id",
+        "client_secret": "s",
+        "refresh_token": "rt"
+      },
+      "expect": {
+        "state": {
+          "client_id": "id",
+          "client_secret": "<REDACTED>",
+          "refresh_token": "<REDACTED>"
+        }
+      }
+    },
+    {
+      "id": "google_needs_a_credential",
+      "resource": "gdrive",
+      "config": {
+        "api_base": "http://127.0.0.1:1"
+      },
+      "expect": {
+        "refused": "gdrive: config: "
+      }
+    },
+    {
+      "id": "calendar_knobs_live_on_the_calendar_mount",
+      "resource": "gcal",
+      "config": {
+        "access_token": "t",
+        "time_zone": "UTC",
+        "min_access_role": "writer"
+      },
+      "expect": {
+        "state": {
+          "time_zone": "UTC",
+          "min_access_role": "writer"
+        }
+      }
+    },
+    {
+      "id": "calendar_knobs_do_not_reach_a_drive_mount",
+      "resource": "gdrive",
+      "config": {
+        "access_token": "t",
+        "time_zone": "UTC"
+      },
+      "expect": {
+        "state": {
+          "access_token": "<REDACTED>"
+        },
+        "absent": [
+          "time_zone"
+        ]
+      }
+    },
+    {
+      "id": "notion_api_version_is_kept",
+      "resource": "notion",
+      "config": {
+        "api_key": "k",
+        "api_version": "2025-09-03"
+      },
+      "expect": {
+        "state": {
+          "api_version": "2025-09-03",
+          "api_key": "<REDACTED>"
+        }
+      }
+    },
+    {
+      "id": "oci_path_style_can_be_turned_off",
+      "resource": "oci",
+      "config": {
+        "bucket": "b",
+        "namespace": "ns",
+        "region": "us-ashburn-1",
+        "path_style": false
+      },
+      "expect": {
+        "state": {
+          "bucket": "b",
+          "path_style": false
+        }
+      }
+    },
+    {
+      "id": "supabase_path_style_defaults_on",
+      "resource": "supabase",
+      "config": {
+        "bucket": "b",
+        "project_ref": "p",
+        "region": "us-east-1"
+      },
+      "expect": {
+        "state": {
+          "bucket": "b",
+          "path_style": true
+        }
+      }
+    },
+    {
+      "id": "hf_bucket_endpoint_is_optional",
+      "resource": "hf_buckets",
+      "config": {
+        "bucket": "ns/name"
+      },
+      "expect": {
+        "state": {
+          "bucket": "ns/name"
+        }
+      }
+    },
+    {
+      "id": "gcs_region_is_optional",
+      "resource": "gcs",
+      "config": {
+        "bucket": "b",
+        "access_key_id": "a",
+        "secret_access_key": "s"
+      },
+      "expect": {
+        "state": {
+          "bucket": "b",
+          "access_key_id": "<REDACTED>"
+        }
+      }
+    },
+    {
+      "id": "onedrive_refuses_two_drive_targets",
+      "resource": "onedrive",
+      "config": {
+        "access_token": "t",
+        "drive_id": "d",
+        "site_id": "s"
+      },
+      "expect": {
+        "refused": "onedrive: config: "
+      }
+    }
+  ]
+}

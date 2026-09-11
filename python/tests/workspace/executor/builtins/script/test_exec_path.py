@@ -120,8 +120,8 @@ def test_path_guard_sees_the_executed_file():
     prod = RAMResource()
     seed = Workspace(resources={"/data/": (prod, MountMode.WRITE)})
     _run(seed, "mkdir -p /data/prod")
-    asyncio.run(seed.ops.write("/data/prod/run.sh", b"echo leaked\n"))
-    asyncio.run(seed.ops.write("/data/ok.sh", b"echo fine\n"))
+    asyncio.run(seed.fs.write("/data/prod/run.sh", b"echo leaked\n"))
+    asyncio.run(seed.fs.write("/data/ok.sh", b"echo fine\n"))
     ws = Workspace(
         resources={
             "/": (RAMResource(), MountMode.WRITE),

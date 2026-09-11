@@ -14,7 +14,12 @@
 
 import type { Node } from 'web-tree-sitter'
 
-import { BASH_KEYWORDS, STRUCTURAL_TOKENS } from './constants.ts'
+import {
+  BASH_KEYWORDS,
+  CASE_TERMINATORS,
+  SEPARATOR_TOKENS,
+  STRUCTURAL_TOKENS,
+} from './constants.ts'
 
 // Locate a backtick substitution that is never closed. tree-sitter
 // happily parses "echo `echo a" as a complete command, so the region has
@@ -64,13 +69,40 @@ export function findUnterminatedBacktick(command: string): string | null {
   return opened !== null ? command.slice(opened) : null
 }
 
+/**
+ * True if an ERROR node represents a real syntactic problem: it holds a
+ * bash keyword, a bracket / quote token, a statement separator, or a
+ * named subtree the parser tried to recover. A separator inside an ERROR
+ * node has nothing to separate (`;s`, `| s`, `a ; ; b`, `a &; b`), and
+ * GNU bash 5.2 refuses every such line with `syntax error near unexpected
+ * token`; an earlier reading that bash accepts `& ;` was wrong.
+ */
 function isStructuralError(node: Node): boolean {
   for (const child of node.children) {
     if (child.isNamed) return true
     if (BASH_KEYWORDS.has(child.type)) return true
     if (STRUCTURAL_TOKENS.has(child.type)) return true
+    if (SEPARATOR_TOKENS.has(child.type)) return true
   }
   return false
+}
+
+/**
+ * The text of a `;;` / `;&` / `;;&` token outside a case item. The
+ * grammar takes them as ordinary statement separators, so `true;;s`
+ * parses cleanly and would run `s`; bash refuses the line at the token.
+ */
+function strayCaseTerminator(node: Node): string | null {
+  const stack: Node[] = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    for (const child of current.children) {
+      if (CASE_TERMINATORS.has(child.type) && current.type !== 'case_item') {
+        return child.text || child.type
+      }
+      stack.push(child)
+    }
+  }
+  return null
 }
 
 function walkNamed(node: Node): Node[] {
@@ -109,13 +141,16 @@ function isRecoveredQuotedHeredocEnd(previous: Node | null, error: Node): boolea
  * Tree-sitter often recovers from minor anomalies (e.g. `for x in;`) by
  * producing a valid statement with an internal ERROR token. Bash accepts
  * those, so we only flag errors that surface as direct children of
- * `program` AND contain a bash keyword, a bracket / quote, or a recovered
- * named subtree. Stand-alone statement separators (`;`, `&`, `|`) inside an
- * ERROR are deliberately not flagged because bash itself accepts e.g. `& ;`.
+ * `program` AND contain a bash keyword, a bracket / quote, a statement
+ * separator, or a recovered named subtree (`isStructuralError`). A case
+ * terminator outside a case item is flagged even when the tree carries no
+ * ERROR at all, because the grammar accepts `;;` as a plain separator.
  *
  * Returns the offending region's text, or `null` if the AST is clean.
  */
 export function findSyntaxError(node: Node): string | null {
+  const stray = strayCaseTerminator(node)
+  if (stray !== null) return stray
   if (!node.hasError) return null
   let previous: Node | null = null
   for (const child of node.children) {

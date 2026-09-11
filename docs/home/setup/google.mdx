@@ -11,7 +11,10 @@ The Google resources use OAuth2 with a refresh token to authenticate against:
 - **Google Drive API v3** - lists documents, reads metadata
 - **Google Docs API v1** - reads/writes document content
 
-Authentication requires three values: `client_id`, `client_secret`, and `refresh_token`.
+Authentication takes either a pre-minted `access_token` (a token, or a provider
+callable that returns one, for a caller that already owns the OAuth dance) or the
+refresh-token grant: `client_id`, `client_secret`, and `refresh_token`. The steps
+below obtain the latter.
 
 ## Setup
 
@@ -139,4 +142,4 @@ For personal use with a published app, you do the auth flow **once** and it work
 | Refresh token expires after 7 days | Publish the app (Step 3.9)                                        |
 | Auth code doesn't work twice       | Codes are single-use - re-authorize if exchange fails             |
 
-For Python configuration, see the [Python Google Workspace Setup](/python/setup/google) guide.
+For Python configuration, see the resource pages: [Gmail](/python/resource/gmail), [Drive](/python/resource/gdrive), [Docs](/python/resource/gdocs), [Sheets](/python/resource/gsheets), [Slides](/python/resource/gslides).

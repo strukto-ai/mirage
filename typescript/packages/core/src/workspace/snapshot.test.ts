@@ -33,7 +33,14 @@ import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { VERSION } from '../version.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
-import { applyStateDict, toStateDict } from './snapshot/state.ts'
+import {
+  applyStateDict,
+  buildMountArgs,
+  restoresAsFreshRAM,
+  savedResourceBuild,
+  toStateDict,
+} from './snapshot/state.ts'
+import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/routing/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -495,5 +502,83 @@ describe('cli registry snapshot', () => {
     expect(clis[0]?.name).toBe('pager')
     expect(clis[0]?.script?.source).toBe("print('hi')")
     await ws.close()
+  })
+})
+
+describe('savedResourceBuild', () => {
+  const known = (name: string): boolean => ['ram', 'disk', 'redis', 'seeded'].includes(name)
+
+  function saved(type: string, ref: string | null, config?: unknown): MountSnapshot {
+    return {
+      index: 0,
+      prefix: '/s/',
+      mode: MountMode.WRITE,
+      consistency: 'lazy',
+      resource_class: type,
+      resource_ref: ref,
+      resource_state: config === undefined ? { type } : { type, config },
+    }
+  }
+
+  it('rebuilds through the recorded ref before a type the registry also knows', () => {
+    // A subclass inherits `kind`, so an alias registered over a builtin
+    // reports the builtin's type; the ref is the door it came through.
+    expect(savedResourceBuild(saved('redis', 'seeded'), known)?.name).toBe('seeded')
+    expect(savedResourceBuild(saved('ram', 'seeded'), known)?.name).toBe('seeded')
+    expect(restoresAsFreshRAM(saved('ram', 'seeded'))).toBe(false)
+  })
+
+  it('falls back to the type only for a mount constructed in code', () => {
+    expect(savedResourceBuild(saved('redis', null), known)?.name).toBe('redis')
+    // A v3 snapshot from before the key carries no ref at all.
+    const preKey: Partial<MountSnapshot> = { ...saved('redis', null) }
+    delete preKey.resource_ref
+    expect(savedResourceBuild(preKey as MountSnapshot, known)?.name).toBe('redis')
+  })
+
+  it('does not guess from the type when the recorded ref cannot be resolved', () => {
+    expect(savedResourceBuild(saved('redis', 'ghost'), known)).toBeNull()
+    expect(savedResourceBuild(saved('ram', 'ghost'), known)).toBeNull()
+    expect(restoresAsFreshRAM(saved('ram', 'ghost'))).toBe(false)
+  })
+
+  it('hands a code reference to the registry as recorded', () => {
+    expect(savedResourceBuild(saved('redis', '/tmp/seeded.mjs:SeededRedis'), known)?.name).toBe(
+      '/tmp/seeded.mjs:SeededRedis',
+    )
+  })
+
+  it('leaves disk, and ram declared by name or in code, to buildMountArgs', () => {
+    const local = [
+      saved('ram', null),
+      saved('ram', 'ram'),
+      saved('disk', null),
+      saved('disk', 'disk'),
+      saved('disk', 'mydisk'),
+    ]
+    for (const entry of local) {
+      expect(restoresAsFreshRAM(entry)).toBe(true)
+      expect(savedResourceBuild(entry, known)).toBeNull()
+    }
+  })
+
+  it('passes an object config through and drops any other shape', () => {
+    expect(savedResourceBuild(saved('redis', null, { url: 'redis://x' }), known)?.config).toEqual({
+      url: 'redis://x',
+    })
+    expect(savedResourceBuild(saved('redis', null, 'nope'), known)?.config).toEqual({})
+  })
+
+  it('buildMountArgs refuses a mount nobody could build rather than substituting RAM', async () => {
+    const ws = buildWorkspace()
+    const state = await toStateDict(ws)
+    await ws.close()
+    const [mount] = state.mounts
+    if (mount === undefined) throw new Error('snapshot recorded no mounts')
+    // As saved by a process holding an alias this one never registered.
+    mount.resource_ref = 'ghost'
+    expect(() => buildMountArgs(state)).toThrow(/resources= must include overrides for: \/data/)
+    // The same mount handed back live loads.
+    expect(() => buildMountArgs(state, { [mount.prefix]: new RAMResource() })).not.toThrow()
   })
 })

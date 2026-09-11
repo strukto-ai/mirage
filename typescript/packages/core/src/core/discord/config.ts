@@ -14,12 +14,12 @@
 
 import { z } from 'zod'
 import {
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
   secretStr,
 } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
 export const DiscordConfigSchema = z.object({
   token: secretStr(),
@@ -35,5 +35,5 @@ export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacte
 }
 
 export function normalizeDiscordConfig(input: Record<string, unknown>): DiscordConfig {
-  return normalizeFields(input) as unknown as DiscordConfig
+  return parseConfigWithSchema(DiscordConfigSchema, input)
 }

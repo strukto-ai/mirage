@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-cli",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",

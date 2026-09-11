@@ -15,6 +15,7 @@
 from mirage.commands.errors import (CommandTimeoutError, FindParseError,
                                     UsageError)
 from mirage.runtime.routing import RouteDeny
+from mirage.types import Refusal
 from mirage.workspace.workspace.failure import failure_result
 
 
@@ -27,7 +28,8 @@ def test_timeout_reports_124_with_the_timeout_message():
 def test_deny_reports_126_named_by_the_command():
     io = failure_result(RouteDeny("no writes"), "rm -rf /data")
     assert io.exit_code == 126
-    assert io.stderr == b"rm: policy denied: no writes\n"
+    assert io.stderr == b"rm: Permission denied\n"
+    assert io.refusal == Refusal(kind="deny", reason="no writes")
 
 
 def test_usage_error_keeps_its_own_exit_code():
@@ -59,4 +61,4 @@ def test_blank_line_falls_back_to_the_raw_command():
     # No word to name, so the diagnostic keeps whatever was typed
     # rather than reporting an empty command name.
     io = failure_result(RouteDeny("nope"), "   ")
-    assert io.stderr == b"   : policy denied: nope\n"
+    assert io.stderr == b"   : Permission denied\n"

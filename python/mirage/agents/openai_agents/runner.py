@@ -54,8 +54,8 @@ class MirageRunner:
         self._client = client
 
     async def _block_for_path(self, path: str) -> dict[str, Any]:
-        st = await self._ws.ops.stat(path)
-        data = await self._ws.ops.read(path)
+        st = await self._ws.fs.stat(path)
+        data = await self._ws.fs.read(path)
         if st.content in _VISION_TYPES:
             mime = _MIMETYPE_FOR[st.content]
             b64 = base64.b64encode(data).decode("ascii")

@@ -23,8 +23,12 @@ import {
   type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
 import { DriveLoc } from '../core/msgraph/drive.ts'
-import { type ConfigOf, redactConfigWithSchema, type RedactedConfig } from '../resource/secrets.ts'
-import { normalizeFields } from '../utils/normalize.ts'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  type RedactedConfig,
+} from '../resource/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
@@ -56,7 +60,7 @@ export function redactSharePointConfig(config: SharePointConfig): SharePointConf
 }
 
 export function normalizeSharePointConfig(input: Record<string, unknown>): SharePointConfig {
-  return SharePointConfigSchema.parse(normalizeFields(input)) as SharePointConfig
+  return parseConfigWithSchema(SharePointConfigSchema, input)
 }
 
 export interface SharePointConfigResolved extends MsGraphConfigResolved {

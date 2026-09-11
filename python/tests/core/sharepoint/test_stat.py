@@ -5,7 +5,6 @@ from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint.read import read_bytes
 from mirage.core.sharepoint.readdir import readdir
-from mirage.core.sharepoint.resolve import _drive_cache, _site_cache
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -16,30 +15,16 @@ _DRIVE_ID = "b!driveXYZ"
 
 
 def _accessor() -> SharePointAccessor:
-    return SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    return accessor
 
 
 def _ps(virtual: str) -> PathSpec:
     return PathSpec(resource_path=mount_key(virtual, "/sp"),
                     virtual=virtual,
                     directory=virtual)
-
-
-def _seed_caches():
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-
-
-def _clear_caches():
-    _site_cache.clear()
-    _drive_cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _reset_caches():
-    _clear_caches()
-    yield
-    _clear_caches()
 
 
 @pytest.mark.asyncio
@@ -53,7 +38,6 @@ async def test_stat_root_is_directory():
 
 @pytest.mark.asyncio
 async def test_stat_site_is_directory():
-    _site_cache["Engineering"] = _SITE_ID
     with aioresponses() as m:
         m.get(f"{_BASE}/sites",
               payload={
@@ -74,7 +58,6 @@ async def test_stat_site_is_directory():
 
 @pytest.mark.asyncio
 async def test_stat_drive_is_directory():
-    _seed_caches()
     path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
                                             "/sp"),
                     virtual="/sp/Engineering/Documents",
@@ -85,7 +68,6 @@ async def test_stat_drive_is_directory():
 
 @pytest.mark.asyncio
 async def test_stat_file_from_api():
-    _seed_caches()
     url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.docx"
     with aioresponses() as m:
         m.get(url,
@@ -113,7 +95,6 @@ async def test_stat_file_from_api():
 
 @pytest.mark.asyncio
 async def test_stat_folder_from_api():
-    _seed_caches()
     url = f"{_BASE}/drives/{_DRIVE_ID}/root:/src"
     with aioresponses() as m:
         m.get(url,
@@ -137,7 +118,6 @@ async def test_stat_folder_from_api():
 
 @pytest.mark.asyncio
 async def test_stat_missing_raises_file_not_found():
-    _seed_caches()
     url = f"{_BASE}/drives/{_DRIVE_ID}/root:/nope.txt"
     with aioresponses() as m:
         m.get(url,
@@ -156,7 +136,6 @@ async def test_stat_missing_raises_file_not_found():
 
 @pytest.mark.asyncio
 async def test_stat_from_index_after_readdir():
-    _seed_caches()
     index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -188,7 +167,6 @@ async def test_stat_from_index_after_readdir():
 
 @pytest.mark.asyncio
 async def test_stat_site_and_drive_have_no_metadata():
-    _seed_caches()
     site_path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
                          virtual="/sp/Engineering",
                          directory="/sp/Engineering")
@@ -210,7 +188,6 @@ async def test_stat_size_matches_read_for_every_file():
     # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
     # from the listing must equal the byte length a read delivers, for
     # every file in the tree, 0-byte files included.
-    _seed_caches()
     contents = {
         "/notes.txt": b"hello sharepoint",
         "/Docs/empty.bin": b"",

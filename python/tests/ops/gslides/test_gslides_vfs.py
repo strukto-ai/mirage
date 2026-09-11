@@ -30,7 +30,7 @@ def _make_gslides_ops() -> tuple[Ops, IndexCacheStore]:
     resource = GSlidesResource(
         config=GSlidesConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gslides/": resource}, mode=MountMode.READ)
-    return ws.ops, resource.index
+    return ws.fs, resource.index
 
 
 @pytest.mark.asyncio

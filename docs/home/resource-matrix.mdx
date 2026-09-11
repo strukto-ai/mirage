@@ -21,7 +21,8 @@ No external setup, these run locally or against a connection string you already 
 | RAM | read, write, exec | [<Icon icon="python" />](/python/resource/ram) [<Icon icon="node-js" />](/typescript/quickstart) [<Icon icon="globe" />](/typescript/quickstart) | Best first-run option |
 | Disk | read, write, exec | [<Icon icon="python" />](/python/resource/disk) [<Icon icon="node-js" />](/typescript/setup/disk) | Local filesystem bridge |
 | OPFS | read, write, exec | [<Icon icon="globe" />](/typescript/setup/opfs) | Browser-only persistent filesystem |
-| Redis | read, write, exec | [<Icon icon="python" />](/python/resource/redis) [<Icon icon="node-js" />](/typescript/setup/redis) | Persistent cache-backed workspace |
+| Redis | read, write, exec | [<Icon icon="python" />](/python/resource/redis) [<Icon icon="node-js" />](/typescript/setup/redis) [<Icon icon="globe" />](/typescript/setup/redis#browser) | Persistent cache-backed workspace; a browser reaches it through a REST front (Upstash, or serverless-redis-http over any Redis) |
+| Upstash Redis | read, write, exec | [<Icon icon="python" />](/python/resource/redis) [<Icon icon="node-js" />](/typescript/setup/upstash) [<Icon icon="globe" />](/typescript/setup/upstash) | Hosted Redis with a REST door; one `rediss://` URL configures Python, Node and the browser |
 | SSH | read, write | [<Icon icon="python" />](/python/resource/ssh) [<Icon icon="node-js" />](/typescript/setup/ssh) | Remote filesystem access |
 
 ## Object Storage

@@ -4,6 +4,7 @@ from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
+from mirage.commands.builtin.utils.identity import Identity, identity_of
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.commands.config import CommandOpts
@@ -642,9 +643,10 @@ def _render_group(
     one_per_line: bool,
     human: bool,
     classify: bool,
+    identity: Identity | None,
 ) -> None:
     if long and not one_per_line:
-        results.extend(format_ls_long(entries, human=human))
+        results.extend(format_ls_long(entries, human=human, identity=identity))
     else:
         results.extend(format_simple(entries, classify=classify))
 
@@ -676,6 +678,7 @@ async def ls(
     child_mounts: ChildMounts | None = None,
     mounts: MountView | None = None,
     stat_path: StatPath | None = None,
+    identity: Identity | None = None,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[LsWarning] = []
@@ -704,7 +707,8 @@ async def ls(
                       long=long,
                       one_per_line=one_per_line,
                       human=human,
-                      classify=classify)
+                      classify=classify,
+                      identity=identity)
         return _finish(results, warnings)
 
     operands: list[Operand] = []
@@ -740,7 +744,8 @@ async def ls(
                   long=long,
                   one_per_line=one_per_line,
                   human=human,
-                  classify=classify)
+                  classify=classify,
+                  identity=identity)
     printed = bool(rows)
     for operand in operands:
         for dir_spec, entries in operand.groups:
@@ -755,7 +760,8 @@ async def ls(
                           long=long,
                           one_per_line=one_per_line,
                           human=human,
-                          classify=classify)
+                          classify=classify,
+                          identity=identity)
             printed = True
 
     return _finish(results, warnings)
@@ -772,8 +778,8 @@ async def ls_generic(
 
     The wiring resolves globs, defaults the operands from the cwd, and
     binds the backend ops (including the stat overlay); flag semantics
-    live here, and the namespace facts (links, child mounts) and index
-    ride ``opts``.
+    live here, and the namespace facts (links, child mounts), the
+    identity the owner columns render, and the index ride ``opts``.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, cwd-defaulted.
@@ -792,6 +798,7 @@ async def ls_generic(
         child_mounts=opts.ns.child_mounts if opts.ns is not None else None,
         mounts=opts.ns.mounts if opts.ns is not None else None,
         stat_path=opts.stat_path,
+        identity=identity_of(opts),
         **ls_options(opts.flags))
 
 

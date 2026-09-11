@@ -59,7 +59,11 @@ async def list_incidents(
     return ("\n".join(lines) + "\n").encode(), IOResult()
 
 
-async def acknowledge(
+# A leaf is a plain function or a coroutine function, whichever its body
+# needs: the executor awaits whatever it returns, so a handler that never
+# awaits is not made async for the executor's sake, and one that raises
+# before any await is refused exactly like one that raises after.
+def acknowledge(
         inv: CLIInvocation[PagerConfig]) -> tuple[bytes | None, IOResult]:
     # Operand.required is enforced by the executor only under the CLAP
     # dialect; an argparse-style leaf words its own missing-operand refusal.

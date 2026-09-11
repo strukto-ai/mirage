@@ -13,9 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import type { Command } from 'commander'
-import { checkWorkspaceConfigFile, interpolateEnv } from '@struktoai/mirage-server'
+import {
+  absolutizeScripts,
+  checkWorkspaceConfigFile,
+  interpolateEnv,
+} from '@struktoai/mirage-server'
 import { parse as yamlParse } from 'yaml'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
@@ -33,14 +37,25 @@ function envRecord(): Record<string, string> {
   return out
 }
 
+// A config handed to `load` or `clone`: env-interpolated, and with its
+// relative script paths and code refs rebased onto the file's directory
+// exactly as `create` rebases them, so `resource: ./wiki.mjs:WikiResource`
+// in an override means "next to this file", never "wherever the daemon
+// runs". Not validated, because an override may name only a subset of
+// mounts. Mirrors `_resolve_config_arg` in the Python CLI.
 function loadConfigArgument(path: string): unknown {
   if (!existsSync(path)) fail(`config file not found: ${path}`, 2)
   const text = readFileSync(path, 'utf-8')
+  let config: unknown
   try {
-    return interpolateEnv(yamlParse(text), envRecord())
+    config = interpolateEnv(yamlParse(text), envRecord())
   } catch (err: unknown) {
     fail(`invalid config YAML/JSON at ${path}: ${String(err)}`, 2)
   }
+  if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
+    absolutizeScripts(config as Record<string, unknown>, dirname(resolve(path)))
+  }
+  return config
 }
 
 interface WorkspaceBrief {

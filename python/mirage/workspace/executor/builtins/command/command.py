@@ -117,7 +117,11 @@ async def handle_command_builtin(
     inner = shlex.join(rest)
     # Function bodies are never None, so popping with a None default lets
     # `is not None` mean "a shadowing function was masked" for restore.
+    # An alias is masked the same way: bash expands an alias only as a
+    # command's first word, which `command` is, so `command cat` runs
+    # the program past `alias cat=...` too.
     saved_fn = session.functions.pop(inner_name, None)
+    saved_alias = session.aliases.pop(inner_name, None)
     try:
         io = await execute_fn(inner,
                               session_id=session.session_id,
@@ -125,6 +129,8 @@ async def handle_command_builtin(
     finally:
         if saved_fn is not None:
             session.functions[inner_name] = saved_fn
+        if saved_alias is not None:
+            session.aliases[inner_name] = saved_alias
     return io.stdout, io, ExecutionNode(command="command",
                                         exit_code=io.exit_code)
 

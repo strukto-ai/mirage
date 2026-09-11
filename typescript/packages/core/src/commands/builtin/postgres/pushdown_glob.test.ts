@@ -57,7 +57,7 @@ import type { PgDriver, PgQueryResult } from '../../../core/postgres/_driver.ts'
 import * as searchModule from '../../../core/postgres/search.ts'
 import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { hasUnresolvedGlob } from '../utils/operands.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
 
@@ -129,7 +129,7 @@ describe('postgres grep push-down and globs', () => {
     // stat because the generic scan reads the type to tell a file operand
     // from a directory one, which is what the backend answers here.
     vi.mocked(statModule.stat).mockResolvedValue(
-      new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+      new FileStat({ name: 'rows.jsonl', type: FileType.FILE, content: ContentType.TEXT }),
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
@@ -171,7 +171,7 @@ describe('postgres grep push-down and globs', () => {
       // A shaping flag cannot be honored by the ILIKE push-down, so the
       // wrapper must defer to the generic scan; searchEntity must not run.
       vi.mocked(statModule.stat).mockResolvedValue(
-        new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+        new FileStat({ name: 'rows.jsonl', type: FileType.FILE, content: ContentType.TEXT }),
       )
       vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
@@ -190,7 +190,7 @@ describe('postgres grep push-down and globs', () => {
     const cmd = POSTGRES_GREP[0]
     if (cmd === undefined) throw new Error('grep not registered')
     vi.mocked(statModule.stat).mockResolvedValue(
-      new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+      new FileStat({ name: 'rows.jsonl', type: FileType.FILE, content: ContentType.TEXT }),
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
@@ -215,7 +215,7 @@ describe('postgres rg push-down and globs', () => {
     const cmd = POSTGRES_RG[0]
     if (cmd === undefined) throw new Error('rg not registered')
     vi.mocked(statModule.stat).mockResolvedValue(
-      new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+      new FileStat({ name: 'rows.jsonl', type: FileType.FILE, content: ContentType.TEXT }),
     )
     vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 
@@ -251,7 +251,7 @@ describe('postgres rg push-down and globs', () => {
       const cmd = POSTGRES_RG[0]
       if (cmd === undefined) throw new Error('rg not registered')
       vi.mocked(statModule.stat).mockResolvedValue(
-        new FileStat({ name: 'rows.jsonl', type: FileType.TEXT }),
+        new FileStat({ name: 'rows.jsonl', type: FileType.FILE, content: ContentType.TEXT }),
       )
       vi.mocked(searchModule.searchEntity).mockResolvedValue([])
 

@@ -24,7 +24,7 @@ import { runWithCacheManager } from '../../cache/context.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { materialize } from '../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../config.ts'
 import { grepGeneric } from './generic/grep.ts'
 import { headGeneric } from './generic/head.ts'
@@ -61,7 +61,14 @@ async function warmManager(): Promise<CacheManager> {
 }
 
 function statOf(_p: PathSpec): Promise<FileStat> {
-  return Promise.resolve(new FileStat({ name: 'a.txt', size: PAYLOAD.length, type: FileType.TEXT }))
+  return Promise.resolve(
+    new FileStat({
+      name: 'a.txt',
+      size: PAYLOAD.length,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+    }),
+  )
 }
 
 function readdirOf(_p: PathSpec): Promise<string[]> {

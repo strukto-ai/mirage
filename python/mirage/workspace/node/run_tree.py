@@ -18,7 +18,8 @@ from typing import Any, Callable
 from mirage.commands.builtin.utils.limit import guard_output
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.policy import ExecuteResultContext, post_execute_gate, render_deny
+from mirage.policy import (ExecuteResultContext, HandOff, post_execute_gate,
+                           refusal_of, render_deny)
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -43,6 +44,7 @@ async def run_command_tree(
     stdin: Any,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None = None,
+    handed: HandOff | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
 
@@ -69,6 +71,8 @@ async def run_command_tree(
         routing_decision (RouteDecision | None): the typed line's routing
             decision, threaded to every command dispatch; None runs on
             the static bindings.
+        handed (HandOff | None): the line's hand-off, threaded to every
+            command's gate.
 
     Returns:
         tuple[IOResult, ExecutionNode]: the finalized result (with
@@ -87,6 +91,7 @@ async def run_command_tree(
         stdin,
         cancel=cancel,
         routing_decision=routing_decision,
+        handed=handed,
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     # The boundary consultation: the envelope's producer facts become
@@ -101,6 +106,7 @@ async def run_command_tree(
         io.stderr = existing + err
         io.exit_code = code
         io.stdout = None
+        io.refusal = refusal_of(deny)
         return io, exec_node
     stdout, io.stderr, io.exit_code = await guard_output(
         stdout, io.stderr, io.exit_code, bound)

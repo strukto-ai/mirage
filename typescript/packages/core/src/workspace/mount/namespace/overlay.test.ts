@@ -13,10 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileStat } from '../../../types.ts'
+import { FileStat, FileType } from '../../../types.ts'
 import { mergeOverlayStat } from './overlay.ts'
 
-const base = new FileStat({ name: 'f.txt', size: 3, modified: '2026-01-01T00:00:00Z' })
+const base = new FileStat({
+  name: 'f.txt',
+  type: FileType.FILE,
+  size: 3,
+  modified: '2026-01-01T00:00:00Z',
+})
 
 describe('mergeOverlayStat', () => {
   it('returns the stat unchanged for null meta', () => {
@@ -52,13 +57,13 @@ describe('mergeOverlayStat', () => {
   })
 
   it('observed mtime fills a missing backend mtime', () => {
-    const bare = new FileStat({ name: 'f.txt', size: 3 })
+    const bare = new FileStat({ name: 'f.txt', type: FileType.FILE, size: 3 })
     const merged = mergeOverlayStat({ observedMtime: 1767312000 }, bare)
     expect(merged.modified).toBe('2026-01-02T00:00:00Z')
   })
 
   it('explicit mtime beats observed', () => {
-    const bare = new FileStat({ name: 'f.txt', size: 3 })
+    const bare = new FileStat({ name: 'f.txt', type: FileType.FILE, size: 3 })
     const merged = mergeOverlayStat({ mtime: 1767312000, observedMtime: 1767398400 }, bare)
     expect(merged.modified).toBe('2026-01-02T00:00:00Z')
   })

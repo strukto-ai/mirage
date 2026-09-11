@@ -365,6 +365,8 @@ class ArithEvaluator {
     private readonly writes: Map<string, ArithWrite>,
     private readonly depth: number,
     private readonly elements: ElementOps | null,
+    private readonly readVar: ((name: string) => string | null) | null,
+    private readonly wroteVar: ((name: string, value: string) => void) | null = null,
   ) {}
 
   private coerce(raw: string | null): bigint {
@@ -373,19 +375,42 @@ class ArithEvaluator {
     try {
       return parseLiteral(text)
     } catch {
-      if (this.depth >= ARITH_MAX_DEPTH)
-        throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
-      const { value } = evaluateArith(
-        text,
-        { ...this.env, ...this.updates },
-        this.depth + 1,
-        this.elements,
-      )
-      return value
+      return this.nested(text)
     }
   }
 
+  /**
+   * Evaluate text as an expression in this expression's record. bash
+   * evaluates a variable's stored text, and an indexed subscript, in the
+   * same context as the expression around them: an assignment they make
+   * lands with the expression's own (`x='y=5'; $((x))` leaves y at 5,
+   * `$((a[x=5] + x))` is 12), a name they read sees the pending updates,
+   * and a `RANDOM` seed reaches the reader. So the nested run shares this
+   * evaluator's record rather than starting a fresh one.
+   */
+  private nested(text: string): bigint {
+    if (this.depth >= ARITH_MAX_DEPTH)
+      throw new ArithError(`expression recursion level exceeded (error token is "${text}")`)
+    const nested = new ArithEvaluator(
+      this.env,
+      this.updates,
+      this.elemUpdates,
+      this.writes,
+      this.depth + 1,
+      this.elements,
+      this.readVar,
+      this.wroteVar,
+    )
+    return nested.run(new ArithParser(tokenize(text)).parse())
+  }
+
   private lookup(name: string): bigint {
+    // A dynamic name is asked first: the reader has been told of every
+    // assignment this expression made (`wroteVar`), so `RANDOM=42, RANDOM`
+    // draws from the new seed rather than reading the seed back out of
+    // the pending update.
+    const dynamic = this.readVar?.(name) ?? null
+    if (dynamic !== null) return this.coerce(dynamic)
     const pending = this.updates[name] ?? this.env[name]
     if (pending !== undefined) return this.coerce(pending)
     // A bare array name reads as element 0 (`a=(4 5)` then `$((a))` is
@@ -398,25 +423,46 @@ class ArithEvaluator {
     if (this.elements === null) {
       throw new ArithError('syntax error: operand expected (error token is "[")')
     }
+    if (this.elements.isAssoc !== undefined && !this.elements.isAssoc(name)) {
+      // An indexed subscript is arithmetic in this expression's own
+      // record (`nested`), so what it assigns the rest of the expression
+      // reads and the expression lands; the resolver only normalizes the
+      // index it is handed (a negative one counts from the extent). A
+      // literal index skips the run.
+      const trimmed = sub.trim()
+      const index = /^-?\d+$/.test(trimmed) ? BigInt(trimmed) : this.nested(sub)
+      return this.elements.resolve(name, index.toString(), { ...this.env, ...this.updates })
+    }
     return this.elements.resolve(name, sub, { ...this.env, ...this.updates })
   }
 
-  private readTarget(target: ArithTarget): bigint {
+  /**
+   * The canonical element key of a target, null for a scalar. Resolved
+   * once per reference: a compound assignment or a `++` reads and writes
+   * the same element, and a subscript that draws (`a[RANDOM]+=1`) must
+   * draw once, as bash's does.
+   */
+  private keyOf(target: ArithTarget): string | null {
+    return target.kind === 'var' ? null : this.elemKey(target.name, target.sub)
+  }
+
+  private readTarget(target: ArithTarget, key: string | null = null): bigint {
     if (target.kind === 'var') return this.lookup(target.name)
-    const key = this.elemKey(target.name, target.sub)
+    key ??= this.elemKey(target.name, target.sub)
     const pending = this.elemUpdates.get(`${target.name} ${key}`)
     if (pending !== undefined) return this.coerce(pending)
     return this.coerce(this.elements === null ? null : this.elements.read(target.name, key))
   }
 
-  private writeTarget(target: ArithTarget, value: bigint): void {
+  private writeTarget(target: ArithTarget, value: bigint, key: string | null = null): void {
     const text = value.toString()
     if (target.kind === 'var') {
       this.updates[target.name] = text
       this.record(target.name, null, text)
+      this.wroteVar?.(target.name, text)
       return
     }
-    const key = this.elemKey(target.name, target.sub)
+    key ??= this.elemKey(target.name, target.sub)
     this.elemUpdates.set(`${target.name} ${key}`, text)
     this.record(target.name, key, text)
   }
@@ -440,12 +486,24 @@ class ArithEvaluator {
         return value
       }
       case 'assign': {
-        const rhsVal = this.run(node.rhs)
-        const value =
-          node.op === '='
-            ? rhsVal
-            : this.applyBinop(node.op.slice(0, -1), this.readTarget(node.target), rhsVal)
-        this.writeTarget(node.target, value)
+        let key: string | null
+        let value: bigint
+        if (node.op === '=') {
+          // bash evaluates the right side before it resolves a plain
+          // assignment's subscript: `x=0, a[x++]=x++` stores 0 at index 1
+          // and leaves x at 2.
+          value = this.run(node.rhs)
+          key = this.keyOf(node.target)
+        } else {
+          // A compound assignment reads its target first, and bash reads
+          // it before the right side, which a dynamic name makes
+          // observable: `RANDOM=42, RANDOM-=RANDOM` is the first draw
+          // minus the second.
+          key = this.keyOf(node.target)
+          const current = this.readTarget(node.target, key)
+          value = this.applyBinop(node.op.slice(0, -1), current, this.run(node.rhs))
+        }
+        this.writeTarget(node.target, value, key)
         return value
       }
       case 'ternary':
@@ -465,13 +523,15 @@ class ArithEvaluator {
         return value
       }
       case 'pre': {
-        const value = wrap(this.readTarget(node.target) + (node.op === '++' ? 1n : -1n))
-        this.writeTarget(node.target, value)
+        const key = this.keyOf(node.target)
+        const value = wrap(this.readTarget(node.target, key) + (node.op === '++' ? 1n : -1n))
+        this.writeTarget(node.target, value, key)
         return value
       }
       case 'post': {
-        const value = this.readTarget(node.target)
-        this.writeTarget(node.target, wrap(value + (node.op === '++' ? 1n : -1n)))
+        const key = this.keyOf(node.target)
+        const value = this.readTarget(node.target, key)
+        this.writeTarget(node.target, wrap(value + (node.op === '++' ? 1n : -1n)), key)
         return value
       }
     }
@@ -545,6 +605,8 @@ export function evaluateArith(
   env: Readonly<Record<string, string>>,
   depth = 0,
   elements: ElementOps | null = null,
+  readVar: ((name: string) => string | null) | null = null,
+  wroteVar: ((name: string, value: string) => void) | null = null,
 ): ArithResult {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, writes: [] }
@@ -552,6 +614,21 @@ export function evaluateArith(
   const updates: Record<string, string> = {}
   const elemUpdates = new Map<string, string>()
   const writes = new Map<string, ArithWrite>()
-  const value = new ArithEvaluator(env, updates, elemUpdates, writes, depth, elements).run(node)
+  let value: bigint
+  try {
+    value = new ArithEvaluator(
+      env,
+      updates,
+      elemUpdates,
+      writes,
+      depth,
+      elements,
+      readVar,
+      wroteVar,
+    ).run(node)
+  } catch (err) {
+    if (err instanceof ArithError) err.writes = [...writes.values()]
+    throw err
+  }
   return { value, writes: [...writes.values()] }
 }

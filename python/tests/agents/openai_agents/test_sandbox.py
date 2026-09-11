@@ -85,3 +85,21 @@ def test_session_running_state():
         assert await session.running() is True
 
     asyncio.run(_run())
+
+
+def test_exec_names_the_reason_beside_a_refused_command():
+    # stderr is bash's bare `Permission denied`; the reason rides the
+    # refusal record, and a byte surface appends it as one more line.
+
+    async def _run():
+        ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+                       mode=MountMode.WRITE,
+                       route_policy=lambda ctx: {"deny": "no deletes"}
+                       if ctx.command == "rm" else None)
+        session = await MirageSandboxClient(ws).create()
+        result = await session.exec("rm /x", shell=False)
+        assert result.exit_code == 126
+        assert result.stderr == (
+            b"rm: Permission denied\npolicy denied: no deletes\n")
+
+    asyncio.run(_run())

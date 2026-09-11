@@ -240,7 +240,7 @@
           "command": "node -e \"console.log(1)\"",
           "expect": {
             "exit": 126,
-            "stderr": "node: policy denied: listed in /ram/deny.txt\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
@@ -271,7 +271,7 @@
           "command": "node -e \"console.log(1)\"",
           "expect": {
             "exit": 126,
-            "stderr": "node: policy denied: no js here\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {

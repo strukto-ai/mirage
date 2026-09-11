@@ -32,14 +32,15 @@ import {
 import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { normDir, rstripSlash } from '../../utils/slash.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { record, runWithMountPrefix, runWithRevisions, startOp } from '../../observe/context.ts'
+import { wrapOpStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
 import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
-import { isMissingPath } from '../../utils/errors.ts'
+import { ebusy, isMissingPath } from '../../utils/errors.ts'
 import { cachesReads, type Resource } from '../../resource/base.ts'
 import {
   ConsistencyPolicy,
@@ -52,6 +53,7 @@ import {
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -102,6 +104,24 @@ function visibleEntries(entries: string[], parent: string): string[] {
 // view; the same binding the hides and modes above read.
 function sessionId(): string {
   return getCurrentSession()?.sessionId ?? ''
+}
+
+/**
+ * The `issuer` kwarg lifted off an op, with the kwargs it leaves behind.
+ *
+ * A caller that stamps its ops (a profile policy's bridge) does so as
+ * an argument, and the door consumes it here: it reaches every gate the
+ * dispatch clears as `OpsContext.issuer`, probes and cascades included,
+ * and is never forwarded to a backend, which has no such argument.
+ */
+function takeIssuer(
+  kwargs: Record<string, unknown> | undefined,
+): [symbol | undefined, Record<string, unknown> | undefined] {
+  const issuer = kwargs?.issuer
+  if (typeof issuer !== 'symbol') return [undefined, kwargs]
+  const rest = { ...kwargs }
+  delete rest.issuer
+  return [issuer, rest]
 }
 
 /** The byte window a read asked for, whole file when it asked none. */
@@ -175,6 +195,10 @@ export class Dispatcher {
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs, report) => {
+    // The caller's own mark on the op, lifted before any gate fires so
+    // each one is told whose op it judges.
+    const [issuer, stripped] = takeIssuer(kwargs)
+    kwargs = stripped
     await this.namespace.ensureLoaded()
     // Pending fingerprint checks from a strict snapshot restore run
     // before the op can touch a mount, whichever surface called: FUSE
@@ -209,7 +233,7 @@ export class Dispatcher {
       for (const sess of liveSessions()) {
         if (
           moveReveals(sess.hiddenPaths, sess.shownPaths, path.virtual, dstArg.virtual) &&
-          (await this.movedSourceIsDir(path))
+          (await this.movedSourceIsDir(path, issuer))
         ) {
           throw eacces(path.virtual)
         }
@@ -217,7 +241,7 @@ export class Dispatcher {
     }
     if (this.tableAnswers(opName, path.virtual, kwargs)) {
       return [
-        await this.namespaceTableOp(opName, path, args ?? [], kwargs ?? {}, report),
+        await this.namespaceTableOp(opName, path, args ?? [], kwargs ?? {}, report, issuer),
         new IOResult(),
       ]
     }
@@ -238,6 +262,7 @@ export class Dispatcher {
         if (!pathAllowed(p.virtual)) throw hiddenRefusal(opName, p.virtual)
       }
     }
+    const resolvedOwner = this.namespace.tryMountFor(p.virtual)
     let resolved: [Resource, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(p.virtual, false)
@@ -257,7 +282,7 @@ export class Dispatcher {
       // the mounted overlay write; an ungranted mount is not that
       // case and keeps the canonical denial.
       if (opName === 'setattr' && isMissingPath(err)) {
-        await preOpsGate(this.policies, opName, p, true, '', sessionId())
+        await preOpsGate(this.policies, opName, p, true, '', sessionId(), issuer)
         requireTurfWritable(null, p)
         const stored = await this.overlaySetattr(p, kwargs ?? {})
         memoryAnswered(report)
@@ -271,7 +296,7 @@ export class Dispatcher {
         fallback = visibleEntries(fallback, p.virtual)
       }
       const fallbackWrite = POLICY_WRITE_OPS.has(opName)
-      await preOpsGate(this.policies, opName, p, fallbackWrite, '', sessionId())
+      await preOpsGate(this.policies, opName, p, fallbackWrite, '', sessionId(), issuer)
       // A synthetic namespace answer (a directory that exists only
       // because a mount or a link sits below it) contacts nothing, so
       // attributing it to the mount that lexically owns the path would
@@ -286,6 +311,7 @@ export class Dispatcher {
     // resolve() above already threw for a path outside every mount, so
     // this lookup cannot miss.
     const mount = this.namespace.mountFor(p.virtual)
+    if (mount !== resolvedOwner) throw ebusy(p.virtual)
     const mountPrefix = mount.prefix
     // Admission policies fire at the door, before the warm-cache early
     // return below: a cached read must be refused exactly like a cold
@@ -293,13 +319,13 @@ export class Dispatcher {
     // one door in TypeScript: shell internals, programmatic access, the
     // fs facade, and FUSE all end up here.
     const opWrite = POLICY_WRITE_OPS.has(opName)
-    await preOpsGate(this.policies, opName, p, opWrite, mountPrefix, sessionId())
+    await preOpsGate(this.policies, opName, p, opWrite, mountPrefix, sessionId(), issuer)
     // A rename's destination is a create there: it passes the same gate
     // as the source, so a path rule holds against moving into a
     // protected scope (or onto the directory that holds one) the way it
     // holds against writing there.
     if (opName === 'rename' && dstArg instanceof PathSpec) {
-      await preOpsGate(this.policies, opName, dstArg, true, mountPrefix, sessionId())
+      await preOpsGate(this.policies, opName, dstArg, true, mountPrefix, sessionId(), issuer)
     }
     const caches = cachesReads(resource)
     // The file cache is keyed on the path alone, and what a command put
@@ -307,10 +333,16 @@ export class Dispatcher {
     // under the same key, so it must not be served from that cache;
     // nothing populates it from here, so skipping the probe is the
     // whole fix. Mirrors Python's Dispatcher.dispatch.
+    await mount.ensureReady()
     const raw = kwargs?.filetype === null
     if (caches && !raw && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
-      if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
+      if (
+        cached !== null &&
+        (await this.reconciler.mayServeCached(mount, p.virtual)) &&
+        !mount.retiring &&
+        this.namespace.tryMountFor(p.virtual) === mount
+      ) {
         // The cache holds the whole object, so a ranged read is answered
         // by slicing it, never by handing back the whole file: the
         // window is what the caller asked for instead of the file, and
@@ -331,7 +363,7 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
-    if (this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    if (this.opsRegistry.find(opName, resource)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
       }
@@ -348,9 +380,7 @@ export class Dispatcher {
     const filetype = getExtension(p.virtual)
     const fullKwargs: OpKwargs = {
       ...(kwargs ?? {}),
-      ...(kwargs?.index === undefined && resource.index !== undefined
-        ? { index: resource.index }
-        : {}),
+      ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
     let fullArgs = args ?? []
@@ -380,30 +410,36 @@ export class Dispatcher {
     // prefix has to be active while the op runs or the record loses the
     // mount it belongs to. Mirrors Python's Ops._call.
     try {
-      result = await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
-          runWithTimeout(
-            Promise.resolve(
-              opName === 'setattr'
-                ? this.applySetattr(resource, scope, p, fullKwargs)
-                : this.opsRegistry.call(
-                    opName,
-                    resource.kind,
-                    resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-                    scope,
-                    fullArgs,
-                    fullKwargs,
-                  ),
+      result = await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, async () =>
+              runWithTimeout(
+                Promise.resolve(
+                  opName === 'setattr'
+                    ? this.applySetattr(resource, scope, p, fullKwargs)
+                    : this.opsRegistry.call(
+                        opName,
+                        resource,
+                        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                        scope,
+                        fullArgs,
+                        fullKwargs,
+                      ),
+                ),
+                opTimeout,
+                opName,
+              ),
             ),
-            opTimeout,
-            opName,
-          ),
-        ),
-      )
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (opName === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
-        await this.rmdirRemnants(resource, scope, mountPrefix, mode, err)
+        await this.rmdirRemnants(resource, scope, mountPrefix, mode, err, issuer)
         result = null
       } else {
         const fallback = isMissingPath(err) ? this.namespaceResult(opName, p.virtual) : null
@@ -470,8 +506,9 @@ export class Dispatcher {
    * the door's own raw registry calls: an indexed backend cannot
    * resolve a nested path without it.
    */
-  private indexKwargs(resource: Resource): OpKwargs {
-    return resource.index !== undefined ? { index: resource.index } : {}
+  private indexKwargs(mount: MountEntry | null): OpKwargs {
+    const index = mount?.index
+    return index !== undefined ? { index } : {}
   }
 
   /**
@@ -496,8 +533,10 @@ export class Dispatcher {
     mode: MountMode,
     opName: string,
     spec: PathSpec,
+    issuer?: symbol,
   ): Promise<unknown> {
-    const write = this.opsRegistry.find(opName, resource.kind)?.write === true
+    const mount = this.namespace.mountFor(spec.virtual)
+    const write = this.opsRegistry.find(opName, resource)?.write === true
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -507,7 +546,7 @@ export class Dispatcher {
       // caller folds the denial into its original refusal, so a
       // policy's protection of a hidden path never surfaces as its own
       // denial.
-      await preOpsGate(this.policies, opName, spec, true, mountPrefix, sessionId())
+      await preOpsGate(this.policies, opName, spec, true, mountPrefix, sessionId(), issuer)
       if (effectivePathMode(spec.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${spec.virtual}' is read-only`, spec)
       }
@@ -516,20 +555,26 @@ export class Dispatcher {
     // pins have to ride here as on the main path above, or a cascade
     // read answers from the wrong version of a revision-pinned mount.
     // Python's twin gets both bindings from `Mount.execute_op`.
-    const mount = this.namespace.mountFor(spec.virtual)
+    await mount.ensureReady()
     try {
-      return await runWithMountPrefix(rstripSlash(mountPrefix), () =>
-        runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
-          this.opsRegistry.call(
-            opName,
-            resource.kind,
-            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-            spec,
-            [],
-            this.indexKwargs(resource),
-          ),
-        ),
-      )
+      return await mount.use(async () => {
+        const answer = await runWithMountPrefix(
+          rstripSlash(mountPrefix),
+          () =>
+            runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
+              this.opsRegistry.call(
+                opName,
+                resource,
+                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                spec,
+                [],
+                this.indexKwargs(mount),
+              ),
+            ),
+          mount.mountId,
+        )
+        return wrapOpStream(answer, rstripSlash(mountPrefix), mount.mountId, mount.activity)
+      })
     } finally {
       if (write) await this.invalidateAfterWriteByPath(spec.virtual)
     }
@@ -545,7 +590,7 @@ export class Dispatcher {
    * same stance the pattern arm takes. Mirrors Python's
    * Dispatcher._moved_source_is_dir.
    */
-  private async movedSourceIsDir(path: PathSpec): Promise<boolean> {
+  private async movedSourceIsDir(path: PathSpec, issuer?: symbol): Promise<boolean> {
     let resolved: [Resource, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(path.virtual, false)
@@ -562,6 +607,7 @@ export class Dispatcher {
         mode,
         'stat',
         scope,
+        issuer,
       )
     } catch (err) {
       // An absent source moves nothing; the rename itself reports it.
@@ -596,11 +642,12 @@ export class Dispatcher {
     mountPrefix: string,
     mode: MountMode,
     refusal: unknown,
+    issuer?: symbol,
   ): Promise<void> {
     if (!hiddenPathsIntersect(path.virtual)) throw refusal
     let entries: unknown
     try {
-      entries = await this.fencedCall(resource, mountPrefix, mode, 'readdir', path)
+      entries = await this.fencedCall(resource, mountPrefix, mode, 'readdir', path, issuer)
     } catch {
       // A backend that cannot list (or later, remove) the remnants
       // keeps the original refusal: the door has no way to take them.
@@ -612,15 +659,15 @@ export class Dispatcher {
     if (names.length === 0 || visibleBelow(path.virtual, merged, pathAllowed)) throw refusal
     const channel: RemnantChannel = {
       readdir: async (at) => {
-        const listed = await this.fencedCall(resource, mountPrefix, mode, 'readdir', at)
+        const listed = await this.fencedCall(resource, mountPrefix, mode, 'readdir', at, issuer)
         return Array.isArray(listed) ? listed.map(String) : []
       },
-      stat: (at) => this.fencedCall(resource, mountPrefix, mode, 'stat', at),
+      stat: (at) => this.fencedCall(resource, mountPrefix, mode, 'stat', at, issuer),
       unlink: async (at) => {
-        await this.fencedCall(resource, mountPrefix, mode, 'unlink', at)
+        await this.fencedCall(resource, mountPrefix, mode, 'unlink', at, issuer)
       },
       rmdir: async (at) => {
-        await this.fencedCall(resource, mountPrefix, mode, 'rmdir', at)
+        await this.fencedCall(resource, mountPrefix, mode, 'rmdir', at, issuer)
       },
     }
     try {
@@ -681,12 +728,13 @@ export class Dispatcher {
     args: readonly unknown[],
     kwargs: OpKwargs,
     report: OpReport | undefined,
+    issuer?: symbol,
   ): Promise<string | FileStat | null> {
     const timer = startOp()
     const mount = this.namespace.tryMountFor(path.virtual)
     const owner = mount?.prefix ?? null
     const write = POLICY_WRITE_OPS.has(opName)
-    await preOpsGate(this.policies, opName, path, write, owner ?? '', sessionId())
+    await preOpsGate(this.policies, opName, path, write, owner ?? '', sessionId(), issuer)
     if (write) requireTurfWritable(mount, path)
     let target: string
     let result: string | FileStat | null = null
@@ -702,7 +750,15 @@ export class Dispatcher {
       // rename. It is then replaced as rename(2) replaces it: any node
       // the table holds at that name (a link, an attr overlay) goes.
       const dstMount = this.namespace.tryMountFor(dst.virtual)
-      await preOpsGate(this.policies, opName, dst, true, dstMount?.prefix ?? '', sessionId())
+      await preOpsGate(
+        this.policies,
+        opName,
+        dst,
+        true,
+        dstMount?.prefix ?? '',
+        sessionId(),
+        issuer,
+      )
       requireTurfWritable(dstMount, dst)
       await this.namespace.unlink(dst.virtual)
       await this.namespace.rename(path.virtual, dst.virtual)
@@ -714,7 +770,7 @@ export class Dispatcher {
       // new node shadowed live data (the bytes stayed, the name read as
       // a link) and could bury a mount root, which is the one name a
       // deployment configured.
-      if (await this.pathPresent(path)) throw eexist(path)
+      if (await this.pathPresent(path, issuer)) throw eexist(path)
       await this.namespace.symlink(path.virtual, target, Date.now() / 1000)
     } else if (opName === 'stat') {
       const row = this.namespace.linkStatAt(path.virtual)
@@ -723,7 +779,7 @@ export class Dispatcher {
       result = row
     } else {
       const found = this.namespace.readlink(path.virtual)
-      if (found === null) throw await this.readlinkMiss(path)
+      if (found === null) throw await this.readlinkMiss(path, issuer)
       target = found
       result = found
     }
@@ -751,8 +807,8 @@ export class Dispatcher {
    * path, where one extra round trip buys the right errno. Mirrors
    * Python's Dispatcher._readlink_miss.
    */
-  private async readlinkMiss(path: PathSpec): Promise<FsError> {
-    return (await this.pathPresent(path)) ? einval(path) : enoent(path)
+  private async readlinkMiss(path: PathSpec, issuer?: symbol): Promise<FsError> {
+    return (await this.pathPresent(path, issuer)) ? einval(path) : enoent(path)
   }
 
   /**
@@ -774,7 +830,7 @@ export class Dispatcher {
    * what dispatch is inside of. Mirrors Python's
    * Dispatcher._path_present.
    */
-  private async pathPresent(path: PathSpec): Promise<boolean> {
+  private async pathPresent(path: PathSpec, issuer?: symbol): Promise<boolean> {
     if (this.namespace.isLink(path.virtual)) return true
     if (namespaceStat(this.namespace.mountPrefixes(), this.namespace, path.virtual) !== null) {
       return true
@@ -790,9 +846,9 @@ export class Dispatcher {
     const mount = this.namespace.tryMountFor(path.virtual)
     if (mount !== null && normDir(mount.prefix) === normDir(path.virtual)) return true
     try {
-      const row = (await this.probeOp('stat', resolved)) as FileStat | null
+      const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
       if (row !== null && row.type !== FileType.DIRECTORY) return true
-      return await this.listedByParent(path)
+      return await this.listedByParent(path, issuer)
     } catch (err) {
       if (!(err instanceof PolicyDenied) && !(err instanceof PolicyError)) throw err
       // A channel that refuses to answer is not evidence of absence.
@@ -812,7 +868,7 @@ export class Dispatcher {
    * paths. The same normalization `mergeReaddir` dedupes on. Mirrors
    * Python's Dispatcher._listed_by_parent.
    */
-  private async listedByParent(path: PathSpec): Promise<boolean> {
+  private async listedByParent(path: PathSpec, issuer?: symbol): Promise<boolean> {
     const trimmed = rstripSlash(path.virtual)
     const cut = trimmed.lastIndexOf('/')
     const name = trimmed.slice(cut + 1)
@@ -823,7 +879,7 @@ export class Dispatcher {
     } catch {
       return false
     }
-    const entries = await this.probeOp('readdir', resolved)
+    const entries = await this.probeOp('readdir', resolved, issuer)
     if (!Array.isArray(entries)) return false
     return entries.some((entry) => {
       const segments = rstripSlash(String(entry)).split('/')
@@ -849,27 +905,33 @@ export class Dispatcher {
    * Args:
    *   opName: the op to run, `stat` or `readdir`.
    *   resolved: what the namespace resolved the path to.
+   *   issuer: the mark on the op being served, carried to the probe's
+   *     gate so the probe is judged as its caller's.
    */
   private async probeOp(
     opName: string,
     resolved: [Resource, PathSpec, MountMode],
+    issuer?: symbol,
   ): Promise<unknown> {
     const [resource, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
-    await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId())
+    await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId(), issuer)
+    await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
-      return await this.opsRegistry.call(
-        opName,
-        resource.kind,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        scope,
-        [],
-        {
-          ...(resource.index !== undefined ? { index: resource.index } : {}),
-          ...(filetype !== null ? { filetype } : {}),
-        },
-      )
+      const call = () =>
+        this.opsRegistry.call(
+          opName,
+          resource,
+          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+          scope,
+          [],
+          {
+            ...this.indexKwargs(mount),
+            ...(filetype !== null ? { filetype } : {}),
+          },
+        )
+      return await (mount === null ? call() : mount.use(call))
     } catch (err) {
       // The "nothing here" set exactly, plus a backend with no such op:
       // a miss on one channel is not absence on its own, so the caller
@@ -896,15 +958,12 @@ export class Dispatcher {
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (
-      this.namespace.isLink(p.virtual) ||
-      this.opsRegistry.find('setattr', resource.kind) === null
-    ) {
+    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', resource) === null) {
       return this.overlaySetattr(p, kwargs)
     }
     const raw = await this.opsRegistry.call(
       'setattr',
-      resource.kind,
+      resource,
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       scope,
       [],
@@ -985,10 +1044,27 @@ export class Dispatcher {
   isCacheablePath = (path: string): boolean => {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return false
-    return cachesReads(mount.resource)
+    return !mount.retiring && cachesReads(mount.resource)
   }
 
-  async applyIo(io: IOResult, records?: readonly OpRecord[]): Promise<void> {
-    await applyIo(this.cache, io, this.isCacheablePath, records)
+  /** Bind deferred command results to the mounts that produced them. */
+  captureCacheablePaths(): (path: string) => boolean {
+    const mounts = new Map(
+      this.namespace.mountPrefixes().map((p) => [p, this.namespace.mountFor(p)]),
+    )
+    return (path) => {
+      const prefix = ownerPrefix(mounts.keys(), path)
+      const original = prefix === null ? null : mounts.get(prefix)
+      const mount = this.namespace.tryMountFor(path)
+      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.resource)
+    }
+  }
+
+  async applyIo(
+    io: IOResult,
+    records?: readonly OpRecord[],
+    isCacheable: (path: string) => boolean = this.isCacheablePath,
+  ): Promise<void> {
+    await applyIo(this.cache, io, isCacheable, records)
   }
 }

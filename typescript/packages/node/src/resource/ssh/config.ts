@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const SSHConfigSchema = z.object({
   host: z.string(),
@@ -38,5 +42,5 @@ export function redactSshConfig(config: SSHConfig): SSHConfigRedacted {
 }
 
 export function normalizeSshConfig(input: Record<string, unknown>): SSHConfig {
-  return normalizeFields(input) as unknown as SSHConfig
+  return parseConfigWithSchema(SSHConfigSchema, input)
 }

@@ -21,8 +21,9 @@ from mirage.commands.builtin.generic.ls import Stat
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic.ls import ls_options
 from mirage.commands.builtin.generic_bind.adapter import overlaid_stat
+from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.spec.types import FlagValue
-from mirage.ops.types import NamespaceView
+from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
@@ -69,9 +70,11 @@ async def relayed_stat(dispatch: DispatchFn, path: PathSpec,
     return info.model_copy(update={"name": name})
 
 
-async def run_ls(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
+async def run_ls(scopes: list[PathSpec],
+                 flag_kwargs: dict[str, FlagValue],
                  dispatch: DispatchFn,
-                 ns: NamespaceView | None) -> CrossResult:
+                 ns: NamespaceView | None,
+                 session_view: SessionView | None = None) -> CrossResult:
     """List operands spanning mounts through the shared generic ls.
 
     ls relays rather than fans out because its layout is decided across
@@ -95,6 +98,8 @@ async def run_ls(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
             itself, and it has to, because nothing runs behind a relay
             to contribute that group the way the fan-out does for a
             single-mount run.
+        session_view (SessionView | None): The session plane's door,
+            for the profile the group column renders.
     """
     p = functools.partial
     stat_fn: Stat = p(relayed_stat, dispatch)
@@ -107,4 +112,5 @@ async def run_ls(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
         stat=stat_fn,
         links=ns.links if ns is not None else None,
         child_mounts=(ns.child_mounts if ns is not None else None),
+        identity=identity_from(ns, session_view),
         **ls_options(flag_kwargs))

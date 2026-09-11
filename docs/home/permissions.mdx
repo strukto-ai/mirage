@@ -104,12 +104,16 @@ The same patterns spell the `allow` list.
 
 A rule with `paths` and no command also reaches the VFS op door, so FUSE
 mounts and the cache cannot go around it. A whole-command `deny` refuses
-with `<command>: policy denied: <reason>` at exit 126; a `deny` matched
-through `paths` refuses the operand instead, in the GNU voice
-`<command>: <path>: <reason>` at the command's own operand exit code
-(`cat: /vault/aws.token: credentials are never read by hand`, exit 1).
-An `ask` refuses at 126, naming an ask id, until a host answers; see
-[Asks](#asks) below.
+in bash's own voice, `<command>: Permission denied` at exit 126, and the
+reason rides beside the output as the result's `refusal` record
+(`{"kind": "deny", "reason": ..., "policy": ..., "scope": "command"}`,
+`null` on a line that ran). A `deny` matched through `paths` refuses the
+operand instead, in the GNU voice `<command>: <path>: <reason>` at the
+command's own operand exit code
+(`cat: /vault/aws.token: credentials are never read by hand`, exit 1),
+with the reason on the line and the record's `scope` set to `operand`.
+An `ask` refuses at 126 the same way, with a `pending` record naming the
+ask id, until a host answers; see [Asks](#asks) below.
 
 ### `paths` and `vars`: hide and show
 
@@ -162,10 +166,54 @@ profiles:
 ```
 
 A profile may also state `cwd` and `env` (seeded and exported at session
-creation), and a `script` with its `runtime`: a program evaluated at the
-gate for every command, whose last expression answers allow, deny or ask,
-for the conditions a declarative rule cannot express. Like every rule,
-a script can only restrict, never grant past a deny.
+creation), and a `policy`: a program that defines the admission hooks it
+answers at, the way a coded [Policy](/home/policy-engine) does, and the
+engine that runs it. `pre_command(ctx)` judges a command before it runs
+and returns `None` or `"allow"` for no opinion, `"deny"` or
+`{"deny": reason}`, `"ask"` or `{"ask": reason}`. `pre_ops(ctx)` judges
+one VFS op (`ctx["op"]`: `name`, `path`, `write`, `prefix`) and
+`pre_session(ctx)` one env write (`ctx["write"]`: `key`, `value`,
+`verb`); both answer allow or deny only. JavaScript spells them
+`preCommand`, `preOps`, `preSession`. Like every rule, a policy can only
+restrict, never grant past a deny.
+
+The hook is told the line's facts as `ctx` (the command, its resolved
+paths, the session, the mounts), and its engine is attached to the
+workspace the way an agent's runtime is: a python policy may `open()` a
+file the line names and judge what it holds, not only what it is called.
+The read clears the op door like any other.
+
+```yaml
+profiles:
+  reviewer:
+    policy:
+      script: ask_curl.py
+      runtime: monty
+```
+
+```python ask_curl.py
+# Ask before a command reads a file that mentions curl.
+def pre_command(ctx):
+    for path in ctx["command"]["paths"]:
+        if "curl" in contents(path):
+            return {"ask": "approve before a command reads it"}
+    return None
+
+def contents(path):
+    try:
+        return open(path).read()
+    except OSError:
+        return ""
+```
+
+A policy file defines any of the three admission hooks and nothing
+else; the output doors stay coded hooks. A hook the file leaves out is
+silence at that door, and a file defining none fails closed. `pre_ops`
+fires per op, thousands under one recursive command, so keep it cheap;
+the policy's own reads are not judged by it. One policy per profile: a
+file holds as many checks as it needs, and it stands in the chain beside
+the document's own rules and every coded policy, under the one rule that
+the first deny wins and an ask is kept only while nothing refuses.
 
 ## Asks
 
@@ -173,10 +221,18 @@ An `ask` rule guards a command instead of refusing it outright. When a
 session runs the guarded line, the line does not run; the agent reads
 
 ```
-rm: requires approval: removal needs sign-off (ask 5b25c31eb62e)
+rm: Permission denied
 ```
 
-at exit 126, and the ask lands in the workspace's decision ledger as a
+at exit 126 with a `pending` refusal record beside it,
+
+```json
+{"kind": "pending", "reason": "removal needs sign-off", "policy": "", "scope": "command", "ask_id": "5b25c31eb62e"}
+```
+
+(a text-only agent adapter renders that as
+`requires approval: removal needs sign-off (ask 5b25c31eb62e)` after
+stderr), and the ask lands in the workspace's decision ledger as a
 pending record carrying the session, command, argv, cwd, paths and the
 rule's reason. Decisions are session state, so they persist wherever the
 session store persists. A host answers **allow** or **deny**:
@@ -186,8 +242,8 @@ session store persists. A host answers **allow** or **deny**:
   used it.
 - `allow` with scope `session` answers every line the rule covers for
   that session, and stays.
-- `deny` answers once: the retry is refused in the deny voice
-  (`rm: policy denied: removal needs sign-off`), and running the line
+- `deny` answers once: the retry is refused (`rm: Permission denied`,
+  with a `deny` record carrying the same reason), and running the line
   again raises a new ask.
 
 ### From the CLI
@@ -231,7 +287,62 @@ answered", not "not found". `deny` with scope `session` is refused
 `answer(ask_id, outcome, scope, note)`. A host that wants to answer
 inline instead of leaving the ask pending passes `on_ask` (`onAsk`) to
 the workspace: an async handler given the pending record, whose answer
-settles the ask while the line waits, like a tool-approval prompt.
+settles the ask while the line waits, like a tool-approval prompt. A
+`once` grant given that way is consumed by the line that asked, so the
+next identical line asks again; a refusal stands for the agent's
+immediate retry, which is refused from the record without the human
+being asked twice, and is spent by it. The literal commands of a compound
+line are judged before execution, and a `once` grant given for one of its commands,
+inline or out of band, is handed to the run; when a later command is
+refused instead, nothing runs and the refusal spends the grant, so the
+next line spelling that command asks again. Every grant a line was
+given is spent when the line ends, whether the run reached the command
+(a `&&` that short-circuited before it) or reached it more than once: a
+loop body is one place on the line, so
+`for f in a b; do touch $f; cat secret.txt; done` is one question, and
+the second iteration runs on the same nod rather than asking again
+after another `touch`. A grant is bound to the place on
+the line it was given for, so a command spelled twice on one line is two
+questions, a word that expands at run time into a command cannot run on
+the nod a literal spelling elsewhere on the line was given (`$S && cat
+secret.txt` asks for both), and a grant one line has claimed is not on
+offer to a line judged at the same time. The grants given to a line
+for the commands inside a background job it launches are shared with
+the job from the moment it is launched, and stand until the last of
+the line and its jobs ends: its commands reach their gates after the
+line has returned, a question that holds the rest of the line does not
+let go of them, and a loop that launches the same job again hands the
+next job the same grant. This also applies when `eval` launches the
+job: in `eval 'sleep 1 && cat secret.txt &'`, the outer line's approval
+stays reserved for the background `cat` after `eval` returns. And it
+applies to a line the job itself evaluates once it is running: in
+`sleep 1 && eval 'cat secret.txt' &`, the `cat` runs on the grant the
+job took with it, long after the line that launched the job has
+returned, and the job's end is what spends it. A line
+the shell evaluates from inside another (`$( )`, `eval`, `source`,
+`xargs`) runs on what the outer line was given for the words it runs,
+so `echo $(cat secret.txt)` is one question, not two, and two such
+bodies on one line are two; what such a line is given at its own gates
+stays with the outer line until that line ends, so every batch
+`xargs -n1 cat` hands on for one file runs on one answer. A line a
+whole-line runtime takes is judged the same
+way: an answer it was given stands while a later question on the same
+line waits, so the retry asks only for what is still unanswered.
+
+Preflight cannot determine every command produced by dynamic expansion.
+Those commands still pass the execution gate, but an ask there can arrive
+after earlier commands have run. For example,
+`F=/data/secret; echo before > /data/marker; cat $F` can write the marker
+before asking about the expanded `cat`. A pending result does not roll
+back earlier work, so retrying such a line can repeat it. The same holds
+for the operands a command appends at run time: `xargs cat` runs `cat`
+on the items it reads from its input, and `find -exec cat {} \;` on the
+paths it finds. Preflight still refuses such a line for a `deny` on the
+command name, before anything runs, but it never asks about a spelling
+the gate will not read (`cat $F`, a bare `cat`): an answer to that
+question would cover nothing that runs, and the gate would ask again
+about the words that do. The one question is the gate's, about the
+real operands.
 
 ## Dry runs
 
@@ -251,3 +362,27 @@ filesystems, one line per rule interaction:
 [typescript](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/permissions.ts).
 Its printed table is pinned in CI, so the behaviors this page describes
 are the behaviors the build enforces.
+
+The policy example puts a coded `Policy` beside a profile's `policy`
+block in code, then loads the same block from a document:
+[policy.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy.py),
+[policy.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy.ts);
+[workspace.yaml](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/workspace.yaml)
+with its program in
+[guard.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/guard.py),
+loaded by
+[policy_yaml.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/policy_yaml.py)
+and
+[policy_yaml.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/policy_yaml.ts).
+Both tables are pinned the same way.
+
+The ask examples show the two kinds of host. An `on_ask` reviewer
+allows one guarded `rm` inline, once, so the same line asks again:
+[ask.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask.py),
+[ask.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask.ts).
+With no reviewer, two asked lines wait in the ledger, and the host reads
+`pending` as a queue, one record per question, and answers each by id,
+the `cat` once and the `rm` for the session, so their retries run and
+only the `cat` asks again:
+[ask_pending.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/permissions/ask_pending.py),
+[ask_pending.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/permissions/ask_pending.ts).

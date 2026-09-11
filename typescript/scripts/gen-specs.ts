@@ -34,9 +34,11 @@ import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import {
   type Capabilities,
   type CommandIoFacts,
+  type ConfigFacts,
   capabilitiesOf,
   collectClasses,
   commandIoFacts,
+  configFacts,
   registryClasses,
 } from './resource_facts.ts'
 
@@ -296,6 +298,7 @@ function emitResources(
   registry: Record<string, RegisteredCommand[]>,
   capabilities: Record<string, Capabilities | null>,
   commandIo: Record<string, CommandIoFacts>,
+  configs: Record<string, ConfigFacts | null>,
 ): void {
   const commandResources = new Set<string>()
   for (const rcs of Object.values(registry)) {
@@ -306,6 +309,7 @@ function emitResources(
     command_resources: [...commandResources].sort(),
     capabilities,
     command_io: commandIo,
+    configs,
   }
   const path = resolve(SPEC_ROOT, name, 'resources.json')
   writeFileSync(path, sortedStringify(payload) + '\n')
@@ -358,6 +362,10 @@ function emitVariant(
       maxGlobMatches: DEFAULT_MAX_GLOB_MATCHES,
       maxDuEntries: DEFAULT_MAX_DU_ENTRIES,
     }),
+    configFacts(
+      resolve(PACKAGES, pkgs[pkgs.length - 1] as string, 'src', 'resource', 'registry.ts'),
+      PACKAGES,
+    ),
   )
 }
 

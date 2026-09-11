@@ -14,9 +14,9 @@
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { imageTypeForExtension } from '../../utils/filetype.ts'
+import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import type { Guard } from '../hierarchy/readdir.ts'
@@ -48,17 +48,23 @@ async function statRow(
 ): Promise<FileStat> {
   const config = accessor.config
   if (!(await accessor.tableExists(tableOf(config, match)))) throw enoent(path.virtual)
-  const fileType = match.kind === 'row_blob' ? imageTypeForExtension(config.blobExt) : FileType.TEXT
+  const content =
+    match.kind === 'row_blob' ? contentTypeForExtension(config.blobExt) : ContentType.TEXT
   // The row-dir readdir seeds exact rendered sizes; a cold index falls back
   // to rendering the row, so the size is exact either way.
   if (index !== undefined) {
     const lookup = await index.get(rstripSlash(path.virtual))
     if (lookup.entry !== undefined && lookup.entry !== null && lookup.entry.size !== null) {
-      return new FileStat({ name: nameOf(path), size: lookup.entry.size, type: fileType })
+      return new FileStat({
+        name: nameOf(path),
+        size: lookup.entry.size,
+        type: FileType.FILE,
+        content,
+      })
     }
   }
   const data = await read(accessor, path, index)
-  return new FileStat({ name: nameOf(path), size: data.length, type: fileType })
+  return new FileStat({ name: nameOf(path), size: data.length, type: FileType.FILE, content })
 }
 
 const GUARDS: Record<string, Guard<QdrantAccessor>> = { group: tableGuard }

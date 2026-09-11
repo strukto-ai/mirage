@@ -15,6 +15,7 @@
 import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { lsModeString } from './utils/formatting.ts'
+import { groupName, ownerName, type Identity } from './utils/identity.ts'
 
 const PRINTF_ESCAPES: Record<string, string> = {
   n: '\n',
@@ -27,7 +28,7 @@ const PRINTF_ESCAPES: Record<string, string> = {
   f: '\f',
   v: '\v',
 }
-const STAT_DIRECTIVES = new Set(['s', 'y', 'Y', 'm', 'M', 'T'])
+const STAT_DIRECTIVES = new Set(['s', 'y', 'Y', 'm', 'M', 'T', 'u', 'U', 'g', 'G'])
 // One mode per kind, spelled from the same constants every stat
 // translator uses (utils/stat_view.ts); links are 777 the way ls draws
 // them. A reported mode (chmod overlay, a backend that knows) supplies
@@ -42,7 +43,7 @@ const KIND_TYPE: Record<PrintfKind, FileType> = {
   d: FileType.DIRECTORY,
   l: FileType.SYMLINK,
   c: FileType.CHAR_DEVICE,
-  f: FileType.TEXT,
+  f: FileType.FILE,
 }
 const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_ABBR = [
@@ -137,6 +138,10 @@ export interface PrintfStatFacts {
   // What %Y classifies on a symlink row: the target's kind, 'N' when the
   // link dangles. Ignored for a non-link row, where %Y is %y.
   targetKind: PrintfKind | 'N' | null
+  // The owner a backend or the attr overlay reported, null when none;
+  // %u %U %g %G fall back to the session's identity from there.
+  uid: number | string | null
+  gid: number | string | null
 }
 
 export function printfKind(st: FileStat): PrintfKind {
@@ -174,6 +179,7 @@ export function expandPrintf(
   startBase: string,
   st: PrintfStatFacts | null,
   warnings: string[],
+  identity: Identity | null = null,
 ): string {
   const out: string[] = []
   let i = 0
@@ -232,6 +238,10 @@ export function expandPrintf(
       } else {
         out.push(kind)
       }
+    } else if (code === 'u' || code === 'U') {
+      out.push(ownerName(st?.uid ?? null, identity))
+    } else if (code === 'g' || code === 'G') {
+      out.push(groupName(st?.gid ?? null, identity))
     } else if (code === 'm') {
       out.push((modeBits(st, kind) & 0o7777).toString(8))
     } else if (code === 'M') {

@@ -36,7 +36,7 @@ async def workspace():
 
 @pytest.mark.asyncio
 async def test_du_single_file(workspace):
-    await workspace.ops.write("/f.txt", b"hello")
+    await workspace.fs.write("/f.txt", b"hello")
     io = await workspace.execute("du /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().strip() == "5\t/f.txt"
@@ -44,9 +44,9 @@ async def test_du_single_file(workspace):
 
 @pytest.mark.asyncio
 async def test_du_directory_collapses(workspace):
-    await workspace.ops.mkdir("/dir")
-    await workspace.ops.write("/dir/a.txt", b"aaa")
-    await workspace.ops.write("/dir/b.txt", b"bb")
+    await workspace.fs.mkdir("/dir")
+    await workspace.fs.write("/dir/a.txt", b"aaa")
+    await workspace.fs.write("/dir/b.txt", b"bb")
     io = await workspace.execute("du /dir")
     assert io.exit_code == 0
     assert io.stdout.decode().strip() == "5\t/dir"
@@ -54,9 +54,9 @@ async def test_du_directory_collapses(workspace):
 
 @pytest.mark.asyncio
 async def test_du_a_lists_files(workspace):
-    await workspace.ops.mkdir("/dir")
-    await workspace.ops.write("/dir/a.txt", b"aaa")
-    await workspace.ops.write("/dir/b.txt", b"bb")
+    await workspace.fs.mkdir("/dir")
+    await workspace.fs.write("/dir/a.txt", b"aaa")
+    await workspace.fs.write("/dir/b.txt", b"bb")
     io = await workspace.execute("du -a /dir")
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -66,8 +66,8 @@ async def test_du_a_lists_files(workspace):
 
 @pytest.mark.asyncio
 async def test_du_c_total(workspace):
-    await workspace.ops.write("/a.txt", b"hello")
-    await workspace.ops.write("/b.txt", b"world")
+    await workspace.fs.write("/a.txt", b"hello")
+    await workspace.fs.write("/b.txt", b"world")
     io = await workspace.execute("du -c /a.txt /b.txt")
     assert io.exit_code == 0
     lines = io.stdout.decode().strip().splitlines()
@@ -77,7 +77,7 @@ async def test_du_c_total(workspace):
 @pytest.mark.asyncio
 async def test_du_without_operand_measures_the_working_directory(workspace):
     """GNU du with no operand summarises '.', dot-spelled; no error."""
-    await workspace.ops.write("/a.txt", b"hello")
+    await workspace.fs.write("/a.txt", b"hello")
     io = await workspace.execute("du")
     assert io.exit_code == 0
     assert "5\t." in io.stdout.decode().splitlines()
@@ -95,7 +95,7 @@ async def test_du_reads_an_unstattable_mount_root():
     await resource._store.clear()
     ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
     try:
-        await ws.ops.write("/data/a.txt", b"hello")
+        await ws.fs.write("/data/a.txt", b"hello")
         io = await ws.execute("du /data")
         assert io.exit_code == 0
         assert io.stdout.decode() == "5\t/data\n"

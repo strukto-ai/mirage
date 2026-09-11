@@ -35,10 +35,12 @@ class Recorder:
         sink (list[OpRecord]): Where new records are appended.
         mount_prefix (str): Current frame's mount prefix (e.g. "/s3").
             Empty when no mount is active.
+        mount_id (str | None): Identity of the mounted instance serving reads.
     """
 
     sink: list[OpRecord] = field(default_factory=list)
     mount_prefix: str = ""
+    mount_id: str | None = None
 
 
 _recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
@@ -124,12 +126,27 @@ def push_mount_prefix(prefix: str) -> str:
     rec = _recorder.get()
     if rec is None:
         return ""
-    _recorder.set(Recorder(sink=rec.sink, mount_prefix=prefix))
+    _recorder.set(
+        Recorder(sink=rec.sink, mount_prefix=prefix, mount_id=rec.mount_id))
     return rec.mount_prefix
 
 
-async def with_mount_prefix(prefix: str,
-                            it: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+def push_mount_context(prefix: str, mount_id: str | None):
+    """Bind the mount instance that owns reads in this async frame.
+
+    Args:
+        prefix (str): virtual mount prefix.
+        mount_id (str | None): instance identity, absent outside a mount.
+    """
+    rec = _recorder.get()
+    return _recorder.set(None if rec is None else Recorder(
+        sink=rec.sink, mount_prefix=prefix, mount_id=mount_id))
+
+
+async def with_mount_prefix(
+        prefix: str,
+        it: AsyncIterator[bytes],
+        mount_id: str | None = None) -> AsyncIterator[bytes]:
     """Wrap an async iterator so the recorder's mount prefix is `prefix`
     during each ``__anext__`` of the underlying stream.
 
@@ -141,17 +158,21 @@ async def with_mount_prefix(prefix: str,
     Args:
         prefix (str): Mount prefix to push during iteration.
         it (AsyncIterator[bytes]): The stream to wrap.
+        mount_id (str | None): Captured mount identity for lazy reads.
     """
     aiter = it.__aiter__()
     try:
         while True:
-            prev = push_mount_prefix(prefix)
+            previous = _recorder.get()
+            token = push_mount_context(
+                prefix, mount_id if mount_id is not None else
+                previous.mount_id if previous else None)
             try:
                 chunk = await aiter.__anext__()
             except StopAsyncIteration:
                 return
             finally:
-                push_mount_prefix(prev)
+                reset_active_recorder(token)
             yield chunk
     finally:
         close = getattr(aiter, "aclose", None)
@@ -233,6 +254,7 @@ def finish_record(op: str,
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
     """
     elapsed = timer.elapsed_ms
+    recorder = _recorder.get()
     return OpRecord(
         op=op,
         path=path,
@@ -242,6 +264,7 @@ def finish_record(op: str,
         duration_ms=elapsed,
         fingerprint=fingerprint,
         revision=revision,
+        mount_id=recorder.mount_id if recorder is not None else None,
     )
 
 
@@ -322,6 +345,7 @@ def record_stream(op: str,
         duration_ms=0,
         fingerprint=fingerprint,
         revision=revision,
+        mount_id=rec.mount_id,
     )
     rec.sink.append(op_rec)
     return op_rec
@@ -395,6 +419,7 @@ async def with_revisions(revisions: dict[str, str] | None,
         revisions (dict[str, str] | None): Revisions to push during
             iteration.
         it (AsyncIterator[bytes]): The stream to wrap.
+        mount_id (str | None): Captured mount identity for lazy reads.
     """
     aiter = it.__aiter__()
     try:

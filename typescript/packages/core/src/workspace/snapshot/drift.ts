@@ -73,7 +73,7 @@ export interface MountLookup {
  * state. Mirrors the Python `DriftQueue` in `snapshot/drift.py`.
  */
 export class DriftQueue {
-  private entries: { path: string; fingerprint: string }[] = []
+  private entries: { path: string; fingerprint: string; mountId: string | null }[] = []
   private isPending = false
 
   get pending(): boolean {
@@ -91,8 +91,8 @@ export class DriftQueue {
     this.isPending = false
   }
 
-  queue(path: string, fingerprint: string): void {
-    this.entries.push({ path, fingerprint })
+  queue(path: string, fingerprint: string, mountId: string | null = null): void {
+    this.entries.push({ path, fingerprint, mountId })
     this.isPending = true
   }
 
@@ -107,7 +107,7 @@ export class DriftQueue {
     const pending = this.entries
     this.entries = []
     const results = await Promise.allSettled(
-      pending.map((p) => checkDrift(registry, statFn, p.path, p.fingerprint)),
+      pending.map((p) => checkDrift(registry, statFn, p.path, p.fingerprint, p.mountId)),
     )
     for (const r of results) {
       if (r.status === 'rejected') throw r.reason as Error
@@ -150,7 +150,7 @@ export function installDriftState(
       continue
     }
     if (e.fingerprint !== undefined && e.fingerprint !== null) {
-      drift.queue(e.path, e.fingerprint)
+      drift.queue(e.path, e.fingerprint, mount.mountId)
     }
   }
   const liveOnly = state.live_only_mounts ?? []
@@ -186,9 +186,9 @@ export function captureFingerprints(
   for (const rec of records) {
     if (rec.op !== 'read' || seen.has(rec.path)) continue
     if (rec.fingerprint === null && rec.revision === null) continue
-    seen.add(rec.path)
     const mount = registry.tryMountFor(rec.path)
-    if (mount === null) continue
+    if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
+    seen.add(rec.path)
     if (mount.resource.supportsSnapshot !== true) continue
     const entry: FingerprintEntry = { path: rec.path, mount_prefix: mount.prefix }
     if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint
@@ -228,19 +228,22 @@ export async function checkDrift(
   statFn: (path: string) => Promise<unknown>,
   path: string,
   recorded: string,
+  mountId: string | null = null,
 ): Promise<void> {
   const mount = registry.tryMountFor(path)
-  if (mount === null) return
+  if (mount === null || (mountId !== null && mount.mountId !== mountId)) return
   if (mount.resource.supportsSnapshot !== true) return
   let stat: FileStat
   try {
     stat = (await statFn(path)) as FileStat
   } catch (err) {
     if ((err as { code?: string } | null)?.code === 'ENOENT') {
+      if (registry.tryMountFor(path) !== mount) return
       throw new ContentDriftError(path, recorded, null)
     }
     throw err
   }
+  if (registry.tryMountFor(path) !== mount) return
   const live = stat.fingerprint
   if (live === null) return
   if (live !== recorded) throw new ContentDriftError(path, recorded, live)

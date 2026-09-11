@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
+import { KeyLock } from '../../cache/lock.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
   CommandFn,
@@ -37,10 +39,12 @@ import { runWithCacheManager } from '../../cache/context.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import { mergeSignals } from '../abort.ts'
 import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
+import { uuid7 } from '../../utils/ids.ts'
+import { ResourceActivity } from './activity.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
-import { enotsup, erofsReadOnly } from '../../utils/errors.ts'
+import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   effectiveMountMode,
@@ -85,10 +89,15 @@ export interface MountInit {
 }
 
 export class MountEntry {
+  readonly mountId = uuid7()
   readonly prefix: string
   readonly resource: Resource
-  readonly mode: MountMode
+  mode: MountMode
   readonly consistency: ConsistencyPolicy
+  activity = new ResourceActivity()
+  retiring = false
+  beforeUse: (() => Promise<void>) | null = null
+  private readonly readyLock = new KeyLock()
 
   /**
    * Per-path revision pins installed at Workspace.load time. Read
@@ -128,6 +137,51 @@ export class MountEntry {
     this.resource = init.resource
     this.mode = init.mode ?? MountMode.READ
     this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
+  }
+
+  /** Prepare and retain the resource while its glob hook reads metadata. */
+  async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
+    return this.use(async () => {
+      const call = async (): Promise<PathSpec[]> => {
+        await this.ensureReady()
+        return this.resource.glob === undefined ? [...paths] : this.resource.glob(paths, prefix)
+      }
+      return this.cacheManager === null ? call() : this.cacheManager.withMutation(call)
+    })
+  }
+
+  /** Metadata access bound to this mount's ownership. */
+  get index(): IndexCacheStore | undefined {
+    const index = this.resource.index
+    return index === undefined ? undefined : (this.cacheManager?.scopeIndex(index) ?? index)
+  }
+
+  /** Finish deferred mount preparation before any backend or cache read. */
+  async use<T>(fn: () => Promise<T>): Promise<T> {
+    await this.ensureReady()
+    this.checkActive()
+    const release = this.activity.acquire()
+    try {
+      return await fn()
+    } finally {
+      release()
+    }
+  }
+
+  async ensureReady(): Promise<void> {
+    this.checkActive()
+    if (this.beforeUse === null) return
+    await this.readyLock.withLock('', async () => {
+      if (this.beforeUse !== null) {
+        await this.beforeUse()
+        this.beforeUse = null
+      }
+    })
+    this.checkActive()
+  }
+
+  private checkActive(): void {
+    if (this.retiring) throw ebusy(this.prefix)
   }
 
   /**
@@ -397,187 +451,196 @@ export class MountEntry {
     flags: Record<string, FlagValue>,
     context: ExecContext = {},
   ): Promise<[ByteSource | null, IOResult]> {
-    let extension =
-      paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
-    // A filetype handler is selected from the operand's NAME, and a
-    // directory can carry any extension, so the cascade would hand a
-    // renderer a directory to read. One stat settles it, and only when a
-    // handler for this exact extension exists, so a mount with no
-    // filetype registrations never reaches the probe. The built-in is
-    // what a directory should get: it owns GNU's `Is a directory`
-    // wording, and the renderer owns nothing but its own format.
-    // The DISPATCHER's stat, not the backend's, so a mount root and a
-    // namespace-only directory answer too; null means neither plane saw
-    // anything, in which case the renderer reports its own miss.
-    const first = paths[0]
-    if (
-      extension !== null &&
-      extension !== '' &&
-      first !== undefined &&
-      context.statPath !== undefined &&
-      this.cmds.has(cmdKey(cmdName, extension))
-    ) {
-      const entry = await context.statPath(first.virtual)
-      if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
-    }
+    return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
+      let extension =
+        paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
+      // A filetype handler is selected from the operand's NAME, and a
+      // directory can carry any extension, so the cascade would hand a
+      // renderer a directory to read. One stat settles it, and only when a
+      // handler for this exact extension exists, so a mount with no
+      // filetype registrations never reaches the probe. The built-in is
+      // what a directory should get: it owns GNU's `Is a directory`
+      // wording, and the renderer owns nothing but its own format.
+      // The DISPATCHER's stat, not the backend's, so a mount root and a
+      // namespace-only directory answer too; null means neither plane saw
+      // anything, in which case the renderer reports its own miss.
+      const first = paths[0]
+      if (
+        extension !== null &&
+        extension !== '' &&
+        first !== undefined &&
+        context.statPath !== undefined &&
+        this.cmds.has(cmdKey(cmdName, extension))
+      ) {
+        const entry = await context.statPath(first.virtual)
+        if (entry !== null && entry.type === FileType.DIRECTORY) extension = null
+      }
 
-    const handlers = this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
-    if (handlers.length === 0) {
-      return [
-        null,
-        new IOResult({
-          exitCode: 127,
-          stderr: new TextEncoder().encode(`${cmdName}: command not found`),
-        }),
-      ]
-    }
+      const handlers = this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
+      if (handlers.length === 0) {
+        return [
+          null,
+          new IOResult({
+            exitCode: 127,
+            stderr: new TextEncoder().encode(`${cmdName}: command not found`),
+          }),
+        ]
+      }
 
-    const mountPrefix = rstripSlash(this.prefix)
-    const filetypeFns = this.filetypeHandlers(cmdName)
-    const isFiletypeCmd =
-      extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
+      const mountPrefix = rstripSlash(this.prefix)
+      const filetypeFns = this.filetypeHandlers(cmdName)
+      const isFiletypeCmd =
+        extension !== null && extension !== '' && this.cmds.has(cmdKey(cmdName, extension))
 
-    const prefixedPaths = paths.map(
-      (p) =>
-        new PathSpec({
-          virtual: p.virtual,
-          directory: p.directory,
-          pattern: p.pattern,
-          resolved: p.resolved,
-          resourcePath: mountKey(p.virtual, mountPrefix),
-          rawPath: p.rawPath,
-        }),
-    )
+      const prefixedPaths = paths.map(
+        (p) =>
+          new PathSpec({
+            virtual: p.virtual,
+            directory: p.directory,
+            pattern: p.pattern,
+            resolved: p.resolved,
+            resourcePath: mountKey(p.virtual, mountPrefix),
+            rawPath: p.rawPath,
+          }),
+      )
 
-    const expandedPaths =
-      this.resource.glob !== undefined ? await this.resource.glob(prefixedPaths) : prefixedPaths
+      const expandedPaths = await this.expandGlob(prefixedPaths, '')
 
-    const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
-    const cmdOpts: CommandOpts = {
-      stdin: context.stdin ?? null,
-      flags,
-      filetypeFns: isFiletypeCmd ? null : filetypeFns,
-      mountPrefix,
-      cwd: context.cwd ?? ROOT_CWD,
-      ...(this.resource.index !== undefined ? { index: this.resource.index } : {}),
-      ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
-      ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
-      ...(context.env !== undefined ? { env: context.env } : {}),
-      ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
-      ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
-      ...(context.execPathAllowed !== undefined
-        ? { execPathAllowed: context.execPathAllowed }
-        : {}),
-      ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
-      ...(context.ns !== undefined ? { ns: context.ns } : {}),
-      ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
-      ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
-    }
+      const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
+      const cmdOpts: CommandOpts = {
+        stdin: context.stdin ?? null,
+        flags,
+        filetypeFns: isFiletypeCmd ? null : filetypeFns,
+        mountPrefix,
+        cwd: context.cwd ?? ROOT_CWD,
+        ...(this.index !== undefined ? { index: this.index } : {}),
+        ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
+        ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
+        ...(context.env !== undefined ? { env: context.env } : {}),
+        ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
+        ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
+        ...(context.execPathAllowed !== undefined
+          ? { execPathAllowed: context.execPathAllowed }
+          : {}),
+        ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
+        ...(context.ns !== undefined ? { ns: context.ns } : {}),
+        ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
+        ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
+      }
 
-    // What the command tier's mode guard reads: the write-command gate
-    // below admits a command when any shown subtree grants writes, and
-    // this binding is how each write the handler then makes is held to
-    // its own region's mode.
-    return runWithMountGate(this.prefix, this.mode, () =>
-      runWithMountPrefix(mountPrefix, () =>
-        runWithCacheManager(this.cacheManager, () =>
-          runWithRevisions(
-            this.revisions.size > 0 ? this.revisions : null,
-            async (): Promise<[ByteSource | null, IOResult]> => {
-              // --help / --version short-circuit inside the handler
-              // wrapper and never touch the backend, so a read-only mount
-              // answers them like GNU instead of refusing them as writes.
-              const infoOnly = flags.help === true || flags.version === true
-              for (const cmd of handlers) {
-                // strongestModeUnder, not effectiveMode: a mount whose
-                // only writable region is a show entry still runs the
-                // command, and the op door refuses per path. The
-                // trailing newline is load-bearing: stderr accumulates
-                // across a line, so two refusals in one list ran
-                // together as `...at /ro/rm: read-only mount at /ro/`,
-                // and the node table's twin of this refusal (a symlink
-                // `rm`, rendered by shared.readOnlyError) concatenates
-                // with it.
-                if (
-                  cmd.write &&
-                  !infoOnly &&
-                  strongestModeUnder(this.prefix, this.mode) === MountMode.READ
-                ) {
-                  return [
-                    null,
-                    new IOResult({
-                      exitCode: 1,
-                      stderr: new TextEncoder().encode(
-                        `${cmdName}: read-only mount at ${this.prefix}\n`,
-                      ),
-                    }),
-                  ]
-                }
-                // The dispatch-level guard only sees default limits
-                // (the mount is unknown before routing), so the
-                // mount-resolved timeout must also bound the command
-                // body: eager commands do their work inside cmd.fn,
-                // where the stream-consumption guard never runs.
-                // limitOverride carries the origin mount's cap across
-                // a warm-cache redirect; a null one is "no opinion" and
-                // must not shadow the serving mount's own table (a
-                // path-less command with cwd outside every mount resolves
-                // no origin, but the serving mount's cap still applies —
-                // python always reads the serving mount).
-                const resolvedLimit = resolveLimit(
-                  cmdName,
-                  [],
-                  cmd.limit,
-                  context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
-                )
-                const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
-                // runWithTimeout abandons the promise, it cannot cancel
-                // it; the aborted signal lets a runtime kill what it
-                // spawned (python cancels the task instead). The ambient
-                // context.signal is a background job's kill channel, folded
-                // into the same wire. timeoutSeconds rides along so an
-                // engine that executes on the event loop (quickjs) can
-                // interrupt itself when the timer cannot fire.
-                const guard = cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
-                const runSignal = mergeSignals(guard?.signal, context.signal)
-                const runOpts =
-                  runSignal !== undefined
-                    ? {
-                        ...cmdOpts,
-                        signal: runSignal,
-                        ...(cmdTimeout !== null && cmdTimeout > 0
-                          ? { timeoutSeconds: cmdTimeout }
-                          : {}),
-                      }
-                    : cmdOpts
-                let result: CommandFnResult
-                try {
-                  result = await runWithTimeout(
-                    Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
-                    cmdTimeout,
-                    cmdName,
-                  )
-                } catch (err) {
-                  if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
-                  throw err
-                }
-                if (result !== null) {
-                  // A warm-cache redirect already resolved the origin
-                  // mount's cap (limitOverride); fold it as the
-                  // declared bound since the origin prefix is not ours.
-                  result[1].producer =
-                    context.limitOverride != null
-                      ? { command: cmdName, prefixes: [], declared: resolvedLimit }
-                      : { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null }
-                  return wrapMountStreams(result, mountPrefix)
-                }
-              }
-              return [null, new IOResult()]
-            },
-          ),
+      // What the command tier's mode guard reads: the write-command gate
+      // below admits a command when any shown subtree grants writes, and
+      // this binding is how each write the handler then makes is held to
+      // its own region's mode.
+      return runWithMountGate(this.prefix, this.mode, () =>
+        runWithMountPrefix(
+          mountPrefix,
+          () =>
+            runWithCacheManager(this.cacheManager, () =>
+              runWithRevisions(
+                this.revisions.size > 0 ? this.revisions : null,
+                async (): Promise<[ByteSource | null, IOResult]> => {
+                  // --help / --version short-circuit inside the handler
+                  // wrapper and never touch the backend, so a read-only mount
+                  // answers them like GNU instead of refusing them as writes.
+                  const infoOnly = flags.help === true || flags.version === true
+                  for (const cmd of handlers) {
+                    // strongestModeUnder, not effectiveMode: a mount whose
+                    // only writable region is a show entry still runs the
+                    // command, and the op door refuses per path. The
+                    // trailing newline is load-bearing: stderr accumulates
+                    // across a line, so two refusals in one list ran
+                    // together as `...at /ro/rm: read-only mount at /ro/`,
+                    // and the node table's twin of this refusal (a symlink
+                    // `rm`, rendered by shared.readOnlyError) concatenates
+                    // with it.
+                    if (
+                      cmd.write &&
+                      !infoOnly &&
+                      strongestModeUnder(this.prefix, this.mode) === MountMode.READ
+                    ) {
+                      return [
+                        null,
+                        new IOResult({
+                          exitCode: 1,
+                          stderr: new TextEncoder().encode(
+                            `${cmdName}: read-only mount at ${this.prefix}\n`,
+                          ),
+                        }),
+                      ]
+                    }
+                    // The dispatch-level guard only sees default limits
+                    // (the mount is unknown before routing), so the
+                    // mount-resolved timeout must also bound the command
+                    // body: eager commands do their work inside cmd.fn,
+                    // where the stream-consumption guard never runs.
+                    // limitOverride carries the origin mount's cap across
+                    // a warm-cache redirect; a null one is "no opinion" and
+                    // must not shadow the serving mount's own table (a
+                    // path-less command with cwd outside every mount resolves
+                    // no origin, but the serving mount's cap still applies —
+                    // python always reads the serving mount).
+                    const resolvedLimit = resolveLimit(
+                      cmdName,
+                      [],
+                      cmd.limit,
+                      context.limitOverride ?? this.commandLimits.get(cmdName) ?? null,
+                    )
+                    const cmdTimeout = resolvedLimit !== null ? resolvedLimit.timeoutSeconds : null
+                    // runWithTimeout abandons the promise, it cannot cancel
+                    // it; the aborted signal lets a runtime kill what it
+                    // spawned (python cancels the task instead). The ambient
+                    // context.signal is a background job's kill channel, folded
+                    // into the same wire. timeoutSeconds rides along so an
+                    // engine that executes on the event loop (quickjs) can
+                    // interrupt itself when the timer cannot fire.
+                    const guard =
+                      cmdTimeout !== null && cmdTimeout > 0 ? new AbortController() : null
+                    const runSignal = mergeSignals(guard?.signal, context.signal)
+                    const runOpts =
+                      runSignal !== undefined
+                        ? {
+                            ...cmdOpts,
+                            signal: runSignal,
+                            ...(cmdTimeout !== null && cmdTimeout > 0
+                              ? { timeoutSeconds: cmdTimeout }
+                              : {}),
+                          }
+                        : cmdOpts
+                    let result: CommandFnResult
+                    try {
+                      result = await runWithTimeout(
+                        Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
+                        cmdTimeout,
+                        cmdName,
+                      )
+                    } catch (err) {
+                      if (guard !== null && err instanceof CommandTimeoutError) guard.abort()
+                      throw err
+                    }
+                    if (result !== null) {
+                      // A warm-cache redirect already resolved the origin
+                      // mount's cap (limitOverride); fold it as the
+                      // declared bound since the origin prefix is not ours.
+                      result[1].producer =
+                        context.limitOverride != null
+                          ? { command: cmdName, prefixes: [], declared: resolvedLimit }
+                          : {
+                              command: cmdName,
+                              prefixes: [this.prefix],
+                              declared: cmd.limit ?? null,
+                            }
+                      return wrapMountStreams(result, mountPrefix, this.mountId, this.activity)
+                    }
+                  }
+                  return [null, new IOResult()]
+                },
+              ),
+            ),
+          this.mountId,
         ),
-      ),
-    )
+      )
+    })
   }
 
   async executeOp(
@@ -586,70 +649,92 @@ export class MountEntry {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
-    const filetype = getExtension(path)
-    const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
-    if (levels.length === 0) {
-      throw enotsup(this.resource.kind, opName, path)
-    }
-    // Per path, not per mount: a show entry can hold one subtree below
-    // `w` on a writable mount, or one writable region on a read mount.
-    // A rename mutates its destination too, so both endpoints answer,
-    // and it relocates whole subtrees in one call, so a read-only
-    // region below either endpoint refuses it too.
-    if (levels.some((o) => o.write)) {
-      if (effectivePathMode(path, this.prefix, this.mode) === MountMode.READ) {
-        throw erofsReadOnly(`mount ${this.prefix} is read-only`, path)
+    return this.use(async (): Promise<unknown> => {
+      const filetype = getExtension(path)
+      const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
+      if (levels.length === 0) {
+        throw enotsup(this.resource.kind, opName, path)
       }
-      const dst = kwargs.dst
-      if (
-        dst instanceof PathSpec &&
-        effectivePathMode(dst.virtual, this.prefix, this.mode) === MountMode.READ
-      ) {
-        throw erofsReadOnly(`mount ${this.prefix} is read-only`, dst.virtual)
-      }
-      if (SUBTREE_OPS.has(opName)) {
-        const endpoints = dst instanceof PathSpec ? [path, dst.virtual] : [path]
-        for (const endpoint of endpoints) {
-          const blame = readonlyBelow(endpoint, this.prefix, this.mode)
-          if (blame !== null) {
-            throw erofsReadOnly(`mount ${this.prefix} is read-only`, blame)
+      // Per path, not per mount: a show entry can hold one subtree below
+      // `w` on a writable mount, or one writable region on a read mount.
+      // A rename mutates its destination too, so both endpoints answer,
+      // and it relocates whole subtrees in one call, so a read-only
+      // region below either endpoint refuses it too.
+      if (levels.some((o) => o.write)) {
+        if (effectivePathMode(path, this.prefix, this.mode) === MountMode.READ) {
+          throw erofsReadOnly(`mount ${this.prefix} is read-only`, path)
+        }
+        const dst = kwargs.dst
+        if (
+          dst instanceof PathSpec &&
+          effectivePathMode(dst.virtual, this.prefix, this.mode) === MountMode.READ
+        ) {
+          throw erofsReadOnly(`mount ${this.prefix} is read-only`, dst.virtual)
+        }
+        if (SUBTREE_OPS.has(opName)) {
+          const endpoints = dst instanceof PathSpec ? [path, dst.virtual] : [path]
+          for (const endpoint of endpoints) {
+            const blame = readonlyBelow(endpoint, this.prefix, this.mode)
+            if (blame !== null) {
+              throw erofsReadOnly(`mount ${this.prefix} is read-only`, blame)
+            }
           }
         }
       }
-    }
-    const mountPrefix = rstripSlash(this.prefix)
-    const lastSlash = path.lastIndexOf('/')
-    const scope = new PathSpec({
-      virtual: path,
-      directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
-      resourcePath: mountKey(path, mountPrefix),
+      const mountPrefix = rstripSlash(this.prefix)
+      const lastSlash = path.lastIndexOf('/')
+      const scope = new PathSpec({
+        virtual: path,
+        directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
+        resourcePath: mountKey(path, mountPrefix),
+      })
+      const effectiveKwargs: OpKwargs = {
+        ...kwargs,
+        ...(kwargs.index === undefined && this.index !== undefined ? { index: this.index } : {}),
+        ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
+      }
+      const accessor = this.resource.accessor ?? NOOP_ACCESSOR
+      // Per-op caps are policy and fire at the op door (postOps); only
+      // the timeout stays here, bounding the backend call itself.
+      const opOverride = this.commandLimits.get(opName) ?? null
+      const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
+      return runWithMountPrefix(
+        mountPrefix,
+        () =>
+          runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
+            for (const op of levels) {
+              const result = await runWithTimeout(
+                Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
+                opTimeout,
+                opName,
+              )
+              if (result !== null && result !== undefined) {
+                return wrapOpStream(result, mountPrefix, this.mountId, this.activity)
+              }
+            }
+            return null
+          }),
+        this.mountId,
+      )
     })
-    const effectiveKwargs: OpKwargs = {
-      ...kwargs,
-      ...(kwargs.index === undefined && this.resource.index !== undefined
-        ? { index: this.resource.index }
-        : {}),
-      ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
-    }
-    const accessor = this.resource.accessor ?? NOOP_ACCESSOR
-    // Per-op caps are policy and fire at the op door (postOps); only
-    // the timeout stays here, bounding the backend call itself.
-    const opOverride = this.commandLimits.get(opName) ?? null
-    const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    return runWithMountPrefix(mountPrefix, () =>
-      runWithRevisions(this.revisions.size > 0 ? this.revisions : null, async () => {
-        for (const op of levels) {
-          const result = await runWithTimeout(
-            Promise.resolve(op.fn(accessor, scope, args, effectiveKwargs)),
-            opTimeout,
-            opName,
-          )
-          if (result !== null && result !== undefined) return result
-        }
-        return null
-      }),
-    )
   }
+}
+
+/** Preserve a streaming operation's recording owner after its dispatch frame exits. */
+export function wrapOpStream(
+  result: unknown,
+  mountPrefix: string,
+  mountId: string,
+  activity: ResourceActivity,
+): unknown {
+  if (result instanceof CachableAsyncIterator) {
+    result.wrapSource((source) => withMountPrefix(mountPrefix, source, mountId))
+    return activity.hold(result)
+  }
+  if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+    return activity.hold(withMountPrefix(mountPrefix, result as AsyncIterable<Uint8Array>, mountId))
+  }
+  return result
 }
 
 // Push `mountPrefix` back during lazy consumption of anything the command
@@ -660,6 +745,8 @@ export class MountEntry {
 function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountPrefix: string,
+  mountId: string,
+  activity: ResourceActivity,
 ): [ByteSource | null, IOResult] {
   const [stream, io] = result
   const seen = new Map<ByteSource, ByteSource>()
@@ -669,11 +756,12 @@ function wrapMountStreams(
     if (hit !== undefined) return hit
     let wrapped: ByteSource
     if (obj instanceof CachableAsyncIterator) {
-      obj.wrapSource((src) => withMountPrefix(mountPrefix, src))
+      obj.wrapSource((src) => withMountPrefix(mountPrefix, src, mountId))
       wrapped = obj
     } else {
-      wrapped = withMountPrefix(mountPrefix, obj)
+      wrapped = withMountPrefix(mountPrefix, obj, mountId)
     }
+    wrapped = activity.hold(wrapped)
     seen.set(obj, wrapped)
     return wrapped
   }

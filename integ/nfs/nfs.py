@@ -199,8 +199,8 @@ async def run_battery(result: dict[str, object]) -> None:
 
     manager = NFSManager()
     try:
-        whole = await track(manager, ws.ops, "/")
-        docs = await track(manager, ws.ops, "/docs")
+        whole = await track(manager, ws.fs, "/")
+        docs = await track(manager, ws.fs, "/docs")
         result["distinct_mounts"] = whole != docs
 
         _, out = await sh("cat", f"{whole}/a.txt")
@@ -248,7 +248,7 @@ async def run_battery(result: dict[str, object]) -> None:
         result["mtime_matches_clock"] = abs(stamp - time.time()) < 3600
 
         try:
-            await track(manager, ws.ops, "/dev", whole)
+            await track(manager, ws.fs, "/dev", whole)
             result["collision_rejected"] = False
         except ValueError:
             result["collision_rejected"] = True
@@ -276,7 +276,7 @@ async def run_sizeless(result: dict[str, object]) -> None:
 
     manager = NFSManager()
     try:
-        mnt = await track(manager, SizelessOps(ws.ops), "/")
+        mnt = await track(manager, SizelessOps(ws.fs), "/")
         _, out = await sh("cat", f"{mnt}/api.json")
         result["sizeless_reads_empty"] = out == ""
         code, out = await sh("stat", "-f", "%z", f"{mnt}/api.json")
@@ -314,7 +314,7 @@ async def run_bigfile(result: dict[str, object]) -> None:
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     manager = NFSManager()
     try:
-        mnt = await track(manager, ws.ops, "/")
+        mnt = await track(manager, ws.fs, "/")
         code, _ = await sh("cp", src, f"{mnt}/big.bin")
         result["bigfile_cp_in"] = code == 0
         code, _ = await sh("cp", f"{mnt}/big.bin", back)
@@ -331,7 +331,7 @@ async def run_bigfile(result: dict[str, object]) -> None:
     # agent surface and its output is capped by the post gate (a 1 MiB
     # file comes back truncated by design), while ops.read(raw=True)
     # answers the stored bytes themselves.
-    stored = await ws.ops.read("/big.bin", raw=True)
+    stored = await ws.fs.read("/big.bin", raw=True)
     result["bigfile_md5_persisted"] = hashlib.md5(stored).hexdigest() == want
 
 

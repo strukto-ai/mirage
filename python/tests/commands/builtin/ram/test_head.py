@@ -25,7 +25,7 @@ def workspace():
 @pytest.mark.asyncio
 async def test_head_default_n_10(workspace):
     body = b"".join(f"line{i}\n".encode() for i in range(1, 15))
-    await workspace.ops.write("/f.txt", body)
+    await workspace.fs.write("/f.txt", body)
     io = await workspace.execute("head /f.txt")
     assert io.exit_code == 0
     lines = io.stdout.decode().splitlines()
@@ -36,7 +36,7 @@ async def test_head_default_n_10(workspace):
 
 @pytest.mark.asyncio
 async def test_head_n_explicit(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\nc\nd\n")
+    await workspace.fs.write("/f.txt", b"a\nb\nc\nd\n")
     io = await workspace.execute("head -n 2 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"a\nb\n"
@@ -44,7 +44,7 @@ async def test_head_n_explicit(workspace):
 
 @pytest.mark.asyncio
 async def test_head_c_bytes(workspace):
-    await workspace.ops.write("/f.txt", b"hello world")
+    await workspace.fs.write("/f.txt", b"hello world")
     io = await workspace.execute("head -c 5 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello"
@@ -52,7 +52,7 @@ async def test_head_c_bytes(workspace):
 
 @pytest.mark.asyncio
 async def test_head_negative_n_excludes_last(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\nc\nd\n")
+    await workspace.fs.write("/f.txt", b"a\nb\nc\nd\n")
     io = await workspace.execute("head -n -1 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"a\nb\nc\n"
@@ -60,7 +60,7 @@ async def test_head_negative_n_excludes_last(workspace):
 
 @pytest.mark.asyncio
 async def test_head_n_larger_than_file(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\n")
+    await workspace.fs.write("/f.txt", b"a\nb\n")
     io = await workspace.execute("head -n 100 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"a\nb\n"
@@ -68,7 +68,7 @@ async def test_head_n_larger_than_file(workspace):
 
 @pytest.mark.asyncio
 async def test_head_no_trailing_newline(workspace):
-    await workspace.ops.write("/partial.txt", b"hello")
+    await workspace.fs.write("/partial.txt", b"hello")
     io = await workspace.execute("head /partial.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello"
@@ -77,8 +77,8 @@ async def test_head_no_trailing_newline(workspace):
 @pytest.mark.asyncio
 async def test_head_multi_file_emits_headers(workspace):
     """POSIX head with multiple files emits `==> name <==` headers."""
-    await workspace.ops.write("/a.txt", b"x\ny\n")
-    await workspace.ops.write("/b.txt", b"z\n")
+    await workspace.fs.write("/a.txt", b"x\ny\n")
+    await workspace.fs.write("/b.txt", b"z\n")
     io = await workspace.execute("head /a.txt /b.txt")
     assert io.exit_code == 0
     assert b"==> /a.txt <==\n" in io.stdout
@@ -89,7 +89,7 @@ async def test_head_multi_file_emits_headers(workspace):
 
 @pytest.mark.asyncio
 async def test_head_empty_file(workspace):
-    await workspace.ops.write("/empty.txt", b"")
+    await workspace.fs.write("/empty.txt", b"")
     io = await workspace.execute("head /empty.txt")
     assert io.exit_code == 0
     assert io.stdout == b""

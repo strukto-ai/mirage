@@ -202,16 +202,17 @@ export class GenericResource<A extends Accessor = Accessor>
     return Promise.resolve()
   }
 
-  // TypeScript cannot rebuild a mount from its state: `buildMountArgs`
-  // consults no registry and substitutes a RAMResource for anything it
-  // was not handed, so the bare `{type}` default would restore a custom
-  // backend as an empty directory. A GenericResource always holds a live
-  // accessor, so it always says this, which turns that silence into a
-  // refusal to load and makes `copy()` reuse this instance. A subclass
-  // that genuinely can restore itself overrides getState and drops the
-  // flag. Python needs none of this: its loader rebuilds the class from
-  // `resource_state.type` through its registry, which is why the field
-  // is inert there.
+  // The base cannot know a subclass's constructor, so by default a
+  // GenericResource cannot be rebuilt from its state and says so: both
+  // loaders then require the mount to be handed back live (`load`'s
+  // overrides; `copy()` does this itself). A subclass whose content is
+  // its own, the way RAMResource's is, overrides this and `loadState` to
+  // carry that content and drops the flag; registered under its name it
+  // rebuilds from a snapshot or a version with no override, and its
+  // content is what gets versioned. A subclass over a remote backend
+  // keeps the flag and versions through `supportsSnapshot` fingerprints
+  // instead: that content is the backend's, and a snapshot only pins
+  // what it observed.
   override getState(): ResourceStateBase {
     return { type: this.kind, needs_override: true }
   }

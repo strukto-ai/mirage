@@ -14,7 +14,7 @@
 
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { guessType } from '@struktoai/mirage-core/utils/filetype'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import {
   destError,
@@ -58,7 +58,8 @@ export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileSta
       size: file.size,
       modified,
       fingerprint: modified,
-      type: guessType(name),
+      type: FileType.FILE,
+      content: contentTypeForPath(name),
     })
   } catch (err) {
     if (!isNotFound(err) && !(err instanceof DOMException && err.name === 'TypeMismatchError')) {

@@ -21,10 +21,10 @@ from mirage.commands.errors import LimitExceededError
 from mirage.io import IOResult
 from mirage.policy import (CommandRule, ExecuteResultContext, OpsContext,
                            OpsResultContext, PolicyError)
-from mirage.policy.profile import SessionProfile
+from mirage.policy.profile import ProfilePolicy, SessionProfile
 from mirage.resource.ram import RAMResource
 from mirage.runtime.types import ScriptSource
-from mirage.types import Limit, MountMode, OnExceed
+from mirage.types import Limit, MountMode, OnExceed, Refusal
 
 from mirage.policy.profile import (  # isort: skip
     CommandsBlock, PathsBlock)
@@ -60,7 +60,7 @@ async def test_workspace_guards_refuse_before_backend_io():
     )
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"keep\n")
+        await ws.fs.write("/data/prod/x.txt", b"keep\n")
         result = await ws.execute("rm /data/prod/x.txt")
         assert result.exit_code == 1
         assert result.stderr == (b"rm: /data/prod/x.txt: "
@@ -84,8 +84,11 @@ async def test_policies_add_wins_over_runtime_placement():
         result = await ws.execute("python3 -c 'print(1)'")
         # A whole-command refusal is bash's "found but may not run".
         assert result.exit_code == 126
-        assert result.stderr == (
-            b"python3: policy denied: interpreters are off\n")
+        assert result.stderr == b"python3: Permission denied\n"
+        # The reason rides beside the GNU line, not inside it.
+        assert result.refusal == Refusal(kind="deny",
+                                         reason="interpreters are off",
+                                         policy="NoInterpreters")
     finally:
         await ws.close()
 
@@ -98,8 +101,7 @@ async def test_policies_constructor_param_accepts_instances():
     try:
         result = await ws.execute("python3 -c 'print(1)'")
         assert result.exit_code == 126
-        assert result.stderr == (
-            b"python3: policy denied: interpreters are off\n")
+        assert result.stderr == b"python3: Permission denied\n"
     finally:
         await ws.close()
 
@@ -122,7 +124,10 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
     try:
         result = await ws.execute("source /data/setup.sh")
         assert result.exit_code == 126
-        assert result.stderr == b"source: policy denied: disabled\n"
+        assert result.stderr == b"source: Permission denied\n"
+        assert result.refusal == Refusal(kind="deny",
+                                         reason="disabled",
+                                         policy="PermissionsPolicy")
         result = await ws.execute("touch /data/prod/x")
         assert result.exit_code == 1
         assert b"frozen" in result.stderr
@@ -165,7 +170,7 @@ class ReadOnlyProd(Policy):
 
 @pytest.mark.asyncio
 async def test_path_guards_hold_at_the_programmatic_door():
-    # ws.ops is the same seam FUSE comes through; a path-only guard
+    # ws.fs is the same seam FUSE comes through; a path-only guard
     # must refuse it, not just shell commands (#675).
     ws = Workspace(
         {"/data/": RAMResource()},
@@ -176,13 +181,13 @@ async def test_path_guards_hold_at_the_programmatic_door():
     )
     try:
         await ws.execute("mkdir -p /data/other")
-        await ws.ops.write("/data/other/ok.txt", b"fine\n")
+        await ws.fs.write("/data/other/ok.txt", b"fine\n")
         with pytest.raises(PermissionError) as excinfo:
-            await ws.ops.write("/data/prod/x.txt", b"nope\n")
+            await ws.fs.write("/data/prod/x.txt", b"nope\n")
         assert excinfo.value.errno == errno.EACCES
         assert "prod is protected" in str(excinfo.value)
         with pytest.raises(PermissionError):
-            await ws.ops.read("/data/prod/x.txt")
+            await ws.fs.read("/data/prod/x.txt")
     finally:
         await ws.close()
 
@@ -202,7 +207,7 @@ async def test_touch_on_an_existing_file_is_a_write_at_the_op_door():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"keep\n")
+        await ws.fs.write("/data/prod/x.txt", b"keep\n")
         ws.policies.add(ReadOnlyProd())
         result = await ws.execute("touch /data/prod/x.txt")
         assert result.exit_code != 0
@@ -220,9 +225,9 @@ async def test_post_ops_deny_still_records_the_completed_write():
         await ws.execute("mkdir -p /data/prod")
         ws.policies.add(SuppressProdWrites())
         with pytest.raises(PermissionError):
-            await ws.ops.write("/data/prod/x.txt", b"data\n")
-        assert any(r.op == "write" for r in ws.ops.records)
-        assert await ws.ops.read("/data/prod/x.txt") == b"data\n"
+            await ws.fs.write("/data/prod/x.txt", b"data\n")
+        assert any(r.op == "write" for r in ws.fs.records)
+        assert await ws.fs.read("/data/prod/x.txt") == b"data\n"
     finally:
         await ws.close()
 
@@ -243,12 +248,12 @@ async def test_post_ops_deny_records_the_bytes_a_denied_read_moved():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"0123456789")
-        ws.ops.records.clear()
+        await ws.fs.write("/data/prod/x.txt", b"0123456789")
+        ws.fs.records.clear()
         ws.policies.add(SuppressProdReads())
         with pytest.raises(PermissionError):
-            await ws.ops.read("/data/prod/x.txt")
-        reads = [r for r in ws.ops.records if r.op == "read"]
+            await ws.fs.read("/data/prod/x.txt")
+        reads = [r for r in ws.fs.records if r.op == "read"]
         assert len(reads) == 1
         assert reads[0].bytes == 10
     finally:
@@ -276,11 +281,11 @@ async def test_a_capped_read_records_what_the_backend_moved():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"0123456789")
-        ws.ops.records.clear()
+        await ws.fs.write("/data/prod/x.txt", b"0123456789")
+        ws.fs.records.clear()
         ws.policies.add(CapProdReads())
-        assert await ws.ops.read("/data/prod/x.txt") == b"012"
-        reads = [r for r in ws.ops.records if r.op == "read"]
+        assert await ws.fs.read("/data/prod/x.txt") == b"012"
+        reads = [r for r in ws.fs.records if r.op == "read"]
         assert [r.bytes for r in reads] == [10]
     finally:
         await ws.close()
@@ -294,18 +299,18 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
     ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        await ws.fs.write("/data/prod/x.txt", b"0123456789")
         await ws.apply_io(
             IOResult(reads={"/data/prod/x.txt": b"0123456789"},
                      cache=["/data/prod/x.txt"]))
-        ws.ops.records.clear()
+        ws.fs.records.clear()
         ws.policies.add(SuppressProdReads())
         with pytest.raises(PermissionError):
-            await ws.ops.read("/data/prod/x.txt")
-        rec = ws.ops.records[-1]
+            await ws.fs.read("/data/prod/x.txt")
+        rec = ws.fs.records[-1]
         assert rec.source == "ram"
         assert rec.is_cache is True
-        assert ws.ops.network_bytes == 0
+        assert ws.fs.network_bytes == 0
     finally:
         await ws.close()
 
@@ -331,14 +336,14 @@ async def test_a_hard_capped_read_records_what_the_backend_moved():
     ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"0123456789")
-        ws.ops.records.clear()
+        await ws.fs.write("/data/prod/x.txt", b"0123456789")
+        ws.fs.records.clear()
         ws.policies.add(HardCapProdReads())
         with pytest.raises(LimitExceededError):
-            await ws.ops.read("/data/prod/x.txt")
-        reads = [r for r in ws.ops.records if r.op == "read"]
+            await ws.fs.read("/data/prod/x.txt")
+        reads = [r for r in ws.fs.records if r.op == "read"]
         assert [(r.source, r.bytes) for r in reads] == [("s3", 10)]
-        assert ws.ops.network_bytes == 10
+        assert ws.fs.network_bytes == 10
     finally:
         await ws.close()
 
@@ -350,18 +355,18 @@ async def test_a_hard_capped_warm_read_is_not_network_traffic():
     ws = Workspace({"/data/": CachingRAM()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/x.txt", b"0123456789")
+        await ws.fs.write("/data/prod/x.txt", b"0123456789")
         await ws.apply_io(
             IOResult(reads={"/data/prod/x.txt": b"0123456789"},
                      cache=["/data/prod/x.txt"]))
-        ws.ops.records.clear()
+        ws.fs.records.clear()
         ws.policies.add(HardCapProdReads())
         with pytest.raises(LimitExceededError):
-            await ws.ops.read("/data/prod/x.txt")
-        rec = ws.ops.records[-1]
+            await ws.fs.read("/data/prod/x.txt")
+        rec = ws.fs.records[-1]
         assert rec.source == "ram"
         assert rec.is_cache is True
-        assert ws.ops.network_bytes == 0
+        assert ws.fs.network_bytes == 0
     finally:
         await ws.close()
 
@@ -384,14 +389,14 @@ async def test_a_committed_write_is_recorded_when_bookkeeping_fails():
     ws = Workspace({"/data/": ColdRemote()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        ws.ops.records.clear()
+        ws.fs.records.clear()
         ws.policies.add(BrokenPostOps())
         with pytest.raises(PolicyError):
-            await ws.ops.write("/data/prod/x.txt", b"123456")
-        assert await ws.ops.read("/data/prod/x.txt") == b"123456"
-        writes = [r for r in ws.ops.records if r.op == "write"]
+            await ws.fs.write("/data/prod/x.txt", b"123456")
+        assert await ws.fs.read("/data/prod/x.txt") == b"123456"
+        writes = [r for r in ws.fs.records if r.op == "write"]
         assert [(r.source, r.bytes) for r in writes] == [("s3", 6)]
-        assert ws.ops.network_bytes >= 6
+        assert ws.fs.network_bytes >= 6
     finally:
         await ws.close()
 
@@ -436,14 +441,14 @@ async def test_pre_ops_binds_op_doors_and_command_tier_io():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/secret.txt", b"sealed\n")
-        await ws.ops.write("/data/prod/keep.txt", b"keep\n")
+        await ws.fs.write("/data/secret.txt", b"sealed\n")
+        await ws.fs.write("/data/prod/keep.txt", b"keep\n")
         ws.policies.add(SealedPaths())
 
         # The doors hold: the ops facade, and a dispatcher-routed
         # redirect write.
         with pytest.raises(PermissionError):
-            await ws.ops.read("/data/secret.txt")
+            await ws.fs.read("/data/secret.txt")
         redirect = await ws.execute("echo hi > /data/prod/new.txt")
         assert redirect.exit_code != 0
 
@@ -471,8 +476,8 @@ async def test_pre_ops_holds_walks_and_lazy_readers():
     # stream) still answers through the wrap-time capture.
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
-        await ws.ops.write("/data/secret.txt", b"sealed\n")
-        await ws.ops.write("/data/ok.txt", b"has sealed word\n")
+        await ws.fs.write("/data/secret.txt", b"sealed\n")
+        await ws.fs.write("/data/ok.txt", b"has sealed word\n")
         ws.policies.add(SealedPaths())
 
         walked = await ws.execute("grep -r sealed /data")
@@ -499,7 +504,7 @@ async def test_pre_ops_denied_entries_still_list_and_stat():
     # what fails.
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
-        await ws.ops.write("/data/secret.txt", b"sealed\n")
+        await ws.fs.write("/data/secret.txt", b"sealed\n")
         ws.policies.add(SealedPaths())
         listing = await ws.execute("ls -l /data")
         assert listing.exit_code == 0
@@ -530,8 +535,8 @@ async def test_shell_rm_r_admits_through_pre_ops():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod/sub")
-        await ws.ops.write("/data/prod/a.txt", b"a\n")
-        await ws.ops.write("/data/prod/sub/b.txt", b"b\n")
+        await ws.fs.write("/data/prod/a.txt", b"a\n")
+        await ws.fs.write("/data/prod/sub/b.txt", b"b\n")
         rec = OpRecorder()
         ws.policies.add(rec)
         removed = await ws.execute("rm -r /data/prod")
@@ -544,7 +549,7 @@ async def test_shell_rm_r_admits_through_pre_ops():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/prod")
-        await ws.ops.write("/data/prod/a.txt", b"a\n")
+        await ws.fs.write("/data/prod/a.txt", b"a\n")
         ws.policies.add(SealedPaths())
         refused = await ws.execute("rm -r /data/prod")
         assert refused.exit_code != 0
@@ -562,7 +567,7 @@ async def test_find_delete_admits_each_deletion_exactly_once():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         await ws.execute("mkdir -p /data/d")
-        await ws.ops.write("/data/d/x.txt", b"x\n")
+        await ws.fs.write("/data/d/x.txt", b"x\n")
         rec = OpRecorder()
         ws.policies.add(rec)
         removed = await ws.execute("find /data/d -name x.txt -delete")
@@ -583,7 +588,7 @@ async def test_pre_ops_sees_the_session_on_the_command_tier():
     # both.
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
-        await ws.ops.write("/data/ok.txt", b"fine\n")
+        await ws.fs.write("/data/ok.txt", b"fine\n")
         rec = SessionRecorder()
         ws.policies.add(rec)
         assert (await ws.execute("cat /data/ok.txt")).exit_code == 0
@@ -627,7 +632,7 @@ async def test_user_limit_policy_caps_line_output():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         ws.policies.add(CapLines())
-        await ws.ops.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
+        await ws.fs.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
         r = await ws.execute("cat /data/big.txt")
         assert (await r.stdout_str()).count("\n") == 2
         assert "output truncated" in (await r.stderr_str())
@@ -637,13 +642,13 @@ async def test_user_limit_policy_caps_line_output():
 
 @pytest.mark.asyncio
 async def test_user_limit_policy_caps_op_reads():
-    # A post_ops Limit bounds the programmatic door too: ws.ops (and
+    # A post_ops Limit bounds the programmatic door too: ws.fs (and
     # FUSE behind it) serve capped bytes.
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         ws.policies.add(CapReadBytes())
-        await ws.ops.write("/data/f.txt", b"hello world")
-        assert await ws.ops.read("/data/f.txt") == b"hell"
+        await ws.fs.write("/data/f.txt", b"hello world")
+        assert await ws.fs.read("/data/f.txt") == b"hell"
     finally:
         await ws.close()
 
@@ -684,7 +689,7 @@ async def test_two_limit_policies_merge_to_the_tightest_end_to_end():
     try:
         ws.policies.add(CapLines())
         ws.policies.add(SuppressNothingCapThree())
-        await ws.ops.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
+        await ws.fs.write("/data/big.txt", b"1\n2\n3\n4\n5\n")
         r = await ws.execute("cat /data/big.txt")
         # CapLines says 2, SuppressNothingCapThree says 3: tightest wins.
         assert (await r.stdout_str()).count("\n") == 2
@@ -705,7 +710,7 @@ async def test_error_mode_limit_fails_the_line():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
         ws.policies.add(CapBytesHard())
-        await ws.ops.write("/data/f.txt", b"hello world\n")
+        await ws.fs.write("/data/f.txt", b"hello world\n")
         r = await ws.execute("cat /data/f.txt")
         assert r.exit_code == 1
         assert r.stdout is None or await r.stdout_str() == ""
@@ -724,9 +729,9 @@ async def test_a_post_ops_deny_beats_a_limit():
     try:
         ws.policies.add(CapReadBytes())
         ws.policies.add(DenyReads())
-        await ws.ops.write("/data/f.txt", b"hello world")
+        await ws.fs.write("/data/f.txt", b"hello world")
         with pytest.raises(PermissionError) as excinfo:
-            await ws.ops.read("/data/f.txt")
+            await ws.fs.read("/data/f.txt")
         assert "reads are suppressed" in str(excinfo.value)
     finally:
         await ws.close()
@@ -740,7 +745,10 @@ async def test_a_raising_post_execute_policy_fails_the_line_closed():
         r = await ws.execute("echo hi")
         assert r.exit_code == 126
         err = await r.stderr_str()
-        assert err == "echo: policy denied: policy Boom failed: boom\n"
+        assert err == "echo: Permission denied\n"
+        assert r.refusal == Refusal(kind="failed",
+                                    reason="Boom failed",
+                                    policy="Boom")
         assert r.stdout is None or await r.stdout_str() == ""
     finally:
         await ws.close()
@@ -754,7 +762,7 @@ async def test_post_execute_sees_the_rightmost_producer():
     try:
         spy = SeeProducer()
         ws.policies.add(spy)
-        await ws.ops.write("/data/f.txt", b"a\nb\n")
+        await ws.fs.write("/data/f.txt", b"a\nb\n")
         await ws.execute("cat /data/f.txt | wc -l")
         await ws.execute("cat /data/f.txt ; head -n 1 /data/f.txt")
         await ws.execute("false || cat /data/f.txt")
@@ -775,8 +783,8 @@ async def test_profile_hides_bind_every_session_including_the_default():
                                                             "*.key"))))
     try:
         await ws.execute("mkdir -p /data/finance /data/pub")
-        await ws.ops.write("/data/pub/a.txt", b"a\n")
-        await ws.ops.write("/data/pub/b.key", b"k\n")
+        await ws.fs.write("/data/pub/a.txt", b"a\n")
+        await ws.fs.write("/data/pub/b.key", b"k\n")
         # The default session cannot see the bound hides ...
         listing = await ws.execute("ls /data /data/pub")
         assert b"finance" not in listing.stdout
@@ -817,11 +825,11 @@ async def test_a_mount_sections_hides_are_written_in_full():
         })
     try:
         await ws.execute("mkdir -p /repo/certs /other")
-        await ws.ops.write("/repo/.env", b"S=1\n")
-        await ws.ops.write("/repo/certs/k.pem", b"pem\n")
-        await ws.ops.write("/repo/README", b"r\n")
-        await ws.ops.write("/other/.env", b"visible\n")
-        await ws.ops.write("/other/x.pem", b"visible\n")
+        await ws.fs.write("/repo/.env", b"S=1\n")
+        await ws.fs.write("/repo/certs/k.pem", b"pem\n")
+        await ws.fs.write("/repo/README", b"r\n")
+        await ws.fs.write("/other/.env", b"visible\n")
+        await ws.fs.write("/other/x.pem", b"visible\n")
         listing = await ws.execute("ls -a /repo /repo/certs /other")
         out = listing.stdout.decode()
         # The section reaches only under its own root, so the same two
@@ -850,41 +858,55 @@ async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
     try:
         result = await ws.execute("shred /data/x")
         assert result.exit_code == 126
-        assert result.stderr == b"shred: policy denied: denied by policy\n"
+        assert result.stderr == b"shred: Permission denied\n"
     finally:
         await ws.close()
 
 
 # A per-command judge: deny cat under /data/sealed/ with a computed
-# reason, take shred to the approval door, stay silent otherwise.
+# reason, take shred to the approval door, stay silent otherwise. A
+# policy defines the hook it answers at, and answers with return.
 JUDGE = """\
-c = ctx['command']
-hit = False
-for p in c['paths']:
-    if p.startswith('/data/sealed/'):
-        hit = True
-verdict = None
-if c['name'] == 'cat' and hit:
-    verdict = {'deny': 'sealed by ' + ctx['profile']}
-if c['name'] == 'shred':
-    verdict = {'ask': 'sign-off'}
-verdict
+def pre_command(ctx):
+    c = ctx['command']
+    for p in c['paths']:
+        if c['name'] == 'cat' and p.startswith('/data/sealed/'):
+            return {'deny': 'sealed by ' + ctx['profile']}
+    if c['name'] == 'shred':
+        return {'ask': 'sign-off'}
+    return None
+"""
+
+# A judge that reads what the operand holds, not what it is called:
+# the shape a content policy takes when it is a program.
+READER = """\
+def pre_command(ctx):
+    for p in ctx['command']['paths']:
+        try:
+            body = open(p).read()
+        except OSError:
+            continue
+        if 'payload' in body:
+            return {'ask': 'sign-off on payload'}
+    return None
 """
 
 
 def _scripted(source: str = JUDGE,
               runtime: str = "monty") -> dict[str, dict[str, object]]:
-    """One scripted profile named release: the per-command program and
-    nothing else, so what runs is purely the script's decision.
+    """One profile named release with a policy and nothing else, so
+    what runs is purely the policy's decision.
 
     Args:
-        source (str): the program evaluated per command.
+        source (str): the policy program called per command.
         runtime (str): the engine it runs on.
     """
     return {
         "release": {
-            "script": ScriptSource(source),
-            "runtime": runtime,
+            "policy": {
+                "script": ScriptSource(source),
+                "runtime": runtime,
+            },
         }
     }
 
@@ -900,7 +922,7 @@ async def test_a_profile_script_judges_each_command():
         assert (await ws.execute("echo hi", session_id="s")).exit_code == 0
         denied = await ws.execute("cat /data/sealed/k", session_id="s")
         assert denied.exit_code == 126
-        assert denied.stderr == b"cat: policy denied: sealed by release\n"
+        assert denied.stderr == b"cat: Permission denied\n"
     finally:
         await ws.close()
 
@@ -916,7 +938,7 @@ async def test_the_script_reads_resolved_paths_not_typed_words():
         ws.create_session("s", profile="release")
         denied = await ws.execute("cd /data && cat sealed/k", session_id="s")
         assert denied.exit_code == 126
-        assert denied.stderr == b"cat: policy denied: sealed by release\n"
+        assert denied.stderr == b"cat: Permission denied\n"
     finally:
         await ws.close()
 
@@ -951,7 +973,7 @@ async def test_a_document_may_ride_beside_the_script():
         assert hidden.exit_code == 127
         denied = await ws.execute("cat /data/sealed/k", session_id="s")
         assert denied.exit_code == 126
-        assert denied.stderr == b"cat: policy denied: sealed by release\n"
+        assert denied.stderr == b"cat: Permission denied\n"
     finally:
         await ws.close()
 
@@ -966,7 +988,38 @@ async def test_an_ask_it_computed_takes_the_approval_door():
         held = await ws.execute("shred /data/x", session_id="s")
         assert held.exit_code == 126
         assert held.stderr is not None
-        assert held.stderr.startswith(b"shred: requires approval: sign-off")
+        assert held.stderr == b"shred: Permission denied\n"
+        assert held.refusal is not None
+        assert (held.refusal.kind, held.refusal.reason) == ("pending",
+                                                            "sign-off")
+        assert held.refusal.ask_id
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_script_reads_what_the_line_names():
+    # Content, not names: the script opens each operand through the
+    # same door an agent's program would, so it can ask about what a
+    # file holds. A directory operand is not its business, and a file
+    # without the marker runs.
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles=_scripted(READER))
+    try:
+        await ws.execute("mkdir -p /data/in && "
+                         "printf 'subject: invoice\\n\\na payload\\n' "
+                         "> /data/in/mail.txt && "
+                         "echo plain > /data/in/note.txt")
+        ws.create_session("s", profile="release")
+        held = await ws.execute("cat /data/in/mail.txt", session_id="s")
+        assert held.exit_code == 126
+        assert held.refusal is not None
+        assert (held.refusal.kind,
+                held.refusal.reason) == ("pending", "sign-off on payload")
+        plain = await ws.execute("cat /data/in/note.txt", session_id="s")
+        assert plain.exit_code == 0
+        assert (await ws.execute("ls /data/in", session_id="s")).exit_code == 0
     finally:
         await ws.close()
 
@@ -996,7 +1049,7 @@ async def test_a_scripted_default_profile_shapes_the_default_session():
         assert (await ws.execute("echo hi")).exit_code == 0
         denied = await ws.execute("cat /data/sealed/k")
         assert denied.exit_code == 126
-        assert denied.stderr == b"cat: policy denied: sealed by release\n"
+        assert denied.stderr == b"cat: Permission denied\n"
     finally:
         await ws.close()
 
@@ -1017,7 +1070,7 @@ async def test_a_profile_script_runs_in_a_world_with_no_evaluator():
         ws.create_session("s", profile="release")
         denied = await ws.execute("cat /data/sealed/k", session_id="s")
         assert denied.exit_code == 126
-        assert denied.stderr == b"cat: policy denied: sealed by release\n"
+        assert denied.stderr == b"cat: Permission denied\n"
     finally:
         await ws.close()
 
@@ -1026,15 +1079,18 @@ async def test_a_profile_script_runs_in_a_world_with_no_evaluator():
 async def test_a_broken_script_fails_closed_per_command():
     # Silence on failure would run exactly the commands the script
     # existed to judge.
-    ws = Workspace({"/data/": RAMResource()},
-                   mode=MountMode.WRITE,
-                   profiles=_scripted(source="raise ValueError('boom')"))
+    ws = Workspace(
+        {"/data/": RAMResource()},
+        mode=MountMode.WRITE,
+        profiles=_scripted(
+            source="def pre_command(ctx):\n    raise ValueError('boom')"))
     try:
         ws.create_session("s", profile="release")
         refused = await ws.execute("echo hi", session_id="s")
         assert refused.exit_code == 126
-        assert refused.stderr is not None
-        assert b"profile 'release' script failed" in refused.stderr
+        assert refused.stderr == b"echo: Permission denied\n"
+        assert refused.refusal is not None
+        assert "profile 'release' policy failed" in refused.refusal.reason
         assert (await ws.execute("echo hi")).exit_code == 0
     finally:
         await ws.close()
@@ -1049,29 +1105,168 @@ async def test_an_engine_that_cannot_evaluate_fails_closed():
         ws.create_session("s", profile="release")
         refused = await ws.execute("echo hi", session_id="s")
         assert refused.exit_code == 126
-        assert refused.stderr is not None
-        assert b"cannot evaluate one" in refused.stderr
+        assert refused.stderr == b"echo: Permission denied\n"
+        assert refused.refusal is not None
+        assert "cannot evaluate one" in refused.refusal.reason
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_profile_script_states_its_runtime():
-    with pytest.raises(ValueError, match="set runtime beside script"):
+async def test_a_profile_policy_states_its_runtime():
+    with pytest.raises(ValueError, match="runtime"):
+        Workspace(
+            {"/data/": RAMResource()},
+            mode=MountMode.WRITE,
+            profiles={"release": {
+                "policy": {
+                    "script": ScriptSource(JUDGE)
+                }
+            }})
+
+
+def test_the_old_script_and_runtime_keys_are_told_the_new_block():
+    # Shipped first as `script` with `runtime` beside it, a word for
+    # what the file is rather than what it does and an engine that read
+    # as the profile's own; the refusal says where they went.
+    with pytest.raises(ValueError, match="now one policy block"):
         Workspace({"/data/": RAMResource()},
                   mode=MountMode.WRITE,
-                  profiles={"release": {
-                      "script": ScriptSource(JUDGE)
-                  }})
+                  profiles={
+                      "release": {
+                          "script": ScriptSource(JUDGE),
+                          "runtime": "monty",
+                      }
+                  })
 
 
 @pytest.mark.asyncio
-async def test_an_inline_document_may_not_add_a_script():
+async def test_a_policy_defining_no_hook_fails_closed():
+    # A verdict as a bare last expression was the old contract; a policy
+    # defines the hooks it answers at, and a program defining none is
+    # refused at every door rather than read for a value it never meant.
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles=_scripted(source="None"))
+    try:
+        ws.create_session("s", profile="release")
+        refused = await ws.execute("echo hi", session_id="s")
+        assert refused.exit_code == 126
+        assert refused.refusal is not None
+        assert refused.refusal.reason == (
+            "profile 'release' policy defines no hook: pre_command, pre_ops "
+            "or pre_session")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_inline_document_may_not_add_a_policy():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     try:
-        with pytest.raises(PolicyError, match="not a script"):
-            ws.create_session("s",
-                              permissions=SessionProfile(
-                                  script=ScriptSource(JUDGE), runtime="monty"))
+        with pytest.raises(PolicyError, match="not a policy"):
+            ws.create_session(
+                "s",
+                permissions=SessionProfile(policy=ProfilePolicy(
+                    script=ScriptSource(JUDGE), runtime="monty")))
+    finally:
+        await ws.close()
+
+
+# A program at the op and session doors and nowhere else: writes under
+# /data/frozen are refused, so is an AWS_* variable, and a command is
+# never judged.
+GATES = """\
+def pre_ops(ctx):
+    op = ctx['op']
+    if op['write'] and op['path'].startswith('/data/frozen/'):
+        return {'deny': 'frozen by ' + ctx['profile']}
+    return None
+
+def pre_session(ctx):
+    if ctx['write']['key'].startswith('AWS_'):
+        return {'deny': 'credentials are set by the operator'}
+    return None
+"""
+
+# The content judge with an op hook beside it: its own reads have to
+# pass the door its pre_ops guards.
+READER_AND_GATE = READER + """
+def pre_ops(ctx):
+    op = ctx['op']
+    if op['write'] and op['path'].startswith('/data/frozen/'):
+        return {'deny': 'frozen'}
+    return None
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_profile_policy_judges_the_op_door():
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles=_scripted(GATES))
+    try:
+        await ws.execute("mkdir -p /data/frozen && echo keep > /data/frozen/k")
+        ws.create_session("s", profile="release")
+        # No command hook, so a command is silence; a read is not a write.
+        assert (await ws.execute("echo hi", session_id="s")).exit_code == 0
+        read = await ws.execute("cat /data/frozen/k", session_id="s")
+        assert read.exit_code == 0
+        assert read.stdout == b"keep\n"
+        refused = await ws.execute("echo x > /data/frozen/f", session_id="s")
+        assert refused.exit_code == 1
+        assert b"Permission denied" in refused.stderr
+        removed = await ws.execute("rm /data/frozen/k", session_id="s")
+        assert removed.exit_code == 1
+        assert b"Permission denied" in removed.stderr
+        assert (await ws.execute("cat /data/frozen/k")).stdout == b"keep\n"
+        # Another session is not judged by it.
+        assert (await ws.execute("echo x > /data/frozen/f")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_policy_judges_the_session_door():
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles=_scripted(GATES))
+    try:
+        ws.create_session("s", profile="release")
+        refused = await ws.execute("export AWS_SECRET=x", session_id="s")
+        assert refused.exit_code == 1
+        assert refused.stderr == b"credentials are set by the operator\n"
+        landed = await ws.execute("export SAFE=1 && echo $SAFE",
+                                  session_id="s")
+        assert landed.exit_code == 0
+        assert landed.stdout == b"1\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_policys_own_read_passes_the_door_its_op_hook_guards():
+    # pre_command opens the operand through the workspace's door while
+    # pre_ops stands at it: the read is the policy's own and is let
+    # through rather than re-entering the evaluation waiting on it, so
+    # the content verdict lands and the op hook still refuses a write.
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   profiles=_scripted(READER_AND_GATE))
+    try:
+        await ws.execute("mkdir -p /data/in && printf 'subject: invoice\\n\\n"
+                         "a payload\\n' > /data/in/mail.txt && "
+                         "echo plain > /data/in/note.txt")
+        ws.create_session("s", profile="release")
+        held = await ws.execute("cat /data/in/mail.txt", session_id="s")
+        assert held.exit_code == 126
+        assert held.refusal is not None
+        assert held.refusal.kind == "pending"
+        assert held.refusal.reason == "sign-off on payload"
+        assert (await ws.execute("cat /data/in/note.txt",
+                                 session_id="s")).exit_code == 0
+        refused = await ws.execute("echo x > /data/frozen/f", session_id="s")
+        assert refused.exit_code == 1
+        assert b"Permission denied" in refused.stderr
     finally:
         await ws.close()

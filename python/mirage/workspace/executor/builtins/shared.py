@@ -197,8 +197,8 @@ async def expand_operands(
             str(item))
         if spec.pattern:
             mount = namespace.mount_for(spec.virtual)
-            expanded = await mount.resource.resolve_glob(
-                [spec], mount.prefix.rstrip("/"))
+            expanded = await mount.expand_glob([spec],
+                                               mount.prefix.rstrip("/"))
             out.extend(p for p in expanded if isinstance(p, PathSpec))
             continue
         out.append(spec)

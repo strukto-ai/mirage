@@ -145,7 +145,8 @@ async def expand_argv(
             # program hands the words after it to that program, and
             # POSIX's own `--` is how that is said.
             extra: list[ValueType | None] = ["str"] * (consumed - 1)
-            word_kinds = extra + spec_word_kinds(spec, expanded[consumed:])
+            word_kinds = extra + spec_word_kinds(spec, expanded[consumed:],
+                                                 name)
             bases = spec_word_bases(spec, expanded[consumed:], session.cwd)
             if bases is not None:
                 head: list[str | None] = [None] * (consumed - 1)

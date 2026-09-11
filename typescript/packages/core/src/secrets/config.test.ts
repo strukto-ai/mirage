@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { EnvVarSchema, SourceBlockSchema } from './config.ts'
+import { EnvVarSchema, SecretSourceSchema } from './config.ts'
 
 describe('EnvVarSchema', () => {
   it('parses a literal entry with defaults', () => {
@@ -41,8 +41,10 @@ describe('EnvVarSchema', () => {
     expect(() => EnvVarSchema.parse({})).toThrowError(/needs 'value' or 'from'/)
   })
 
-  it('refuses readonly on a managed entry', () => {
-    expect(() => EnvVarSchema.parse({ from: 'env', readonly: true })).toThrowError(/readonly/)
+  it('allows readonly on a managed entry', () => {
+    const entry = EnvVarSchema.parse({ from: 'env', readonly: true })
+    expect(entry.readonly).toBe(true)
+    expect(entry.from).toBe('env')
   })
 
   it('refuses export:false on a managed entry', () => {
@@ -59,12 +61,12 @@ describe('EnvVarSchema', () => {
   })
 })
 
-describe('SourceBlockSchema', () => {
+describe('SecretSourceSchema', () => {
   it('keeps a __proto__ config key as an own property', () => {
     // Keyed assignment would run the prototype setter and the key
     // would never reach the source's own model; python's dict passes
     // it through like any other.
-    const block = SourceBlockSchema.parse({
+    const block = SecretSourceSchema.parse({
       source: 'demo',
       config: Object.fromEntries([['__proto__', 'kept']]),
     })
@@ -73,7 +75,7 @@ describe('SourceBlockSchema', () => {
   })
 
   it('takes a type and a config', () => {
-    const block = SourceBlockSchema.parse({
+    const block = SecretSourceSchema.parse({
       source: 'aws-sm',
       config: { region: 'us-east-2' },
     })
@@ -82,7 +84,7 @@ describe('SourceBlockSchema', () => {
   })
 
   it('reads a config value carrying from as a pointer', () => {
-    const block = SourceBlockSchema.parse({
+    const block = SecretSourceSchema.parse({
       source: 'aws-sm',
       config: { aws_access_key_id: { from: 'env', key: 'KEY_ID' } },
     })
@@ -90,7 +92,7 @@ describe('SourceBlockSchema', () => {
   })
 
   it('leaves a config value without from a literal', () => {
-    const block = SourceBlockSchema.parse({
+    const block = SecretSourceSchema.parse({
       source: 'aws-sm',
       config: { tags: { team: 'infra' } },
     })
@@ -98,17 +100,20 @@ describe('SourceBlockSchema', () => {
   })
 
   it('defaults the config to empty', () => {
-    expect(SourceBlockSchema.parse({ source: 'env' }).config).toEqual({})
+    expect(SecretSourceSchema.parse({ source: 'env' }).config).toEqual({})
   })
 
   it.each(['1password', 'aws-sm', 'auth0'])('refuses %s as a config source', (source) => {
     expect(() =>
-      SourceBlockSchema.parse({ source: 'aws-sm', config: { region: { from: source, key: 'r' } } }),
+      SecretSourceSchema.parse({
+        source: 'aws-sm',
+        config: { region: { from: source, key: 'r' } },
+      }),
     ).toThrowError(/needs no config of its own/)
   })
 
   it.each(['env', 'dotenv'])('accepts %s as a config source', (source) => {
-    const block = SourceBlockSchema.parse({
+    const block = SecretSourceSchema.parse({
       source: 'aws-sm',
       config: { region: { from: source, key: 'r' } },
     })
@@ -117,7 +122,7 @@ describe('SourceBlockSchema', () => {
 
   it('refuses an unknown key on a pointer', () => {
     expect(() =>
-      SourceBlockSchema.parse({
+      SecretSourceSchema.parse({
         source: 'aws-sm',
         config: { region: { from: 'env', key: 'r', sticky: true } },
       }),
@@ -125,6 +130,6 @@ describe('SourceBlockSchema', () => {
   })
 
   it('refuses an unknown key on the block', () => {
-    expect(() => SourceBlockSchema.parse({ source: 'env', account: 'x' })).toThrowError()
+    expect(() => SecretSourceSchema.parse({ source: 'env', account: 'x' })).toThrowError()
   })
 })

@@ -27,7 +27,7 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { GmailAccessor } from '../../accessor/gmail.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -97,11 +97,23 @@ describe('gmail core find', () => {
         return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
       }
       if (spec.virtual === '/INBOX/2026-06-01/Hello__m1/report.pdf') {
-        return Promise.resolve(new FileStat({ name: 'report.pdf', size: 3, type: FileType.PDF }))
+        return Promise.resolve(
+          new FileStat({
+            name: 'report.pdf',
+            size: 3,
+            type: FileType.FILE,
+            content: ContentType.PDF,
+          }),
+        )
       }
       if (spec.virtual === '/INBOX/2026-06-01/Hello__m1.gmail.json') {
         return Promise.resolve(
-          new FileStat({ name: 'Hello__m1.gmail.json', size: 5, type: FileType.JSON }),
+          new FileStat({
+            name: 'Hello__m1.gmail.json',
+            size: 5,
+            type: FileType.FILE,
+            content: ContentType.JSON,
+          }),
         )
       }
       return Promise.reject(enoent(spec.virtual))

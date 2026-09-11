@@ -13,9 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/resource/s3/config'
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const GridFSConfigSchema = z.object({
   uri: secretStr(),
@@ -39,7 +43,7 @@ export function redactConfig(config: GridFSConfig): GridFSConfigRedacted {
  * normalize the key prefix the way the accessor expects.
  */
 export function normalizeGridFSConfig(input: Record<string, unknown>): GridFSConfig {
-  const norm = normalizeFields(input) as unknown as GridFSConfig
+  const norm = parseConfigWithSchema(GridFSConfigSchema, input)
   const prefix = normalizeKeyPrefix(norm.keyPrefix)
   if (prefix !== undefined) {
     norm.keyPrefix = prefix

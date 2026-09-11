@@ -114,11 +114,18 @@ export async function handleCommandBuiltin(
   const savedFn = session.functions[innerName]
   // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
   delete session.functions[innerName]
+  // An alias is masked the same way: bash expands an alias only as a
+  // command's first word, which `command` is, so `command cat` runs the
+  // program past `alias cat=...` too.
+  const savedAlias = session.aliases[innerName]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.aliases[innerName]
   try {
     const io = await executeFn(inner, { sessionId: session.sessionId, stdin })
     return [io.stdout, io, new ExecutionNode({ command: 'command', exitCode: io.exitCode })]
   } finally {
     if (savedFn !== undefined) session.functions[innerName] = savedFn
+    if (savedAlias !== undefined) session.aliases[innerName] = savedAlias
   }
 }
 

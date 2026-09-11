@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-node",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -40,13 +40,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -145,7 +150,6 @@
     "pg": "^8.13.0",
     "redis": "^5.0.0",
     "ssh2": "^1.16.0",
-    "tsup": "^8.5.0",
     "typescript": "^6.0.0",
     "vitest": "^3.2.6"
   }

@@ -1121,6 +1121,1416 @@
     "ssh",
     "trello"
   ],
+  "configs": {
+    "aliyun": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "backblaze": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "box": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "content_search": {
+          "required": false
+        },
+        "endpoint": {
+          "required": false
+        },
+        "enterprise_id": {
+          "required": false
+        },
+        "on_refresh_token_rotated": {
+          "required": false
+        },
+        "refresh_fn": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        },
+        "root_folder_id": {
+          "required": false
+        }
+      }
+    },
+    "ceph": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": true
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "chroma": {
+      "fields": {
+        "chunk_index_field": {
+          "required": false
+        },
+        "collection_name": {
+          "required": true
+        },
+        "host": {
+          "required": false
+        },
+        "port": {
+          "required": false
+        },
+        "slug_field": {
+          "required": false
+        },
+        "ssl": {
+          "required": false
+        }
+      }
+    },
+    "databricks_volume": {
+      "fields": {
+        "catalog": {
+          "required": true
+        },
+        "host": {
+          "required": false
+        },
+        "profile": {
+          "required": false
+        },
+        "root_path": {
+          "required": false
+        },
+        "schema": {
+          "required": true
+        },
+        "timeout": {
+          "required": false
+        },
+        "token": {
+          "required": false
+        },
+        "volume": {
+          "required": true
+        }
+      }
+    },
+    "dify": {
+      "fields": {
+        "api_key": {
+          "required": true
+        },
+        "base_url": {
+          "required": true
+        },
+        "dataset_id": {
+          "required": true
+        },
+        "max_concurrency": {
+          "required": false
+        },
+        "request_timeout": {
+          "required": false
+        },
+        "retry_attempts": {
+          "required": false
+        },
+        "retry_max_delay": {
+          "required": false
+        },
+        "slug_metadata_name": {
+          "required": false
+        }
+      }
+    },
+    "digitalocean": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "discord": {
+      "fields": {
+        "base_url": {
+          "required": false
+        },
+        "token": {
+          "required": true
+        }
+      }
+    },
+    "disk": null,
+    "dropbox": {
+      "fields": {
+        "client_id": {
+          "required": true
+        },
+        "client_secret": {
+          "required": true
+        },
+        "content_search": {
+          "required": false
+        },
+        "endpoint": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": true
+        },
+        "root_path": {
+          "required": false
+        }
+      }
+    },
+    "email": {
+      "fields": {
+        "imap_host": {
+          "required": true
+        },
+        "imap_port": {
+          "required": false
+        },
+        "max_messages": {
+          "required": false
+        },
+        "password": {
+          "required": true
+        },
+        "save_copy": {
+          "required": false
+        },
+        "sent_folder": {
+          "required": false
+        },
+        "smtp_host": {
+          "required": true
+        },
+        "smtp_port": {
+          "required": false
+        },
+        "use_ssl": {
+          "required": false
+        },
+        "username": {
+          "required": true
+        }
+      }
+    },
+    "gcal": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "min_access_role": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        },
+        "time_zone": {
+          "required": false
+        },
+        "today": {
+          "required": false
+        }
+      }
+    },
+    "gcs": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "gdocs": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        }
+      }
+    },
+    "gdrive": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        }
+      }
+    },
+    "github": {
+      "fields": {
+        "base_url": {
+          "required": false
+        },
+        "owner": {
+          "required": false
+        },
+        "ref": {
+          "required": false
+        },
+        "repo": {
+          "required": false
+        },
+        "token": {
+          "required": true
+        }
+      }
+    },
+    "gmail": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        }
+      }
+    },
+    "gridfs": {
+      "fields": {
+        "bucket": {
+          "required": false
+        },
+        "chunk_size_bytes": {
+          "required": false
+        },
+        "database": {
+          "required": true
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "uri": {
+          "required": true
+        }
+      }
+    },
+    "gsheets": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        }
+      }
+    },
+    "gslides": {
+      "fields": {
+        "access_token": {
+          "required": false
+        },
+        "api_base": {
+          "required": false
+        },
+        "client_id": {
+          "required": false
+        },
+        "client_secret": {
+          "required": false
+        },
+        "folder_id": {
+          "required": false
+        },
+        "refresh_token": {
+          "required": false
+        }
+      }
+    },
+    "hf_buckets": {
+      "fields": {
+        "bucket": {
+          "required": true
+        },
+        "endpoint": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "token": {
+          "required": false
+        }
+      }
+    },
+    "hf_datasets": {
+      "fields": {
+        "endpoint": {
+          "required": false
+        },
+        "expand_commits": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "repo_id": {
+          "required": true
+        },
+        "revision": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "token": {
+          "required": false
+        }
+      }
+    },
+    "hf_models": {
+      "fields": {
+        "endpoint": {
+          "required": false
+        },
+        "expand_commits": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "repo_id": {
+          "required": true
+        },
+        "revision": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "token": {
+          "required": false
+        }
+      }
+    },
+    "hf_spaces": {
+      "fields": {
+        "endpoint": {
+          "required": false
+        },
+        "expand_commits": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "repo_id": {
+          "required": true
+        },
+        "revision": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "token": {
+          "required": false
+        }
+      }
+    },
+    "jaeger": {
+      "fields": {
+        "default_from_timestamp": {
+          "required": false
+        },
+        "default_to_timestamp": {
+          "required": false
+        },
+        "default_trace_limit": {
+          "required": false
+        },
+        "host": {
+          "required": false
+        },
+        "request_timeout": {
+          "required": false
+        }
+      }
+    },
+    "lancedb": {
+      "fields": {
+        "api_key": {
+          "required": false
+        },
+        "blob_column": {
+          "required": false
+        },
+        "blob_ext": {
+          "required": false
+        },
+        "group_by": {
+          "required": false
+        },
+        "host_override": {
+          "required": false
+        },
+        "id_column": {
+          "required": false
+        },
+        "max_rows": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "search_limit": {
+          "required": false
+        },
+        "storage_options": {
+          "required": false
+        },
+        "table": {
+          "required": false
+        },
+        "text_column": {
+          "required": false
+        },
+        "title_column": {
+          "required": false
+        },
+        "uri": {
+          "required": true
+        },
+        "vector_column": {
+          "required": false
+        }
+      }
+    },
+    "langfuse": {
+      "fields": {
+        "default_from_timestamp": {
+          "required": false
+        },
+        "default_search_limit": {
+          "required": false
+        },
+        "default_trace_limit": {
+          "required": false
+        },
+        "host": {
+          "required": false
+        },
+        "public_key": {
+          "required": true
+        },
+        "secret_key": {
+          "required": true
+        }
+      }
+    },
+    "linear": {
+      "fields": {
+        "api_key": {
+          "required": true
+        },
+        "base_url": {
+          "required": false
+        },
+        "team_ids": {
+          "required": false
+        },
+        "workspace": {
+          "required": false
+        }
+      }
+    },
+    "mem0": {
+      "fields": {
+        "agent_id": {
+          "required": false
+        },
+        "api_key": {
+          "required": true
+        },
+        "default_page_size": {
+          "required": false
+        },
+        "default_search_limit": {
+          "required": false
+        },
+        "host": {
+          "required": false
+        },
+        "run_id": {
+          "required": false
+        },
+        "user_id": {
+          "required": false
+        }
+      }
+    },
+    "minio": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": true
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "mongodb": {
+      "fields": {
+        "databases": {
+          "required": false
+        },
+        "default_doc_limit": {
+          "required": false
+        },
+        "default_search_limit": {
+          "required": false
+        },
+        "elide_fields": {
+          "required": false
+        },
+        "max_doc_limit": {
+          "required": false
+        },
+        "uri": {
+          "required": true
+        }
+      }
+    },
+    "nextcloud": {
+      "fields": {
+        "password": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "url": {
+          "required": true
+        },
+        "username": {
+          "required": false
+        },
+        "verify_ssl": {
+          "required": false
+        }
+      }
+    },
+    "notion": {
+      "fields": {
+        "api_key": {
+          "required": true
+        },
+        "api_version": {
+          "required": false
+        },
+        "base_url": {
+          "required": false
+        }
+      }
+    },
+    "oci": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "namespace": {
+          "required": true
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "onedrive": {
+      "fields": {
+        "access_token": {
+          "required": true
+        },
+        "drive_id": {
+          "required": false
+        },
+        "graph_base_url": {
+          "required": false
+        },
+        "group_id": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "max_retries": {
+          "required": false
+        },
+        "site_id": {
+          "required": false
+        },
+        "tenant_host": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "user_id": {
+          "required": false
+        }
+      }
+    },
+    "postgres": {
+      "fields": {
+        "default_row_limit": {
+          "required": false
+        },
+        "default_search_limit": {
+          "required": false
+        },
+        "dsn": {
+          "required": true
+        },
+        "max_read_bytes": {
+          "required": false
+        },
+        "max_read_rows": {
+          "required": false
+        },
+        "schemas": {
+          "required": false
+        }
+      }
+    },
+    "qdrant": {
+      "fields": {
+        "api_key": {
+          "required": false
+        },
+        "blob_ext": {
+          "required": false
+        },
+        "blob_field": {
+          "required": false
+        },
+        "cloud_inference": {
+          "required": false
+        },
+        "collection": {
+          "required": false
+        },
+        "embedding_model": {
+          "required": false
+        },
+        "group_by": {
+          "required": false
+        },
+        "host": {
+          "required": false
+        },
+        "https": {
+          "required": false
+        },
+        "id_field": {
+          "required": false
+        },
+        "max_rows": {
+          "required": false
+        },
+        "port": {
+          "required": false
+        },
+        "search_limit": {
+          "required": false
+        },
+        "text_field": {
+          "required": false
+        },
+        "url": {
+          "required": false
+        },
+        "vector_field": {
+          "required": false
+        }
+      }
+    },
+    "qingstor": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "r2": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "account_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "ram": null,
+    "redis": null,
+    "s3": {
+      "fields": {
+        "aws_access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "aws_secret_access_key": {
+          "required": false
+        },
+        "aws_session_token": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "scaleway": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "seaweedfs": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": true
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "sharepoint": {
+      "fields": {
+        "access_token": {
+          "required": true
+        },
+        "drive": {
+          "required": false
+        },
+        "graph_base_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "max_retries": {
+          "required": false
+        },
+        "site": {
+          "required": false
+        },
+        "site_filter": {
+          "required": false
+        },
+        "tenant_host": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "slack": {
+      "fields": {
+        "base_url": {
+          "required": false
+        },
+        "search_token": {
+          "required": false
+        },
+        "token": {
+          "required": true
+        }
+      }
+    },
+    "ssh": {
+      "fields": {
+        "host": {
+          "required": true
+        },
+        "hostname": {
+          "required": false
+        },
+        "identity_file": {
+          "required": false
+        },
+        "known_hosts": {
+          "required": false
+        },
+        "passphrase": {
+          "required": false
+        },
+        "password": {
+          "required": false
+        },
+        "port": {
+          "required": false
+        },
+        "root": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        },
+        "username": {
+          "required": false
+        }
+      }
+    },
+    "supabase": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "project_ref": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "tencent": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": true
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    },
+    "trello": {
+      "fields": {
+        "api_key": {
+          "required": true
+        },
+        "api_token": {
+          "required": true
+        },
+        "base_url": {
+          "required": false
+        },
+        "board_ids": {
+          "required": false
+        },
+        "workspace_id": {
+          "required": false
+        }
+      }
+    },
+    "wasabi": {
+      "fields": {
+        "access_key_id": {
+          "required": false
+        },
+        "aws_profile": {
+          "required": false
+        },
+        "bucket": {
+          "required": true
+        },
+        "endpoint_url": {
+          "required": false
+        },
+        "key_prefix": {
+          "required": false
+        },
+        "path_style": {
+          "required": false
+        },
+        "proxy": {
+          "required": false
+        },
+        "region": {
+          "required": false
+        },
+        "secret_access_key": {
+          "required": false
+        },
+        "session_token": {
+          "required": false
+        },
+        "timeout": {
+          "required": false
+        }
+      }
+    }
+  },
   "registry": [
     "aliyun",
     "backblaze",

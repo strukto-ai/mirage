@@ -34,6 +34,8 @@ flowchart TD
 <CodeGroup>
 
 ```python Python
+from mirage import DriftPolicy, Workspace
+
 # capture — async; serializes state plus fingerprints recorded during reads
 await ws.snapshot("run.tar")
 await ws.snapshot("run.tar.gz", compress="gz")

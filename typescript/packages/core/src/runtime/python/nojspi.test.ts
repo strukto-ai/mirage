@@ -15,7 +15,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './pyodide.ts'
 import type { BridgeDispatchFn } from '../types.ts'
-import { FileStat, FileType } from '../../types.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { PrefixResolver } from '../resolver.ts'
 
 // The vitest pool runs every fork with --experimental-wasm-jspi, which no
@@ -78,7 +78,12 @@ describe('PyodideRuntime without JSPI', () => {
           throw Object.assign(new Error(`no such file: ${path}`), {
             code: 'ENOENT',
           })
-        return new FileStat({ name: path, size: found.length, type: FileType.TEXT })
+        return new FileStat({
+          name: path,
+          size: found.length,
+          type: FileType.FILE,
+          content: ContentType.TEXT,
+        })
       }
       return undefined
     }
@@ -156,7 +161,12 @@ describe('PyodideRuntime without JSPI', () => {
           throw Object.assign(new Error(`no such file: ${path}`), {
             code: 'ENOENT',
           })
-        return new FileStat({ name: path, size: listed.length, type: FileType.TEXT })
+        return new FileStat({
+          name: path,
+          size: listed.length,
+          type: FileType.FILE,
+          content: ContentType.TEXT,
+        })
       }
       if (op === 'write' && bytes !== undefined) {
         files.set(path, new Uint8Array(bytes))

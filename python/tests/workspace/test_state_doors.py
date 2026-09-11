@@ -75,7 +75,7 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
     # Through the adapter, not the core: a scoped mount binds its
     # session at the adapter's entry points, the way the nfs delegate
     # does, so the core stays free of a policy only a caller can apply.
-    fs = MirageFS(ws.ops, session=sess)
+    fs = MirageFS(ws.fs, session=sess)
     with pytest.raises(PermissionError):
         fs.symlink("/b/lk", "/a/x.txt")
     assert not ws.namespace.is_link("/b/lk")
@@ -84,7 +84,7 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
 def test_fuse_symlink_on_visible_turf_still_works():
     ws = _two_mounts()
     sess = ws.create_session("agent")
-    fs = MirageFS(ws.ops, session=sess)
+    fs = MirageFS(ws.fs, session=sess)
     fs.symlink("/a/lk", "x.txt")
     assert ws.namespace.readlink("/a/lk") == "x.txt"
 
@@ -111,7 +111,7 @@ def test_ln_leaves_an_op_record():
 
     io = asyncio.run(run())
     assert io.exit_code == 0
-    assert any(r.op == "symlink" and r.path == "/a/lk" for r in ws.ops.records)
+    assert any(r.op == "symlink" and r.path == "/a/lk" for r in ws.fs.records)
 
 
 def test_scoped_shell_ln_onto_hidden_turf_is_refused():
@@ -132,8 +132,8 @@ def test_symlink_and_readlink_answer_on_the_ops_facade():
     ws = _two_mounts()
 
     async def run():
-        await ws.ops.symlink("/a/lk", "x.txt")
-        return await ws.ops.readlink("/a/lk")
+        await ws.fs.symlink("/a/lk", "x.txt")
+        return await ws.fs.readlink("/a/lk")
 
     assert asyncio.run(run()) == "x.txt"
     assert ws.namespace.readlink("/a/lk") == "x.txt"
@@ -189,7 +189,7 @@ def test_readlink_on_a_non_link_raises_einval():
     ws = _two_mounts()
 
     async def run():
-        return await ws.ops.readlink("/a/x.txt")
+        return await ws.fs.readlink("/a/x.txt")
 
     with pytest.raises(OSError):
         asyncio.run(run())
@@ -372,13 +372,13 @@ def test_facade_symlink_respects_the_sessions_view():
     async def run():
         token = set_current_session(sess)
         try:
-            await ws.ops.symlink("/a/lk", "x.txt")
+            await ws.fs.symlink("/a/lk", "x.txt")
             # Creating under a hidden path is EACCES, not ENOENT: a
             # create is the one op a hide answers out loud, because
             # silently succeeding would leave a link the session
             # cannot see and the next writer cannot overwrite.
             with pytest.raises(PermissionError):
-                await ws.ops.symlink("/b/lk", "y.txt")
+                await ws.fs.symlink("/b/lk", "y.txt")
         finally:
             reset_current_session(token)
 
@@ -1099,11 +1099,11 @@ def test_ops_read_of_a_hidden_path_is_enoent():
         token = set_current_session(sess)
         try:
             with pytest.raises(FileNotFoundError):
-                await ws.ops.read("/a/secrets/token.txt")
+                await ws.fs.read("/a/secrets/token.txt")
             with pytest.raises(FileNotFoundError):
-                await ws.ops.stat("/a/secrets")
+                await ws.fs.stat("/a/secrets")
             with pytest.raises(FileNotFoundError):
-                await ws.ops.read("/a/note.key")
+                await ws.fs.read("/a/note.key")
         finally:
             reset_current_session(token)
 
@@ -1117,7 +1117,7 @@ def test_ops_readdir_drops_hidden_names():
     async def run():
         token = set_current_session(sess)
         try:
-            return await ws.ops.readdir("/a")
+            return await ws.fs.readdir("/a")
         finally:
             reset_current_session(token)
 
@@ -1134,7 +1134,7 @@ def test_ops_exists_says_a_hidden_path_does_not():
     async def run():
         token = set_current_session(sess)
         try:
-            return await ws.ops.exists("/a/secrets/token.txt")
+            return await ws.fs.exists("/a/secrets/token.txt")
         finally:
             reset_current_session(token)
 
@@ -1152,9 +1152,9 @@ def test_ops_create_into_hidden_space_is_eacces():
         token = set_current_session(sess)
         try:
             with pytest.raises(PermissionError):
-                await ws.ops.write("/a/secrets/new.txt", b"x")
+                await ws.fs.write("/a/secrets/new.txt", b"x")
             with pytest.raises(PermissionError):
-                await ws.ops.mkdir("/a/secrets/sub")
+                await ws.fs.mkdir("/a/secrets/sub")
         finally:
             reset_current_session(token)
 
@@ -1168,8 +1168,8 @@ def test_unscoped_session_sees_everything():
     ws = _hidden_paths_ws()
 
     async def run():
-        listing = await ws.ops.readdir("/a")
-        body = await ws.ops.read("/a/secrets/token.txt")
+        listing = await ws.fs.readdir("/a")
+        body = await ws.fs.read("/a/secrets/token.txt")
         return listing, body
 
     listing, body = asyncio.run(run())
@@ -1183,7 +1183,7 @@ def test_fuse_hides_hidden_paths():
     # scoped shell about what exists.
     ws = _hidden_paths_ws()
     sess = ws.get_session("agent")
-    fs = MirageFS(ws.ops, session=sess)
+    fs = MirageFS(ws.fs, session=sess)
     with pytest.raises(FileNotFoundError):
         fs.getattr("/a/secrets/token.txt")
     names = fs.readdir("/a", 0)

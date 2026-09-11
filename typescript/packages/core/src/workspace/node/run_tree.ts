@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { guardOutput } from '../../commands/builtin/utils/limit.ts'
-import { postExecuteGate, renderDeny } from '../../policy/index.ts'
+import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -65,6 +65,7 @@ export async function runCommandTree(
     mergedErr.set(denyBytes, existingErr.byteLength)
     io.stderr = mergedErr
     io.exitCode = exitCode
+    io.refusal = refusalOf(deny)
     execNode.exitCode = io.exitCode
     return [null, io, execNode]
   }

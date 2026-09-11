@@ -30,7 +30,7 @@ def _make_gsheets_ops() -> tuple[Ops, IndexCacheStore]:
     resource = GSheetsResource(
         config=GSheetsConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gsheets/": resource}, mode=MountMode.READ)
-    return ws.ops, resource.index
+    return ws.fs, resource.index
 
 
 @pytest.mark.asyncio

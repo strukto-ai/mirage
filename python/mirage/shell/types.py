@@ -41,9 +41,15 @@ class ElementOps:
             assignments included, so ``i=2, a[i]`` reads the new ``i``.
         read (Callable[[str, str], str | None]): the element's stored
             text, None when the element is unset.
+        is_assoc (Callable[[str], bool] | None): whether a name holds an
+            associative array, whose subscript is a key. Given, the
+            evaluator evaluates an indexed subscript itself, in its own
+            record, and hands ``resolve`` the index; absent, ``resolve``
+            evaluates the subscript text (a caller outside a session).
     """
     resolve: Callable[[str, str, Mapping[str, str]], str]
     read: Callable[[str, str], str | None]
+    is_assoc: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +152,9 @@ class NodeType(StrEnum):
     REDIRECT_APPEND = ">>"
     REDIRECT_IN = "<"
     REDIRECT_STDERR = ">&"
+    REDIRECT_DUP_IN = "<&"
+    REDIRECT_CLOSE_OUT = ">&-"
+    REDIRECT_CLOSE_IN = "<&-"
     REDIRECT_BOTH = "&>"
     REDIRECT_BOTH_APPEND = "&>>"
     HEREDOC_START_TOKEN = "<<"
@@ -211,6 +220,11 @@ class RedirectKind(StrEnum):
     STDERR_TO_STDOUT = "stderr_to_stdout"
     HEREDOC = "heredoc"
     HERESTRING = "herestring"
+    # `N>&word` with a word that is neither a number nor `-` on a
+    # descriptor other than 1: bash refuses it as `word: ambiguous
+    # redirect` before the command runs, so the target is kept for the
+    # message and nothing is opened.
+    AMBIGUOUS = "ambiguous"
 
 
 @dataclass
@@ -378,3 +392,23 @@ class BuiltinGroup(StrEnum):
     NESTED_SHELLS = "nested-shells"
     INTERPRETERS = "interpreters"
     COMMAND_RUNNERS = "command-runners"
+
+
+@dataclass(frozen=True, slots=True)
+class BacktickSegment:
+    """One piece of a backtick region as the evaluator lexes it: a
+    command a pair encloses, or the literal text between two pairs.
+
+    Args:
+        text (str): the segment's text, a command's with its escapes
+            resolved, as the nested line parses it.
+        command (bool): whether a pair encloses it.
+        start (int): where the segment's raw text starts in the region.
+        end (int): the index after its last raw character; for a
+            command, the closing backtick's.
+    """
+
+    text: str
+    command: bool
+    start: int
+    end: int

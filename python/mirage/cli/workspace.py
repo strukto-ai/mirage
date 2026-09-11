@@ -49,21 +49,25 @@ def _resolve_config(path: Path) -> dict[str, Any]:
         load_config(path)
     except ValueError as e:
         fail(str(e), exit_code=2)
-    resolved = _resolve_config_arg(path)
-    _absolutize_scripts(resolved, path.resolve().parent)
-    return resolved
+    return _resolve_config_arg(path)
 
 
 def _resolve_config_arg(path: Path) -> dict[str, Any]:
     """Read a workspace YAML/JSON config and interpolate ``${VAR}`` from
-    the CLI's env. Skips validation because load/clone may only need a
-    subset of mounts.
+    the CLI's env, then rebase its relative script paths and code refs
+    onto the file's directory, exactly as ``create`` does: a
+    ``resource: ./wiki.py:WikiResource`` in a ``load``/``clone`` override
+    means "next to this file", never "wherever the daemon runs". Skips
+    validation because load/clone may only need a subset of mounts.
+    Mirrors ``loadConfigArgument`` in the TypeScript CLI.
     """
     raw = _load_yaml(path)
     try:
-        return _interpolate_env(raw, dict(os.environ))
+        resolved = _interpolate_env(raw, dict(os.environ))
     except ValueError as e:
         fail(str(e), exit_code=2)
+    _absolutize_scripts(resolved, path.resolve().parent)
+    return resolved
 
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:

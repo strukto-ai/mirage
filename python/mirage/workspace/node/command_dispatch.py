@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
@@ -22,7 +23,7 @@ from mirage.context import (redirect_paths_for, reset_admission,
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import PolicyDenied, resolve_limit
-from mirage.policy.types import SessionContext
+from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import encode_text
 from mirage.shell.parse import find_syntax_error, parse, syntax_error_result
@@ -41,7 +42,8 @@ from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
                                      follows_last_component)
-from mirage.workspace.node.admission import Admitted, Refusal, admit
+from mirage.workspace.node.admission import Admitted, Refused, admit
+from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
                                             pre_session_gate, seed_var,
                                             session_view, set_attr)
@@ -72,6 +74,7 @@ async def execute_command(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
@@ -107,10 +110,28 @@ async def execute_command(
                                                exit_code=io.exit_code,
                                                stderr=bad)
             session._alias_stack.append(head)
+            # The rewritten line is read from this node, so it runs as
+            # a line of its own under the word that named it: each
+            # invocation of one alias is a place of its own on the line
+            # (`c && c` asks twice, as its spelled-out form does), and
+            # what its gates claim is the line's again at its end. Run
+            # on the line's own hand-off, both reads stood at the same
+            # offsets of the same text and the second ran on the
+            # first's nod.
+            expansion = (evaluated_from(node, handed)
+                         if handed is not None else None)
             try:
-                return await recurse(ast, session, stdin, call_stack)
+                if expansion is None:
+                    return await recurse(ast, session, stdin, call_stack)
+                return await recurse(ast,
+                                     session,
+                                     stdin,
+                                     call_stack,
+                                     handed=expansion)
             finally:
                 session._alias_stack.pop()
+                if expansion is not None:
+                    registry.decisions.hand_up(session.session_id, expansion)
 
     prefix_assignments: list[tuple[str, str]] = []
     for p in assignment_nodes:
@@ -194,7 +215,7 @@ async def execute_command(
                                             namespace, execute_fn, node, parts,
                                             name, session, stdin, call_stack,
                                             job_table, cancel,
-                                            routing_decision, agent_id)
+                                            routing_decision, agent_id, handed)
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:
@@ -219,7 +240,15 @@ async def _dispatch_command_body(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision | None = None,
     agent_id: str = "",
+    handed: HandOff | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
+    # The command's place on the line, as the pass computed it, and
+    # the door its nested evaluations re-enter through: a word that
+    # runs a line (eval, source, xargs) is bound to this node, and a
+    # substitution names its own node when it calls, so every nested
+    # line stands under the node its text came from.
+    claimant = claimant_for(node, handed)
+    execute_fn = partial(execute_fn, node=node)
     parent = node.parent
     if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
         for child in node.named_children:
@@ -249,7 +278,9 @@ async def _dispatch_command_body(
                     command=name or "process_sub", exit_code=2, stderr=err)
             inner = get_process_sub_body(p)
             if inner:
-                io_ps = await execute_fn(inner, session_id=session.session_id)
+                io_ps = await execute_fn(inner,
+                                         session_id=session.session_id,
+                                         node=p)
                 proc_sub_parts.append(io_ps.stdout or b"")
                 stderr = await materialize(io_ps.stderr)
                 if stderr:
@@ -286,7 +317,8 @@ async def _dispatch_command_body(
                      routing_decision,
                      row=node.start_point[0],
                      agent_id=agent_id,
-                     redirects=redirect_paths_for(node.id))
+                     redirects=redirect_paths_for(node.id),
+                     claimant=claimant)
     # Capture xtrace before the body runs so `set -x` itself is not
     # traced (bash enables tracing only for the following commands).
     xtrace = bool(session.shell_options.get("xtrace"))
@@ -322,6 +354,7 @@ async def _run_argv(
     row: int = 0,
     agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
+    claimant: Claimant | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
@@ -377,11 +410,13 @@ async def _run_argv(
                               agent_id,
                               stdin,
                               redirects=redirects,
-                              cancel=cancel)
-        if isinstance(verdict, Refusal):
+                              cancel=cancel,
+                              claimant=claimant)
+        if isinstance(verdict, Refused):
             cmd_str = " ".join([name, *argv.args])
             return None, IOResult(exit_code=verdict.exit_code,
-                                  stderr=verdict.stderr), ExecutionNode(
+                                  stderr=verdict.stderr,
+                                  refusal=verdict.refusal), ExecutionNode(
                                       command=cmd_str,
                                       exit_code=verdict.exit_code,
                                       stderr=verdict.stderr,
@@ -599,7 +634,8 @@ async def _route_argv(
         call_stack,
         job_table=job_table,
         namespace=namespace,
-        routing_decision=routing_decision)
+        routing_decision=routing_decision,
+        execute_fn=execute_fn)
 
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":

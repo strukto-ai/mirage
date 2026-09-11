@@ -20,12 +20,13 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import RedirectKind
 
 from mirage.shell.helpers import (  # isort: skip
-    brace_expands, get_case_items, get_case_word, get_command_name,
-    get_declaration_keyword, get_for_parts, get_function_body,
-    get_function_name, get_heredoc_meta, get_heredoc_parts, get_if_branches,
-    get_list_parts, get_negated_command, get_parts, get_pipeline_commands,
-    get_process_sub_body, get_redirects, get_subshell_body, get_text,
-    get_while_parts, literal_word, split_env_prefix)
+    brace_expands, byte_offset, get_case_items, get_case_word,
+    get_command_name, get_declaration_keyword, get_for_parts,
+    get_function_body, get_function_name, get_heredoc_meta, get_heredoc_parts,
+    get_if_branches, get_list_parts, get_negated_command, get_parts,
+    get_pipeline_commands, get_process_sub_body, get_redirects,
+    get_subshell_body, get_text, get_while_parts, literal_word,
+    split_env_prefix)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -187,6 +188,20 @@ def test_get_parts_excludes_redirect():
     parts = get_parts(_first("echo hello > out.txt").named_children[0])
     texts = [get_text(p) for p in parts]
     assert "out.txt" not in texts
+
+
+def test_get_parts_drops_a_bare_zero_descriptor():
+    stmt = _first("cat a 0>&-")
+    parts = get_parts(stmt.named_children[0])
+    assert [get_text(p) for p in parts] == ["cat", "a"]
+    _, redirects = get_redirects(stmt)
+    assert [(r.fd, r.target) for r in redirects] == [(0, -1)]
+    spaced = _first("cat a 0 >&-")
+    assert [get_text(p)
+            for p in get_parts(spaced.named_children[0])] == ["cat", "a", "0"]
+    assert [r.fd for r in get_redirects(spaced)[1]] == [1]
+    _, chained = get_redirects(_first("cat 0<a >b"))
+    assert [(r.fd, r.target) for r in chained] == [(0, "a"), (1, "b")]
 
 
 def test_semicolon_is_program_level():
@@ -813,3 +828,10 @@ def test_brace_expands():
     assert brace_expands("{a,{b,c}}")
     assert not brace_expands("{}") and not brace_expands("{abc}")
     assert not brace_expands("a,b") and not brace_expands("{a,b")
+
+
+def test_byte_offset_counts_the_bytes_before_an_index():
+    assert byte_offset("cat é x", 4) == 4
+    assert byte_offset("cat é x", 5) == 6
+    assert byte_offset("cat é x", 7) == 8
+    assert byte_offset("", 0) == 0

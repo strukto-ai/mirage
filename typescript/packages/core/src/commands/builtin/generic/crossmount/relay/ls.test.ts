@@ -63,7 +63,7 @@ function makeDispatch(calls: Calls, roots: ReadonlySet<string>): DispatchFn {
       new FileStat({
         name: roots.has(k) ? '/' : (k.split('/').pop() ?? ''),
         size: isDir ? 0 : 3,
-        type: isDir ? FileType.DIRECTORY : FileType.TEXT,
+        type: isDir ? FileType.DIRECTORY : FileType.FILE,
         mode: isDir ? 0o755 : 0o644,
       }),
       new IOResult(),

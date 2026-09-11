@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLISpec
 from mirage.io import IOResult
@@ -94,10 +94,31 @@ def test_general_command_collision_is_refused():
 
 def test_config_validates_through_the_model_fail_loud():
     reg = CLIRegistry()
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValueError, match="CLI 'prog': token: missing"):
         reg.install("prog", tree(TokenConfig), {})
     with pytest.raises(ValueError, match="unknown config keys: extra"):
         reg.install("prog", tree(TokenConfig), {"token": "x", "extra": 1})
+
+
+class PortConfig(BaseModel):
+    host: str
+    port: int
+
+
+def test_a_refused_config_value_is_not_in_the_error():
+    """An account CLI's config is where a fetched credential lands, and
+    the create route answers `str(e)` as its 400 detail. Pydantic puts
+    the value it refused in `input_value`, so an unparseable secret
+    came back to a caller whose only way to name it was a pointer."""
+    secret = "sk-live-notanumber"
+    reg = CLIRegistry()
+    with pytest.raises(ValueError) as caught:
+        reg.install("prog", tree(PortConfig), {"host": "h", "port": secret})
+    message = str(caught.value)
+    assert secret not in message
+    assert message == "CLI 'prog': port: int_parsing"
+    # The chain would carry the value into any logged traceback.
+    assert caught.value.__cause__ is None
 
 
 def test_config_without_model_is_refused():

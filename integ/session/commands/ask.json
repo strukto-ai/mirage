@@ -24,7 +24,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: sign-off (ask 5b25c31eb62e)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -38,7 +38,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: sign-off (ask 5b25c31eb62e)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -81,7 +81,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: sign-off (ask b416c5b1c8fa)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -96,7 +96,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: policy denied: sign-off\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -110,7 +110,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: sign-off (ask b416c5b1c8fa)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -139,7 +139,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: sign-off (ask 5bda3012c32d)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -167,7 +167,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "git: requires approval: log needs a nod (ask f520086f93cb)\n"
+        "stderr": "git: Permission denied\n"
       }
     },
     {
@@ -210,7 +210,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "head: requires approval: no standing approval (ask edd518295293)\n"
+        "stderr": "head: Permission denied\n"
       }
     }
   ]

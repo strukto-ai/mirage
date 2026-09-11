@@ -69,7 +69,7 @@ describe('OneDrive addressing', () => {
   it('rejects two drive targets', () => {
     // A fixed precedence would silently address one and ignore the other.
     expect(() => new OneDriveAccessor({ accessToken: 'token', driveId: 'd', siteId: 's' })).toThrow(
-      /more than one drive/,
+      /names 2 drives \(driveId, siteId\)/,
     )
   })
 })

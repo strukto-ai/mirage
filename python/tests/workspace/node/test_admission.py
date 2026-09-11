@@ -16,6 +16,7 @@ import errno
 
 import pytest
 
+from mirage.agents.io_text import with_refusal
 from mirage.policy import PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandRule
@@ -62,6 +63,12 @@ def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
         p.virtual
         for p in policy_scopes(name, list(args), words[1:], ws._namespace, "/")
     ]
+
+
+def _voiced(refused) -> str:
+    """stderr as bash prints it, then the record as one more line: what
+    an agent reading through the text adapters sees."""
+    return with_refusal(refused.stderr.decode(), refused.refusal)
 
 
 @pytest.mark.asyncio
@@ -138,9 +145,8 @@ async def test_a_bare_listing_reads_the_working_directory():
                                   registry,
                                   namespace,
                                   stdin=stdin)
-            return None if isinstance(refusal,
-                                      Admitted) else (refusal.exit_code,
-                                                      refusal.stderr.decode())
+            return None if isinstance(
+                refusal, Admitted) else (refusal.exit_code, _voiced(refusal))
 
         assert await run("ls") is None
         await ws.execute("cd /data/private")
@@ -168,7 +174,7 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
             refusal = await admit_line(parse(text), session, registry,
                                        namespace)
             return None if refusal is None else (refusal.exit_code,
-                                                 refusal.stderr.decode())
+                                                 _voiced(refusal))
 
         # Quotes and escapes read as the text they name: a quoted path
         # is a path, a quoted head is the command.
@@ -178,37 +184,43 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
             1, "cat: /data/secret: sealed\n")
         # A head only the runtime can expand is refused under any rule.
         assert await line("$cmd /data/x") == (
-            126, "$cmd: policy denied: cannot read $cmd before the runtime "
+            126, "$cmd: Permission denied\n"
+            "policy denied: cannot read $cmd before the runtime "
             "expands it\n")
         assert await line('"$cmd" /data/x') == (
-            126,
-            '"$cmd": policy denied: cannot read "$cmd" before the runtime '
+            126, '"$cmd": Permission denied\n'
+            'policy denied: cannot read "$cmd" before the runtime '
             "expands it\n")
         # An argument is refused only where a rule reads that command's
         # arguments: cat has a path rule, echo has none.
         assert await line('cat "$f"') == (
-            126, 'cat: policy denied: cannot read "$f" before the runtime '
+            126, 'cat: Permission denied\n'
+            'policy denied: cannot read "$f" before the runtime '
             "expands it\n")
         assert await line("cat /data/{a,secret}") == (
-            126, "cat: policy denied: cannot read /data/{a,secret} before the "
+            126, "cat: Permission denied\n"
+            "policy denied: cannot read /data/{a,secret} before the "
             "runtime expands it\n")
         assert await line('echo "$HOME" $(ls /data)') is None
         # What a word runs is admitted in turn.
         assert await line("eval 'cat /data/secret'") == (
             1, "cat: /data/secret: sealed\n")
         assert await line('eval "$p"') == (
-            126, '"$p": policy denied: cannot read "$p" before the runtime '
+            126, '"$p": Permission denied\n'
+            'policy denied: cannot read "$p" before the runtime '
             "expands it\n")
         assert await line("echo $(cat /data/secret)") == (
             1, "cat: /data/secret: sealed\n")
         assert await line("ls | xargs cat") == (
-            126, "cat: policy denied: runs on operands the gate cannot read\n")
+            126, "cat: Permission denied\n"
+            "policy denied: runs on operands the gate cannot read\n")
         assert await line("ls | xargs echo") is None
         assert await line("source /data/env.sh") == (
-            126, "source: policy denied: runs lines the gate cannot read\n")
+            126, "source: Permission denied\n"
+            "policy denied: runs lines the gate cannot read\n")
         assert await line("/data/run.sh") == (
-            126,
-            "/data/run.sh: policy denied: runs lines the gate cannot read\n")
+            126, "/data/run.sh: Permission denied\n"
+            "policy denied: runs lines the gate cannot read\n")
         assert await line("sh -c 'rm /data/x'; sh -c 'sort'") == (
             127, "sort: command not found\n")
     finally:
@@ -251,14 +263,17 @@ async def test_admit_line_refuses_a_walk_or_a_glob_under_a_path_rule():
             refusal = await admit_line(parse(text), session, registry,
                                        namespace)
             return None if refusal is None else (refusal.exit_code,
-                                                 refusal.stderr.decode())
+                                                 _voiced(refusal))
 
         assert await line("grep -r x /data") == (
-            126, "grep: policy denied: walks a tree the gate cannot follow\n")
+            126, "grep: Permission denied\n"
+            "policy denied: walks a tree the gate cannot follow\n")
         assert await line("rg x /data") == (
-            126, "rg: policy denied: walks a tree the gate cannot follow\n")
+            126, "rg: Permission denied\n"
+            "policy denied: walks a tree the gate cannot follow\n")
         assert await line("cat /data/se*") == (
-            126, "cat: policy denied: expands a pattern only the runtime can "
+            126, "cat: Permission denied\n"
+            "policy denied: expands a pattern only the runtime can "
             "read\n")
         # The judged words still pass: a named clean path, a command no
         # path rule reads, a walker the rules leave alone.
@@ -284,7 +299,7 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
             refusal = await admit_line(parse(text), session, registry,
                                        namespace)
             return None if refusal is None else (refusal.exit_code,
-                                                 refusal.stderr.decode())
+                                                 _voiced(refusal))
 
         assert await line("cat < /data/secret") == (
             1, "cat: /data/secret: sealed\n")
@@ -292,7 +307,8 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
         assert await line("cat /data/open > /data/secret2") == (
             1, "cat: /data/secret2: sealed\n")
         assert await line("cat < $F") == (
-            126, 'cat: policy denied: cannot read $F before the runtime '
+            126, 'cat: Permission denied\n'
+            'policy denied: cannot read $F before the runtime '
             "expands it\n")
         assert await line("echo hi > $F") is None
         assert await line("cat /data/open <<< 'body'") is None
@@ -319,9 +335,8 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
             words = classify_parts([name, *args], registry, session.cwd)
             refusal = await admit(name, list(args), words[1:], session,
                                   registry, namespace)
-            return None if isinstance(refusal,
-                                      Admitted) else (refusal.exit_code,
-                                                      refusal.stderr.decode())
+            return None if isinstance(
+                refusal, Admitted) else (refusal.exit_code, _voiced(refusal))
 
         assert await run(plain, "cat",
                          "/data/secret") == (1, "cat: /data/secret: sealed\n")

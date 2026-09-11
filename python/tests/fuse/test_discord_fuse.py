@@ -100,7 +100,7 @@ def world():
 
 @pytest.fixture
 def ops(world) -> Ops:
-    return world[1].ops
+    return world[1].fs
 
 
 @pytest.fixture

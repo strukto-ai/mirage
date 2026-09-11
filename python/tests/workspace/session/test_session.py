@@ -15,9 +15,6 @@
 import dataclasses
 import json
 
-import pytest
-from pydantic import ValidationError
-
 from mirage.policy.match import Outcome
 from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
@@ -450,9 +447,11 @@ def test_vars_from_entries_coerces_raw_mappings():
     assert out["B"].managed == ManagedRef("env", "", "B", False)
 
 
-def test_vars_from_entries_refuses_readonly_on_managed():
-    with pytest.raises(ValidationError, match="readonly"):
-        vars_from_entries({"T": {"from": "env", "readonly": True}})
+def test_vars_from_entries_keeps_readonly_on_managed():
+    out = vars_from_entries({"T": {"from": "env", "readonly": True}})
+    assert out["T"].attrs == frozenset({VarAttr.EXPORT, VarAttr.READONLY})
+    assert out["T"].managed == ManagedRef("env", "", "T", False)
+    assert out["T"].value is None
 
 
 def _managed_session() -> Session:
@@ -565,3 +564,12 @@ def test_vars_fields_never_writes_a_fetched_value():
     fields = vars_to_fields(table)
     assert "T" not in fields["env"]
     assert vars_from_fields(fields)["T"].value is None
+
+
+def test_session_profile_round_trips_and_is_omitted_when_none():
+    assert "profile" not in Session(session_id="a").to_dict()
+    original = Session(session_id="rt", profile="admin")
+    data = original.to_dict()
+    assert data["profile"] == "admin"
+    assert Session.from_dict(data).profile == "admin"
+    assert original.fork().profile == "admin"

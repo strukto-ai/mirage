@@ -82,20 +82,40 @@ export function op(name: string, options: OpOptions) {
 
 export class OpsRegistry {
   private readonly registered = new Map<string, RegisteredOp>()
+  private readonly owners = new Map<string, Resource>()
+  private readonly scoped = new WeakMap<Resource, Map<string, RegisteredOp>>()
 
   register(ro: RegisteredOp): void {
-    this.registered.set(keyFor(ro.name, ro.filetype, ro.resource), ro)
+    const key = keyFor(ro.name, ro.filetype, ro.resource)
+    this.registered.set(key, ro)
+    this.owners.delete(key)
   }
 
-  unregisterResource(resourceKind: string): void {
+  unregisterResource(resourceKind: string | Resource): void {
     for (const [key, ro] of this.registered) {
-      if (ro.resource === resourceKind) {
+      if (
+        typeof resourceKind === 'string'
+          ? ro.resource === resourceKind
+          : this.owners.get(key) === resourceKind
+      ) {
         this.registered.delete(key)
+        this.owners.delete(key)
       }
     }
   }
 
-  registerResource(resource: Resource): void {
+  registerResource(resource: Resource, overwrite = true): void {
+    const entries = this.collectResource(resource)
+    this.scoped.set(resource, entries)
+    for (const [key, ro] of entries) {
+      if (!overwrite && this.registered.has(key)) continue
+      this.register(ro)
+      if (this.registered.get(key) === ro) this.owners.set(key, resource)
+    }
+  }
+
+  private collectResource(resource: Resource): Map<string, RegisteredOp> {
+    const entries = new Map<string, RegisteredOp>()
     const chain: object[] = []
     let proto = Object.getPrototypeOf(resource) as object | null
     while (proto !== null && proto !== Object.prototype) {
@@ -107,21 +127,45 @@ export class OpsRegistry {
       if (p === undefined) continue
       for (const key of Object.getOwnPropertyNames(p)) {
         if (key === 'constructor') continue
-        const method = (p as Record<string, unknown>)[key]
+        const method: unknown = Object.getOwnPropertyDescriptor(p, key)?.value
         if (typeof method !== 'function') continue
         const carrier = method as OpFn & OpCarrier
         const ops = carrier[REGISTERED_OPS]
         if (!ops) continue
         const bound = method.bind(resource) as OpFn
         for (const ro of ops) {
-          this.register({ ...ro, fn: bound })
+          entries.set(keyFor(ro.name, ro.filetype, ro.resource), { ...ro, fn: bound })
         }
       }
     }
+    for (const ro of resource.ops?.() ?? []) {
+      entries.set(keyFor(ro.name, ro.filetype, ro.resource), ro)
+    }
+    return entries
   }
 
-  find(name: string, resource: string | null, filetype: string | null = null): RegisteredOp | null {
-    return this.registered.get(keyFor(name, filetype, resource)) ?? null
+  private entry(key: string, resource: Resource | null): RegisteredOp | null {
+    const registered = this.registered.get(key)
+    if (registered === undefined) return null
+    // Explicit registry overrides and removals remain authoritative.
+    if (resource === null || !this.owners.has(key)) return registered
+    let entries = this.scoped.get(resource)
+    if (entries === undefined) {
+      entries = this.collectResource(resource)
+      this.scoped.set(resource, entries)
+    }
+    // An instance-bound operation from a sibling mount is never a fallback.
+    return entries.get(key) ?? null
+  }
+
+  find(
+    name: string,
+    resource: string | Resource | null,
+    filetype: string | null = null,
+  ): RegisteredOp | null {
+    const owner = typeof resource === 'object' ? resource : null
+    const kind = typeof resource === 'object' ? (resource?.kind ?? null) : resource
+    return this.entry(keyFor(name, filetype, kind), owner)
   }
 
   resolve(name: string, resource: string, filetype: string | null = null): OpFn {
@@ -143,25 +187,27 @@ export class OpsRegistry {
 
   async call(
     name: string,
-    resourceKind: string,
+    resourceKind: string | Resource,
     accessor: Accessor,
     path: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const filetype = kwargs.filetype ?? null
+    const owner = typeof resourceKind === 'string' ? null : resourceKind
+    const kind = typeof resourceKind === 'string' ? resourceKind : resourceKind.kind
     const levels: OpFn[] = []
     if (filetype !== null) {
-      const specific = this.registered.get(keyFor(name, filetype, resourceKind))
+      const specific = this.entry(keyFor(name, filetype, kind), owner)
       if (specific) levels.push(specific.fn)
     }
-    const byResource = this.registered.get(keyFor(name, null, resourceKind))
+    const byResource = this.entry(keyFor(name, null, kind), owner)
     if (byResource) levels.push(byResource.fn)
-    const global = this.registered.get(keyFor(name, null, null))
+    const global = this.entry(keyFor(name, null, null), owner)
     if (global) levels.push(global.fn)
 
     if (levels.length === 0) {
-      throw enotsup(resourceKind, name, path)
+      throw enotsup(kind, name, path)
     }
 
     for (const fn of levels) {

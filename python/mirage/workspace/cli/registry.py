@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec import SPECS
+from mirage.secrets.summary import error_summary
 from mirage.types import JsonValue
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.names import (JOB_BUILTINS, KEYWORDS, NAMESPACE_COMMANDS,
@@ -109,7 +110,15 @@ class CLIRegistry:
                 names = ", ".join(sorted(unknown))
                 raise ValueError(f"CLI {name!r}: unknown config keys: "
                                  f"{names}")
-        return model(**(config or {}))
+        try:
+            return model(**(config or {}))
+        except ValidationError as exc:
+            # An account CLI's config is where a fetched credential
+            # lands, the same as a mount's, and the create route answers
+            # `str(e)` as its 400 detail: pydantic's own rendering would
+            # hand the refused value back. Field and type only, chain
+            # cut, the way `build_resource` reports its config class.
+            raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
 
     def uninstall(self, name: str) -> None:
         """Remove an installed CLI; its head word stops resolving (127).

@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 // rmdir(2) refuses a non-empty directory; `rm -r` is what empties one.
 // Implementing rmdir AS the recursive removal silently turns it into a
 // subtree delete for every caller that does not pre-check emptiness itself,
-// and the command builders are the only callers that do -- FUSE, `ws.ops`
+// and the command builders are the only callers that do -- FUSE, `ws.fs`
 // and the sandbox runtimes all reach the op directly. That is the shape the
 // bug took in five backends at once: two took the object store kit's prefix
 // delete, three called their own recursive removal.

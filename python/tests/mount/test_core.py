@@ -32,7 +32,7 @@ async def seeded():
     await ws.execute("tee /a.txt", stdin=b"hello world")
     await ws.execute("mkdir /sub")
     await ws.execute("tee /sub/b.txt", stdin=b"nested")
-    return MountCore(ws.ops)
+    return MountCore(ws.fs)
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_getattr_of_a_link_reports_the_nodes_own_row():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     await ws.execute("tee /a.txt", stdin=b"hello")
     await ws.execute("ln -s a.txt /link")
-    core = MountCore(ws.ops)
+    core = MountCore(ws.fs)
     await ws.dispatch("setattr",
                       PathSpec.from_str_path("/link"),
                       mode=None,
@@ -155,7 +155,7 @@ async def test_scoped_mount_may_not_touch_a_link_on_hidden_turf():
     await ws.execute("tee /extra/secret.txt", stdin=b"classified")
     await ws.execute("ln -s secret.txt /extra/lk")
     sess = ws.create_session("agent", profile={"paths": {"hide": ["/extra"]}})
-    core = MountCore(ws.ops, session=sess)
+    core = MountCore(ws.fs, session=sess)
 
     with pytest.raises(OSError) as created:
         await core.symlink("/extra/lk2", "/data/greeting.txt")
@@ -174,7 +174,7 @@ async def test_unlink_removes_a_link_and_keeps_its_target():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     await ws.execute("tee /f.txt", stdin=b"body")
     await ws.execute("ln -s f.txt /lk")
-    core = MountCore(ws.ops)
+    core = MountCore(ws.fs)
     await core.unlink("/lk")
     assert not ws.namespace.is_link("/lk")
     assert (await ws.execute("cat /f.txt")).stdout == b"body"
@@ -201,7 +201,7 @@ async def test_getxattr_missing_raises_no_xattr(seeded):
 @pytest.mark.asyncio
 async def test_resolve_honors_root_prefix():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    core = MountCore(ws.ops, root_prefix="/data/")
+    core = MountCore(ws.fs, root_prefix="/data/")
     assert core.resolve("/") == "/data"
     assert core.resolve("/x.txt") == "/data/x.txt"
 
@@ -216,7 +216,7 @@ async def test_rename_across_mounts_reports_exdev():
         "/other/": RAMResource()
     },
                    mode=MountMode.WRITE)
-    core = MountCore(ws.ops)
+    core = MountCore(ws.fs)
     await core.write("/data/x.txt", b"body", 0, None)
     with pytest.raises(OSError) as exc:
         await core.rename("/data/x.txt", "/other/x.txt")
@@ -233,7 +233,7 @@ def _tally_core() -> MountCore:
     resource = RAMResource()
     resource.register_op(_read_tally)
     ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
-    return MountCore(ws.ops)
+    return MountCore(ws.fs)
 
 
 @pytest.mark.asyncio

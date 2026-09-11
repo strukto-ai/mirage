@@ -12,9 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import inspect
+from collections.abc import Callable
+from functools import partial
 
+from mirage.cache.file.io import mutation_lock
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
+from mirage.cache.index.store import IndexCacheStore
 from mirage.nfs.config import NFSConfig
 from mirage.ops import Ops
 from mirage.resource.base import BaseResource
@@ -22,6 +28,7 @@ from mirage.resource.history import HISTORY_PREFIX
 from mirage.resource.ram import RAMResource
 from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.types import MountSpec, ResourceMount
 
@@ -134,6 +141,7 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
         bool: whether the root mount was synthesized.
     """
     for spec in specs:
+        registry.check_resource_available(spec.resource)
         spec.resource.set_index(index)
         entry = registry.mount(spec.prefix, spec.resource, spec.mode)
         if spec.command_limits:
@@ -144,18 +152,51 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     return implicit_root
 
 
-async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
+async def clear_mount_cache(cache: FileCacheMixin | None, prefix: str,
+                            indices: list[IndexCacheStore]) -> None:
+    """Drop a mount's cache state atomically with deferred file-cache fills."""
+
+    async def clear_indices() -> None:
+        for index in dict.fromkeys(indices):
+            await index.invalidate_prefix(prefix.rstrip("/"))
+
+    if cache is None:
+        await clear_indices()
+        return
+    async with mutation_lock(cache):
+        await cache.remove(prefix.rstrip("/"))
+        await cache.evict_prefix(prefix)
+        await clear_indices()
+
+
+def prepare_added_mount(registry: MountRegistry, entry: MountEntry,
+                        previous: list[MountEntry]) -> None:
+    """Keep synchronous registration; I/O awaits removal of shadowed state."""
+    indices = [entry.resource.index]
+    indices.extend(m.resource.index for m in previous
+                   if entry.prefix.startswith(m.prefix))
+    entry.before_use = partial(clear_mount_cache, registry.file_cache,
+                               entry.prefix, indices)
+
+
+async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
+                  is_shutting_down: Callable[[], bool],
+                  shared_resources: set[int]) -> None:
     """Remove one mount, closing its resource if nothing else uses it.
 
     The virtual root, the device mount, and the history view are
     permanent. The resource is closed only when no remaining mount
-    holds the same instance; its command registration is dropped only
-    when no remaining mount holds the same kind.
+    holds the same instance. Admitted calls and streams finish first;
+    callers must consume or close streams. Closed instances cannot be
+    mounted again. Commands and operations belong to each
+    mount, so removing one leaves other mounts of the same kind intact.
 
     Args:
         registry (MountRegistry): the workspace's mount table.
         ops (Ops): the ops facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
+        is_shutting_down: live admission check after asynchronous cleanup.
+        shared_resources: instances owned by another workspace.
 
     Raises:
         ValueError: the prefix names a permanent mount.
@@ -168,15 +209,50 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str) -> None:
         raise ValueError("cannot unmount reserved prefix: '/dev/'")
     if norm == HISTORY_PREFIX + "/":
         raise ValueError(f"cannot unmount history view: {HISTORY_PREFIX!r}")
-    removed = registry.unmount(prefix)
+    entry = registry.try_mount_for_prefix(prefix)
+    if entry is None:
+        raise ValueError(f"no mount at prefix: {norm!r}")
+    if entry.retiring:
+        raise ValueError(f"mount is being unmounted: {norm!r}")
+    entry.retiring = True
+    try:
+        await clear_mount_cache(registry.file_cache, norm,
+                                [entry.resource.index])
+        if is_shutting_down():
+            raise RuntimeError("Workspace is closed")
+        if registry.try_mount_for_prefix(prefix) is not entry:
+            raise ValueError(f"mount changed while unmounting: {prefix!r}")
+        removed = registry.unmount(prefix)
+    except BaseException:
+        entry.retiring = False
+        raise
     ops.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.resource is removed.resource for m in remaining)
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
-    if not still_instance:
-        close = getattr(removed.resource, "close", None)
-        if callable(close):
-            result = close()
-            if hasattr(result, "__await__"):
-                await result
+    if not still_instance and id(removed.resource) not in shared_resources:
+        identity = id(removed.resource)
+        registry.retired_resources[identity] = removed.resource
+        closing = asyncio.create_task(_close_resource(removed))
+        registry.retiring_resources[identity] = closing
+        closing.add_done_callback(
+            partial(_release_resource, registry, identity))
+        await asyncio.shield(closing)
+
+
+async def _close_resource(entry: MountEntry) -> None:
+    await entry.activity.wait()
+    close = getattr(entry.resource, "close", None)
+    if callable(close):
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+
+
+def _release_resource(registry: MountRegistry, identity: int,
+                      closing: asyncio.Task[None]) -> None:
+    registry.retiring_resources.pop(identity, None)
+    # The caller may have been cancelled while shield kept cleanup alive.
+    if not closing.cancelled():
+        closing.exception()

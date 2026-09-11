@@ -79,7 +79,7 @@ def make_rmdir(driver: ObjectStoreDriver[A, C]) -> RmdirFn[A]:
     ``rm -r``, not ``rmdir``. Sharing one function between the two slots
     made ``rmdir`` destroy a whole subtree for every caller that does
     not pre-check emptiness itself, and the command builders are the
-    only callers that do: FUSE, ``ws.ops`` and the sandbox runtimes all
+    only callers that do: FUSE, ``ws.fs`` and the sandbox runtimes all
     reach the op directly.
 
     The listing is the same one ``readdir`` reads, so the two agree on

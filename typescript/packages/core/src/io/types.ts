@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Producer } from '../types.ts'
+import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
@@ -70,9 +70,16 @@ export interface IOResultInit {
   cache?: string[]
   producer?: Producer | null
   mutated?: boolean | null
+  matchedRuns?: PathSpec[][] | null
+  refusal?: Refusal | null
 }
 
 export class IOResult {
+  // Structured selection before display rendering, for later actions:
+  // one list of rows per start point, in operand order, so a nested or
+  // repeated start point stays its own traversal (GNU walks each to
+  // completion before the next).
+  matchedRuns: PathSpec[][] | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -82,8 +89,9 @@ export class IOResult {
   // Provenance of this result (which command, spanning which
   // mounts); merge keeps the rightmost producer, mirroring whose
   // stream the shell shows. The workspace boundary hands it to the
-  // policy layer as context. Facts ride the envelope, policy
-  // decisions never do.
+  // policy layer as context. Facts ride the envelope as policy
+  // input; the decision a chain hands down rides beside them as
+  // `refusal`, written after the last hook has spoken.
   producer: Producer | null
   // Whether this run changed service state, when only the handler can
   // tell. A CLI leaf declares `write` statically because for almost every
@@ -91,9 +99,15 @@ export class IOResult {
   // plain `gh api /user` is a read through a leaf that is declared
   // writable. null leaves the spec's answer standing.
   mutated: boolean | null
+  // Why the line did not run, when a policy or an unanswered ask
+  // refused it; null on every ordinary run. stderr stays in bash's
+  // voice, this carries the reason. merge keeps the rightmost record,
+  // as it does the producer.
+  refusal: Refusal | null
   streamSource: IOResult | null
 
   constructor(init: IOResultInit = {}) {
+    this.matchedRuns = init.matchedRuns ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0
@@ -102,6 +116,7 @@ export class IOResult {
     this.cache = init.cache ?? []
     this.producer = init.producer ?? null
     this.mutated = init.mutated ?? null
+    this.refusal = init.refusal ?? null
     this.streamSource = null
   }
 
@@ -154,11 +169,13 @@ export class IOResult {
     // firing at drain time) is still visible.
     const result = new IOResult({
       stdout: other.stdout,
+      matchedRuns: other.matchedRuns,
       stderr: mergedStderr,
       reads: { ...this.reads, ...other.reads },
       writes: { ...this.writes, ...other.writes },
       cache: [...this.cache, ...other.cache],
       producer: other.producer,
+      refusal: other.refusal ?? this.refusal,
     })
     result.streamSource = other
     return result

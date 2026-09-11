@@ -65,7 +65,7 @@ def test_rmdir_refuses_a_nonempty_prefix_and_keeps_every_key(accessor):
     delete removes an empty directory correctly and a non-empty one
     recursively -- which is ``rm -r``. The two slots shared one function,
     so every caller that does not pre-check emptiness itself (FUSE,
-    ``ws.ops``, the sandbox runtimes) destroyed the subtree.
+    ``ws.fs``, the sandbox runtimes) destroyed the subtree.
     """
     store = FakeStore({"a/b/": b"", "a/b/c.txt": b"hi", "a/b/d/e.txt": b"x"})
     with pytest.raises(OSError) as excinfo:
@@ -107,7 +107,7 @@ def test_rmdir_on_a_populated_mount_root_destroys_nothing(accessor):
     A mount root resolves to the bare key prefix, so ``make_remove_prefix``
     in this slot emptied the entire store. ``MountRootPolicy`` refuses a
     mount root as an operand with EBUSY, but only on the command path;
-    FUSE and ``ws.ops`` reach the op. The root is also the one path that
+    FUSE and ``ws.fs`` reach the op. The root is also the one path that
     cannot report ENOENT -- it exists because it is mounted -- so the
     empty case below is a no-op rather than a refusal.
     """

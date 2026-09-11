@@ -14,8 +14,8 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
-import { FileType } from '../../types.ts'
-import { imageTypeForExtension } from '../../utils/filetype.ts'
+import { ContentType } from '../../types.ts'
+import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import { Codec } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope, type DetectFn, type ScopeMatch } from '../hierarchy/scope.ts'
@@ -48,7 +48,7 @@ export function scopesFor(config: LanceDBConfigResolved): Scope[] {
       kind: 'row_card',
       segments: [...full, new Slot('row_id', CARD)],
       leaf: true,
-      filetype: FileType.TEXT,
+      filetype: ContentType.TEXT,
     }),
   )
   if (config.blobColumn !== null) {
@@ -58,7 +58,7 @@ export function scopesFor(config: LanceDBConfigResolved): Scope[] {
         kind: 'row_blob',
         segments: [...full, new Slot('row_id', blob)],
         leaf: true,
-        filetype: imageTypeForExtension(config.blobExt),
+        filetype: contentTypeForExtension(config.blobExt),
       }),
     )
   }

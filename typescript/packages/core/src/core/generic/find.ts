@@ -279,7 +279,9 @@ async function searchMatches<A>(
   const rootNorm = rstripSlash(root) !== '' ? rstripSlash(root) : '/'
   const itemNorm = rstripSlash(item) !== '' ? rstripSlash(item) : '/'
   const itemName = itemNorm === rootNorm ? startName : (rstripSlash(item).split('/').pop() ?? '')
-  const spec = PathSpec.fromStrPath(item, mountKey(item, prefix))
+  // The walk strips its mount prefix; backend probes still need both paths.
+  const virtual = rstripSlash(rstripSlash(prefix) + '/' + lstripSlash(item)) || '/'
+  const spec = PathSpec.fromStrPath(virtual, lstripSlash(item))
   let kind: 'd' | 'f' = 'f'
   if (needsKind) {
     const resolved = await deps.resolvePath(accessor, spec, index)

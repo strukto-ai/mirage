@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
-import { Limit, type PathSpec } from '../types.ts'
+import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { PolicyDenied, PolicyError } from './errors.ts'
+import { isSessionScoped } from './mixin.ts'
 import {
   VALIDITY,
   type Ask,
@@ -35,32 +36,79 @@ type Hook = keyof typeof VALIDITY
  * The command plane's rendering of a refusal: stderr and exit code. The
  * one place the outcome table for that plane is written down, so a
  * document rule and a coded policy print alike: a whole-command Deny is
- * `<subject>: policy denied: <reason>` at 126, an operand Deny keeps the
- * GNU voice `<subject>: <reason>` at the command's operand-refusal code
- * (1, tar 2).
+ * bash's own `<subject>: Permission denied` at 126, with the reason on
+ * the result's `refusal` record rather than on stderr; an operand Deny
+ * keeps the GNU voice `<subject>: <reason>` at the command's
+ * operand-refusal code (1, tar 2), because there the reason is the
+ * diagnostic.
  */
 export function renderDeny(subject: string, deny: Deny): [Uint8Array, number] {
   if (deny.scope === 'operand') {
     return [new TextEncoder().encode(`${subject}: ${deny.reason}\n`), operandExitCode(subject)]
   }
-  return [
-    new TextEncoder().encode(`${subject}: policy denied: ${deny.reason}\n`),
-    POLICY_DENIED_EXIT,
-  ]
+  return [new TextEncoder().encode(`${subject}: Permission denied\n`), POLICY_DENIED_EXIT]
 }
 
 /**
  * The command plane's rendering of an unanswered ask: refused for now
- * at 126, naming the ask id the agent should quote, so the retry
- * after the host allows it passes.
+ * at 126 in the same words as a deny, so stderr never tells an agent
+ * whether a retry might pass; the ask id it should quote rides the
+ * `refusal` record.
  */
 export function renderPending(subject: string, pending: Pending): [Uint8Array, number] {
-  return [
-    new TextEncoder().encode(
-      `${subject}: requires approval: ${pending.reason} (ask ${pending.id})\n`,
-    ),
-    POLICY_DENIED_EXIT,
-  ]
+  void pending
+  return [new TextEncoder().encode(`${subject}: Permission denied\n`), POLICY_DENIED_EXIT]
+}
+
+/** The record a refused result carries beside its bash-voiced stderr. */
+export function refusalOf(action: Deny | Pending): Refusal {
+  if (action.kind === 'pending') {
+    return {
+      kind: 'pending',
+      reason: action.reason,
+      policy: '',
+      scope: 'command',
+      askId: action.id,
+    }
+  }
+  return {
+    kind: action.failed === true ? 'failed' : 'deny',
+    reason: action.reason,
+    policy: action.policy ?? '',
+    scope: action.scope ?? 'command',
+    askId: null,
+  }
+}
+
+/**
+ * One line saying why, for a surface that hands the agent text rather
+ * than a record; the agent adapters append it after stderr.
+ */
+export function describeRefusal(refusal: Refusal): string {
+  if (refusal.kind === 'pending') {
+    return `requires approval: ${refusal.reason} (ask ${refusal.askId ?? ''})`
+  }
+  if (refusal.kind === 'failed') return `policy ${refusal.policy} failed`
+  return `policy denied: ${refusal.reason}`
+}
+
+/**
+ * Whether `text` already carries the line that says why the command was
+ * refused. Only an operand-scoped denial has one: its GNU diagnostic
+ * `<command>: <reason>` is the reason, wherever a redirect landed it, so
+ * a surface that describes the record after the text looks for that
+ * line rather than for the scope (`2>/dev/null` takes the line away and
+ * the record is the only reason left, `2>&1` moves it onto stdout and
+ * nothing needs repeating) and rather than for the reason as a
+ * substring, since output that happens to quote the words has refused
+ * nothing. A command-scoped refusal's stderr is bash's bare
+ * `Permission denied`, which never says why. An empty reason says
+ * nothing, so no text can already have said it.
+ */
+export function saysWhy(text: string, refusal: Refusal): boolean {
+  if (refusal.scope !== 'operand' || refusal.reason === '') return false
+  const tail = `: ${refusal.reason}`
+  return text.split('\n').some((line) => line.endsWith(tail))
 }
 
 /**
@@ -87,9 +135,17 @@ export async function preOpsGate(
   write: boolean,
   prefix: string,
   sessionId = '',
+  issuer?: symbol,
 ): Promise<void> {
   if (!policies.wants('preOps')) return
-  const deny = await policies.preOps({ op, path, write, prefix, sessionId })
+  const deny = await policies.preOps({
+    op,
+    path,
+    write,
+    prefix,
+    sessionId,
+    ...(issuer !== undefined ? { issuer } : {}),
+  })
   if (deny !== null) {
     throw new PolicyDenied(deny.reason, path.virtual)
   }
@@ -181,6 +237,24 @@ export class Policies {
     return this.wanted.has(hook)
   }
 
+  /**
+   * True when some policy will speak at `hook` for this session. The
+   * per-session refinement of `wants`: a policy that defines the hook
+   * counts, unless it speaks per session (`SessionScoped`) and says this
+   * is not one of its. For a seam that pays ahead for a hook rather than
+   * gating on it: the secret fill drops its masks under a session-write
+   * gate, and a profile's policy at that door is one profile's, not
+   * every session's.
+   */
+  async wantsFor(hook: Hook, sessionId: string): Promise<boolean> {
+    for (const policy of [...this.policies]) {
+      if (policy[hook] === undefined) continue
+      if (!isSessionScoped(policy)) return true
+      if (await policy.wantsFor(hook, sessionId)) return true
+    }
+    return false
+  }
+
   private rescan(): void {
     const wanted = new Set<Hook>()
     for (const hook of Object.keys(VALIDITY) as Hook[]) {
@@ -199,6 +273,15 @@ export class Policies {
     this.rescan()
   }
 
+  /** Remove one registration by identity, preserving the other policies' order. Host-side only. */
+  remove(entry: Policy): boolean {
+    const index = this.policies.indexOf(entry)
+    if (index === -1) return false
+    this.policies.splice(index, 1)
+    this.rescan()
+    return true
+  }
+
   /**
    * One loop for every hook: the first Deny wins (limits are moot once
    * the result is suppressed), Limit actions accumulate and merge
@@ -213,7 +296,9 @@ export class Policies {
   ): Promise<[Deny | Ask | null, Limit | null]> {
     const limits: Limit[] = []
     let asked: Ask | null = null
-    for (const policy of this.policies) {
+    // Keep this gate's order stable if the host edits registrations
+    // while a hook awaits. Changes take effect at the next gate.
+    for (const policy of [...this.policies]) {
       const fn = policy[hook]
       if (fn === undefined) continue
       const name = policy.constructor.name || 'policy'
@@ -228,8 +313,11 @@ export class Policies {
             SessionContext,
         )
       } catch (err) {
+        // The agent reads which policy broke, never what it threw: the
+        // error text is the deployment's to debug, in the log.
         const detail = err instanceof Error ? err.message : String(err)
-        return [{ kind: 'deny', reason: `policy ${name} failed: ${detail}` }, null]
+        console.error(`${hook} policy ${name} raised: ${detail}`)
+        return [{ kind: 'deny', reason: `${name} failed`, policy: name, failed: true }, null]
       }
       if (action === null) continue
       const kind: unknown = typeof action === 'object' ? action.kind : undefined
@@ -239,7 +327,14 @@ export class Policies {
             `legal kinds here: ${[...VALIDITY[hook]].join(', ')}`,
         )
       }
-      if (action.kind === 'deny') return [action, null]
+      if (action.kind === 'deny') {
+        return [
+          action.policy === undefined || action.policy === ''
+            ? { ...action, policy: name }
+            : action,
+          null,
+        ]
+      }
       if (action.kind === 'ask') {
         asked ??= action
         continue

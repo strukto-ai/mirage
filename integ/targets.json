@@ -2141,7 +2141,15 @@
           "backend": "memory",
           "fixture": "statvfs/v1"
         }
-      ]
+      ],
+      "profile": "ops",
+      "profiles": {
+        "ops": {},
+        "auditor": {}
+      },
+      "sessions": {
+        "auditor": "auditor"
+      }
     },
     {
       "id": "argerr-databricks",
@@ -2648,6 +2656,7 @@
         },
         "scripted": "scripted",
         "scriptedask": "scriptedask",
+        "scriptedops": "scriptedops",
         "keeper": "keeper",
         "opener": "opener",
         "pruner": "pruner"
@@ -2852,18 +2861,31 @@
           }
         },
         "scripted": {
-          "script": {
-            "language": "python",
-            "source": "c = ctx['command']\nhit = False\nfor p in c['paths']:\n    if p.startswith('/repo/sealed/'):\n        hit = True\nverdict = None\nif c['name'] == 'cat' and hit:\n    verdict = {'deny': 'written by ' + ctx['profile']}\nverdict\n"
-          },
-          "runtime": "monty"
+          "policy": {
+            "script": {
+              "language": "python",
+              "source": "def pre_command(ctx):\n    c = ctx['command']\n    for p in c['paths']:\n        if c['name'] == 'cat' and p.startswith('/repo/sealed/'):\n            return {'deny': 'written by ' + ctx['profile']}\n    return None\n"
+            },
+            "runtime": "monty"
+          }
         },
         "scriptedask": {
-          "script": {
-            "language": "python",
-            "source": "c = ctx['command']\nhit = False\nfor p in c['paths']:\n    if p.startswith('/scratch/askme/'):\n        hit = True\nverdict = None\nif c['name'] == 'rm' and hit:\n    verdict = {'ask': 'scripted sign-off'}\nverdict\n"
-          },
-          "runtime": "monty"
+          "policy": {
+            "script": {
+              "language": "python",
+              "source": "def pre_command(ctx):\n    c = ctx['command']\n    for p in c['paths']:\n        if c['name'] == 'rm' and p.startswith('/scratch/askme/'):\n            return {'ask': 'scripted sign-off'}\n    return None\n"
+            },
+            "runtime": "monty"
+          }
+        },
+        "scriptedops": {
+          "policy": {
+            "script": {
+              "language": "python",
+              "source": "def pre_command(ctx):\n    for p in ctx['command']['paths']:\n        if 'marker' in contents(p):\n            return {'deny': 'marked by ' + ctx['profile']}\n    return None\n\ndef pre_ops(ctx):\n    op = ctx['op']\n    if op['write'] and op['path'].startswith('/scratch/cold/'):\n        return {'deny': 'cold by ' + ctx['profile']}\n    return None\n\ndef pre_session(ctx):\n    if ctx['write']['key'].startswith('AWS_'):\n        return {'deny': 'credentials are set by the operator'}\n    return None\n\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n"
+            },
+            "runtime": "monty"
+          }
         }
       }
     },
@@ -2887,7 +2909,8 @@
         }
       ],
       "sessions": {
-        "scriptedjs": "scriptedjs"
+        "scriptedjs": "scriptedjs",
+        "scriptedopsjs": "scriptedopsjs"
       },
       "profile": "default",
       "profiles": {
@@ -2905,11 +2928,22 @@
           }
         },
         "scriptedjs": {
-          "script": {
-            "language": "js",
-            "source": "const c = ctx.command\nconst hit = c.name === 'cat' && c.paths.some((p) => p.startsWith('/repo/sealed/'))\nhit ? {deny: 'sealed by ' + ctx.profile} : null\n"
-          },
-          "runtime": "quickjs"
+          "policy": {
+            "script": {
+              "language": "js",
+              "source": "function preCommand(ctx) {\n  const c = ctx.command\n  const hit = c.name === 'cat' && c.paths.some((p) => p.startsWith('/repo/sealed/'))\n  return hit ? {deny: 'sealed by ' + ctx.profile} : null\n}\n"
+            },
+            "runtime": "quickjs"
+          }
+        },
+        "scriptedopsjs": {
+          "policy": {
+            "script": {
+              "language": "js",
+              "source": "function preOps(ctx) {\n  const op = ctx.op\n  return op.write && op.path.startsWith('/scratch/cold/') ? {deny: 'cold by ' + ctx.profile} : null\n}\nfunction preSession(ctx) {\n  return ctx.write.key.startsWith('AWS_') ? {deny: 'credentials are set by the operator'} : null\n}\n"
+            },
+            "runtime": "quickjs"
+          }
         }
       }
     },

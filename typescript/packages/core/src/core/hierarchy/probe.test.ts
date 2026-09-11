@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { JSON_NAME } from './codec.ts'
 import { assertListed, listedSize, resolveEntry } from './probe.ts'
@@ -30,7 +30,7 @@ const SCOPES: readonly Scope[] = [
     kind: 'note',
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 

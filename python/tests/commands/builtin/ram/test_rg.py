@@ -24,8 +24,8 @@ def workspace():
 
 @pytest.mark.asyncio
 async def test_rg_dash_e_matches_like_positional_pattern(workspace):
-    await workspace.ops.mkdir("/data")
-    await workspace.ops.write("/data/a.txt", b"orange line\nplain line\n")
+    await workspace.fs.mkdir("/data")
+    await workspace.fs.write("/data/a.txt", b"orange line\nplain line\n")
 
     io = await workspace.execute("rg -e orange /data/a.txt")
     assert io.exit_code == 0
@@ -34,9 +34,9 @@ async def test_rg_dash_e_matches_like_positional_pattern(workspace):
 
 @pytest.mark.asyncio
 async def test_rg_repeated_dash_e_matches_any_pattern(workspace):
-    await workspace.ops.mkdir("/data")
-    await workspace.ops.write("/data/a.txt",
-                              b"orange line\nplain line\nlast line\n")
+    await workspace.fs.mkdir("/data")
+    await workspace.fs.write("/data/a.txt",
+                             b"orange line\nplain line\nlast line\n")
 
     io = await workspace.execute("rg -e orange -e plain /data/a.txt")
     assert io.exit_code == 0
@@ -48,10 +48,10 @@ async def test_rg_repeated_dash_e_matches_any_pattern(workspace):
 
 @pytest.mark.asyncio
 async def test_rg_dash_f_reads_patterns_from_file(workspace):
-    await workspace.ops.mkdir("/data")
-    await workspace.ops.write("/data/a.txt",
-                              b"orange line\nplain line\nlast line\n")
-    await workspace.ops.write("/data/pats.txt", b"orange\nlast\n")
+    await workspace.fs.mkdir("/data")
+    await workspace.fs.write("/data/a.txt",
+                             b"orange line\nplain line\nlast line\n")
+    await workspace.fs.write("/data/pats.txt", b"orange\nlast\n")
 
     io = await workspace.execute("rg -f /data/pats.txt /data/a.txt")
     assert io.exit_code == 0
@@ -63,10 +63,10 @@ async def test_rg_dash_f_reads_patterns_from_file(workspace):
 
 @pytest.mark.asyncio
 async def test_rg_dash_e_and_dash_f_union(workspace):
-    await workspace.ops.mkdir("/data")
-    await workspace.ops.write("/data/a.txt",
-                              b"orange line\nplain line\nlast line\n")
-    await workspace.ops.write("/data/pats.txt", b"last\n")
+    await workspace.fs.mkdir("/data")
+    await workspace.fs.write("/data/a.txt",
+                             b"orange line\nplain line\nlast line\n")
+    await workspace.fs.write("/data/pats.txt", b"last\n")
 
     io = await workspace.execute("rg -e plain -f /data/pats.txt /data/a.txt")
     assert io.exit_code == 0

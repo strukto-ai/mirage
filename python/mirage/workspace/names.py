@@ -82,3 +82,17 @@ NO_FOLLOW_COMMANDS = frozenset({
 })
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
+
+# The builtins that are the shell's own, which no program loader can
+# find: `find -exec` execs through execvp and sees nothing the shell
+# defined, so these heads are `find: 'cd': No such file or directory`
+# (findutils 4.10 on debian:stable-slim, where `kill` is bash's alone
+# since procps is absent), while `echo`, `sh`, `xargs` or `python3` are
+# programs there as well as builtins here.
+SHELL_ONLY_BUILTINS = frozenset({
+    ".", ":", "alias", "bg", "break", "cd", "command", "compgen", "complete",
+    "continue", "declare", "disown", "eval", "exec", "exit", "export", "fg",
+    "getopts", "history", "jobs", "kill", "let", "local", "mapfile", "read",
+    "readarray", "readonly", "return", "set", "shift", "shopt", "source",
+    "trap", "type", "typeset", "ulimit", "umask", "unalias", "unset", "wait"
+})

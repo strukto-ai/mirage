@@ -12,17 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '../../utils/normalize.ts'
-import { REDACTED_SECRET, type RedactedConfig } from '../secrets.ts'
+import { z } from 'zod'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  REDACTED_SECRET,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
-export interface MongoDBConfig {
-  uri: string
-  databases?: readonly string[]
-  defaultDocLimit?: number
-  defaultSearchLimit?: number
-  maxDocLimit?: number
-  elideFields?: Record<string, readonly string[]>
-}
+// `uri` is the credential, so it carries the secret marker the redactor
+// reads; the rest are the knobs python's `MongoDBConfig` declares.
+const MongoDBConfigSchema = z.object({
+  uri: secretStr(),
+  databases: z.array(z.string()).readonly().optional(),
+  defaultDocLimit: z.number().optional(),
+  defaultSearchLimit: z.number().optional(),
+  maxDocLimit: z.number().optional(),
+  elideFields: z.record(z.string(), z.array(z.string()).readonly()).optional(),
+})
+
+export type MongoDBConfig = ConfigOf<typeof MongoDBConfigSchema>
 
 export interface MongoDBConfigResolved {
   uri: string
@@ -34,7 +44,7 @@ export interface MongoDBConfigResolved {
 }
 
 export function normalizeMongoDBConfig(input: Record<string, unknown>): MongoDBConfig {
-  return normalizeFields(input) as unknown as MongoDBConfig
+  return parseConfigWithSchema(MongoDBConfigSchema, input)
 }
 
 export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolved {

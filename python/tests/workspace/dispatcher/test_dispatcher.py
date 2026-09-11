@@ -70,6 +70,8 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     namespace.follow = MagicMock(side_effect=lambda p: p)
     mount = MagicMock()
     mount.prefix = "/data/"
+    mount.retiring = False
+    mount.ensure_ready = AsyncMock()
     mount.resource.caches_reads = True
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
@@ -466,7 +468,7 @@ async def test_the_remnant_channel_invalidates_each_deletion():
 
 @pytest.mark.asyncio
 async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
-    # A direct dispatcher caller (FUSE, ws.ops) establishes no
+    # A direct dispatcher caller (FUSE, ws.fs) establishes no
     # cache-manager context, so the cores' own invalidation cannot land
     # during the remnant cascade; every deletion must reach the
     # dispatcher's write invalidation, not only the rmdir target, or
@@ -486,7 +488,7 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
     token = set_current_session(sess)
     try:
-        await ws.ops.rmdir("/a/d")
+        await ws.fs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert "/a/d/sec/k" in recorded
@@ -512,7 +514,7 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.ops.rmdir("/a/d")
+            await ws.fs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
@@ -535,7 +537,7 @@ async def test_ops_rmdir_takes_hidden_namespace_links_with_it():
         }})
     token = set_current_session(sess)
     try:
-        await ws.ops.rmdir("/a/d")
+        await ws.fs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     # No session, no hides: the tree must be gone, link included.
@@ -558,7 +560,7 @@ async def test_a_visible_link_below_keeps_the_rmdir_refusal():
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.ops.rmdir("/a/d")
+            await ws.fs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
@@ -588,7 +590,7 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.ops.rmdir("/a/d")
+            await ws.fs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)

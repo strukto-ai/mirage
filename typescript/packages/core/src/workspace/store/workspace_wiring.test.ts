@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RAMObserverStore } from '../../observe/store.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
@@ -21,6 +21,14 @@ import { Workspace } from '../workspace/workspace.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 
 const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = (): void => undefined
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
 
 // Yields to the microtask queue on meta reads so two concurrent
 // attaches both observe the record as absent before either writes.
@@ -109,6 +117,55 @@ describe('Workspace on a WorkspaceStateStore', () => {
     open.push(wsB)
     await wsB.ensureSessionsLoaded()
     expect(wsB.defaultSessionId).toBe('pinned')
+  })
+
+  it.each(['default', 'named'])(
+    'changes the %s session profile after hydration',
+    async (target) => {
+      const store = new RAMWorkspaceStateStore()
+      const writer = await mkWs(store, 'shared')
+      writer.createSession('named')
+      await writer.ensureSessionsLoaded()
+      await writer.flushSessions()
+      const attached = await mkWs(store, 'shared')
+      const provisional = attached.defaultSessionId
+      const requested = target === 'default' ? provisional : 'named'
+      const expected = target === 'default' ? writer.defaultSessionId : 'named'
+      const session = await attached.setSessionProfile(requested, { commands: { allow: ['cat'] } })
+      expect(session.sessionId).toBe(expected)
+      expect(attached.defaultSessionId).toBe(writer.defaultSessionId)
+      expect(attached.defaultSessionId).not.toBe(provisional)
+      expect(session.commands?.allow).toEqual(['cat'])
+      const persisted = await store.sessions('shared').load()
+      expect(persisted.get(expected)?.commands).toMatchObject({ allow: ['cat'] })
+    },
+  )
+
+  it('refuses a profile change if shutdown starts during hydration', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const ws = await mkWs(store, 'shared')
+    const entered = deferred()
+    const release = deferred()
+    const sessions = store.sessions('shared')
+    const load = sessions.load.bind(sessions)
+    vi.spyOn(sessions, 'load').mockImplementationOnce(async () => {
+      entered.resolve()
+      await release.promise
+      return load()
+    })
+    const session = ws.getSession(ws.defaultSessionId)
+    const commands = session.commands
+    const changing = ws.setSessionProfile(ws.defaultSessionId, { commands: { allow: ['cat'] } })
+    const refused = expect(changing).rejects.toThrow('Workspace is closed')
+    try {
+      await entered.promise
+      await ws.close()
+    } finally {
+      release.resolve()
+      await refused
+    }
+    expect(session.commands).toBe(commands)
+    expect(await load()).toEqual(new Map())
   })
 
   it('an existing discovery record wins', async () => {

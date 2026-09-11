@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
+import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
@@ -31,6 +32,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  absolutizeScripts,
   checkWorkspaceConfigFile,
   interpolateEnv,
   loadWorkspaceConfig,
@@ -50,6 +52,48 @@ describe('interpolateEnv', () => {
 
   it('throws listing all missing vars', () => {
     expect(() => interpolateEnv('${A} ${B}', {})).toThrow(/missing.*A.*B/)
+  })
+})
+
+describe('absolutizeScripts', () => {
+  // The CLI applies this to a `load`/`clone` override on its own, since an
+  // override is read without validation; a relative code ref there has to
+  // mean "next to the file" exactly as it does at create time.
+  it('rebases relative resource and cli refs onto the config dir, not dotpaths', () => {
+    const raw: Record<string, unknown> = {
+      mounts: {
+        '/wiki': { resource: './backends/wiki.mjs:WikiResource' },
+        '/pkg': { resource: 'my-pkg/backends:WikiResource' },
+        '/ram': { resource: 'ram' },
+      },
+      clis: { tally: { cli: '../tools/tally.mjs:TALLY' } },
+    }
+    absolutizeScripts(raw, '/srv/deploy')
+    const mounts = raw.mounts as Record<string, { resource: string }>
+    const clis = raw.clis as Record<string, { cli: string }>
+    expect(mounts['/wiki']?.resource).toBe('/srv/deploy/backends/wiki.mjs:WikiResource')
+    expect(mounts['/pkg']?.resource).toBe('my-pkg/backends:WikiResource')
+    expect(mounts['/ram']?.resource).toBe('ram')
+    expect(clis.tally?.cli).toBe('/srv/tools/tally.mjs:TALLY')
+  })
+
+  it('rebases a runtime entry name that is a code ref, not a registered name', () => {
+    const raw: Record<string, unknown> = {
+      runtimes: [
+        { name: './box.mjs:EchoBox', captures: ['nvidia-smi'] },
+        { name: 'monty' },
+        '../box.mjs:EchoBox',
+        'my-runtimes:EchoBox',
+        'vfs',
+      ],
+    }
+    absolutizeScripts(raw, '/srv/deploy')
+    const runtimes = raw.runtimes as ({ name: string } | string)[]
+    expect(runtimes[0]).toEqual({ name: '/srv/deploy/box.mjs:EchoBox', captures: ['nvidia-smi'] })
+    expect(runtimes[1]).toEqual({ name: 'monty' })
+    expect(runtimes[2]).toBe('/srv/box.mjs:EchoBox')
+    expect(runtimes[3]).toBe('my-runtimes:EchoBox')
+    expect(runtimes[4]).toBe('vfs')
   })
 })
 
@@ -728,6 +772,105 @@ describe('clis section', () => {
     })
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/it takes script/)
   })
+
+  it('a script entry refuses a secrets pointer', () => {
+    // A script's config is opaque: nothing declares which key is a
+    // credential, so the snapshot captures it verbatim, and a pointer
+    // resolved into it would be written out as the value it fetched. A
+    // script reads a credential from a managed env var instead.
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/data': { resource: 'ram' } },
+        clis: {
+          pager: { script: 'pager.py', config: { token: { from: 'env', key: 'PAGER_TOKEN' } } },
+        },
+      }),
+    ).toThrow(/clis entry 'pager'.*opaque/)
+    // A literal in a script's config is the script's own business.
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/data': { resource: 'ram' } },
+      clis: { pager: { script: 'pager.py', config: { verbose: true } } },
+    })
+    expect(cfg.clis?.pager?.config).toEqual({ verbose: true })
+  })
+})
+
+// Mirrors python/tests/config/test_loader.py's runtimes `name:` cases. A
+// runtime entry name carrying a colon names a Runtime subclass the way
+// `resource:` names a backend, so a deployment ships a runtime as a file
+// with no host program calling registerRuntime.
+describe('runtimes name: reference', () => {
+  const CORE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../core/dist/index.js'),
+  ).href
+  const BOX =
+    `import {LINE_EXECUTOR, Runtime} from ${JSON.stringify(CORE)}\n` +
+    'export class EchoBox extends Runtime {\n' +
+    '  [LINE_EXECUTOR] = true\n' +
+    "  name = 'echobox'\n" +
+    "  constructor(options = {}) { super(options, ['nvidia-smi'], []) }\n" +
+    '  runLine(line) { return Promise.resolve({ stdout: new TextEncoder().encode(`box:${line}\\n`), stderr: null, exitCode: 0 }) }\n' +
+    '}\n' +
+    "export const NOT_A_RUNTIME = { name: 'nope' }\n"
+
+  it('builds a runtime out of a file next to the config, with the entry options', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
+    writeFileSync(join(dir, 'box.mjs'), BOX)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\n' +
+        'runtimes:\n  - name: ./box.mjs:EchoBox\n    captures: [nvidia-smi, rocm-smi]\n  - vfs\n',
+    )
+    const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
+    expect(cfg.runtimes?.[0]).toEqual({
+      name: `${join(dir, 'box.mjs')}:EchoBox`,
+      captures: ['nvidia-smi', 'rocm-smi'],
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    const [box, vfs] = args.options.runtimes ?? []
+    expect(box).toBeInstanceOf(Runtime)
+    expect((box as Runtime).name).toBe('echobox')
+    expect((box as Runtime).captures).toEqual(['nvidia-smi', 'rocm-smi'])
+    expect((vfs as Runtime).name).toBe('vfs')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('checks the entry keys of a referenced runtime the way a named one is checked', async () => {
+    // The base constructor ignores a key it does not read, so without
+    // the check `captuers:` would leave EchoBox on its class captures;
+    // Python refuses the same entry through `**options`.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
+    writeFileSync(join(dir, 'box.mjs'), BOX)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\n' +
+        'runtimes:\n  - name: ./box.mjs:EchoBox\n    captuers: [nvidia-smi, rocm-smi]\n  - vfs\n',
+    )
+    await expect(
+      configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
+    ).rejects.toThrow(/unknown .*box\.mjs:EchoBox runtime option 'captuers'/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('refuses a ref that is not a Runtime subclass, and one that does not load', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-rt-'))
+    writeFileSync(join(dir, 'box.mjs'), BOX)
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nruntimes:\n  - ./box.mjs:NOT_A_RUNTIME\n',
+    )
+    await expect(
+      configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
+    ).rejects.toThrow('is not a Runtime subclass')
+    writeFileSync(
+      join(dir, 'ws.yaml'),
+      'mounts:\n  /data:\n    resource: ram\nruntimes:\n  - name: ./missing.mjs:EchoBox\n',
+    )
+    await expect(
+      configToWorkspaceArgs(loadWorkspaceConfigFile(join(dir, 'ws.yaml'))),
+    ).rejects.toThrow('cannot load script')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 
 // Mirrors python/tests/config/test_loader.py's mounts `resource:` cases.
@@ -969,14 +1112,61 @@ describe('CLI to daemon round trip', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('rebases a profile script path onto the config dir before loading it', async () => {
-    // The check door validates the profile without reading its script:
+  it('rebases a profile policy path onto the config dir before loading it', async () => {
+    // The check door validates the profile without reading its policy:
     // reading at validation resolved `roles/x.js` against the process
     // cwd (this test's cwd is the package, not the config dir), so
     // checking a file config from anywhere else failed with ENOENT.
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-script-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
     mkdirSync(join(dir, 'roles'))
-    writeFileSync(join(dir, 'roles', 'x.js'), 'null\n')
+    writeFileSync(join(dir, 'roles', 'x.js'), 'function preCommand() { return null }\n')
+    const file = join(dir, 'w.yaml')
+    writeFileSync(
+      file,
+      [
+        'mounts:',
+        '  /data:',
+        '    resource: ram',
+        'profiles:',
+        '  release: {policy: {script: roles/x.js, runtime: quickjs}}',
+        '',
+      ].join('\n'),
+    )
+    const wire = checkWorkspaceConfigFile(file)
+    const profiles = wire.profiles as Record<string, { policy: Record<string, unknown> }>
+    expect(profiles.release?.policy.script).toBe(join(dir, 'roles', 'x.js'))
+    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
+    const release = args.options.profiles?.release
+    expect(release?.policy?.script).toBeInstanceOf(ScriptSource)
+    expect((release?.policy?.script as ScriptSource).source).toBe(
+      'function preCommand() { return null }\n',
+    )
+    expect(release?.policy?.runtime).toBe('quickjs')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('refuses a profile policy that states no runtime', () => {
+    // There is no default engine: a policy the config does not pin to
+    // an engine is refused at load, not guessed at the gate.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
+    const file = join(dir, 'w.yaml')
+    writeFileSync(
+      file,
+      [
+        'mounts:',
+        '  /data:',
+        '    resource: ram',
+        'profiles:',
+        '  release: {policy: {script: roles/x.js}}',
+        '',
+      ].join('\n'),
+    )
+    expect(() => checkWorkspaceConfigFile(file)).toThrow(/runtime names the engine the policy/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('tells a profile written with script and runtime where the keys went', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
     const file = join(dir, 'w.yaml')
     writeFileSync(
       file,
@@ -989,34 +1179,7 @@ describe('CLI to daemon round trip', () => {
         '',
       ].join('\n'),
     )
-    const wire = checkWorkspaceConfigFile(file)
-    const profiles = wire.profiles as Record<string, Record<string, unknown>>
-    expect(profiles.release?.script).toBe(join(dir, 'roles', 'x.js'))
-    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
-    const release = args.options.profiles?.release
-    expect(release?.script).toBeInstanceOf(ScriptSource)
-    expect((release?.script as ScriptSource).source).toBe('null\n')
-    expect(release?.runtime).toBe('quickjs')
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('refuses a profile script that states no runtime', () => {
-    // There is no default engine: a script the config does not pin to
-    // an engine is refused at load, not guessed at the gate.
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-script-'))
-    const file = join(dir, 'w.yaml')
-    writeFileSync(
-      file,
-      [
-        'mounts:',
-        '  /data:',
-        '    resource: ram',
-        'profiles:',
-        '  release: {script: roles/x.js}',
-        '',
-      ].join('\n'),
-    )
-    expect(() => checkWorkspaceConfigFile(file)).toThrow(/set runtime beside script/)
+    expect(() => checkWorkspaceConfigFile(file)).toThrow(/now one policy block/)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -1111,8 +1274,8 @@ describe('env block', () => {
       /env\.X.*not both/,
     )
     expect(() =>
-      loadWorkspaceConfig({ ...base, env: { X: { from: 'env', readonly: true } } }),
-    ).toThrow(/readonly/)
+      loadWorkspaceConfig({ ...base, env: { X: { from: 'env', export: false } } }),
+    ).toThrow(/always exported/)
     expect(() => loadWorkspaceConfig({ ...base, env: { X: { value: 'v', key: 'k' } } })).toThrow(
       /managed entries/,
     )
@@ -1160,6 +1323,38 @@ describe('the secrets block', () => {
     })
   })
 
+  it('builds no source when no mount or CLI config names one', async () => {
+    // Building a source reads its own bootstrap pointers, and a dotenv
+    // file is I/O. With nothing to serve, a source whose file is
+    // missing must not stop the workspace from being created: the
+    // managed variables that do read it resolve at command time.
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      secrets: {
+        sm: {
+          source: 'aws-sm',
+          config: { region: { from: 'dotenv', ref: '/no/such/file', key: 'R' } },
+        },
+      },
+    })
+    await expect(configToWorkspaceArgs(cfg)).resolves.toBeDefined()
+  })
+
+  it('builds the source when a mount config does name one', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: {
+        '/': { resource: 'ram', config: { root: { from: 'sm', ref: 'r', key: 'K' } } },
+      },
+      secrets: {
+        sm: {
+          source: 'aws-sm',
+          config: { region: { from: 'dotenv', ref: '/no/such/file', key: 'R' } },
+        },
+      },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow()
+  })
+
   it('surfaces refusals as config errors naming the instance', () => {
     const base = { mounts: { '/': { resource: 'ram' } } }
     expect(() =>
@@ -1175,6 +1370,58 @@ describe('the secrets block', () => {
       /secrets\.sm.*must be a mapping/,
     )
     expect(() => loadWorkspaceConfig({ ...base, secrets: 'nope' })).toThrow(/must be a mapping/)
+  })
+})
+
+describe('a mount or CLI credential from the secrets plane', () => {
+  it('resolves a mount pointer against a declared instance', async () => {
+    process.env.CONFIG_DOOR_PROBE = 'xoxb-from-env'
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: {
+          '/slack': {
+            resource: 'slack',
+            config: { token: { from: 'ambient', key: 'CONFIG_DOOR_PROBE' } },
+          },
+        },
+        secrets: { ambient: { source: 'env' } },
+      }),
+    )
+    const entry = args.resources['/slack']
+    expect(entry).toBeDefined()
+    expect(JSON.stringify(entry?.[0])).not.toContain('CONFIG_DOOR_PROBE')
+  })
+
+  it('resolves a CLI pointer against the same instances', async () => {
+    // The sources reached mount construction and not `buildCliEntries`,
+    // so the CLI's config model was handed the pointer itself.
+    process.env.CONFIG_DOOR_CLI_PROBE = 'xoxb-for-the-cli'
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/data': { resource: 'ram' } },
+        clis: {
+          sl: {
+            cli: 'slack',
+            config: { token: { from: 'ambient', key: 'CONFIG_DOOR_CLI_PROBE' } },
+          },
+        },
+        secrets: { ambient: { source: 'env' } },
+      }),
+    )
+    expect(args.options.clis?.sl).toEqual(['slack', { token: 'xoxb-for-the-cli' }])
+  })
+
+  it('resolves a pointer with no secrets block at all', async () => {
+    process.env.CONFIG_DOOR_BARE_PROBE = 'xoxb-ambient'
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: { '/data': { resource: 'ram' } },
+        clis: {
+          sl: { cli: 'slack', config: { token: { from: 'env', key: 'CONFIG_DOOR_BARE_PROBE' } } },
+        },
+      }),
+    )
+    expect(args.options.clis?.sl).toEqual(['slack', { token: 'xoxb-ambient' }])
   })
 })
 

@@ -23,7 +23,7 @@ from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -86,7 +86,7 @@ async def stat(
                         size=entry.size,
                         modified=entry.remote_time or None,
                         type=FileType.FILE,
-                        content=guess_type(entry.name))
+                        content=content_type_for_path(entry.name))
     parent = virtual_key.rsplit("/", 1)[0] or "/"
     parent_listing = await index.list_dir(parent)
     if parent_listing.entries is not None:
@@ -108,4 +108,4 @@ async def stat(
                     size=size,
                     modified=modified,
                     type=FileType.FILE,
-                    content=guess_type(name))
+                    content=content_type_for_path(name))

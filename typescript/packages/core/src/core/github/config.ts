@@ -14,8 +14,7 @@
 
 import { z } from 'zod'
 import type { ConfigOf, RedactedConfig } from '../../resource/secrets.ts'
-import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
+import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
 
 const GitHubConfigSchema = z.object({
   token: secretStr(),
@@ -34,7 +33,7 @@ export function redactGitHubConfig(config: GitHubConfig): GitHubConfigRedacted {
 }
 
 export function normalizeGitHubConfig(input: Record<string, unknown>): GitHubConfig {
-  return normalizeFields(input) as unknown as GitHubConfig
+  return parseConfigWithSchema(GitHubConfigSchema, input)
 }
 
 export const GhConfigSchema = z.object({

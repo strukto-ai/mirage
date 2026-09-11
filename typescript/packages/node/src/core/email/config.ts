@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
-
-function asString(v: unknown): string {
-  return typeof v === 'string' ? v : ''
-}
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password
@@ -68,18 +68,5 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
 }
 
 export function normalizeEmailConfig(input: Record<string, unknown>): EmailConfig {
-  const norm = normalizeFields(input)
-  const built: EmailConfigInput = {
-    imapHost: asString(norm.imapHost),
-    smtpHost: asString(norm.smtpHost),
-    username: asString(norm.username),
-    password: asString(norm.password),
-  }
-  if (typeof norm.imapPort === 'number') built.imapPort = norm.imapPort
-  if (typeof norm.smtpPort === 'number') built.smtpPort = norm.smtpPort
-  if (typeof norm.useSsl === 'boolean') built.useSsl = norm.useSsl
-  if (typeof norm.maxMessages === 'number') built.maxMessages = norm.maxMessages
-  if (typeof norm.saveCopy === 'boolean') built.saveCopy = norm.saveCopy
-  if (typeof norm.sentFolder === 'string') built.sentFolder = norm.sentFolder
-  return buildEmailConfig(built)
+  return parseConfigWithSchema(EmailConfigSchema, input)
 }

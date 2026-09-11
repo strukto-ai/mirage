@@ -37,7 +37,7 @@ from mirage.observe.context import (active_recorder, record, record_stream,
                                     revision_for, start_op)
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent, listing_error
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.ranges import window_for
 
 SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
@@ -307,7 +307,7 @@ def entry_stat(item: dict[str, Any]) -> FileStat:
         size=item.get("size"),
         modified=item.get("lastModifiedDateTime"),
         type=FileType.FILE,
-        content=guess_type(name),
+        content=content_type_for_path(name),
         fingerprint=item.get("cTag"),
         extra={
             "id": item.get("id"),
@@ -729,7 +729,7 @@ async def stat_item(config: MsGraphConfig,
                         size=entry.size,
                         modified=entry.remote_time or None,
                         type=FileType.FILE,
-                        content=guess_type(entry.name),
+                        content=content_type_for_path(entry.name),
                         extra=dict(entry.extra))
     parent = virtual_key.rsplit("/", 1)[0] or "/"
     parent_listing = await index.list_dir(parent)

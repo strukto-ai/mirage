@@ -8,7 +8,9 @@ import pytest
 from mirage.commands.builtin.find_eval import Name, Not, Or
 from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
                                                   apply_mtime_filter, find,
+                                                  find_walk_generic,
                                                   parse_find_args, walk_find)
+from mirage.commands.config import CommandOpts
 from mirage.commands.errors import FindParseError
 from mirage.ops.types import LinkView
 from mirage.resource.ram import RAMResource
@@ -1038,3 +1040,15 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
                         stat=stat,
                         index=None,
                         args=FindArgs())
+
+
+@pytest.mark.asyncio
+async def test_walk_selection_preserves_newlines_before_rendering():
+    stats = {"/mnt": _DIR_STAT, "/mnt/a\nb": _FILE_STAT}
+    _, io = await find_walk_generic(
+        [_file_spec(virtual="/mnt", key="")], ["-type", "f"],
+        CommandOpts(stat_path=_stat_map(stats)),
+        readdir=AsyncMock(return_value=["/mnt/a\nb"]),
+        stat=AsyncMock(side_effect=lambda path, *_: stats[path.virtual]))
+    assert io.matched_runs is not None
+    assert [p.virtual for run in io.matched_runs for p in run] == ["/mnt/a\nb"]

@@ -17,7 +17,7 @@ import { stat as fsStat } from 'node:fs/promises'
 import path from 'node:path'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { guessType } from '@struktoai/mirage-core/utils/filetype'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
 
@@ -52,7 +52,8 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
     size: st.size,
     modified,
     fingerprint: modified,
-    type: guessType(name),
+    type: FileType.FILE,
+    content: contentTypeForPath(name),
     mode: st.mode & 0o7777,
     atime: st.atime.toISOString(),
   })

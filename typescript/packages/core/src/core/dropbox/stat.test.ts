@@ -28,7 +28,7 @@ vi.mock('./client.ts', async () => {
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import type { DropboxEntry } from './api.ts'
@@ -79,7 +79,7 @@ describe('dropbox stat', () => {
     const fake = new FakeDropboxRpc({ metadata: FILE_ENTRY })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(makeAccessor(), PathSpec.fromStrPath('/a.txt'))
-    expect(out.type).toBe(FileType.TEXT)
+    expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
     expect(out.modified).toBe('2026-04-01T00:00:00Z')
@@ -167,7 +167,7 @@ describe('dropbox stat', () => {
       new PathSpec({ resourcePath: 'a.txt', virtual: '/a.txt', directory: '/' }),
       new RAMIndexCacheStore(),
     )
-    expect(out.type).toBe(FileType.TEXT)
+    expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
     expect(out.modified).toBe('2026-04-01T00:00:00Z')
@@ -195,7 +195,7 @@ describe('dropbox stat', () => {
       new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/' }),
       index,
     )
-    expect(fileOut.type).toBe(FileType.TEXT)
+    expect(fileOut.content).toBe(ContentType.TEXT)
     expect(dirOut.type).toBe(FileType.DIRECTORY)
     expect(dirOut.extra.dropbox_id).toBe('id:docs')
     expect(fake.listRequests).toBe(1)
@@ -235,7 +235,7 @@ describe('dropbox stat', () => {
       }),
       new RAMIndexCacheStore(),
     )
-    expect(out.type).toBe(FileType.TEXT)
+    expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
   })

@@ -26,9 +26,9 @@ def workspace():
 async def test_rg_no_operand_searches_cwd(workspace):
     # ripgrep with no path operand and no attached stdin searches the
     # cwd recursively and prints bare relative names (ripgrep 14).
-    await workspace.ops.mkdir("/sub")
-    await workspace.ops.write("/a.txt", b"hello\n")
-    await workspace.ops.write("/sub/b.txt", b"hello\n")
+    await workspace.fs.mkdir("/sub")
+    await workspace.fs.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/sub/b.txt", b"hello\n")
 
     io = await workspace.execute("rg hello", cwd="/")
     assert io.exit_code == 0
@@ -39,7 +39,7 @@ async def test_rg_no_operand_searches_cwd(workspace):
 async def test_rg_no_operand_attached_stdin_wins(workspace):
     # A piped stdin, even empty, wins over the cwd search (rg's
     # readable-stdin rule).
-    await workspace.ops.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
 
     io = await workspace.execute("rg hello", cwd="/", stdin=b"hello pipe\n")
     assert io.exit_code == 0
@@ -52,7 +52,7 @@ async def test_rg_no_operand_attached_stdin_wins(workspace):
 
 @pytest.mark.asyncio
 async def test_rg_no_operand_no_match_exits_one(workspace):
-    await workspace.ops.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
 
     io = await workspace.execute("rg zzz", cwd="/")
     assert io.exit_code == 1

@@ -34,7 +34,7 @@ ws = Workspace({"/ds/": resource}, mode=MountMode.READ)
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -218,11 +218,11 @@ async def main():
     print(f"  size: {(await r.stdout_str()).strip()} bytes")
 
     async def measure(label: str, cmd: str) -> None:
-        before_bytes = sum(rec.bytes for rec in ws.ops.records)
+        before_bytes = sum(rec.bytes for rec in ws.fs.records)
         t0 = time.monotonic()
         r = await ws.execute(cmd)
         dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.ops.records) - before_bytes
+        net = sum(rec.bytes for rec in ws.fs.records) - before_bytes
         out = (await r.stdout_str()).rstrip().splitlines()
         print(f"  {label:38s} bytes={net:>6,}  t={dt:4.2f}s  "
               f"lines={len(out):>3}")

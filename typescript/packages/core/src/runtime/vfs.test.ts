@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { enotsup } from '../utils/errors.ts'
-import { DEVICE_NUMBERS_KEY, FileStat, FileType } from '../types.ts'
+import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../types.ts'
 import { CHAR_MODE, DIR_MODE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
 import { CrossMountError } from './errors.ts'
 import type { BridgeDispatchFn } from './types.ts'
@@ -49,7 +49,12 @@ describe('RuntimeVFS transport', () => {
       return Promise.resolve(
         path === '/ram/sub'
           ? new FileStat({ name: 'sub', type: FileType.DIRECTORY })
-          : new FileStat({ name: 'a.txt', size: 4, type: FileType.TEXT }),
+          : new FileStat({
+              name: 'a.txt',
+              size: 4,
+              type: FileType.FILE,
+              content: ContentType.TEXT,
+            }),
       )
     })
     const entries = await new RuntimeVFS(dispatch).readdir('/ram/')
@@ -67,7 +72,8 @@ describe('RuntimeVFS transport', () => {
         new FileStat({
           name: 'a.txt',
           size: 4,
-          type: FileType.TEXT,
+          type: FileType.FILE,
+          content: ContentType.TEXT,
           mode: 0o700,
           modified: '2026-07-15T00:00:00Z',
         }),
@@ -83,7 +89,9 @@ describe('RuntimeVFS transport', () => {
 
   it('reports an unknown stamp as epoch zero', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() =>
-      Promise.resolve(new FileStat({ name: 'a.txt', size: 1, type: FileType.TEXT })),
+      Promise.resolve(
+        new FileStat({ name: 'a.txt', size: 1, type: FileType.FILE, content: ContentType.TEXT }),
+      ),
     )
     expect((await new RuntimeVFS(dispatch).stat('/ram/a.txt')).mtimeMs).toBe(0)
   })
@@ -163,7 +171,9 @@ describe('RuntimeVFS transport', () => {
   it('marks the names the resolver calls links', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'readdir') return Promise.resolve(['/ram/lnk', '/ram/a.txt'])
-      return Promise.resolve(new FileStat({ name: 'x', size: 2, type: FileType.TEXT }))
+      return Promise.resolve(
+        new FileStat({ name: 'x', size: 2, type: FileType.FILE, content: ContentType.TEXT }),
+      )
     })
     const resolver = new PrefixResolver(
       () => ['/ram/'],
@@ -195,7 +205,9 @@ describe('RuntimeVFS transport', () => {
   it('marks nothing when no link source was supplied', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op) => {
       if (op === 'readdir') return Promise.resolve(['/ram/lnk'])
-      return Promise.resolve(new FileStat({ name: 'lnk', size: 0, type: FileType.TEXT }))
+      return Promise.resolve(
+        new FileStat({ name: 'lnk', size: 0, type: FileType.FILE, content: ContentType.TEXT }),
+      )
     })
     const entries = await new RuntimeVFS(dispatch, new PrefixResolver(() => ['/ram/'])).readdir(
       '/ram/',

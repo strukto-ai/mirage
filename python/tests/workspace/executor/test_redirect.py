@@ -375,3 +375,26 @@ async def test_write_target_unwritable_same_line_for_every_form(line: str):
     io = await ws.execute(line)
     assert io.exit_code == 1
     assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,expected", [
+    ("cat 0<&1; echo rc=$?", ("rc=1\n", "cat: -: Bad file descriptor\n")),
+    ("cat 0<&2; echo rc=$?", ("rc=1\n", "cat: -: Bad file descriptor\n")),
+    ("cat <&-; echo rc=$?", ("rc=1\n", "cat: -: Bad file descriptor\n")),
+    ("true 0<&1; echo rc=$?", ("rc=0\n", "")),
+    ("echo hi 0<&1; echo rc=$?", ("hi\nrc=0\n", "")),
+    ("read x 0<&1; echo rc=$?",
+     ("rc=1\n", "bash: read: read error: 0: Bad file descriptor\n")),
+])
+async def test_stdin_from_a_closed_or_write_only_descriptor_is_unreadable(
+        line, expected):
+    # bash 5.2.37 opens the command all the same and the first read
+    # fails with EBADF; a command that never reads succeeds. GNU cat's
+    # `closing standard input` second line after `<&-` is not rendered.
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(line)
+        assert (await io.stdout_str(), await io.stderr_str()) == expected
+    finally:
+        await ws.close()

@@ -28,24 +28,26 @@ import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { deviceRdev } from '../../../utils/stat_view.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { lsModeString } from '../utils/formatting.ts'
+import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 
 const ENC = new TextEncoder()
 
-const DEFAULT_OWNER = 'user'
-
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
   [FileType.SYMLINK]: 'symbolic link',
   [FileType.CHAR_DEVICE]: 'character special file',
-  [FileType.TEXT]: 'regular file',
-  [FileType.BINARY]: 'regular file',
-  [FileType.JSON]: 'regular file',
-  [FileType.CSV]: 'regular file',
+  [FileType.FILE]: 'regular file',
 }
 
 function typeLabel(s: FileStat): string {
-  return s.type ? (TYPE_LABELS[s.type] ?? 'regular file') : 'regular file'
+  return TYPE_LABELS[s.type] ?? 'regular file'
+}
+
+// The default record's type= shows a regular file's content shape and a
+// non-regular node's kind, so one field reads the way it always has.
+function shownType(s: FileStat): string {
+  return s.type === FileType.FILE && s.content !== null ? s.content : s.type
 }
 
 function effectiveMode(s: FileStat): number {
@@ -62,10 +64,6 @@ function typeBits(s: FileStat): number {
   if (s.type === FileType.SYMLINK) return 0o120000
   if (s.type === FileType.CHAR_DEVICE) return 0o020000
   return 0o100000
-}
-
-function owner(value: number | string | null): string {
-  return value !== null ? String(value) : DEFAULT_OWNER
 }
 
 function epoch(iso: string | null): string {
@@ -173,7 +171,12 @@ function applyFlags(
   return value
 }
 
-function directiveValue(spec: string, s: FileStat, name: string): string {
+function directiveValue(
+  spec: string,
+  s: FileStat,
+  name: string,
+  identity: Identity | null,
+): string {
   if (spec === '%') return '%'
   if (spec === 'n') return name
   if (spec === 's') return String(s.size ?? 0)
@@ -181,8 +184,8 @@ function directiveValue(spec: string, s: FileStat, name: string): string {
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)
   if (spec === 'f') return (typeBits(s) | effectiveMode(s)).toString(16)
-  if (spec === 'u' || spec === 'U') return owner(s.uid)
-  if (spec === 'g' || spec === 'G') return owner(s.gid)
+  if (spec === 'u' || spec === 'U') return ownerName(s.uid, identity)
+  if (spec === 'g' || spec === 'G') return groupName(s.gid, identity)
   if (spec === 'x') return s.atime ?? s.modified ?? ''
   if (spec === 'X') return epoch(s.atime ?? s.modified)
   if (spec === 'y' || spec === 'z') return s.modified ?? ''
@@ -219,7 +222,12 @@ function nameParts(s: FileStat, name: string, quoted: boolean): string[] {
   return quoted ? parts.map(quoteName) : parts
 }
 
-function renderDirective(d: FormatDirective, s: FileStat, name: string): string {
+function renderDirective(
+  d: FormatDirective,
+  s: FileStat,
+  name: string,
+  identity: Identity | null,
+): string {
   if (d.spec === 'N') {
     // GNU formats the name and a symlink's target as two separate fields,
     // so a width pads each one rather than the joined line.
@@ -228,7 +236,13 @@ function renderDirective(d: FormatDirective, s: FileStat, name: string): string 
       .map((part) => applyFlags(part, d.flags, d.width, d.precision, d.spec))
       .join(' -> ')
   }
-  return applyFlags(directiveValue(d.spec, s, name), d.flags, d.width, d.precision, d.spec)
+  return applyFlags(
+    directiveValue(d.spec, s, name, identity),
+    d.flags,
+    d.width,
+    d.precision,
+    d.spec,
+  )
 }
 
 function isAsciiDigit(char: string | undefined): boolean {
@@ -277,7 +291,7 @@ function parseFormatDirective(fmt: string, start: number): FormatDirective | nul
   return { end: cursor, flags, width, precision, spec }
 }
 
-function formatStat(fmt: string, s: FileStat, name: string): string {
+function formatStat(fmt: string, s: FileStat, name: string, identity: Identity | null): string {
   const parts: string[] = []
   let cursor = 0
   while (cursor < fmt.length) {
@@ -293,7 +307,7 @@ function formatStat(fmt: string, s: FileStat, name: string): string {
       cursor = start + 1
       continue
     }
-    parts.push(renderDirective(directive, s, name))
+    parts.push(renderDirective(directive, s, name, identity))
     cursor = directive.end
   }
   return parts.join('')
@@ -312,6 +326,7 @@ export async function statGeneric(
   const lines: string[] = []
   let err = ''
   const links = fl.asBool('L') ? null : (opts.ns?.links ?? null)
+  const identity = identityOf(opts)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
     // its target, unless -L asks to dereference. A link has no backend
@@ -319,12 +334,12 @@ export async function statGeneric(
     const linked = links?.statAt(p.virtual) ?? null
     if (linked !== null) {
       if (fmt !== null) {
-        lines.push(formatStat(fmt, linked, p.rawPath))
+        lines.push(formatStat(fmt, linked, p.rawPath, identity))
       } else {
         const sizeStr = linked.size === null ? 'None' : String(linked.size)
         const modStr = linked.modified ?? 'None'
         lines.push(
-          `name=${linked.name} size=${sizeStr} modified=${modStr} type=${linked.type ?? 'None'}`,
+          `name=${linked.name} size=${sizeStr} modified=${modStr} type=${shownType(linked)}`,
         )
       }
       continue
@@ -339,12 +354,11 @@ export async function statGeneric(
       continue
     }
     if (fmt !== null) {
-      lines.push(formatStat(fmt, s, p.rawPath))
+      lines.push(formatStat(fmt, s, p.rawPath, identity))
     } else {
       const sizeStr = s.size === null ? 'None' : String(s.size)
       const modStr = s.modified ?? 'None'
-      const typeStr = s.type ?? 'None'
-      lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${typeStr}`)
+      lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${shownType(s)}`)
     }
   }
   const io = new IOResult({

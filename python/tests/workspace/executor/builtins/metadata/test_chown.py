@@ -55,7 +55,7 @@ async def test_chown_recursive_does_not_follow_a_link_operand():
         ws, "stat -c '%U %n' /data/dirlink /data/tree/sub/b.txt")
     assert out.splitlines() == [
         "bob /data/dirlink",
-        "user /data/tree/sub/b.txt",
+        "- /data/tree/sub/b.txt",
     ]
 
 

@@ -20,27 +20,32 @@ from mirage.shell.array import (array_count, array_extent, array_get,
                                 array_has, array_with)
 from mirage.shell.variable import ShellValue
 from mirage.workspace.session.session import Session
-from mirage.workspace.session.state import (deref, element_index,
+from mirage.workspace.session.state import (conversion_scalar, deref,
                                             ensure_var_visible, env_get,
-                                            seed_var, session_elements,
-                                            strip_key_quotes, visible_arrays,
-                                            visible_assocs, visible_env)
+                                            seed_var, strip_key_quotes,
+                                            subscript_index, visible_arrays,
+                                            visible_assocs)
 
 _ELEMENT_REF = re.compile(r"([A-Za-z_]\w*)(?:\[(.+)\])?\Z", re.DOTALL)
 
 
-def element_is_set(session: Session, ref: str) -> bool:
+async def element_is_set(session: Session,
+                         ref: str,
+                         view: SessionView | None = None) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value.
 
     What ``test -v`` asks. A bare name over an array checks element 0
     (the literal key ``"0"`` for an associative one), which is GNU's
     rule; ``name[@]`` and ``name[*]`` ask whether any element is set.
     An associative subscript is the key verbatim; an indexed one
-    evaluates as arithmetic.
+    evaluates as arithmetic, and what it assigns lands
+    (``[[ -v a[x=2] ]]`` leaves x at 2, as bash does).
 
     Args:
         session (Session): shell session state.
         ref (str): the reference as the operand spelled it.
+        view (SessionView | None): the gated door the subscript's
+            assignments land through; None outside a workspace.
     """
     match = _ELEMENT_REF.fullmatch(ref)
     if match is None:
@@ -73,7 +78,7 @@ def element_is_set(session: Session, ref: str) -> bool:
         held = [scalar]
     else:
         return False
-    idx = element_index(sub, visible_env(session), session_elements(session))
+    idx = await subscript_index(session, sub, view)
     if idx < 0:
         idx += array_extent(held)
     return array_has(held, idx)
@@ -139,13 +144,13 @@ async def assign_element(session: Session,
             stored = (session.env.get(name, "") + value) if append else value
         else:
             if arr is None:
-                scalar = session.env.get(name)
+                scalar = conversion_scalar(session, name)
                 # An existing scalar becomes element 0, even when
                 # empty: bash resolves `x[-1]` against the length-1
                 # array that produces.
                 arr = [] if scalar is None else [scalar]
-            idx = 0 if subscript is None else element_index(
-                subscript, visible_env(session), session_elements(session))
+            idx = (0 if subscript is None else await subscript_index(
+                session, subscript, view))
             if idx < 0:
                 idx += array_extent(arr)
             if idx < 0:

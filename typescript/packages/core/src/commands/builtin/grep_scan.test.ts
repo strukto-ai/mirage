@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType } from '../../types.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { grepFilesOnly } from './grep_scan.ts'
 
 const ENC = new TextEncoder()
@@ -24,7 +24,7 @@ describe('grepFilesOnly', () => {
     // operands are walked (search-narrowed candidates arrive as files).
     const readdirFn = (path: string): Promise<string[]> => Promise.reject(new Error(path))
     const statFn = (path: string): Promise<FileStat> =>
-      Promise.resolve(new FileStat({ name: path, type: FileType.TEXT }))
+      Promise.resolve(new FileStat({ name: path, type: FileType.FILE, content: ContentType.TEXT }))
     const readBytesFn = (): Promise<Uint8Array> => Promise.resolve(ENC.encode('alpha beta\n'))
     const hits = await grepFilesOnly(readdirFn, statFn, readBytesFn, '/data/notes.txt', 'alpha', {
       recursive: true,

@@ -50,7 +50,7 @@ _FUSE = SimpleNamespace(FUSE=_CaptureFuse)
 @pytest.fixture
 def fs():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    return MirageFS(ws.ops)
+    return MirageFS(ws.fs)
 
 
 def test_run_fuse_mount_options(fs):

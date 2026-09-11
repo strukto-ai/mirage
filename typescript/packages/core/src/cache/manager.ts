@@ -17,6 +17,8 @@ import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
 import type { IndexCacheStore } from './index/store.ts'
+import { IndexView } from './index/view.ts'
+import { withCacheMutation } from './file/io.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -34,17 +36,38 @@ export class CacheManager {
   private readonly index: IndexCacheStore | null
   private readonly prefix: string
   private readonly cachesReads: boolean
+  private readonly ownsPath: (path: string) => boolean
 
   constructor(
     fileCache: FileCache | null,
     index: IndexCacheStore | null,
     prefix: string,
     cachesReads: boolean,
+    ownsPath: (path: string) => boolean = () => true,
   ) {
     this.fileCache = fileCache
     this.index = index
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
+    this.ownsPath = ownsPath
+  }
+
+  /** Drain raw backend index access before mount cache eviction. */
+  withMutation<T>(call: () => Promise<T>): Promise<T> {
+    return this.fileCache === null ? call() : withCacheMutation(this.fileCache, call)
+  }
+
+  /** Clear the whole backend index while this mount still owns it. */
+  clearIndex(index: IndexCacheStore | undefined): Promise<void> {
+    return this.withMutation(async () => {
+      if (this.ownsPath(this.prefix || '/')) await index?.clear()
+    })
+  }
+
+  /** Bind backend metadata writes to this mount's lifetime. */
+  scopeIndex(index: IndexCacheStore): IndexCacheStore {
+    if (this.fileCache === null || index instanceof IndexView) return index
+    return new IndexView(index, this.fileCache, this.prefix || '/', this.ownsPath)
   }
 
   /**
@@ -98,10 +121,11 @@ export class CacheManager {
    * command knowing about it. No-op for local or non-caching mounts.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
-    if (!this.cachesReads || this.fileCache === null) return null
     const key = this.cacheKey(path)
+    if (!this.cachesReads || this.fileCache === null || !this.ownsPath(key)) return null
     if (await this.fileCache.exists(key)) {
-      return this.fileCache.get(key)
+      const cached = await this.fileCache.get(key)
+      return this.ownsPath(key) ? cached : null
     }
     return null
   }

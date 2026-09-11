@@ -115,7 +115,7 @@ export async function expandArgv(
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-      wordKinds = [...extra, ...specWordKinds(spec, lineWords.slice(consumed))]
+      wordKinds = [...extra, ...specWordKinds(spec, lineWords.slice(consumed), name)]
       const bases = specWordBases(spec, lineWords.slice(consumed), session.cwd)
       if (bases !== null) {
         wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]

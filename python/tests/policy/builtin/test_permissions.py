@@ -291,5 +291,6 @@ async def test_seeded_in_a_policies_chain_after_the_builtins():
     policies = Policies([_policy()])
     deny = await policies.pre_command(
         _ctx("git", "push", cwd="/repo", program=("git", "push")))
-    assert deny == Deny("history is read-only here")
+    assert deny == Deny("history is read-only here",
+                        policy="PermissionsPolicy")
     assert policies.wants("pre_ops")

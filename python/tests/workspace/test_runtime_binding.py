@@ -331,7 +331,9 @@ async def test_policy_deny_folds_into_the_line_result():
     try:
         io = await ws.execute("python3 -c 'x'")
         assert io.exit_code == 126
-        assert io.stderr == b"python3: policy denied: python3 is blocked\n"
+        assert io.stderr == b"python3: Permission denied\n"
+        assert io.refusal is not None
+        assert io.refusal.reason == "python3 is blocked"
         io = await ws.execute("echo ok")
         assert await materialize(io.stdout) == b"ok\n"
         assert io.exit_code == 0
@@ -378,7 +380,9 @@ async def test_policy_result_arms_route_and_deny():
         assert await materialize(io.stdout) == b"ran-beta\n"
         io = await ws.execute("python3 -c 'secret'")
         assert io.exit_code == 126
-        assert io.stderr == b"python3: policy denied: secrets stay put\n"
+        assert io.stderr == b"python3: Permission denied\n"
+        assert io.refusal is not None
+        assert io.refusal.reason == "secrets stay put"
     finally:
         await ws.close()
 

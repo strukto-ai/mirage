@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType, FileType } from '../../types.ts'
 import { entryStat, makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -20,13 +20,13 @@ import { detectScope } from './scope.ts'
 export const stat = makeStat(detectScope, readdir, {
   entryStats: {
     team: entryStat('team_id', FileType.DIRECTORY),
-    team_json: entryStat('team_id', FileType.JSON),
-    member: entryStat('user_id', FileType.JSON),
+    team_json: entryStat('team_id', ContentType.JSON),
+    member: entryStat('user_id', ContentType.JSON),
     issue: entryStat('issue_id', FileType.DIRECTORY),
-    issue_json: entryStat('issue_id', FileType.JSON),
-    comments_jsonl: entryStat('issue_id', FileType.TEXT),
-    project: entryStat('project_id', FileType.JSON),
-    cycle: entryStat('cycle_id', FileType.JSON),
-    document: entryStat('document_id', FileType.JSON),
+    issue_json: entryStat('issue_id', ContentType.JSON),
+    comments_jsonl: entryStat('issue_id', ContentType.TEXT),
+    project: entryStat('project_id', ContentType.JSON),
+    cycle: entryStat('cycle_id', ContentType.JSON),
+    document: entryStat('document_id', ContentType.JSON),
   },
 })

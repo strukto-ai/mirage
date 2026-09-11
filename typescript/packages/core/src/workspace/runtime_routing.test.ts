@@ -298,7 +298,8 @@ describe('routing ladder', () => {
     try {
       const denied = await ws.execute('node -e "1"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('node: policy denied: js-engine-picked\n')
+      expect(DEC.decode(denied.stderr)).toBe('node: Permission denied\n')
+      expect(denied.refusal?.reason).toBe('js-engine-picked')
       const ok = await ws.execute('echo fine')
       expect(ok.exitCode).toBe(0)
     } finally {
@@ -367,7 +368,8 @@ describe('routing ladder', () => {
       await ws.execute('echo node > /deny.txt')
       const denied = await ws.execute('node -e "1"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('node: policy denied: listed in /deny.txt\n')
+      expect(DEC.decode(denied.stderr)).toBe('node: Permission denied\n')
+      expect(denied.refusal?.reason).toBe('listed in /deny.txt')
       const ok = await ws.execute('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
@@ -390,7 +392,8 @@ describe('routing ladder', () => {
     try {
       const denied = await ws.execute('python3 -c "x"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: python3 is blocked\n')
+      expect(DEC.decode(denied.stderr)).toBe('python3: Permission denied\n')
+      expect(denied.refusal?.reason).toBe('python3 is blocked')
       const ok = await ws.execute('echo ok')
       expect(DEC.decode(ok.stdout)).toBe('ok\n')
       expect(ok.exitCode).toBe(0)
@@ -469,7 +472,8 @@ describe('routing ladder', () => {
       expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
       const denied = await ws.execute('python3 -c "secret"')
       expect(denied.exitCode).toBe(126)
-      expect(DEC.decode(denied.stderr)).toBe('python3: policy denied: secrets stay put\n')
+      expect(DEC.decode(denied.stderr)).toBe('python3: Permission denied\n')
+      expect(denied.refusal?.reason).toBe('secrets stay put')
     } finally {
       await ws.close()
     }

@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { normalizeFields } from '../../utils/normalize.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   type ConfigOf,
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type RedactedConfig,
   secretStr,
@@ -41,7 +41,7 @@ export function redactMem0Config(config: Mem0Config): Mem0ConfigRedacted {
 }
 
 export function normalizeMem0Config(input: Record<string, unknown>): Mem0Config {
-  return Mem0ConfigSchema.parse(normalizeFields(input)) as Mem0Config
+  return parseConfigWithSchema(Mem0ConfigSchema, input)
 }
 
 function positive(value: number | undefined, fallback: number, name: string): number {

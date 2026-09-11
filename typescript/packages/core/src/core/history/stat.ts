@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
-import { FileStat, type PathSpec } from '../../types.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { read } from './read.ts'
 
 /** Stat the rendered histfile, sized to the current rendering. */
@@ -24,6 +24,7 @@ export async function stat(accessor: HistoryAccessor, path: PathSpec): Promise<F
     name: '.bash_history',
     size: data.byteLength,
     modified: null,
-    type: guessType('.bash_history'),
+    type: FileType.FILE,
+    content: contentTypeForPath('.bash_history'),
   })
 }

@@ -15,15 +15,24 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import type { Action, CommandContext, Policy } from '@struktoai/mirage-core/policy/index'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { mirageOperations } from './operations.ts'
 
-function mkWs(): Workspace {
+function mkWs(policies: Policy[] = []): Workspace {
   const ram = new RAMResource()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
-  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops, policies })
+}
+
+async function streamed(ws: Workspace, command: string): Promise<[string, number | null]> {
+  const chunks: Buffer[] = []
+  const result = await mirageOperations(ws).bash.exec(command, '/', {
+    onData: (data) => chunks.push(data),
+  })
+  return [Buffer.concat(chunks).toString(), result.exitCode]
 }
 
 describe('mirageOperations.read', () => {
@@ -250,5 +259,33 @@ describe('mirageOperations.ls', () => {
     expect(stat.isDirectory()).toBe(true)
     const entries = await ops.ls.readdir('/d')
     expect(entries.sort()).toEqual(['x.txt', 'y.txt'])
+  })
+})
+
+describe('mirageOperations.bash and a refusal', () => {
+  class NoDeletes implements Policy {
+    preCommand(ctx: CommandContext): Action | null {
+      if (ctx.command === 'rm') return { kind: 'deny', reason: 'no deletes' }
+      if (ctx.command === 'cat' && ctx.argv.includes('/x')) {
+        return { kind: 'deny', reason: '/x: frozen', scope: 'operand' }
+      }
+      return null
+    }
+  }
+
+  it('names the reason after a bare Permission denied', async () => {
+    const ws = mkWs([new NoDeletes()])
+    await ws.fs.writeFile('/x', 'hush')
+    const [data, exitCode] = await streamed(ws, 'rm /x')
+    expect(exitCode).toBe(126)
+    expect(data).toBe('rm: Permission denied\npolicy denied: no deletes\n')
+  })
+
+  it('does not repeat a reason the streamed line already carries', async () => {
+    const ws = mkWs([new NoDeletes()])
+    await ws.fs.writeFile('/x', 'hush')
+    const [data, exitCode] = await streamed(ws, 'cat /x')
+    expect(exitCode).toBe(1)
+    expect(data).toBe('cat: /x: frozen\n')
   })
 })

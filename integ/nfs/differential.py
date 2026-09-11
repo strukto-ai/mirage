@@ -133,9 +133,9 @@ async def main() -> None:
     try:
         # FUSE first: its mount runs on a thread of its own, so bringing
         # it up cannot be answered by the loop the nfs server needs.
-        mount_background(ws.ops, fuse_point)
+        mount_background(ws.fs, fuse_point)
         MOUNTPOINTS.append(fuse_point)
-        nfs_point = await manager.setup(ws.ops, "/", None, NFSConfig(port=0))
+        nfs_point = await manager.setup(ws.fs, "/", None, NFSConfig(port=0))
         MOUNTPOINTS.append(nfs_point)
         result["both_mounted"] = True
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -60,10 +61,12 @@ async function assignPrintfTarget(
  *
  * With `-v NAME` the formatted text is stored in the shell variable
  * `NAME` (or the array element `NAME[idx]`) instead of written to
- * stdout, matching GNU printf. An unusable `NAME` is rejected before the
- * format runs (status 2); a readonly name or an out-of-range subscript
+ * stdout, matching bash's builtin. An unusable `NAME` is rejected before
+ * the format runs (status 2); a readonly name or an out-of-range subscript
  * still reports the format's own errors first, then fails with status 1
- * and leaves the variable untouched.
+ * and leaves the variable untouched. `-v` is the builtin's alone: run as a
+ * program (`find -exec printf`, which execvp answers with coreutils
+ * printf) the word is the format.
  */
 export async function handlePrintf(
   args: string[],
@@ -72,7 +75,7 @@ export async function handlePrintf(
 ): Promise<Result> {
   let target: string | null = null
   let parsed: RegExpExecArray | null = null
-  if (args.length >= 2 && args[0] === '-v') {
+  if (args.length >= 2 && args[0] === '-v' && !isProgramInvocation(session)) {
     target = args[1] ?? ''
     args = args.slice(2)
     parsed = TARGET_RE.exec(target)

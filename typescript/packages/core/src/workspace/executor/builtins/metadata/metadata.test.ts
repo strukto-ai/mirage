@@ -159,7 +159,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
     expect(code).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain('Mar  4 12:00')
+    expect(out).toContain('Mar  4  2026')
     await ws.close()
   })
 
@@ -181,7 +181,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [, out] = await run(ws, 'ls -l /data')
     // The mode lands on the target, not the link. The link's own row is
     // listed too and is wider, so the size column pads f.txt's 5.
-    expect(out).toContain('-rw-r----- 1 user user  5')
+    expect(out).toContain('-rw-r----- 1 - -  5')
     expect(out).toContain('lrwxrwxrwx')
     await ws.close()
   })
@@ -223,7 +223,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [, out] = await run(ws, 'ls -l /data')
     expect(out).toContain('-rw-rw-r--')
     expect(out).toContain(' 500 dev ')
-    expect(out).toContain('Mar  4 12:00')
+    expect(out).toContain('Mar  4  2026')
     await ws.close()
   })
 
@@ -260,7 +260,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code, , err] = await run(ws, 'cd /data && touch -r f.txt new.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out.split('Mar  4 12:00').length - 1).toBe(2)
+    expect(out.split('Mar  4  2026').length - 1).toBe(2)
     await ws.close()
   })
 
@@ -321,7 +321,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
     expect(code, err).toBe(0)
     const [, out] = await run(ws, 'ls -l /data')
-    expect(out).toContain(' user staff ')
+    expect(out).toContain(' - staff ')
     await ws.close()
   })
 
@@ -447,7 +447,7 @@ describe('recursive metadata flags (-R)', () => {
     const [code] = await run(ws, 'chown -R bob /data/dirlink')
     expect(code).toBe(0)
     const [, out] = await run(ws, "stat -c '%U %n' /data/dirlink /data/tree/sub/b.txt")
-    expect(out.trimEnd().split('\n')).toEqual(['bob /data/dirlink', 'user /data/tree/sub/b.txt'])
+    expect(out.trimEnd().split('\n')).toEqual(['bob /data/dirlink', '- /data/tree/sub/b.txt'])
     await ws.close()
   })
 

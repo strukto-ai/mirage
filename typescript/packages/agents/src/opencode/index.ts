@@ -18,6 +18,7 @@ import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
 import { gnuDirname } from '@struktoai/mirage-core/utils/path'
 import { FileVersionTracker } from '../file-version.ts'
 import { readWorkspaceFile } from '../read-file.ts'
+import { withRefusal } from '../io-text.ts'
 
 const z = tool.schema
 
@@ -207,7 +208,7 @@ export function mirageTools(
       const parts: string[] = []
       if (io.stdoutText.length > 0) parts.push(io.stdoutText)
       if (io.stderrText.length > 0) parts.push(io.stderrText)
-      return parts.join('\n').trim()
+      return withRefusal(parts.join('\n'), io.refusal).trim()
     },
   })
 

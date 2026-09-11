@@ -142,15 +142,13 @@ describe('CLI dispatch e2e', () => {
     ws.createSession('c', { profile: 'crew' })
     ws.createSession('s', { profile: 'solo' })
     const denied = await ws.execute('h2 message send -t x hi', { sessionId: 'c' })
-    expect([denied.exitCode, dec.decode(denied.stderr)]).toEqual([
-      126,
-      'h2: policy denied: beta is read-only\n',
-    ])
+    expect([denied.exitCode, dec.decode(denied.stderr)]).toEqual([126, 'h2: Permission denied\n'])
+    expect(denied.refusal?.reason).toBe('beta is read-only')
     const asked = await ws.execute('h1 message send -t x hi', { sessionId: 'c' })
     expect(asked.exitCode).toBe(126)
-    expect(dec.decode(asked.stderr).startsWith('h1: requires approval: outbound needs a nod')).toBe(
-      true,
-    )
+    expect(dec.decode(asked.stderr)).toBe('h1: Permission denied\n')
+    expect(asked.refusal?.kind).toBe('pending')
+    expect(asked.refusal?.reason.startsWith('outbound needs a nod')).toBe(true)
     const request = ws.decisions.pending()[0]
     if (request === undefined) throw new Error('no pending approval')
     expect(request.command).toBe('h1')
@@ -387,7 +385,8 @@ describe('policy cli fact', () => {
     ws.registerCli('slack-eng', makeTree(), { token: 'tok' })
     const r = await ws.execute('slack-eng message send -t x hi')
     expect(r.exitCode).toBe(126)
-    expect(r.stderrText).toContain('policy denied')
+    expect(r.stderrText).toBe('slack-eng: Permission denied\n')
+    expect(r.refusal?.kind).toBe('deny')
     expect(seen.at(-1)).toBe('slack-eng')
     const ok = await ws.execute('echo unaffected')
     expect(ok.exitCode).toBe(0)

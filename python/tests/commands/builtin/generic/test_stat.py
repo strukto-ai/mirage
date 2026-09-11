@@ -5,6 +5,7 @@ import pytest
 from mirage.commands.builtin.generic.stat import stat
 from mirage.io.types import materialize
 from mirage.ops.types import LinkView
+from mirage.policy.profile import SessionProfile
 from mirage.resource.ram import RAMResource
 from mirage.types import (DEVICE_NUMBERS_KEY, LINK_TARGET_KEY, ContentType,
                           FileStat, FileType, MountMode, PathSpec)
@@ -185,9 +186,9 @@ async def test_owner_directives():
     assert await _render("%U", owned) == "1000"
     assert await _render("%g", owned) == "dev"
     assert await _render("%G", owned) == "dev"
-    # No owner -> neutral "user" placeholder (matches ls -l).
+    # No owner and no identity -> `-` in every slot (matches ls -l).
     bare = _fs(uid=None, gid=None)
-    assert await _render("%u %U %g %G", bare) == "user user user user"
+    assert await _render("%u %U %g %G", bare) == "- - - -"
 
 
 @pytest.mark.asyncio
@@ -306,18 +307,34 @@ async def test_owner_defaults_to_workspace_agent():
                    agent_id="agent7")
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
     assert code == 0
-    assert out == "agent7:agent7\n"
+    # The owner is the workspace user; the group is the session's
+    # profile, and this session runs under none.
+    assert out == "agent7:-\n"
 
 
 @pytest.mark.asyncio
-async def test_owner_falls_back_to_user_when_unclaimed():
+async def test_group_is_the_session_profile():
+    resource = RAMResource()
+    resource._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+                   mode=MountMode.WRITE,
+                   agent_id="agent7",
+                   profiles={"admin": SessionProfile()},
+                   profile="admin")
+    code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
+    assert code == 0
+    assert out == "agent7:admin\n"
+
+
+@pytest.mark.asyncio
+async def test_owner_falls_back_to_dash_when_unclaimed():
     resource = RAMResource()
     resource._store.files["/f.txt"] = b"hello"
     ws = Workspace({"/data/": (resource, MountMode.WRITE)},
                    mode=MountMode.WRITE)
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
     assert code == 0
-    assert out == "user:user\n"
+    assert out == "-:-\n"
 
 
 @pytest.mark.asyncio
@@ -329,8 +346,8 @@ async def test_stat_and_ls_agree_on_owner():
                    agent_id="agent7")
     _, stat_owner, _ = await _run(ws, 'stat -c "%U %G" /data/f.txt')
     _, ls_long, _ = await _run(ws, "ls -l /data/f.txt")
-    assert stat_owner.strip() == "agent7 agent7"
-    assert "agent7 agent7" in ls_long
+    assert stat_owner.strip() == "agent7 -"
+    assert " 1 agent7 - " in ls_long
 
 
 def _link_fs(target: str = "/data/f.txt") -> FileStat:

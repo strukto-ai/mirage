@@ -91,7 +91,8 @@ from mirage.shell.parse import env_reads, implicit_reads, opaque_reads, parse
         ("declare", True, set(), set()),
         ("declare -p A B", False, {"A", "B"}, set()),
         ("declare -x OTHER=1", False, set(), set()),
-        # readonly and local print sets a managed entry can never be in.
+        # readonly and local print what the session already holds and
+        # never fetch to fill it.
         ("readonly", False, set(), set()),
         ("echo hi", False, set(), set()),
         # Inside a substitution counts; inside a definition does not.

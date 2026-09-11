@@ -42,6 +42,17 @@ export function mirageTools(ws: Workspace) {
         stdout: z.string(),
         stderr: z.string(),
         exitCode: z.number(),
+        // Why the line did not run, null on every ordinary run; the
+        // reason a bash-voiced stderr leaves out.
+        refusal: z
+          .object({
+            kind: z.enum(['deny', 'pending', 'failed']),
+            reason: z.string(),
+            policy: z.string(),
+            scope: z.enum(['command', 'operand']),
+            askId: z.string().nullable(),
+          })
+          .nullable(),
       }),
       execute: async (inputData) => {
         const { command } = inputData as { command: string }
@@ -50,6 +61,7 @@ export function mirageTools(ws: Workspace) {
           stdout: io.stdoutText,
           stderr: io.stderrText,
           exitCode: io.exitCode,
+          refusal: io.refusal,
         }
       },
     }),

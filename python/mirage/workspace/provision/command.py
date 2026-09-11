@@ -144,59 +144,61 @@ async def handle_command_provision(
                                    precision=Precision.UNKNOWN)
         mount = mounts[0]
 
-    extension = get_extension(first_scope.virtual) if first_scope else None
-    cmd = mount.resolve_command(cmd_name, extension)
-    if cmd is None or cmd.provision_fn is None:
-        return ProvisionResult(command=cmd_str, precision=Precision.UNKNOWN)
+    async with mount.use():
+        extension = get_extension(first_scope.virtual) if first_scope else None
+        cmd = mount.resolve_command(cmd_name, extension)
+        if cmd is None or cmd.provision_fn is None:
+            return ProvisionResult(command=cmd_str,
+                                   precision=Precision.UNKNOWN)
 
-    mount_prefix = mount.prefix.rstrip("/")
-    resource_scopes = []
-    for i, p in enumerate(parts[1:], start=1):
-        if isinstance(p, PathSpec):
-            scoped = dataclasses.replace(p,
-                                         resource_path=mount_key(
-                                             p.virtual, mount_prefix))
-            parts[i] = scoped
-            resource_scopes.append(scoped)
+        mount_prefix = mount.prefix.rstrip("/")
+        resource_scopes = []
+        for i, p in enumerate(parts[1:], start=1):
+            if isinstance(p, PathSpec):
+                scoped = dataclasses.replace(p,
+                                             resource_path=mount_key(
+                                                 p.virtual, mount_prefix))
+                parts[i] = scoped
+                resource_scopes.append(scoped)
 
-    # Parse flags so plan functions receive them as kwargs (e.g. r=True)
-    argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
-    spec = mount.spec_for(cmd_name)
-    if spec is not None:
-        parsed = parse_command(spec, argv, cwd=session.cwd)
-        flag_kwargs = parse_to_kwargs(parsed)
-        text_args = parsed.texts()
-    else:
-        flag_kwargs = {}
-        text_args = [p for p in parts[1:] if not isinstance(p, PathSpec)]
+        # Parse flags so plan functions receive them as kwargs (e.g. r=True)
+        argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
+        spec = mount.spec_for(cmd_name)
+        if spec is not None:
+            parsed = parse_command(spec, argv, cwd=session.cwd)
+            flag_kwargs = parse_to_kwargs(parsed)
+            text_args = parsed.texts()
+        else:
+            flag_kwargs = {}
+            text_args = [p for p in parts[1:] if not isinstance(p, PathSpec)]
 
-    # One typed bag, the provision-path twin of Mount.execute_cmd's
-    # (mirrors handleCommandProvision building CommandOpts in TS),
-    # promoting cwd the same way: CommandOpts.cwd is always a PathSpec.
-    opts = CommandOpts(
-        flags=flag_kwargs,
-        cwd=PathSpec(
-            virtual=session.cwd,
-            directory=session.cwd,
-            resolved=False,
-            resource_path=mount_key(session.cwd, mount_prefix),
-        ),
-        mount_prefix=mount_prefix,
-        command=cmd_str,
-        spec=spec,
-        index=mount.resource.index,
-    )
-    result = await cmd.provision_fn(mount.resource.accessor, resource_scopes,
-                                    text_args, opts)
-    if not result.command:
-        result.command = cmd_str
+        # One typed bag, the provision-path twin of Mount.execute_cmd's
+        # (mirrors handleCommandProvision building CommandOpts in TS),
+        # promoting cwd the same way: CommandOpts.cwd is always a PathSpec.
+        opts = CommandOpts(
+            flags=flag_kwargs,
+            cwd=PathSpec(
+                virtual=session.cwd,
+                directory=session.cwd,
+                resolved=False,
+                resource_path=mount_key(session.cwd, mount_prefix),
+            ),
+            mount_prefix=mount_prefix,
+            command=cmd_str,
+            spec=spec,
+            index=mount.index,
+        )
+        result = await cmd.provision_fn(mount.resource.accessor,
+                                        resource_scopes, text_args, opts)
+        if not result.command:
+            result.command = cmd_str
 
-    hits = await _check_cache_hits(registry.file_cache, parts)
-    if hits > 0:
-        result.cache_hits = hits
-        result.cache_read_low = result.network_read_low
-        result.cache_read_high = result.network_read_high
-        result.network_read_low = 0
-        result.network_read_high = 0
+        hits = await _check_cache_hits(registry.file_cache, parts)
+        if hits > 0:
+            result.cache_hits = hits
+            result.cache_read_low = result.network_read_low
+            result.cache_read_high = result.network_read_high
+            result.network_read_low = 0
+            result.network_read_high = 0
 
-    return result
+        return result

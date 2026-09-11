@@ -481,6 +481,7 @@
                       "typescript/setup/disk",
                       "typescript/setup/opfs",
                       "typescript/setup/redis",
+                      "typescript/setup/upstash",
                       "typescript/setup/ssh"
                     ]
                   },

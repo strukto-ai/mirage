@@ -26,7 +26,7 @@ import { enoent } from '../../utils/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { byteChar } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { FileStat, FileType, MountMode } from '../../types.ts'
+import { ContentType, FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
@@ -710,7 +710,7 @@ describe('handleCd', () => {
   it('rejects non-directory targets', async () => {
     const dispatch = vi.fn<DispatchFn>(() =>
       Promise.resolve<[unknown, IOResult]>([
-        new FileStat({ name: 'file', type: FileType.TEXT }),
+        new FileStat({ name: 'file', type: FileType.FILE, content: ContentType.TEXT }),
         new IOResult(),
       ]),
     )
@@ -763,7 +763,10 @@ describe('handleEval', () => {
 
 describe('handleTest', () => {
   const dispatch = vi.fn<DispatchFn>(() =>
-    Promise.resolve<[unknown, IOResult]>([new FileStat({ name: 'x' }), new IOResult()]),
+    Promise.resolve<[unknown, IOResult]>([
+      new FileStat({ name: 'x', type: FileType.FILE }),
+      new IOResult(),
+    ]),
   )
   const session = new Session({ sessionId: 'test' })
   const testResolve: ResolveFn = () => Promise.reject(new Error('unused'))
@@ -796,7 +799,7 @@ describe('handleTest', () => {
       const ps = scope
       if (ps.virtual === '/data/plain.txt') {
         return Promise.resolve<[unknown, IOResult]>([
-          new FileStat({ name: 'plain.txt' }),
+          new FileStat({ name: 'plain.txt', type: FileType.FILE }),
           new IOResult(),
         ])
       }
@@ -812,7 +815,10 @@ describe('handleTest', () => {
 
   it('-f empty operand is false without dispatch', async () => {
     const spy = vi.fn<DispatchFn>(() =>
-      Promise.resolve<[unknown, IOResult]>([new FileStat({ name: 'x' }), new IOResult()]),
+      Promise.resolve<[unknown, IOResult]>([
+        new FileStat({ name: 'x', type: FileType.FILE }),
+        new IOResult(),
+      ]),
     )
     const s = new Session({ sessionId: 'test' })
     const [, io] = await handleTest(spy, testNamespace(), ['-f', ''], s)

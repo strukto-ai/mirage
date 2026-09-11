@@ -390,6 +390,47 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     return bound[1]
 
 
+_program_invocation: ContextVar[int | None] = ContextVar(
+    "mirage_program_invocation", default=None)
+
+
+def set_program_invocation(session: "Session") -> Token[Any]:
+    """Mark the line about to run in a session as a program run.
+
+    ``find -exec`` hands its words to ``execvp``, so the head it runs is
+    the coreutils program, not the shell's builtin of the same name:
+    ``printf -v`` is a format string there, not an assignment. Keyed
+    by the session object, and cleared again by a nested shell the
+    line starts (``-exec sh -c ...``, which snapshots the same
+    session), so that shell's builtins are its own.
+
+    Args:
+        session (Session): the session the program line runs in.
+    """
+    return _program_invocation.set(id(session))
+
+
+def clear_program_invocation() -> Token[Any]:
+    """Mark the line about to run as a shell's own again: a nested shell
+    (``-exec sh -c ...``) is a program, and the builtins it runs are its
+    builtins, ``printf -v`` included."""
+    return _program_invocation.set(None)
+
+
+def reset_program_invocation(token: Token[Any]) -> None:
+    """Restore the previous program-run marking."""
+    _program_invocation.reset(token)
+
+
+def program_invocation(session: "Session") -> bool:
+    """Whether the line running in this session is a program run.
+
+    Args:
+        session (Session): the session a builtin is answering in.
+    """
+    return _program_invocation.get() == id(session)
+
+
 def redirect_target_judged(virtual: str) -> bool:
     """Whether a path is a redirect target the command door already
     judged for the statement writing it now.

@@ -14,7 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { countDocuments, isView, listIndexes } from './client.ts'
@@ -81,7 +81,8 @@ async function documentsStat(
   }
   return new FileStat({
     name: 'documents.jsonl',
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     size: null,
     extra: {
       database,

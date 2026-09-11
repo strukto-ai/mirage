@@ -17,7 +17,7 @@ from pydantic import SecretStr, ValidationError
 
 from mirage.accessor.s3 import S3Config
 from mirage.secrets.config import (AWSAuth, AWSSMConfig, DotenvConfig,
-                                   EnvConfig, EnvVar, SecretRef, SourceBlock)
+                                   EnvConfig, EnvVar, SecretRef, SecretSource)
 
 AUTH_KWARGS = {
     "region": "us-east-1",
@@ -101,11 +101,12 @@ def test_one_of_value_or_from_is_required():
         EnvVar()
 
 
-def test_readonly_on_a_managed_entry_is_refused():
-    # A readonly managed variable would print `-r` beside a value that
-    # changes under refresh, which is a lie.
-    with pytest.raises(ValidationError, match="readonly"):
-        EnvVar.model_validate({"from": "env", "readonly": True})
+def test_a_managed_entry_may_be_readonly():
+    # A credential the agent cannot overwrite is the point of one: the
+    # fetch writes the record itself, not through the assignment gate.
+    entry = EnvVar.model_validate({"from": "env", "readonly": True})
+    assert entry.readonly
+    assert entry.provider == "env"
 
 
 def test_unexporting_a_managed_entry_is_refused():
@@ -141,7 +142,7 @@ def test_entry_is_frozen():
 
 
 def test_a_source_block_takes_a_type_and_a_config():
-    block = SourceBlock.model_validate({
+    block = SecretSource.model_validate({
         "source": "aws-sm",
         "config": {
             "region": "us-east-2"
@@ -152,7 +153,7 @@ def test_a_source_block_takes_a_type_and_a_config():
 
 
 def test_a_config_value_carrying_from_becomes_a_pointer():
-    block = SourceBlock.model_validate({
+    block = SecretSource.model_validate({
         "source": "aws-sm",
         "config": {
             "aws_access_key_id": {
@@ -167,7 +168,7 @@ def test_a_config_value_carrying_from_becomes_a_pointer():
 
 
 def test_a_config_value_without_from_stays_a_literal():
-    block = SourceBlock.model_validate({
+    block = SecretSource.model_validate({
         "source": "aws-sm",
         "config": {
             "tags": {
@@ -179,13 +180,13 @@ def test_a_config_value_without_from_stays_a_literal():
 
 
 def test_a_config_defaults_to_empty():
-    assert SourceBlock(source="env").config == {}
+    assert SecretSource(source="env").config == {}
 
 
 @pytest.mark.parametrize("source", ["1password", "aws-sm", "auth0"])
 def test_only_a_bootstrap_source_can_back_a_config_value(source):
     with pytest.raises(ValidationError, match="needs no config of its own"):
-        SourceBlock.model_validate({
+        SecretSource.model_validate({
             "source": "aws-sm",
             "config": {
                 "region": {
@@ -198,7 +199,7 @@ def test_only_a_bootstrap_source_can_back_a_config_value(source):
 
 @pytest.mark.parametrize("source", ["env", "dotenv"])
 def test_both_bootstrap_sources_are_accepted(source):
-    block = SourceBlock.model_validate({
+    block = SecretSource.model_validate({
         "source": "aws-sm",
         "config": {
             "region": {
@@ -212,7 +213,7 @@ def test_both_bootstrap_sources_are_accepted(source):
 
 def test_a_pointer_refuses_unknown_keys():
     with pytest.raises(ValidationError):
-        SourceBlock.model_validate({
+        SecretSource.model_validate({
             "source": "aws-sm",
             "config": {
                 "region": {
@@ -226,13 +227,13 @@ def test_a_pointer_refuses_unknown_keys():
 
 def test_a_source_block_refuses_unknown_keys():
     with pytest.raises(ValidationError):
-        SourceBlock.model_validate({"source": "env", "account": "x"})
+        SecretSource.model_validate({"source": "env", "account": "x"})
 
 
 def test_a_source_config_keeps_a_dunder_key():
     """Free in python; the TypeScript twin had to drop `z.record`,
     which builds by keyed assignment and loses `__proto__` outright."""
-    block = SourceBlock.model_validate({
+    block = SecretSource.model_validate({
         "source": "demo",
         "config": {
             "__proto__": "kept"

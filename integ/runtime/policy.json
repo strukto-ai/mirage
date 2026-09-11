@@ -433,7 +433,7 @@
           "command": "python3 -c \"print(1)\"",
           "expect": {
             "exit": 126,
-            "stderr": "python3: policy denied: python3 is blocked here\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
@@ -543,7 +543,7 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr": "grep: policy denied: recursive search is not allowed here\n"
+            "stderr": "grep: Permission denied\n"
           }
         },
         {
@@ -815,7 +815,202 @@
           "expect": {
             "exit": 126,
             "stdout": "",
-            "stderr_contains": "policy Boom failed"
+            "stderr_contains": "echo: Permission denied"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_command_sync",
+      "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "deny_flag",
+            "command": "grep",
+            "flag": "-r",
+            "reason": "recursive search is not allowed here",
+            "sync": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "grep -r hello /ram",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "grep: Permission denied\n"
+          }
+        },
+        {
+          "command": "grep hello /ram/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_pre_ops_sync",
+      "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "open.txt": "free\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "lock_writes",
+            "prefix": "/ram/locked/",
+            "sync": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi > /ram/locked/f.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "/ram/locked/f.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "echo hi > /ram/note.txt && cat /ram/note.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/open.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "free\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_ops_sync",
+      "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "clean.txt": "hello\n",
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "redact_reads",
+            "marker": "TOPSECRET",
+            "sync": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "read_op": "/ram/clean.txt",
+          "expect": {
+            "content": "hello\n"
+          }
+        },
+        {
+          "read_op": "/ram/secret.txt",
+          "expect": {
+            "errno": "EACCES"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_sync",
+      "note": "The same policy written as a plain function: python `def` instead of `async def`, TypeScript a value instead of a promise. The seam awaits whatever a hook returns, so both shapes decide identically; before that a plain `def` raised inside python's fail-closed arm and every command read `policy X failed`.",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "data.txt": "1\n2\n3\n4\n5\n"
+            },
+            "limits": {
+              "cat": {
+                "max_lines": 3
+              }
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "line_cap",
+            "max_lines": 2,
+            "sync": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cat /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n",
+            "stderr_contains": "output truncated"
+          }
+        },
+        {
+          "command": "head -n 1 /ram/data.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_execute_fail_closed_sync",
+      "note": "A hook that throws synchronously fails closed exactly like one that throws after an await: the call itself sits inside the guarded arm.",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        },
+        "policies": [
+          {
+            "name": "boom",
+            "sync": true
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo hi",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr_contains": "echo: Permission denied"
           }
         }
       ]

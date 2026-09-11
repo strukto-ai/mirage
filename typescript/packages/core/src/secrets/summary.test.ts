@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
-import { MAX_LISTED_FIELDS, fieldSummary } from './summary.ts'
+import { MAX_LISTED_FIELDS, errorSummary, fieldSummary } from './summary.ts'
 
 describe('fieldSummary', () => {
   it('lists a secret-sized secret', () => {
@@ -46,5 +47,56 @@ describe('fieldSummary', () => {
     const fields = { HOME: '/root', AWS_SESSION_TOKEN: 't' }
     expect(fieldSummary(fields, 'env')).toBe('2 fields')
     expect(fieldSummary(fields, 'env')).not.toContain('AWS_SESSION_TOKEN')
+  })
+})
+
+describe('errorSummary', () => {
+  const Refusing = z.strictObject({
+    port: z.number(),
+    token: z
+      .string()
+      .superRefine((value, ctx) => {
+        if (value.startsWith('sk-')) {
+          ctx.addIssue({ code: 'custom', message: `a live key is not allowed here: ${value}` })
+        }
+      })
+      .default(''),
+  })
+
+  function refusal(input: Record<string, unknown>): z.ZodError {
+    const parsed = Refusing.safeParse(input)
+    if (parsed.success) throw new Error('expected a refusal')
+    return parsed.error
+  }
+
+  it('names the field and the code only', () => {
+    expect(errorSummary(refusal({ port: 'x' }))).toBe('port: invalid_type')
+  })
+
+  it('never carries the input', () => {
+    // A refinement is free to build its message out of the value it
+    // refused; neither the message nor the input may reach a 400 body.
+    const summary = errorSummary(refusal({ port: 1, token: 'sk-live-SUPERSECRET' }))
+    expect(summary).toBe('token: custom')
+    expect(summary).not.toContain('SUPERSECRET')
+  })
+
+  it('joins every issue', () => {
+    expect(errorSummary(refusal({ port: 'x', token: 'sk-1' }))).toBe(
+      'port: invalid_type; token: custom',
+    )
+  })
+
+  it('reports a model-level refinement as config, like python', () => {
+    const OneOfTwo = z
+      .object({ a: z.string().optional(), b: z.string().optional() })
+      .refine((v) => v.a !== undefined || v.b !== undefined, { message: 'needs a or b' })
+    const parsed = OneOfTwo.safeParse({})
+    if (parsed.success) throw new Error('expected a refusal')
+    expect(errorSummary(parsed.error)).toBe('config: custom')
+  })
+
+  it('names the keys of an unrecognized-keys issue', () => {
+    expect(errorSummary(refusal({ port: 1, extra: 1 }))).toBe('extra: unrecognized_keys')
   })
 })

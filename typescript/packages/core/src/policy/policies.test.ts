@@ -19,7 +19,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
-import { Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
+import { Limit, MountMode, OnExceed, PathSpec, type Refusal } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
@@ -30,6 +30,9 @@ import {
   postExecuteGate,
   postOpsGate,
   preOpsGate,
+  describeRefusal,
+  saysWhy,
+  refusalOf,
   renderDeny,
   renderPending,
 } from './policies.ts'
@@ -192,11 +195,11 @@ describe('Policies', () => {
     expect(deny?.reason).toContain('Device or resource busy')
     // Only the user rule matches `rm /data/x`.
     deny = await policies.preCommand(ctx('rm', [path('/data/x')]))
-    expect(deny).toEqual({ kind: 'deny', reason: 'user rule' })
+    expect(deny).toEqual({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })
     // The command plane renders a whole-command refusal at 126 and an
     // operand one in the GNU voice at 1, whoever produced it.
     const text = (r: [Uint8Array, number]) => [new TextDecoder().decode(r[0]), r[1]]
-    expect(text(renderDeny('rm', deny as Deny))).toEqual(['rm: policy denied: user rule\n', 126])
+    expect(text(renderDeny('rm', deny as Deny))).toEqual(['rm: Permission denied\n', 126])
     expect(
       text(renderDeny('rm', { kind: 'deny', reason: "cannot remove 'x'", scope: 'operand' })),
     ).toEqual(["rm: cannot remove 'x'\n", 1])
@@ -209,7 +212,11 @@ describe('Policies', () => {
     const policies = new Policies()
     policies.add(silent)
     policies.add(new DenyWeird())
-    expect(await policies.preCommand(ctx('weird'))).toEqual({ kind: 'deny', reason: 'nope' })
+    expect(await policies.preCommand(ctx('weird'))).toEqual({
+      kind: 'deny',
+      reason: 'nope',
+      policy: 'DenyWeird',
+    })
     expect(await policies.preCommand(ctx('normal'))).toBeNull()
   })
 
@@ -219,8 +226,9 @@ describe('Policies', () => {
     const deny = await policies.preCommand(ctx('ls'))
     expect(deny?.kind).toBe('deny')
     expect(deny).not.toHaveProperty('scope')
-    expect(deny?.reason).toContain('Raising')
-    expect(deny?.reason).toContain('boom')
+    expect(deny?.reason).toBe('Raising failed')
+    expect((deny as Deny).policy).toBe('Raising')
+    expect((deny as Deny).failed).toBe(true)
   })
 
   it('an illegal return throws PolicyError', async () => {
@@ -241,7 +249,7 @@ describe('Policies', () => {
       write: false,
       prefix: '/data/',
     })
-    expect(deny).toEqual({ kind: 'deny', reason: 'no reads' })
+    expect(deny).toEqual({ kind: 'deny', reason: 'no reads', policy: 'DenyReadOps' })
     expect(
       await policies.preOps({ op: 'write', path: path('/data/x'), write: true, prefix: '/data/' }),
     ).toBeNull()
@@ -282,7 +290,11 @@ describe('Policies', () => {
     }
     policies.add(entry)
     expect(await policies.preCommand(ctx('ls'))).toBeNull()
-    expect(await policies.preCommand(ctx('weird'))).toEqual({ kind: 'deny', reason: 'nope' })
+    expect(await policies.preCommand(ctx('weird'))).toEqual({
+      kind: 'deny',
+      reason: 'nope',
+      policy: 'Object',
+    })
   })
 })
 
@@ -318,9 +330,14 @@ describe('workspace policies', () => {
       const refused = await ws.execute("python3 -c 'print(1)'")
       // A whole-command refusal is bash's "found but may not run".
       expect(refused.exitCode).toBe(126)
-      expect(new TextDecoder().decode(refused.stderr)).toBe(
-        'python3: policy denied: interpreters are off\n',
-      )
+      expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
+      expect(refused.refusal).toEqual({
+        kind: 'deny',
+        reason: 'interpreters are off',
+        policy: 'NoInterpreters',
+        scope: 'command',
+        askId: null,
+      })
     } finally {
       await ws.close()
     }
@@ -331,9 +348,14 @@ describe('workspace policies', () => {
     try {
       const refused = await ws.execute("python3 -c 'print(1)'")
       expect(refused.exitCode).toBe(126)
-      expect(new TextDecoder().decode(refused.stderr)).toBe(
-        'python3: policy denied: interpreters are off\n',
-      )
+      expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
+      expect(refused.refusal).toEqual({
+        kind: 'deny',
+        reason: 'interpreters are off',
+        policy: 'NoInterpreters',
+        scope: 'command',
+        askId: null,
+      })
     } finally {
       await ws.close()
     }
@@ -350,7 +372,14 @@ describe('workspace policies', () => {
     try {
       const refused = await ws.execute('source /data/setup.sh')
       expect(refused.exitCode).toBe(126)
-      expect(new TextDecoder().decode(refused.stderr)).toBe('source: policy denied: disabled\n')
+      expect(new TextDecoder().decode(refused.stderr)).toBe('source: Permission denied\n')
+      expect(refused.refusal).toEqual({
+        kind: 'deny',
+        reason: 'disabled',
+        policy: 'PermissionsPolicy',
+        scope: 'command',
+        askId: null,
+      })
       const frozen = await ws.execute('touch /data/prod/x')
       expect(frozen.exitCode).toBe(1)
       expect(new TextDecoder().decode(frozen.stderr)).toContain('frozen')
@@ -604,7 +633,14 @@ describe('Limit end to end', () => {
       const r = await ws.execute('echo hi')
       expect(r.exitCode).toBe(126)
       const err = new TextDecoder().decode(r.stderr)
-      expect(err).toBe('echo: policy denied: policy Boom failed: boom\n')
+      expect(err).toBe('echo: Permission denied\n')
+      expect(r.refusal).toEqual({
+        kind: 'failed',
+        reason: 'Boom failed',
+        policy: 'Boom',
+        scope: 'command',
+        askId: null,
+      })
     } finally {
       await ws.close()
     }
@@ -639,7 +675,11 @@ describe('Ask in the chain', () => {
       [new DenyRm(), new AskRm()],
     ]) {
       const policies = new Policies(order)
-      expect(await policies.preCommand(ctx('rm'))).toEqual({ kind: 'deny', reason: 'no' })
+      expect(await policies.preCommand(ctx('rm'))).toEqual({
+        kind: 'deny',
+        reason: 'no',
+        policy: 'DenyRm',
+      })
     }
     // With nothing refusing, the first Ask is the answer.
     const policies = new Policies([new AskRm(), new AskAll()])
@@ -659,7 +699,130 @@ describe('Ask in the chain', () => {
 
   it('renderPending names the approval', () => {
     const [err, code] = renderPending('git', { kind: 'pending', id: 'abc123', reason: 'sign-off' })
-    expect(new TextDecoder().decode(err)).toBe('git: requires approval: sign-off (ask abc123)\n')
+    expect(new TextDecoder().decode(err)).toBe('git: Permission denied\n')
     expect(code).toBe(126)
   })
+
+  it('refusalOf records kind, policy, scope and ask', () => {
+    expect(refusalOf({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })).toEqual({
+      kind: 'deny',
+      reason: 'user rule',
+      policy: 'RulePolicy',
+      scope: 'command',
+      askId: null,
+    })
+    expect(
+      refusalOf({
+        kind: 'deny',
+        reason: "cannot remove 'x'",
+        scope: 'operand',
+        policy: 'MountRootPolicy',
+      }),
+    ).toEqual({
+      kind: 'deny',
+      reason: "cannot remove 'x'",
+      policy: 'MountRootPolicy',
+      scope: 'operand',
+      askId: null,
+    })
+    expect(
+      refusalOf({ kind: 'deny', reason: 'Raising failed', policy: 'Raising', failed: true }),
+    ).toEqual({
+      kind: 'failed',
+      reason: 'Raising failed',
+      policy: 'Raising',
+      scope: 'command',
+      askId: null,
+    })
+    expect(refusalOf({ kind: 'pending', id: 'abc123', reason: 'sign-off' })).toEqual({
+      kind: 'pending',
+      reason: 'sign-off',
+      policy: '',
+      scope: 'command',
+      askId: 'abc123',
+    })
+  })
+
+  it('describeRefusal carries the reason the stderr line dropped', () => {
+    expect(
+      describeRefusal({
+        kind: 'deny',
+        reason: 'user rule',
+        policy: 'RulePolicy',
+        scope: 'command',
+        askId: null,
+      }),
+    ).toBe('policy denied: user rule')
+    expect(
+      describeRefusal({
+        kind: 'pending',
+        reason: 'sign-off',
+        policy: '',
+        scope: 'command',
+        askId: 'abc123',
+      }),
+    ).toBe('requires approval: sign-off (ask abc123)')
+    expect(
+      describeRefusal({
+        kind: 'failed',
+        reason: 'Raising failed',
+        policy: 'Raising',
+        scope: 'command',
+        askId: null,
+      }),
+    ).toBe('policy Raising failed')
+  })
+
+  it('saysWhy needs the operand diagnostic itself', () => {
+    const operand: Refusal = {
+      kind: 'deny',
+      reason: '/protected: frozen',
+      policy: 'Frozen',
+      scope: 'operand',
+      askId: null,
+    }
+    // The GNU line, wherever a redirect landed it.
+    expect(saysWhy('cat: /protected: frozen\n', operand)).toBe(true)
+    expect(saysWhy('partial\ncat: /protected: frozen\n', operand)).toBe(true)
+    expect(saysWhy('', operand)).toBe(false)
+    // The reason quoted inside other output is not the diagnostic.
+    expect(saysWhy('note: /protected: frozen for now\n', operand)).toBe(false)
+    // A command-scoped refusal's stderr is bash's bare line; output that
+    // happens to carry the reason (or was left when 2>/dev/null took the
+    // line away) has not said why.
+    const denied: Refusal = {
+      kind: 'deny',
+      reason: 'no deletes',
+      policy: 'RulePolicy',
+      scope: 'command',
+      askId: null,
+    }
+    expect(saysWhy('rm: Permission denied\n', denied)).toBe(false)
+    expect(saysWhy('rm: Permission denied\nno deletes\n', denied)).toBe(false)
+    expect(saysWhy('printf: no deletes\n', denied)).toBe(false)
+    // An empty reason says nothing, so no text can already have said it.
+    expect(
+      saysWhy('cat: \n', { kind: 'deny', reason: '', policy: 'P', scope: 'operand', askId: null }),
+    ).toBe(false)
+  })
+})
+
+it('removes by identity, refreshes hooks and preserves an admission in progress', async () => {
+  const policies = new Policies()
+  const first: Policy = {
+    preCommand: () => {
+      expect(policies.remove(first)).toBe(true)
+      return null
+    },
+  }
+  const last = new DenyWeird()
+  policies.add(first)
+  policies.add(last)
+  expect(policies.remove(new DenyWeird())).toBe(false)
+  expect(await policies.preCommand(ctx('weird'))).toMatchObject({ kind: 'deny', reason: 'nope' })
+  expect(policies.wants('preCommand')).toBe(true)
+  expect(policies.remove(last)).toBe(true)
+  expect(policies.wants('preCommand')).toBe(false)
+  expect(policies.remove(first)).toBe(false)
+  expect(await policies.preCommand(ctx('weird'))).toBeNull()
 })

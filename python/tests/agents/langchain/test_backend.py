@@ -212,3 +212,16 @@ async def test_upload_and_download(backend):
     down_results = await backend.adownload_files(["/up1.txt", "/up2.txt"])
     assert down_results[0].content == b"content1"
     assert down_results[1].content == b"content2"
+
+
+@pytest.mark.asyncio
+async def test_als_names_the_reason_beside_a_refusal():
+    # stderr is bash's bare `Permission denied`; the reason rides the
+    # refusal record, and the error text appends it as one more line.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   route_policy=lambda ctx: {"deny": "no lists"}
+                   if ctx.command == "ls" else None)
+    result = await LangchainWorkspace(ws).als("/")
+    assert result.entries is None
+    assert result.error == "ls: Permission denied\npolicy denied: no lists"

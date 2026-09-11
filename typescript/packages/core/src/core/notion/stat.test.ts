@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import type { NotionTransport } from './client.ts'
 import { stat } from './stat.ts'
@@ -164,7 +164,7 @@ describe('notion stat', () => {
       idx,
     )
     expect(result.name).toBe('database.json')
-    expect(result.type).toBe(FileType.JSON)
+    expect(result.content).toBe(ContentType.JSON)
     expect(result.size).toBe(42)
     expect(result.extra.database_id).toBe(DB_ID)
     expect(transport.invocations).toHaveLength(0)
@@ -226,7 +226,7 @@ describe('notion stat', () => {
     )
     const result = await stat(makeAccessor(transport), spec(`/pages/${segment}/page.json`), idx)
     expect(result.name).toBe('page.json')
-    expect(result.type).toBe(FileType.JSON)
+    expect(result.content).toBe(ContentType.JSON)
     expect(result.size).toBeNull()
     expect(transport.invocations).toHaveLength(0)
   })

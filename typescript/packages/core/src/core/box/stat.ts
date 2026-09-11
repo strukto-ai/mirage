@@ -20,7 +20,7 @@ import { getFolderInfo, type BoxItem } from './api.ts'
 import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 
 function statFromItem(item: BoxItem): FileStat {
   const vfsName = item.name
@@ -43,7 +43,8 @@ function statFromItem(item: BoxItem): FileStat {
   return new FileStat({
     name: vfsName,
     size,
-    type: guessType(vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(vfsName),
     modified,
     fingerprint: sha1 ?? (modified !== '' ? modified : null),
     extra: { box_id: item.id, resource_type: rt, ...(sha1 === null ? {} : { sha1 }) },
@@ -119,7 +120,8 @@ export async function stat(
   return new FileStat({
     name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
     size: result.entry.size,
-    type: guessType(result.entry.vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
     fingerprint: sha1 ?? (result.entry.remoteTime !== '' ? result.entry.remoteTime : null),
     extra: {

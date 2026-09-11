@@ -30,7 +30,7 @@ async def test_registered_command_dispatch():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/a.txt", b"hello")
+    await ws.fs.write("/tmp/a.txt", b"hello")
 
     async def my_cat(store, paths, *texts, stdin=None, **flags):
         return b"custom-cat", IOResult()
@@ -53,7 +53,7 @@ async def test_registered_filetype_dispatch():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/data.avro", b"avro-data")
+    await ws.fs.write("/tmp/data.avro", b"avro-data")
 
     async def cat_avro(store, paths, *texts, stdin=None, **flags):
         return b"avro-output", IOResult()
@@ -76,7 +76,7 @@ async def test_filetype_takes_priority_over_generic():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/data.avro", b"avro-data")
+    await ws.fs.write("/tmp/data.avro", b"avro-data")
 
     async def cat_generic(store, paths, *texts, stdin=None, **flags):
         return b"generic", IOResult()
@@ -102,7 +102,7 @@ async def test_filetype_takes_priority_over_generic():
     result = await ws.execute("cat /tmp/data.avro")
     assert result.stdout == b"avro"
 
-    await ws.ops.write("/tmp/data.csv", b"csv-data")
+    await ws.fs.write("/tmp/data.csv", b"csv-data")
     result = await ws.execute("cat /tmp/data.csv")
     assert result.stdout == b"generic"
 
@@ -113,7 +113,7 @@ async def test_registered_falls_back_to_builtin():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    await ws.ops.write("/tmp/a.txt", b"hello world")
+    await ws.fs.write("/tmp/a.txt", b"hello world")
     ws._cwd = "/"
     result = await ws.execute("wc -l /tmp/a.txt")
     out = await result.stdout_str()

@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../types.ts'
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { FILE_MIME_MAP } from './constants.ts'
 
-export function detectFileType(header: Uint8Array, stat: FileStat): FileType {
-  if (stat.type !== null && stat.type !== FileType.BINARY) return stat.type
-  const magic: [number[], FileType][] = [
-    [[0x89, 0x50, 0x4e, 0x47], FileType.IMAGE_PNG],
-    [[0xff, 0xd8, 0xff], FileType.IMAGE_JPEG],
-    [[0x47, 0x49, 0x46, 0x38], FileType.IMAGE_GIF],
-    [[0x50, 0x4b, 0x03, 0x04], FileType.ZIP],
-    [[0x1f, 0x8b], FileType.GZIP],
-    [[0x25, 0x50, 0x44, 0x46], FileType.PDF],
-    [[0x7b, 0x0a], FileType.JSON],
-    [[0x5b, 0x7b], FileType.JSON],
+export function detectFileType(header: Uint8Array, stat: FileStat): ContentType {
+  if (stat.content !== null && stat.content !== ContentType.BINARY) return stat.content
+  const magic: [number[], ContentType][] = [
+    [[0x89, 0x50, 0x4e, 0x47], ContentType.IMAGE_PNG],
+    [[0xff, 0xd8, 0xff], ContentType.IMAGE_JPEG],
+    [[0x47, 0x49, 0x46, 0x38], ContentType.IMAGE_GIF],
+    [[0x50, 0x4b, 0x03, 0x04], ContentType.ZIP],
+    [[0x1f, 0x8b], ContentType.GZIP],
+    [[0x25, 0x50, 0x44, 0x46], ContentType.PDF],
+    [[0x7b, 0x0a], ContentType.JSON],
+    [[0x5b, 0x7b], ContentType.JSON],
   ]
   for (const [sig, ftype] of magic) {
     if (startsWith(header, sig)) return ftype
@@ -39,7 +39,7 @@ export function detectFileType(header: Uint8Array, stat: FileStat): FileType {
       break
     }
   }
-  return printable ? FileType.TEXT : FileType.BINARY
+  return printable ? ContentType.TEXT : ContentType.BINARY
 }
 
 function startsWith(data: Uint8Array, sig: number[]): boolean {
@@ -52,9 +52,9 @@ function startsWith(data: Uint8Array, sig: number[]): boolean {
 
 export function formatFileResult(
   pathOriginal: string,
-  // A FileType, or a ready-made description (a symlink line) that
-  // passes through as-is. FileType is a string union, so one `string`
-  // covers both.
+  // A ContentType or FileType, or a ready-made description (a symlink
+  // line) that passes through as-is. Both are string unions, so one
+  // `string` covers all three.
   result: string,
   brief: boolean,
   mime: boolean,

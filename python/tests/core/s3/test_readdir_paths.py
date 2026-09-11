@@ -33,19 +33,19 @@ def ws():
 
 
 def test_readdir_returns_leading_slash(ws):
-    entries = asyncio.run(ws.ops.readdir("/mnt/data/dir"))
+    entries = asyncio.run(ws.fs.readdir("/mnt/data/dir"))
     for e in entries:
         assert e.startswith("/"), f"readdir entry missing leading /: {e}"
 
 
 def test_readdir_returns_full_virtual_paths(ws):
-    entries = asyncio.run(ws.ops.readdir("/mnt/data/dir"))
+    entries = asyncio.run(ws.fs.readdir("/mnt/data/dir"))
     assert "/mnt/data/dir/a.txt" in entries
     assert "/mnt/data/dir/b.txt" in entries
 
 
 def test_readdir_root(ws):
-    entries = asyncio.run(ws.ops.readdir("/mnt/data"))
+    entries = asyncio.run(ws.fs.readdir("/mnt/data"))
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert "dir" in names
     assert "c.csv" in names

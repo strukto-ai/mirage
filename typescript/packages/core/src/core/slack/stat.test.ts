@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
 import { stat } from './stat.ts'
 
@@ -166,7 +166,7 @@ describe('stat user file', () => {
       spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
       idx,
     )
-    expect(out.type).toBe(FileType.JSON)
+    expect(out.content).toBe(ContentType.JSON)
     expect(out.name).toBe('alice__U1.json')
     expect(out.extra.user_id).toBe('U1')
   })
@@ -242,7 +242,7 @@ describe('stat chat.jsonl and files dir', () => {
       spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
       idx,
     )
-    expect(out.type).toBe(FileType.TEXT)
+    expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('chat.jsonl')
     expect(out.size).toBe(42)
   })

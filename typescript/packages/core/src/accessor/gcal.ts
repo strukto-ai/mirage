@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { localDate } from '../core/gcal/day.ts'
-import type { GoogleConfig } from '../core/google/config.ts'
 import type { TokenManager } from '../core/google/client.ts'
 import { GoogleApiAccessor } from './google_api.ts'
+import type { GCalConfig } from '../resource/gcal/config.ts'
 
 export class GCalAccessor extends GoogleApiAccessor {
-  readonly config: GoogleConfig
+  readonly config: GCalConfig
 
-  constructor(opts: { tokenManager: TokenManager; config: GoogleConfig }) {
+  constructor(opts: { tokenManager: TokenManager; config: GCalConfig }) {
     super(opts)
     this.config = opts.config
   }

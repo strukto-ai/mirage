@@ -108,7 +108,7 @@ def run_link_probe(result: dict[str, ProbeValue]) -> None:
     asyncio.run(ws.execute("ln -s f.txt /data/lk.pinned"))
     asyncio.run(ws.execute("ln -s f.txt /data/lk.plain"))
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-link-")
-    mount_background(ws.ops, mountpoint)
+    mount_background(ws.fs, mountpoint)
     try:
         # A denied removal must FAIL and leave the link where it was.
         # Keyed on the refusal, not on an errno, because Windows cannot
@@ -202,7 +202,7 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
     api._store.files["/api.json"] = API_CONTENT
     ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
-    mount_background(SizelessOps(ws.ops), mountpoint)
+    mount_background(SizelessOps(ws.fs), mountpoint)
     api_file = f"{mountpoint}/api/api.json"
     try:
         # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0

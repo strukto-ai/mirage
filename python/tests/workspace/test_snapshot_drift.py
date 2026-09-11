@@ -17,11 +17,16 @@ from contextlib import ExitStack
 
 import pytest
 
+from mirage.commands.cli.types import CLISpec
+from mirage.io import IOResult
+from mirage.observe.context import RecordingScope, record, start_op
+from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import DriftPolicy, MountMode
+from mirage.types import DriftPolicy, MountMode, PathSpec
 from mirage.workspace import Workspace
-from mirage.workspace.snapshot import ContentDriftError, install_fingerprints
+from mirage.workspace.snapshot import (ContentDriftError, install_fingerprints,
+                                       to_state_dict)
 from tests.e2e.s3_mock import patch_s3_multi
 
 
@@ -108,7 +113,7 @@ def test_strict_load_checks_drift_before_an_ops_write(tmp_path):
 
         dst = _load(snap, resources={"/s3": S3Resource(_config())})
         with pytest.raises(ContentDriftError):
-            asyncio.run(dst.ops.write("/s3/data.csv", b"CLOBBERED\n"))
+            asyncio.run(dst.fs.write("/s3/data.csv", b"CLOBBERED\n"))
         assert store["data.csv"] == b"VERSION 2 DRIFTED\n"
 
 
@@ -231,3 +236,171 @@ def test_live_only_mount_does_not_block_snapshot(tmp_path, caplog):
                    "no drift" in r.message.lower()
                    or "no drift" in r.getMessage().lower()
                    for r in caplog.records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", ["state", "copy"])
+async def test_snapshot_prepares_new_mount_before_capturing_cache(capture):
+    old = {"data/file": b"old", "outside": b"keep", "data2/file": b"sibling"}
+    new = {"file": b"new"}
+    with patch_s3_multi({"old": old, "new": new}):
+        ancestor = S3Resource(_config().model_copy(update={"bucket": "old"}))
+        replacement = S3Resource(
+            _config().model_copy(update={"bucket": "new"}))
+        ws = Workspace({"/": ancestor})
+        clone = None
+        try:
+            assert (await ws.execute("cat /data/file /outside /data2/file")
+                    ).stdout == b"oldkeepsibling"
+            assert await ws.cache.get("/data/file") == b"old"
+            ws.add_mount("/data", replacement)
+            if capture == "copy":
+                clone = await ws.copy()
+            else:
+                state = await to_state_dict(ws)
+                assert "/data/file" not in [
+                    e["key"] for e in state["cache"]["entries"]
+                ]
+                clone = await Workspace.from_state(state,
+                                                   resources={
+                                                       "/": ancestor,
+                                                       "/data": replacement
+                                                   })
+            assert await clone.cache.get("/data/file") is None
+            assert await clone.cache.get("/outside") == b"keep"
+            assert await clone.cache.get("/data2/file") == b"sibling"
+            assert (await clone.execute("cat /data/file")).stdout == b"new"
+        finally:
+            if clone is not None:
+                await clone.close()
+            await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shadow", [False, True])
+@pytest.mark.parametrize("delayed", [False, True])
+async def test_snapshot_fingerprints_keep_read_mount_ownership(
+        shadow, delayed):
+    old = {"data/file" if shadow else "file": b"old"}
+    with patch_s3_multi({
+            "old": old,
+            "new": {
+                "file": b"new"
+            },
+            "keep": {
+                "file": b"keep"
+            }
+    }):
+        ancestor = S3Resource(_config().model_copy(update={"bucket": "old"}))
+        replacement = S3Resource(
+            _config().model_copy(update={"bucket": "new"}))
+        sibling = S3Resource(_config().model_copy(update={"bucket": "keep"}))
+        ws = Workspace({
+            "/" if shadow else "/data": ancestor,
+            "/data/nested": sibling
+        })
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def gate(_inv):
+            entered.set()
+            await release.wait()
+            return None, IOResult()
+
+        ws.register_cli("gate", CLISpec(name="gate", fn=gate))
+        reading = None
+        try:
+            await ws.execute("cat /data/nested/file")
+            if delayed:
+                reading = asyncio.create_task(
+                    ws.execute("cat /data/file; gate"))
+                await asyncio.wait_for(entered.wait(), 5)
+            else:
+                await ws.execute("cat /data/file")
+            if not shadow:
+                await ws.unmount("/data")
+            ws.add_mount("/data", replacement)
+            release.set()
+            if reading is not None:
+                assert (await reading).stdout == b"old"
+            state = await to_state_dict(ws)
+            assert [e["path"]
+                    for e in state["fingerprints"]] == ["/data/nested/file"]
+            await ws.execute("cat /data/file")
+            state = await to_state_dict(ws)
+            entries = {e["path"]: e for e in state["fingerprints"]}
+            new_read = next(
+                r for r in ws._ops.records if r.path == "/data/file"
+                and r.mount_id == ws.mount("/data").mount_id and r.fingerprint)
+            assert entries["/data/file"]["fingerprint"] == new_read.fingerprint
+            assert "/data/nested/file" in entries
+        finally:
+            release.set()
+            if reading is not None:
+                await asyncio.gather(reading, return_exceptions=True)
+            await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
+    resource = RAMResource()
+    resource.SUPPORTS_SNAPSHOT = True
+    payload = b"old"
+
+    @op("read", resource="ram")
+    async def lazy_read(accessor, scope, **kwargs):
+        record("read", scope.virtual, "ram", 3, start_op(), fingerprint="old")
+        yield payload
+
+    resource.register_op(lazy_read)
+    ws = Workspace({"/data": resource})
+    scope = RecordingScope()
+    try:
+        stream, _ = await ws.dispatch("read",
+                                      PathSpec.from_str_path("/data/file"))
+        old_id = ws.mount("/data").mount_id
+        removing = asyncio.create_task(ws.unmount("/data"))
+        async with asyncio.timeout(5):
+            while ws._registry.try_mount_for_prefix("/data") is not None:
+                await asyncio.sleep(0)
+        replacement = RAMResource()
+        replacement.SUPPORTS_SNAPSHOT = True
+        ws.add_mount("/data", replacement)
+        async for chunk in stream:
+            assert chunk == payload
+        ws._ops.records.extend(scope.records)
+        await removing
+        assert scope.records[0].mount_id == old_id
+        assert (await to_state_dict(ws))["fingerprints"] == []
+    finally:
+        scope.close()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shadow", [False, True])
+async def test_restored_drift_checks_do_not_follow_replaced_mounts(shadow):
+    prefix = "/" if shadow else "/data"
+    with patch_s3_multi({"old": {}, "new": {"file": b"new"}}):
+        ancestor = S3Resource(_config().model_copy(update={"bucket": "old"}))
+        replacement = S3Resource(
+            _config().model_copy(update={"bucket": "new"}))
+        source = Workspace({prefix: ancestor})
+        loaded = None
+        try:
+            state = await to_state_dict(source)
+            state["fingerprints"] = [{
+                "path": "/data/file",
+                "mount_prefix": prefix,
+                "fingerprint": "old-account"
+            }]
+            loaded = await Workspace.from_state(state,
+                                                resources={prefix: ancestor})
+            if not shadow:
+                await loaded.unmount("/data")
+            loaded.add_mount("/data", replacement)
+            assert (await loaded.execute("cat /data/file")).stdout == b"new"
+        finally:
+            if loaded is not None:
+                await loaded.close()
+            await source.close()

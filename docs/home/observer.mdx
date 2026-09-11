@@ -47,8 +47,7 @@ ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE,
 ```
 
 ```typescript TypeScript
-import { Workspace, RAMResource } from '@struktoai/mirage-core'
-import { DiskObserverStore, RedisObserverStore } from '@struktoai/mirage-node'
+import { DiskObserverStore, RAMResource, RedisObserverStore, Workspace } from '@struktoai/mirage-node'
 
 // RAM (default), nothing to configure
 const ws = new Workspace({ '/data': new RAMResource() })

@@ -15,6 +15,8 @@
 from datetime import datetime, timezone
 from stat import filemode
 
+from mirage.commands.builtin.utils.identity import (Identity, group_name,
+                                                    owner_name)
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import CHAR_MODE, DIR_MODE, FILE_MODE, LINK_MODE
@@ -30,7 +32,7 @@ _PRINTF_ESCAPES = {
     "f": "\f",
     "v": "\v",
 }
-_STAT_DIRECTIVES = frozenset("syYmMT")
+_STAT_DIRECTIVES = frozenset("syYmMTuUgG")
 _TYPE_LETTER = {
     FileType.DIRECTORY: "d",
     FileType.SYMLINK: "l",
@@ -131,12 +133,16 @@ def expand_printf(fmt: str,
                   search: PathSpec,
                   st: FileStat | None,
                   warnings: list[str],
-                  target: FileStat | None = None) -> str:
+                  target: FileStat | None = None,
+                  identity: Identity | None = None) -> str:
     """Expand one -printf format against one result row.
 
     Directives cover what GNU's find agents actually use: the path family
-    (%p %P %f %h %d), the stat family (%s %y %Y %m %M), %T times, and the
-    backslash escapes. An unrecognized directive or escape renders
+    (%p %P %f %h %d), the stat family (%s %y %Y %m %M), the owner family
+    (%u %U %g %G, which read the entry's uid and gid and fall back to
+    the workspace user and the session's profile, the same rule
+    ``ls -l`` draws its columns by), %T times, and the backslash
+    escapes. An unrecognized directive or escape renders
     literally and adds GNU's warning line once, exit code untouched --
     which is GNU's own behavior. Times render in UTC (mirage timestamps
     are zone-carrying ISO strings; GNU renders the local zone). ``%Y``
@@ -151,6 +157,8 @@ def expand_printf(fmt: str,
         warnings (list[str]): sink for GNU's warning lines, deduplicated.
         target (FileStat | None): a symlink row's resolved target stat,
             None when the link dangles; ignored for non-link rows.
+        identity (Identity | None): who the session is, for the owner
+            family on an entry that reports no owner of its own.
     """
     out: list[str] = []
     i = 0
@@ -203,6 +211,12 @@ def expand_printf(fmt: str,
                 out.append("N" if target is None else printf_kind(target))
             else:
                 out.append(kind)
+        elif code in ("u", "U"):
+            out.append(owner_name(st.uid if st is not None else None,
+                                  identity))
+        elif code in ("g", "G"):
+            out.append(group_name(st.gid if st is not None else None,
+                                  identity))
         elif code == "m":
             out.append(format(_mode_bits(st, kind) & 0o7777, "o"))
         elif code == "M":

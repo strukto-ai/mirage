@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ScriptSource } from '../runtime/routing/types.ts'
-import type { Limit, PathSpec, Producer } from '../types.ts'
+import type { Limit, PathSpec, Producer, Refusal } from '../types.ts'
 
 /**
  * The one registry question policy hooks may ask. MountRegistry
@@ -27,7 +27,8 @@ interface MountRootQuery {
 
 /**
  * What a command-plane refusal is about, which picks its voice. `command`
- * refuses the whole line: `<cmd>: policy denied: <reason>`, exit 126.
+ * refuses the whole line in bash's own words, `<cmd>: Permission denied`,
+ * exit 126, and the reason rides the result's `refusal` record instead.
  * `operand` refuses one operand and keeps the GNU voice `<cmd>: <reason>`
  * (the reason names the operand, as `rm: cannot remove 'x': ...` does),
  * exit 1, or the command's own fatal code where GNU differs (tar exits
@@ -65,6 +66,10 @@ export interface Deny {
   reason: string
   /** Whole command (the default) or one operand; ignored off the command plane. */
   scope?: DenyScope
+  /** The class name of the policy that spoke, stamped by the chain so no policy names itself. */
+  policy?: string
+  /** True when the chain refused on a policy's behalf because it raised. */
+  failed?: boolean
 }
 
 /**
@@ -234,6 +239,98 @@ export interface Decision {
 }
 
 /**
+ * Where one command stands: the text it was parsed from, its span in
+ * that text, and the occurrence of the node that text was evaluated
+ * from, so the commands of a nested line stand under the word that ran
+ * them.
+ *
+ * The pass computes one from the line's parse and the gate from the
+ * node it runs, by one rule (`workspace/node/occurrence`), and the
+ * ledger only compares them: a grant a pass claims is bound to the
+ * occurrence it judged, and offered to a reader at that occurrence
+ * alone. So a word that expands at run time into the same command as a
+ * literal spelling elsewhere on the line (`$S && cat secret`) cannot
+ * run on the literal's nod, and one body evaluated under two words
+ * (`eval 'cat s'; eval 'cat s'`) is two occurrences. Mirrors the Python
+ * Occurrence.
+ */
+export interface Occurrence {
+  /** The node whose text this command was parsed from, null for a typed line. */
+  readonly parent: Occurrence | null
+  /** The text the command was parsed from. */
+  readonly source: string
+  /** The command's first index in that text. */
+  readonly start: number
+  /** The index after its last. */
+  readonly end: number
+}
+
+/**
+ * One grant a reader of a line matched, and the occurrence it matched
+ * it for. Mirrors the Python Claim.
+ */
+export interface Claim {
+  readonly occurrence: Occurrence
+  readonly decision: Decision
+}
+
+/**
+ * The ONCE grants a line's readers matched to its commands, for the
+ * line's end to spend.
+ *
+ * One per line, made by the executor and filled by `Decisions.resolve`
+ * as a pass or a gate admits a command: every grant it matches, whether
+ * the host gave it inline just now or out of band before the line, is
+ * claimed here instead of spent, bound to the occurrence it was judged
+ * for. A claimed grant is on offer to that occurrence alone, so two
+ * spellings of one command on a line each need a nod of their own, and
+ * invisible to every other line of the session while this one lives, so
+ * two lines judged at once cannot both run on one nod. Nothing spends a
+ * claim while the line runs: a gate the run reaches again at the same
+ * place (a loop body) runs on the same nod, and every claim, reached or
+ * not, is spent when the line ends (`Decisions.revoke`). A background
+ * job the line launches holds a copy of the claims made for the
+ * commands inside it on a hand-off of its own (`Decisions.split`),
+ * since its gates run after the line has returned and it ends on its
+ * own clock; a grant is spent when the last hand-off holding it ends.
+ * Compared by identity, because the hand-off is the line.
+ *
+ * A line the executor evaluates from inside another (`$( )`, `eval`,
+ * `source`, `xargs`, the line an alias invocation rewrites to) is a line
+ * of its own with a hand-off of its own,
+ * linked to the outer line's through `parent` and standing under the
+ * node that ran it through `origin`: the outer pass reads into the
+ * words it runs, so the grants it claimed for them are the inner line's
+ * to run on, at the occurrences the outer pass computed for them, and
+ * what the inner line's own gates claim is handed to the outer line
+ * when it ends (`Decisions.handUp`), for the next evaluation from the
+ * same node to run on and the typed line's end to spend. Mirrors the
+ * Python HandOff.
+ */
+export interface HandOff {
+  /** The grants matched so far, in the order the commands were judged. */
+  readonly claimed: Claim[]
+  /**
+   * The hand-off of the line this one was evaluated from, null for a
+   * typed line.
+   */
+  readonly parent: HandOff | null
+  /** The node this line's text was evaluated from, null for a typed line. */
+  readonly origin: Occurrence | null
+}
+
+/**
+ * Who reads the ledger: one command of one line. A judging pass and the
+ * gate that runs the line name themselves the same way, so a grant the
+ * pass claimed for a command is found by the gate for that command and
+ * by no other reader. Mirrors the Python Claimant.
+ */
+export interface Claimant {
+  readonly line: HandOff
+  readonly occurrence: Occurrence
+}
+
+/**
  * The door's answer while the host has not decided: the line is refused
  * for now, and the id names what to grant. Mirrors the Python Pending.
  */
@@ -307,13 +404,14 @@ export interface SessionCommandsQuery {
 }
 
 /**
- * One profile's script, as a session carries it: the program, the
- * engine it runs on, and the profile it speaks for. Compiled off
- * `SessionProfile.script` beside the admission rules, and evaluated per
- * command by `ScriptPolicy` with the command's facts as `ctx`; its
- * answer is allow (no opinion), deny or ask. `profile` is the
- * profile's name, which the script reads as `ctx.profile`; empty for a
- * profile document passed to `createSession` without a name.
+ * One profile's policy, as a session carries it: the program, the
+ * engine it runs on, and the profile it speaks for. Compiled off the
+ * profile's policy block beside the admission rules; `ScriptPolicy`
+ * calls the admission hooks it defines (`preCommand`, `preOps`,
+ * `preSession`) with the door's facts, and a hook returns allow (no
+ * opinion), deny, or at the command gate ask. `profile` is
+ * the profile's name, which the policy reads as `ctx.profile`; empty
+ * for a profile document passed to `createSession` without a name.
  */
 export interface ProfileScript {
   readonly profile: string
@@ -390,13 +488,21 @@ export interface CommandContext {
  * door (the dispatcher every access routes through, FUSE included),
  * before any backend or cache I/O. `sessionId` is the session the door
  * serves, set from the session it already resolves for hides and
- * modes; empty for the unbound host view. */
+ * modes; empty for the unbound host view. `issuer` is the token the op
+ * arrived with, when its caller stamped one: a policy whose own engine
+ * reads through the door stamps those reads, and recognizes its token
+ * here so the read an evaluation is waiting on is not judged by the
+ * hook that is waiting. It travels with the op as an argument, never
+ * through ambient context, so no concurrent op can be taken for it;
+ * python marks the same read with a task-local ContextVar, which a
+ * browser has no twin of. */
 export interface OpsContext {
   op: string
   path: PathSpec
   write: boolean
   prefix: string
   sessionId?: string
+  issuer?: symbol
 }
 
 /** One completed VFS op, as postOps hooks see it; a Deny suppresses
@@ -449,6 +555,9 @@ export const VALIDITY: Readonly<
   preSession: new Set(['deny']),
 }
 
+/** The name of one Policy hook, as the interface spells it. */
+export type PolicyHook = keyof typeof VALIDITY
+
 /**
  * What one command of a line would do, without doing it.
  *
@@ -486,4 +595,6 @@ export interface Explanation {
   readonly exitCode: number
   /** What the agent would read, empty to run. */
   readonly stderr: string
+  /** The record the refused result would carry, null when the line would run. */
+  readonly refusal: Refusal | null
 }

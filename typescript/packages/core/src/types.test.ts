@@ -16,6 +16,7 @@ import { mountKey, mountPrefixOf } from './utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
   ConsistencyPolicy,
+  ContentType,
   FileStat,
   FileType,
   MountMode,
@@ -156,18 +157,16 @@ describe('ResourceName', () => {
 })
 
 describe('FileType', () => {
-  it('exposes the documented enum values', () => {
-    expect(FileType.DIRECTORY).toBe('directory')
-    expect(FileType.TEXT).toBe('text')
-    expect(FileType.BINARY).toBe('binary')
-    expect(FileType.JSON).toBe('json')
-    expect(FileType.CSV).toBe('csv')
-    expect(FileType.IMAGE_PNG).toBe('image/png')
-    expect(FileType.IMAGE_JPEG).toBe('image/jpeg')
-    expect(FileType.IMAGE_GIF).toBe('image/gif')
-    expect(FileType.ZIP).toBe('application/zip')
-    expect(FileType.GZIP).toBe('application/gzip')
-    expect(FileType.PDF).toBe('application/pdf')
+  it('is the POSIX st_mode kind, the python enum verbatim', () => {
+    expect({ ...FileType }).toEqual({
+      DIRECTORY: 'directory',
+      FILE: 'file',
+      SYMLINK: 'symlink',
+      CHAR_DEVICE: 'char_device',
+      BLOCK_DEVICE: 'block_device',
+      FIFO: 'fifo',
+      SOCKET: 'socket',
+    })
   })
 
   it('is frozen at runtime', () => {
@@ -175,14 +174,36 @@ describe('FileType', () => {
   })
 })
 
+describe('ContentType', () => {
+  it('is the rendering hint of a regular file, the python enum verbatim', () => {
+    expect({ ...ContentType }).toEqual({
+      TEXT: 'text',
+      BINARY: 'binary',
+      JSON: 'json',
+      CSV: 'csv',
+      IMAGE_PNG: 'image/png',
+      IMAGE_JPEG: 'image/jpeg',
+      IMAGE_GIF: 'image/gif',
+      ZIP: 'application/zip',
+      GZIP: 'application/gzip',
+      PDF: 'application/pdf',
+    })
+  })
+
+  it('is frozen at runtime', () => {
+    expect(Object.isFrozen(ContentType)).toBe(true)
+  })
+})
+
 describe('FileStat', () => {
-  it('fills defaults when only name is provided', () => {
-    const s = new FileStat({ name: 'x.txt' })
+  it('fills defaults when only name and type are provided', () => {
+    const s = new FileStat({ name: 'x.txt', type: FileType.FILE })
     expect(s.name).toBe('x.txt')
     expect(s.size).toBeNull()
     expect(s.modified).toBeNull()
     expect(s.fingerprint).toBeNull()
-    expect(s.type).toBeNull()
+    expect(s.type).toBe(FileType.FILE)
+    expect(s.content).toBeNull()
     expect(s.extra).toEqual({})
   })
 
@@ -192,18 +213,31 @@ describe('FileStat', () => {
       size: 1024,
       modified: '2026-04-18T00:00:00Z',
       fingerprint: 'abc123',
-      type: FileType.JSON,
+      type: FileType.FILE,
+      content: ContentType.JSON,
       extra: { etag: 'W/"abc"' },
     })
     expect(s.size).toBe(1024)
     expect(s.modified).toBe('2026-04-18T00:00:00Z')
     expect(s.fingerprint).toBe('abc123')
-    expect(s.type).toBe(FileType.JSON)
+    expect(s.type).toBe(FileType.FILE)
+    expect(s.content).toBe(ContentType.JSON)
     expect(s.extra).toEqual({ etag: 'W/"abc"' })
   })
 
+  it('refuses a content shape on anything but a regular file', () => {
+    expect(
+      () => new FileStat({ name: 'd', type: FileType.DIRECTORY, content: ContentType.JSON }),
+    ).toThrow('content must be null for directory, got json')
+  })
+
+  it('carries content through with()', () => {
+    const s = new FileStat({ name: 'x.json', type: FileType.FILE, content: ContentType.JSON })
+    expect(s.with({ name: 'y.json' }).content).toBe(ContentType.JSON)
+  })
+
   it('is frozen at the top level', () => {
-    const s = new FileStat({ name: 'x' })
+    const s = new FileStat({ name: 'x', type: FileType.FILE })
     expect(Object.isFrozen(s)).toBe(true)
   })
 })

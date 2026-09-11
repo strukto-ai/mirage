@@ -20,7 +20,7 @@ from mirage.core.ssh.client import _abs
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 
 
 async def stat(accessor: SSHAccessor,
@@ -50,7 +50,7 @@ async def stat(accessor: SSHAccessor,
             modified=mod_str,
             fingerprint=mod_str or None,
             type=FileType.DIRECTORY if is_dir else FileType.FILE,
-            content=None if is_dir else guess_type(path),
+            content=None if is_dir else content_type_for_path(path),
             mode=(attrs.permissions
                   & 0o7777 if attrs.permissions is not None else None),
             atime=(epoch_to_iso(attrs.atime)

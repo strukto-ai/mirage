@@ -221,7 +221,7 @@ export async function rmR(accessor: OneDriveAccessor, path: PathSpec): Promise<v
  * emptiness check is the only thing separating them. Aliasing the two --
  * which this was -- destroyed the whole subtree for every caller that does
  * not pre-check emptiness itself, and the command builders are the only
- * callers that do: FUSE, `ws.ops` and the sandbox runtimes all reach the op
+ * callers that do: FUSE, `ws.fs` and the sandbox runtimes all reach the op
  * directly.
  */
 export async function rmdir(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {

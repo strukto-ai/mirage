@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import inspect
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -51,6 +52,27 @@ from mirage.workspace.types import ExecutionNode
 # (lenient_dash_operands), which is what a program parsing its own argv
 # needs. "str", not "path", so nothing is cwd-resolved or routed.
 PASSTHROUGH_REST = Operand(type="str")
+
+
+async def call_leaf(fn: Callable[..., Any], inv: CLIInvocation[Any]) -> Any:
+    """Run a leaf handler, whether it was written ``async def`` or not.
+
+    Deferring the call into this coroutine is what the TypeScript twin
+    does with ``(async () => fn(inv))()``: a leaf that returns its
+    result directly is awaited like one that returns a coroutine, and
+    a leaf that raises synchronously lands in the same catch arms as
+    one that raises after an await. Before this a plain ``def`` leaf
+    failed at the ``await`` with a TypeError the generic arm rendered
+    as ``prog: object tuple can't be used in 'await' expression``.
+
+    Args:
+        fn (Callable[..., Any]): the leaf's handler.
+        inv (CLIInvocation): the one record every leaf receives.
+    """
+    result = fn(inv)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def parse_spec_for(leaf: CLISpec) -> tuple[CLISpec, bool]:
@@ -351,7 +373,7 @@ async def handle_cli(
             # this is a bug.
             raise RuntimeError(
                 f"walk returned a leaf without a handler for {prog!r}")
-        body = fn(inv)
+        body = call_leaf(fn, inv)
     # The leaf's declared limit bounds the handler body and its
     # streams, exactly like mount dispatch: without the wrap a blocking
     # leaf hangs forever and an unbounded-output leaf ignores its own

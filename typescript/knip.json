@@ -13,7 +13,8 @@
         "seek-bzip",
         "tree-sitter-bash",
         "web-tree-sitter"
-      ]
+      ],
+      "entry": ["scripts/*.mjs"]
     },
     "packages/browser": {
       "entry": ["scripts/*.mjs"],

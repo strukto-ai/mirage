@@ -140,6 +140,7 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
       prefix,
       mode: mount.mode,
       resourceClass: mount.resource_class,
+      resourceRef: (mount.resource_ref as string | null | undefined) ?? null,
       resourceState,
     })
   }
@@ -179,6 +180,9 @@ export function toState(
       prefix,
       mode: mount.mode,
       resource_class: mount.resourceClass,
+      // A meta committed before the ref was recorded reads as null, the
+      // answer for a resource constructed in code.
+      resource_ref: (mount.resourceRef as string | null | undefined) ?? null,
       resource_state: resourceState,
     })
   }

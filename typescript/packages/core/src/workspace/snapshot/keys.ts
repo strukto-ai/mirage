@@ -36,6 +36,7 @@ export const MountKey = Object.freeze({
   MODE: 'mode',
   CONSISTENCY: 'consistency',
   RESOURCE_CLASS: 'resource_class',
+  RESOURCE_REF: 'resource_ref',
   RESOURCE_STATE: 'resource_state',
 } as const)
 
@@ -67,6 +68,7 @@ export const JobKey = Object.freeze({
 export const ResourceStateKey = Object.freeze({
   TYPE: 'type',
   CONFIG: 'config',
+  NEEDS_OVERRIDE: 'needs_override',
   FILES: 'files',
   DIRS: 'dirs',
   MODIFIED: 'modified',

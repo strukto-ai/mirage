@@ -29,6 +29,8 @@ ws = Workspace({"/remote": resource}, mode=MountMode.WRITE)
 | `port`          | no       | `22`    | SSH port                             |
 | `username`      | no       |         | SSH username                         |
 | `identity_file` | no       |         | Path to private key                  |
+| `password`      | no       |         | Password authentication; redacted in snapshots |
+| `passphrase`    | no       |         | Passphrase of an encrypted `identity_file`; redacted in snapshots |
 | `root`          | no       | `/`     | Remote directory to mount            |
 | `timeout`       | no       | `30`    | Connection timeout in seconds        |
 | `known_hosts`   | no       |         | Path to known_hosts file             |

@@ -25,7 +25,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.ops.types import NamespaceView
+from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error
@@ -41,6 +41,7 @@ async def handle_cross_mount(
     stdin: ByteSource | None = None,
     storage_key: Callable[[PathSpec], str] | None = None,
     ns: NamespaceView | None = None,
+    session_view: SessionView | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -67,12 +68,14 @@ async def handle_cross_mount(
             identity (RELAY's transfer commands).
         ns (NamespaceView | None): Name-plane facts for the RELAY
             generics that render them (ls).
+        session_view (SessionView | None): The session plane's door, for
+            the RELAY generic that renders the session's profile (ls).
     """
     try:
         strategy = strategy_for(cmd_name, flag_kwargs)
         if strategy is Strategy.RELAY:
             return await run_relay(cmd_name, scopes, text_args, flag_kwargs,
-                                   dispatch, storage_key, ns)
+                                   dispatch, storage_key, ns, session_view)
         if strategy is Strategy.STREAM:
             return await run_stream(cmd_name, scopes, text_args, flag_kwargs,
                                     run_single)

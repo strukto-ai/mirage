@@ -206,7 +206,8 @@ async def expand_redirects(
                 inner_data = b""
                 if inner:
                     io_ps = await execute_fn(inner,
-                                             session_id=session.session_id)
+                                             session_id=session.session_id,
+                                             node=r.target_node)
                     inner_data = io_ps.stdout or b""
                 expanded.append(
                     Redirect(fd=0,

@@ -14,7 +14,7 @@
 
 import { Codec, DATE } from '@struktoai/mirage-core/core/hierarchy/codec'
 import { makeDetectScope, Scope, Slot } from '@struktoai/mirage-core/core/hierarchy/scope'
-import { FileType } from '@struktoai/mirage-core/types'
+import { ContentType } from '@struktoai/mirage-core/types'
 
 const EMAIL_JSON = new Codec({ suffix: '.email.json' })
 
@@ -33,7 +33,7 @@ const SCOPES: readonly Scope[] = [
     kind: 'message',
     segments: [...DAY, new Slot('message', EMAIL_JSON, 'uid')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'attachment_dir',

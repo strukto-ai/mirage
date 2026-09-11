@@ -16,10 +16,11 @@ import json
 from pathlib import Path
 
 from mirage.types import ContentType
-from mirage.utils.filetype import (_MIMETYPE_MAP, EXTENSION_MAP,
-                                   IMAGE_TYPE_BY_EXTENSION, MIME_BY_EXTENSION,
-                                   filetype_from_mimetype, guess_type,
-                                   image_type_for_extension, mime_type_for)
+from mirage.utils.filetype import (CONTENT_BY_EXTENSION, CONTENT_BY_MIME,
+                                   MIME_BY_EXTENSION,
+                                   content_type_for_extension,
+                                   content_type_for_mime,
+                                   content_type_for_path, mime_type_for)
 
 _FIXTURE = (Path(__file__).parents[3] / "integ" / "fixtures" / "filetype" /
             "tables.json")
@@ -33,66 +34,45 @@ def test_shared_parity_fixture_pins_every_table():
     tables = json.loads(_FIXTURE.read_text())
     assert {
         k: v.value
-        for k, v in EXTENSION_MAP.items()
-    } == tables["extension_map"]
-    assert MIME_BY_EXTENSION == tables["mime_by_extension"]
+        for k, v in CONTENT_BY_EXTENSION.items()
+    } == tables["content_by_extension"]
     assert {
         k: v.value
-        for k, v in _MIMETYPE_MAP.items()
-    } == tables["mimetype_map"]
-    assert ({
-        k: v.value
-        for k, v in IMAGE_TYPE_BY_EXTENSION.items()
-    } == tables["image_type_by_extension"])
+        for k, v in CONTENT_BY_MIME.items()
+    } == tables["content_by_mime"]
+    assert MIME_BY_EXTENSION == tables["mime_by_extension"]
 
 
-def test_log_and_gzip_extensions():
-    assert guess_type("build.log") == ContentType.TEXT
-    assert guess_type("dump.gzip") == ContentType.GZIP
+def test_content_type_for_path_reads_the_extension():
+    assert content_type_for_path("photo.jpg") == ContentType.IMAGE_JPEG
+    assert content_type_for_path("photo.jpeg") == ContentType.IMAGE_JPEG
+    assert content_type_for_path("logo.png") == ContentType.IMAGE_PNG
+    assert content_type_for_path("doc.pdf") == ContentType.PDF
+    assert content_type_for_path("build.log") == ContentType.TEXT
+    assert content_type_for_path("dump.gzip") == ContentType.GZIP
+    assert content_type_for_path("unknown.blob") == ContentType.BINARY
 
 
-def test_image_type_for_extension():
-    assert image_type_for_extension("png") == ContentType.IMAGE_PNG
-    assert image_type_for_extension("JPG") == ContentType.IMAGE_JPEG
-    assert image_type_for_extension("txt") == ContentType.BINARY
+def test_content_type_for_path_reads_the_last_segment_only():
+    assert content_type_for_path("/v1.2/README") == ContentType.BINARY
+    assert content_type_for_path("/v1.2/notes.md") == ContentType.TEXT
 
 
-def test_jpg_extension_maps_to_jpeg():
-    assert guess_type("photo.jpg") == ContentType.IMAGE_JPEG
+def test_content_type_for_extension():
+    assert content_type_for_extension("png") == ContentType.IMAGE_PNG
+    assert content_type_for_extension("JPG") == ContentType.IMAGE_JPEG
+    assert content_type_for_extension("txt") == ContentType.TEXT
+    assert content_type_for_extension("blob") == ContentType.BINARY
 
 
-def test_jpeg_extension_maps_to_jpeg():
-    assert guess_type("photo.jpeg") == ContentType.IMAGE_JPEG
-
-
-def test_png_extension():
-    assert guess_type("logo.png") == ContentType.IMAGE_PNG
-
-
-def test_pdf_extension():
-    assert guess_type("doc.pdf") == ContentType.PDF
-
-
-def test_filetype_from_mimetype_image():
-    assert filetype_from_mimetype("image/png") == ContentType.IMAGE_PNG
-    assert filetype_from_mimetype("image/jpeg") == ContentType.IMAGE_JPEG
-    assert filetype_from_mimetype("image/gif") == ContentType.IMAGE_GIF
-
-
-def test_filetype_from_mimetype_pdf():
-    assert filetype_from_mimetype("application/pdf") == ContentType.PDF
-
-
-def test_filetype_from_mimetype_text_fallback():
-    assert filetype_from_mimetype("text/markdown") == ContentType.TEXT
-
-
-def test_filetype_from_mimetype_empty():
-    assert filetype_from_mimetype("") == ContentType.BINARY
-
-
-def test_filetype_from_mimetype_unknown():
-    assert filetype_from_mimetype(
+def test_content_type_for_mime():
+    assert content_type_for_mime("image/png") == ContentType.IMAGE_PNG
+    assert content_type_for_mime("image/jpeg") == ContentType.IMAGE_JPEG
+    assert content_type_for_mime("image/gif") == ContentType.IMAGE_GIF
+    assert content_type_for_mime("application/pdf") == ContentType.PDF
+    assert content_type_for_mime("text/markdown") == ContentType.TEXT
+    assert content_type_for_mime("") == ContentType.BINARY
+    assert content_type_for_mime(
         "application/octet-stream") == ContentType.BINARY
 
 

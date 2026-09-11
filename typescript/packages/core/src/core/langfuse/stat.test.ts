@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { LangfuseTransport } from './client.ts'
 import { stat } from './stat.ts'
@@ -50,7 +50,7 @@ describe('langfuse stat existence', () => {
       spec('/traces/present.json'),
       new RAMIndexCacheStore(),
     )
-    expect(s.type).toBe(FileType.JSON)
+    expect(s.content).toBe(ContentType.JSON)
     expect(s.name).toBe('present.json')
   })
 
@@ -81,7 +81,7 @@ describe('langfuse stat existence', () => {
       spec('/prompts/greeting/1.json'),
       new RAMIndexCacheStore(),
     )
-    expect(s.type).toBe(FileType.JSON)
+    expect(s.content).toBe(ContentType.JSON)
   })
 
   it('stats the mount root without consulting the api', async () => {

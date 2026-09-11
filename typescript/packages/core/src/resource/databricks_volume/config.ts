@@ -14,12 +14,12 @@
 
 import { z } from 'zod'
 import {
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -61,6 +61,5 @@ export function redactDatabricksVolumeConfig(
 export function normalizeDatabricksVolumeConfig(
   input: Record<string, unknown>,
 ): DatabricksVolumeConfig {
-  const renamed = normalizeFields(input)
-  return DatabricksVolumeConfigSchema.parse(renamed) as DatabricksVolumeConfig
+  return parseConfigWithSchema(DatabricksVolumeConfigSchema, input)
 }

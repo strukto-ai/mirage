@@ -78,6 +78,7 @@ export function mirageTools(ws: Workspace): ToolSet {
           stdout: io.stdoutText,
           stderr: io.stderrText,
           exitCode: io.exitCode,
+          refusal: io.refusal,
         }
       },
     }),

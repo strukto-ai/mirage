@@ -79,6 +79,7 @@ async def _no_match_resolve_glob(scopes, prefix=""):
 def _mock_registry():
     mount = MagicMock()
     mount.prefix = "/data/"
+    mount.ensure_ready = AsyncMock()
     mount.mode = MountMode.EXEC
     mount.execute_cmd = AsyncMock(return_value=(b"ok\n", IOResult()))
     mount.resource = MagicMock()
@@ -86,6 +87,7 @@ def _mock_registry():
     mount.spec_for = MagicMock(return_value=None)
 
     reg = MagicMock()
+    reg.file_cache = None
     reg.mount_for = MagicMock(return_value=mount)
     reg.try_mount_for = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
@@ -501,8 +503,10 @@ def test_read_from_bytes():
 
 
 def test_shift():
+    # bash: shifting past `$#` (here, with no positionals at all) is a
+    # silent exit 1.
     _, io, _, _, _, _ = _exec("shift")
-    assert io.exit_code == 0
+    assert io.exit_code == 1
 
 
 # ── trap ────────────────────────────────────────
@@ -2777,9 +2781,10 @@ def test_printf_in_function():
 
 def test_sort_in_while_read():
     stdout, _, _, session, _, _ = _exec_with_stdin(
-        "sort | while read LINE; do export LAST=$LINE; done",
+        "sort | while read LINE; do export LAST=$LINE; echo $LAST; done",
         stdin=b"banana\napple\n")
-    assert session.env.get("LAST") is not None
+    assert stdout == b"ok\n"
+    assert session.env.get("LAST") is None
 
 
 def test_echo_redirect_then_cat():
@@ -2846,13 +2851,13 @@ def test_background_does_not_block():
 
 
 def test_multiple_background():
-    """sleep 0 &; sleep 0 &; export DONE=yes."""
+    """sleep 0 & sleep 0 & export DONE=yes."""
     _, _, _, session, _, _ = _exec("sleep 0 & sleep 0 & export DONE=yes")
     assert session.env["DONE"] == "yes"
 
 
 def test_background_in_sequence():
-    """export A=1; sleep 0 &; export B=2."""
+    """export A=1; sleep 0 & export B=2."""
     _, _, _, session, _, _ = _exec("export A=1; sleep 0 & export B=2")
     assert session.env["A"] == "1"
     assert session.env["B"] == "2"

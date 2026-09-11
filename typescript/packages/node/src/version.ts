@@ -12,6 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pkg from '../package.json'
+// The attribute is load-bearing: this package ships as a module tree
+// (tsc, one file per module), so the import reaches Node as written and
+// Node refuses a JSON module without it (ERR_IMPORT_ATTRIBUTE_MISSING),
+// which took the daemon down at startup. The old bundler inlined the
+// file and hid that. Same spelling as core's version.ts.
+import pkg from '../package.json' with { type: 'json' }
 
 export const VERSION: string = pkg.version

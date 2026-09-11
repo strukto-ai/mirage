@@ -286,7 +286,7 @@ describe('PermissionsPolicy', () => {
     const policies = new Policies([policy()])
     expect(
       await policies.preCommand(ctx('git', ['push'], { cwd: '/repo', program: ['git', 'push'] })),
-    ).toEqual({ kind: 'deny', reason: 'history is read-only here' })
+    ).toEqual({ kind: 'deny', reason: 'history is read-only here', policy: 'PermissionsPolicy' })
     expect(policies.wants('preOps')).toBe(true)
   })
 })

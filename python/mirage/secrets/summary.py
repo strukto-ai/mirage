@@ -14,6 +14,8 @@
 
 from collections.abc import Mapping
 
+from pydantic import ValidationError
+
 # Past this many, what came back is not a secret's shape, and reciting
 # a host's names back to the agent is neither a useful hint nor ours to
 # print.
@@ -47,3 +49,31 @@ def field_summary(fields: Mapping[str, str], source: str) -> str:
     if source in OPAQUE_FIELD_SOURCES or len(fields) > MAX_LISTED_FIELDS:
         return f"{len(fields)} fields"
     return "{" + ", ".join(sorted(fields)) + "}"
+
+
+def error_summary(exc: ValidationError) -> str:
+    """How a refusal names what a config model rejected.
+
+    The field path and the error type per issue, and nothing else. Not
+    pydantic's rendered message: the values it refused ride `str(exc)`
+    as `input_value`, and a `value_error` or `union_tag_invalid` message
+    spells the input inside the message itself. Every config this plane
+    validates is one a fetched credential may have just landed in -- a
+    source's own, a mount's, an account CLI's -- and the create route
+    answers `str(e)` as its 400 detail, so the summary is what any of
+    them may say. A caller raises its own type over it and chains
+    `from None`, because the original carries the value in `__cause__`
+    and a logged traceback would print it.
+
+    Args:
+        exc (ValidationError): what the model raised.
+
+    Returns:
+        str: `loc: type` per issue, joined by `; `. An issue with no
+            location (a model-level validator) is reported as `config`.
+    """
+    parts = []
+    for err in exc.errors(include_input=False, include_url=False):
+        loc = ".".join(str(part) for part in err["loc"]) or "config"
+        parts.append(f"{loc}: {err['type']}")
+    return "; ".join(parts)

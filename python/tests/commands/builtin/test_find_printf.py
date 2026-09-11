@@ -1,5 +1,6 @@
 from mirage.commands.builtin.find_printf import (expand_printf,
                                                  printf_needs_stat)
+from mirage.commands.builtin.utils.identity import Identity
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
@@ -28,6 +29,7 @@ def _stat(size: int = 6,
 def test_printf_needs_stat():
     assert printf_needs_stat("%s\n")
     assert printf_needs_stat("%TY\n")
+    assert printf_needs_stat("%u %g\n")
     assert not printf_needs_stat("%p %f %h %P %d\n")
     assert not printf_needs_stat("100%%score\n")
 
@@ -51,6 +53,31 @@ def test_expand_stat_directives():
     dir_out = expand_printf("%y %m\n", "/data/sub", search,
                             _stat(0, FileType.DIRECTORY), warnings)
     assert dir_out == "d 755\n"
+
+
+def test_expand_owner_directives():
+    warnings: list[str] = []
+    search = _spec("/data")
+    identity = Identity(user="alice", profile="admin")
+    # No uid/gid on the entry: the owner is the workspace user and the
+    # group the session's profile, the rule ls -l draws its columns by.
+    assert expand_printf("%u %U %g %G\n",
+                         "/data/a.txt",
+                         search,
+                         _stat(),
+                         warnings,
+                         identity=identity) == "alice alice admin admin\n"
+    # A reported owner wins; `-` when nothing names one.
+    owned = _stat().model_copy(update={"uid": 501, "gid": "staff"})
+    assert expand_printf("%u %g\n",
+                         "/data/a.txt",
+                         search,
+                         owned,
+                         warnings,
+                         identity=identity) == "501 staff\n"
+    assert expand_printf("%u %g\n", "/data/a.txt", search, _stat(),
+                         warnings) == "- -\n"
+    assert warnings == []
 
 
 def test_expand_reported_mode_over_default():

@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>mirage-ai — Redis in browser via Upstash</title>
+    <style>
+      body {
+        font-family: ui-monospace, Menlo, monospace;
+        background: #0c0d0e;
+        color: #d9dadb;
+        padding: 24px;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      #log {
+        white-space: pre-wrap;
+        background: #16181a;
+        padding: 16px;
+        border-radius: 6px;
+        overflow-x: auto;
+      }
+      .prompt {
+        color: #6bc9ff;
+      }
+      .err {
+        color: #ff7474;
+      }
+      .ok {
+        color: #7fd479;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>mirage-ai — Redis-as-filesystem in the browser (Upstash REST)</h1>
+    <div id="log"></div>
+    <script type="module" src="/src/redis.ts"></script>
+  </body>
+</html>

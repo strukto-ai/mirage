@@ -56,7 +56,7 @@ function mockStats(stats: Record<string, { size?: number | null; modified?: stri
         name,
         size: entry.size ?? null,
         modified: entry.modified ?? null,
-        type: entry.size === undefined ? FileType.DIRECTORY : FileType.TEXT,
+        type: entry.size === undefined ? FileType.DIRECTORY : FileType.FILE,
       }),
     )
   })

@@ -13,17 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import inspect
 import logging
+from dataclasses import replace
 from typing import Any
 
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.policy.base import Policy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import PolicyDenied, PolicyError
+from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (VALIDITY, Ask, CommandContext, Deny,
                                  DenyScope, ExecuteResultContext, OpsContext,
                                  OpsResultContext, Pending, SessionContext)
-from mirage.types import Limit, PathSpec
+from mirage.types import Limit, PathSpec, Refusal
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +39,11 @@ def render_deny(subject: str, deny: Deny) -> tuple[bytes, int]:
 
     The one place the outcome table for that plane is written down, so
     a document rule and a coded policy print alike: a whole-command
-    Deny is ``<subject>: policy denied: <reason>`` at 126, an operand
-    Deny keeps the GNU voice ``<subject>: <reason>`` at the command's
-    operand-refusal code (1, tar 2).
+    Deny is bash's own ``<subject>: Permission denied`` at 126, with
+    the reason on the result's ``refusal`` record rather than on
+    stderr; an operand Deny keeps the GNU voice ``<subject>: <reason>``
+    at the command's operand-refusal code (1, tar 2), because there
+    the reason is the diagnostic.
 
     Args:
         subject (str): the command name (or ``line`` at the boundary).
@@ -47,21 +52,74 @@ def render_deny(subject: str, deny: Deny) -> tuple[bytes, int]:
     if deny.scope is DenyScope.OPERAND:
         return (f"{subject}: {deny.reason}\n".encode(),
                 operand_exit_code(subject))
-    return (f"{subject}: policy denied: {deny.reason}\n".encode(),
-            POLICY_DENIED_EXIT)
+    return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
 
 
 def render_pending(subject: str, pending: Pending) -> tuple[bytes, int]:
     """The command plane's rendering of an unanswered ask: refused for
-    now at 126, naming the ask id the agent should quote, so the
-    retry after the host allows it passes.
+    now at 126 in the same words as a deny, so stderr never tells an
+    agent whether a retry might pass; the ask id it should quote rides
+    the ``refusal`` record.
 
     Args:
         subject (str): the command name.
         pending (Pending): the door's answer.
     """
-    return (f"{subject}: requires approval: {pending.reason} "
-            f"(ask {pending.id})\n".encode(), POLICY_DENIED_EXIT)
+    return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
+
+
+def refusal_of(action: Deny | Pending) -> Refusal:
+    """The record a refused result carries beside its bash-voiced stderr.
+
+    Args:
+        action (Deny | Pending): what the command plane refused with.
+    """
+    if isinstance(action, Pending):
+        return Refusal(kind="pending", reason=action.reason, ask_id=action.id)
+    return Refusal(
+        kind="failed" if action.failed else "deny",
+        reason=action.reason,
+        policy=action.policy,
+        scope=("operand" if action.scope is DenyScope.OPERAND else "command"))
+
+
+def describe_refusal(refusal: Refusal) -> str:
+    """One line saying why, for a surface that hands the agent text
+    rather than a record; the agent adapters append it after stderr.
+
+    Args:
+        refusal (Refusal): the record off a refused result.
+    """
+    if refusal.kind == "pending":
+        return f"requires approval: {refusal.reason} (ask {refusal.ask_id})"
+    if refusal.kind == "failed":
+        return f"policy {refusal.policy} failed"
+    return f"policy denied: {refusal.reason}"
+
+
+def says_why(text: str, refusal: Refusal) -> bool:
+    """Whether ``text`` already carries the line that says why the
+    command was refused.
+
+    Only an operand-scoped denial has one: its GNU diagnostic
+    ``<command>: <reason>`` is the reason, wherever a redirect landed
+    it, so a surface that describes the record after the text looks
+    for that line rather than for the scope (``2>/dev/null`` takes the
+    line away and the record is the only reason left, ``2>&1`` moves it
+    onto stdout and nothing needs repeating) and rather than for the
+    reason as a substring, since output that happens to quote the words
+    has refused nothing. A command-scoped refusal's stderr is bash's
+    bare ``Permission denied``, which never says why. An empty reason
+    says nothing, so no text can already have said it.
+
+    Args:
+        text (str): what the surface is about to hand over.
+        refusal (Refusal): the record off the result.
+    """
+    if refusal.scope != "operand" or not refusal.reason:
+        return False
+    tail = f": {refusal.reason}"
+    return any(line.endswith(tail) for line in text.split("\n"))
 
 
 async def pre_ops_gate(policies: "Policies",
@@ -200,6 +258,11 @@ class Policies:
     policy that returns something the hook may not return (VALIDITY)
     raises PolicyError: that is a programming error, not a refusal.
 
+    A hook may be ``async def`` or a plain ``def``; the seam awaits
+    whatever it returns, the way the TypeScript seam accepts a value
+    or a promise. Without that a plain ``def`` raised inside the
+    fail-closed arm and every command read ``policy X failed``.
+
     Args:
         policies (list[Policy] | None): initial policies, consulted in
             order before anything registered later through add().
@@ -222,6 +285,21 @@ class Policies:
         self._policies.append(policy)
         self._rescan()
 
+    def remove(self, policy: Policy) -> bool:
+        """Remove one registration by identity; return whether it existed.
+
+        Host-side only, like add(). Other policies keep their order.
+
+        Args:
+            policy (Policy): the exact instance passed to add().
+        """
+        for index, entry in enumerate(self._policies):
+            if entry is policy:
+                del self._policies[index]
+                self._rescan()
+                return True
+        return False
+
     def wants(self, hook: str) -> bool:
         """True when any policy overrides ``hook``.
 
@@ -232,6 +310,31 @@ class Policies:
             hook (str): hook name (pre_command, pre_ops, post_ops).
         """
         return hook in self._wanted
+
+    async def wants_for(self, hook: str, session_id: str) -> bool:
+        """True when some policy will speak at ``hook`` for this session.
+
+        The per-session refinement of ``wants``: a policy that overrides
+        the hook counts, unless it speaks per session
+        (``SessionScopedMixin``) and says this is not one of its. For
+        a seam that pays ahead for a hook rather than gating on it: the
+        secret fill drops its masks under a session-write gate, and a
+        profile's policy at that door is one profile's, not every
+        session's.
+
+        Args:
+            hook (str): hook name (pre_command, pre_ops, pre_session).
+            session_id (str): the session, empty when none is bound.
+        """
+        base = getattr(Policy, hook)
+        for policy in tuple(self._policies):
+            if getattr(type(policy), hook) is base:
+                continue
+            if not isinstance(policy, SessionScopedMixin):
+                return True
+            if await policy.wants_for(hook, session_id):
+                return True
+        return False
 
     def _rescan(self) -> None:
         wanted = set()
@@ -258,19 +361,28 @@ class Policies:
         base = getattr(Policy, hook)
         limits: list[Limit] = []
         asked: Ask | None = None
-        for policy in self._policies:
+        # Keep this gate's order stable if the host edits registrations
+        # while a hook awaits. Changes take effect at the next gate.
+        for policy in tuple(self._policies):
             if getattr(type(policy), hook) is base:
                 continue
             name = type(policy).__name__
             try:
-                action = await getattr(policy, hook)(ctx)
+                action = getattr(policy, hook)(ctx)
+                if inspect.isawaitable(action):
+                    action = await action
             except Exception as exc:
+                # The agent reads which policy broke, never what it
+                # raised: the exception text is the deployment's to
+                # debug, in the log.
                 logger.error("%s policy %s raised: %s", hook, name, exc)
-                return Deny(f"policy {name} failed: {exc}"), None
+                return Deny(f"{name} failed", policy=name, failed=True), None
             if action is None:
                 continue
             legal = VALIDITY[hook]
             if isinstance(action, Deny) and Deny.kind in legal:
+                if action.policy == "":
+                    action = replace(action, policy=name)
                 return action, None
             if isinstance(action, Ask) and Ask.kind in legal:
                 if asked is None:

@@ -43,14 +43,27 @@ function prismaBin(): string {
 // work, and a file copy is ~1ms. So the schema is pushed ONCE into a template
 // file per pool and every run file is a copy of it. A per-run push
 // would put a third of a second on the clock for each /reset.
+//
+// This is the ONE synchronous spawn on a fake's startup path, and a spawn that
+// blocks the event loop is a spawn no timer can interrupt: a CLI that stalls
+// (its own update check, an engine fetch, a wedged schema engine) hangs the
+// whole launcher with nothing written anywhere. CI saw exactly that, sixty
+// seconds of silence and then "only 0 of 14 endpoints came up". The timeout is
+// thirty times the measured cost, and the CLI's stderr is appended explicitly:
+// node folds it into the message of a failed command but not of a killed one,
+// which says only ETIMEDOUT, so the first line is kept and stderr added once.
 function pushTemplate(schema: string, target: string): void {
   try {
     execFileSync('node', [prismaBin(), 'db', 'push', '--schema', schema, '--skip-generate'], {
       env: { ...process.env, [SCHEMA_ENV]: `file:${target}` },
       stdio: 'pipe',
+      timeout: 30_000,
     })
   } catch (err: unknown) {
-    throw new KitError(`db push failed for ${schema}: ${String(err)}`)
+    const stderr =
+      err instanceof Error && 'stderr' in err ? String(err.stderr as Buffer | string).trim() : ''
+    const head = String(err).split('\n')[0] ?? String(err)
+    throw new KitError(`db push failed for ${schema}: ${head}${stderr === '' ? '' : `\n${stderr}`}`)
   }
 }
 

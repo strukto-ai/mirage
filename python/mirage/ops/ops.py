@@ -30,7 +30,7 @@ class Ops:
     """The typed op facade FUSE and programmatic callers use.
 
     Every op delegates to the workspace dispatcher, so FUSE and
-    ``ws.ops`` walk the same pipeline as a shell command: link follow,
+    ``ws.fs`` walk the same pipeline as a shell command: link follow,
     session grants, admission policies, cache read-through, namespace
     structure, and write invalidation all fire once, at that one door.
     The facade keeps only what is its own: the typed surface, op
@@ -52,9 +52,7 @@ class Ops:
                  agent_id: str = "default",
                  session_id: str = "default",
                  links: NamespaceLinks | None = None) -> None:
-        self._mounts = sorted(mounts,
-                              key=lambda m: len(m.prefix),
-                              reverse=True)
+        self.set_mounts(mounts)
         self._observer = observer
         self._agent_id = agent_id
         self._session_id = session_id
@@ -78,6 +76,16 @@ class Ops:
             list[str]: mount prefixes, longest first.
         """
         return [m.prefix for m in self._mounts]
+
+    def set_mounts(self, mounts: list[OpsMount]) -> None:
+        """Refresh mount metadata without replacing the facade or its ledger.
+
+        Args:
+            mounts (list[OpsMount]): the workspace's current mount table.
+        """
+        self._mounts = sorted(mounts,
+                              key=lambda m: len(m.prefix),
+                              reverse=True)
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
         """Mounts whose files cannot be sized without reading them.

@@ -20,6 +20,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
+from mirage.utils.errors import BadDescriptorError
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.read.constants import \
     READ_VALUE_LETTERS
@@ -354,7 +355,12 @@ async def handle_read(
     complete = False
     line = ""
     if buffer is not None:
-        line, complete = await _read_raw(buffer, raw, delim, nchars, exact)
+        try:
+            line, complete = await _read_raw(buffer, raw, delim, nchars, exact)
+        except BadDescriptorError:
+            # stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
+            return _read_refusal(
+                "bash: read: read error: 0: Bad file descriptor\n")
     if not raw:
         line = _unescape_read(line)
     ifs = visible_env(session).get("IFS", " \t\n")

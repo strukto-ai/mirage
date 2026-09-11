@@ -42,12 +42,14 @@ import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { handleCommand } from '../executor/command.ts'
+import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
 import { findSyntaxError } from '../../shell/parse/index.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { PolicyDenied, resolveLimit } from '../../policy/index.ts'
+import { PolicyDenied, resolveLimit, type Claimant, type HandOff } from '../../policy/index.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
@@ -85,6 +87,7 @@ export async function executeCommand(
     s: Session,
     i: ByteSource | null,
     cs: CallStack | null,
+    opts?: ExecuteNodeOpts,
   ) => Promise<Result>,
   dispatch: DispatchFn,
   registry: MountRegistry,
@@ -104,6 +107,8 @@ export async function executeCommand(
   reparse?: (line: string) => TSNodeLike,
   // The agent the line is attributed to, which an approval request names.
   agentId = '',
+  // The line's hand-off, which its gate claims on and runs on.
+  handed?: HandOff,
 ): Promise<Result> {
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
@@ -146,10 +151,25 @@ export async function executeCommand(
         ]
       }
       session.aliasStack.push(head)
+      // The rewritten line is read from this node, so it runs as a line
+      // of its own under the word that named it: each invocation of one
+      // alias is a place of its own on the line (`c && c` asks twice, as
+      // its spelled-out form does), and what its gates claim is the
+      // line's again at its end. Run on the line's own hand-off, both
+      // reads stood at the same offsets of the same text and the second
+      // ran on the first's nod.
+      const expansion = handed === undefined ? null : evaluatedFrom(node, handed)
       try {
-        return await recurse(ast, session, stdinIn, callStack)
+        return await recurse(
+          ast,
+          session,
+          stdinIn,
+          callStack,
+          expansion === null ? undefined : { handed: expansion },
+        )
       } finally {
         session.aliasStack.pop()
+        if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
       }
     }
   }
@@ -259,6 +279,7 @@ export async function executeCommand(
       routingDecision,
       signal,
       agentId,
+      handed,
     )
   } finally {
     for (const [k, prev] of savedEnvOverrides) {
@@ -282,7 +303,7 @@ async function runCommandBody(
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
-  executeFn: ExecuteFn,
+  executeFnIn: ExecuteFn,
   node: TSNodeLike,
   parts: TSNodeLike[],
   name: string,
@@ -295,11 +316,19 @@ async function runCommandBody(
   routingDecision?: RouteDecision,
   signalIn?: AbortSignal,
   agentId = '',
+  handed?: HandOff,
 ): Promise<Result> {
   let stdin = stdinIn
   // A background job's kill channel rides the session; fold it in so
   // builtins (sleep) and the mount layer observe the kill.
   const signal = mergeSignals(signalIn, session.abortSignal)
+  // The command's place on the line, as the pass computed it, and the
+  // door its nested evaluations re-enter through: a word that runs a
+  // line (eval, source, xargs) is bound to this node, and a substitution
+  // names its own node when it calls, so every nested line stands under
+  // the node its text came from.
+  const claimant = claimantFor(node, handed)
+  const executeFn: ExecuteFn = (cmd, opts) => executeFnIn(cmd, { node, ...opts })
 
   if (node.parent?.type !== NT.REDIRECTED_STATEMENT) {
     for (const child of node.namedChildren) {
@@ -338,7 +367,7 @@ async function runCommandBody(
       }
       const inner = getProcessSubBody(p)
       if (inner !== '') {
-        const io = await executeFn(inner, { sessionId: session.sessionId })
+        const io = await executeFn(inner, { sessionId: session.sessionId, node: p })
         procSubParts.push(await materialize(io.stdout))
         const stderr = await materialize(io.stderr)
         if (stderr.byteLength > 0) procSubStderr.push(stderr)
@@ -395,6 +424,7 @@ async function runCommandBody(
       node.startPosition?.row ?? 0,
       agentId,
       redirectPathsFor(node),
+      claimant,
     ),
     timeout,
     argv.name !== '' ? argv.name : '?',
@@ -459,6 +489,8 @@ async function runArgv(
   // because their I/O runs on the shell's own fds outside the admitted
   // command's gate window.
   redirects: readonly PathSpec[] = [],
+  // The line's hand-off, which its gate claims on and runs on.
+  claimant: Claimant | null = null,
 ): Promise<Result> {
   const name = argv.name
 
@@ -506,11 +538,16 @@ async function runArgv(
       stdin,
       redirects,
       signal,
+      claimant,
     )
     if (!(verdict instanceof Admitted)) {
       return [
         null,
-        new IOResult({ exitCode: verdict.exitCode, stderr: verdict.stderr }),
+        new IOResult({
+          exitCode: verdict.exitCode,
+          stderr: verdict.stderr,
+          refusal: verdict.refusal,
+        }),
         new ExecutionNode({
           command: [name, ...argv.args].join(' '),
           stderr: verdict.stderr,
@@ -776,6 +813,7 @@ async function routeArgv(
     runtimeBindings,
     namespace,
     routingDecision,
+    executeFn,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {

@@ -19,6 +19,7 @@ from pathlib import Path
 from camel.toolkits import FileToolkit
 
 from mirage.agents.camel._async import AsyncRunner
+from mirage.agents.io_text import io_to_str
 from mirage.workspace.workspace import Workspace
 
 
@@ -205,7 +206,7 @@ class MirageFileToolkit(FileToolkit):
         root = self._to_mirage_path(path or self._mirage_root)
         cmd = f"find {shlex.quote(root)} -name {shlex.quote(file_name)}"
         io = self._runner.run(self._ws.execute(cmd))
-        return _io_text(io)
+        return io_to_str(io)
 
     def glob_files(self, pattern: str, path: str | None = None) -> str:
         """Glob via Mirage's find -name.
@@ -241,16 +242,4 @@ class MirageFileToolkit(FileToolkit):
             parts.insert(2, f"--include={shlex.quote(file_pattern)}")
         parts.append(shlex.quote(root))
         io = self._runner.run(self._ws.execute(" ".join(parts)))
-        return _io_text(io)
-
-
-def _io_text(io) -> str:
-    stdout = io.stdout if isinstance(io.stdout, bytes) else b""
-    stderr = io.stderr if isinstance(io.stderr, bytes) else b""
-    out = stdout.decode("utf-8", errors="replace")
-    err = stderr.decode("utf-8", errors="replace")
-    if err and not out:
-        return err
-    if err:
-        return f"{out}\n{err}"
-    return out
+        return io_to_str(io)

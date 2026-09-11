@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../../../types.ts'
 import { enoent } from '../../../../../utils/errors.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
@@ -39,7 +39,10 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
         return Promise.resolve([new FileStat({ name, type: FileType.DIRECTORY }), new IOResult()])
       }
       if (files.has(k)) {
-        return Promise.resolve([new FileStat({ name, type: FileType.TEXT }), new IOResult()])
+        return Promise.resolve([
+          new FileStat({ name, type: FileType.FILE, content: ContentType.TEXT }),
+          new IOResult(),
+        ])
       }
       return Promise.reject(enoent(k))
     }

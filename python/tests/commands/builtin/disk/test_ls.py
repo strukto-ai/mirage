@@ -25,8 +25,8 @@ def workspace(tmp_path):
 
 @pytest.mark.asyncio
 async def test_ls_lists_files(workspace):
-    await workspace.ops.write("/a.txt", b"a")
-    await workspace.ops.write("/b.txt", b"b")
+    await workspace.fs.write("/a.txt", b"a")
+    await workspace.fs.write("/b.txt", b"b")
     io = await workspace.execute("ls /")
     assert io.exit_code == 0
     names = set(io.stdout.decode().strip().split("\n"))
@@ -36,8 +36,8 @@ async def test_ls_lists_files(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_a_shows_dotfiles(workspace):
-    await workspace.ops.write("/.hidden", b"h")
-    await workspace.ops.write("/visible.txt", b"v")
+    await workspace.fs.write("/.hidden", b"h")
+    await workspace.fs.write("/visible.txt", b"v")
     io = await workspace.execute("ls -a /")
     assert io.exit_code == 0
     names = set(io.stdout.decode().strip().split("\n"))
@@ -47,7 +47,7 @@ async def test_ls_a_shows_dotfiles(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_l_long_format_includes_size(workspace):
-    await workspace.ops.write("/f.txt", b"hello")
+    await workspace.fs.write("/f.txt", b"hello")
     io = await workspace.execute("ls -l /")
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -57,8 +57,8 @@ async def test_ls_l_long_format_includes_size(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_F_classify_marks_dirs(workspace):
-    await workspace.ops.mkdir("/sub")
-    await workspace.ops.write("/sub/a.txt", b"a")
+    await workspace.fs.mkdir("/sub")
+    await workspace.fs.write("/sub/a.txt", b"a")
     io = await workspace.execute("ls -F /")
     assert io.exit_code == 0
     assert "sub/" in io.stdout.decode()
@@ -66,8 +66,8 @@ async def test_ls_F_classify_marks_dirs(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_R_recursive(workspace):
-    await workspace.ops.mkdir("/sub")
-    await workspace.ops.write("/sub/a.txt", b"a")
+    await workspace.fs.mkdir("/sub")
+    await workspace.fs.write("/sub/a.txt", b"a")
     io = await workspace.execute("ls -R /")
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -77,7 +77,7 @@ async def test_ls_R_recursive(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_d_lists_dir_itself(workspace):
-    await workspace.ops.mkdir("/sub")
+    await workspace.fs.mkdir("/sub")
     io = await workspace.execute("ls -d /sub")
     assert io.exit_code == 0
     assert "sub" in io.stdout.decode()

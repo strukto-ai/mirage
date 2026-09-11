@@ -14,7 +14,7 @@
 
 import type { Action, OpsResultContext, Policy } from '@struktoai/mirage-core/policy/index'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
-import { FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
+import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { MirageFS, type MountAttrs } from './fs.ts'
@@ -237,7 +237,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const ws = mkSizeNullWs()
     await ws.fs.writeFile('/data/api.json', new TextEncoder().encode('content'))
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
-      new FileStat({ name: 'api.json', type: FileType.JSON }),
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
     )
     const readSpy = vi.spyOn(ws.fs, 'readFile')
     const mfs = new MirageFS(ws.fs)
@@ -253,7 +253,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const bytes = new TextEncoder().encode('payload from API')
     await ws.fs.writeFile('/data/api.json', bytes)
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
-      new FileStat({ name: 'api.json', type: FileType.JSON }),
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
     )
     const mfs = new MirageFS(ws.fs)
     await callOp(mfs, 'getattr', '/data/api.json')
@@ -270,7 +270,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const bytes = new TextEncoder().encode('short')
     await ws.fs.writeFile('/data/api.json', bytes)
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
-      new FileStat({ name: 'api.json', type: FileType.JSON }),
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
     )
     const mfs = new MirageFS(ws.fs)
     const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
@@ -292,7 +292,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const bytes = new TextEncoder().encode('cached now')
     await ws.fs.writeFile('/data/api.json', bytes)
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
-      new FileStat({ name: 'api.json', type: FileType.JSON }),
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
     )
     const mfs = new MirageFS(ws.fs)
     await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
@@ -305,7 +305,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const bytes = new TextEncoder().encode('hydrated bytes')
     await ws.fs.writeFile('/data/api.json', bytes)
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
-      new FileStat({ name: 'api.json', type: FileType.JSON }),
+      new FileStat({ name: 'api.json', type: FileType.FILE, content: ContentType.JSON }),
     )
     const mfs = new MirageFS(ws.fs)
     const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)

@@ -18,6 +18,7 @@ import type { Resource } from '../../resource/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMResource, type RAMResourceState } from '../../resource/ram/ram.ts'
+import { type ResourceStateBase, resourceRefOf } from '../../resource/base.ts'
 import { z } from 'zod'
 
 import { setCwd } from '../session/shell_dirs.ts'
@@ -74,7 +75,9 @@ const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMo
 
 export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const skip = new Set(['/dev/', normMountPrefix(HISTORY_PREFIX)])
-  const mounts = [...ws.registry.allMounts()].filter((m) => !skip.has(m.prefix))
+  const mounted = [...ws.registry.allMounts()]
+  for (const mount of mounted) await mount.ensureReady()
+  const mounts = mounted.filter((m) => !skip.has(m.prefix))
   const mountSnapshots: MountSnapshot[] = []
   for (let i = 0; i < mounts.length; i++) {
     const m = mounts[i]
@@ -83,13 +86,14 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     // the contract carries it, so a resource missing one fails to compile
     // rather than throwing here at save time. What remains narrows the
     // returned state to the snapshot format's union.
-    const state = (await Promise.resolve(m.resource.getState())) as ResourceState
+    const state = (await m.use(() => Promise.resolve(m.resource.getState()))) as ResourceState
     mountSnapshots.push({
       index: i,
       prefix: m.prefix,
       mode: m.mode,
       consistency: ConsistencyPolicy.LAZY,
       resource_class: m.resource.kind,
+      resource_ref: resourceRefOf(m.resource),
       resource_state: state,
     })
   }
@@ -153,6 +157,10 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const historyEvents = (await ws.observer.events()).filter(
     (e) => e.type === EVENT_COMMAND || e.type === EVENT_CLEAR || e.type === EVENT_DELETE,
   )
+  const current = ws.registry.allMounts()
+  if (current.length !== mounted.length || mounted.some((m, i) => m !== current[i] || m.retiring)) {
+    throw new Error('mounts changed during snapshot')
+  }
   const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(ws.records, ws.registry)
   const liveOnly = liveOnlyMountPrefixes(ws.registry)
   const nodes: Record<string, NodeMetaSnapshot> = {}
@@ -215,6 +223,10 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
   if (model instanceof z.ZodObject) {
     return redactConfigWithSchema(model, install.config)
   }
+  // A script's config is opaque, so it is captured verbatim rather than
+  // guessed at; the config door refuses a secrets pointer in one for
+  // exactly this reason (`validateConfigKeys`), since resolved, the
+  // value would sit in this capture.
   if (install.config !== null && typeof install.config === 'object') {
     return install.config as Record<string, unknown>
   }
@@ -236,18 +248,26 @@ export function buildMountArgs(
   for (const [prefix, resource] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = resource
   }
+  // A mount with no override by now is one nobody can build: it asked to
+  // be handed back live or was saved with a redacted secret, or the
+  // registry `withRebuiltResources` consulted had nothing for its ref or
+  // type. Only a mount this builder restores itself is exempt. Refusing
+  // is what Python's `requires_resource_override` does for a class it
+  // cannot import; an empty RAMResource in its place would lose the
+  // backend without a word.
   const missing = state.mounts
     .filter(
       (m) =>
         normalized[normMountPrefix(m.prefix)] === undefined &&
-        resourceStateRequiresOverride(m.resource_state),
+        (resourceStateRequiresOverride(m.resource_state) || !restoresAsFreshRAM(m)),
     )
     .map((m) => m.prefix)
   if (missing.length > 0) {
     throw new Error(
       `Workspace.load: resources= must include overrides for: ${missing.join(', ')}. ` +
-        `These mounts were saved with redacted creds or transient connection state ` +
-        `and need fresh resources.`,
+        `A listed mount was saved with redacted credentials, asked to be handed back live ` +
+        `(needs_override), or names a resource this registry cannot build; register its ` +
+        `factory (register) or pass a live instance.`,
     )
   }
   const mountArgs: Record<string, [Resource, MountMode]> = {}
@@ -290,6 +310,90 @@ export function buildMountArgs(
     defaultAgentId: state.default_agent_id,
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
   }
+}
+
+/** Builds the resource a saved mount names, or null when it cannot. */
+export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<Resource | null>
+
+/**
+ * The `resource_ref` a saved mount was built from, or null: for one
+ * constructed in code, and for a v3 snapshot written before the key
+ * existed, which carries none (the format version did not move).
+ */
+function savedRef(entry: MountSnapshot): string | null {
+  return (entry.resource_ref as string | null | undefined) ?? null
+}
+
+/**
+ * Whether `buildMountArgs` restores a saved mount itself, into a fresh
+ * RAMResource, so no registry is asked about it: `disk` (its content
+ * rides the state, and reopening the original root is exactly what a
+ * restore must not do), and `ram` declared by its builtin name or
+ * constructed in code. A `ram` mount whose ref points elsewhere is an
+ * alias registered over RAMResource, and rebuilds through that alias so
+ * the subclass survives; Python's `_construct_resource` calls `cls()` on
+ * the class its ladder found for the same reason.
+ */
+export function restoresAsFreshRAM(entry: MountSnapshot): boolean {
+  const type = entry.resource_state.type
+  if (type === 'disk') return true
+  const ref = savedRef(entry)
+  return type === 'ram' && (ref === null || ref === type)
+}
+
+/**
+ * What a saved mount asks a registry to build: the name and config, or
+ * null when the registry has nothing to say. The `resource_ref` the
+ * registry built the mount from when one was recorded (a registered name,
+ * or a code reference, which is how a mount declared as
+ * `./wiki.mjs:WikiResource` comes back), else the resource's `type`, the
+ * one locator a resource constructed in code leaves. The ref comes first
+ * because `type` is the class's `kind` and a subclass inherits it: an
+ * alias registered over a builtin reports the builtin's type and rebuilt
+ * as the builtin while the type was consulted first. A recorded ref this
+ * registry cannot resolve is not a reason to fall back to that guess: the
+ * answer is null, and `buildMountArgs` then asks for the mount live.
+ */
+export function savedResourceBuild(
+  entry: MountSnapshot,
+  known: (name: string) => boolean,
+): { name: string; config: Record<string, unknown> } | null {
+  if (restoresAsFreshRAM(entry)) return null
+  const type = entry.resource_state.type
+  const ref = savedRef(entry)
+  const name =
+    ref !== null ? (known(ref) || ref.includes(':') ? ref : null) : known(type) ? type : null
+  if (name === null) return null
+  const config = (entry.resource_state as ResourceStateBase).config
+  return {
+    name,
+    config:
+      typeof config === 'object' && config !== null && !Array.isArray(config)
+        ? (config as Record<string, unknown>)
+        : {},
+  }
+}
+
+/**
+ * The overrides `buildMountArgs` restores with: the caller's, plus every
+ * mount the builder can rebuild from its saved state. A mount that asks
+ * to be handed back live (`resourceStateRequiresOverride`) is never
+ * built here, so the refusal `buildMountArgs` raises for it stands.
+ */
+export async function withRebuiltResources(
+  state: WorkspaceStateDict,
+  overrides: Record<string, Resource>,
+  build: SavedResourceBuilder,
+): Promise<Record<string, Resource>> {
+  const merged: Record<string, Resource> = { ...overrides }
+  const held = new Set(Object.keys(overrides).map(normMountPrefix))
+  for (const m of state.mounts) {
+    if (held.has(normMountPrefix(m.prefix))) continue
+    if (resourceStateRequiresOverride(m.resource_state)) continue
+    const built = await build(m)
+    if (built !== null) merged[m.prefix] = built
+  }
+  return merged
 }
 
 export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): Promise<void> {

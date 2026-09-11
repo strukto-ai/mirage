@@ -101,7 +101,7 @@ with Workspace({
     else:
         print(">>> (non-interactive: unmounting now)")
 
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, "
           f"{total} bytes transferred")

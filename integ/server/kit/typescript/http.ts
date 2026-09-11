@@ -30,6 +30,20 @@ import type { JsonValue, Reply } from './types.ts'
 export const HEALTH_PATH = '/_kit/health'
 export const RESET_PATH = '/reset'
 
+// How long an idle keep-alive socket stays open, and the one number in this
+// file that is about the CLIENTS rather than the vendor being imitated. Node's
+// default is 5s (the socket actually closes a second after that). The python
+// host rides every backend on one aiohttp pool, which reuses a socket idle for
+// up to 15s and never reads the timeout a server advertises, so a run of
+// shell-only cases left the dropbox pool idle and the next request was written
+// onto a socket node was closing at that very instant. aiohttp re-sends such a
+// request only when the method is idempotent, and dropbox posts every read, so
+// `grep -rl` died in CI with `Server disconnected`. Holding the socket well past
+// the pool's reuse window is what a vendor's edge does too; undici, the
+// TypeScript host's client, reads the advertised value and stays under it
+// either way. Pinned by the kit selftest.
+export const KEEP_ALIVE_TIMEOUT_MS = 60_000
+
 export function makeRuntime<C extends MinimalClient>(
   fake: Fake<C>,
   fixtureRoot: string = DEFAULT_FIXTURE_ROOT,
@@ -276,7 +290,7 @@ async function answer<C extends MinimalClient>(
 export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server {
   const { service, maxBodyBytes } = rt.fake.config
   const router = new Router<C>(rt.fake.routes())
-  return createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const host = req.headers.host ?? '127.0.0.1'
     const url = new URL(req.url ?? '/', `http://${host}`)
     const method = (req.method ?? 'GET').toUpperCase()
@@ -310,4 +324,6 @@ export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server
         })
     })
   })
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS
+  return server
 }

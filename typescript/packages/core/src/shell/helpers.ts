@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expandTilde } from '../utils/path.ts'
+import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
 import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
@@ -30,6 +31,25 @@ export function getCommandName(node: TSNodeLike): string {
 
 const SKIP_PARTS: ReadonlySet<string> = new Set([NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT])
 
+/**
+ * The descriptor a bare `0` before a redirect operator names.
+ *
+ * tree-sitter-bash reads `0>&-` and `0<f` as an operand `0` followed by an
+ * undecorated redirect, where it gives every other digit string its
+ * `file_descriptor` node. bash's rule is that a digit string touching the
+ * operator is the descriptor, so the number is one when it ends exactly
+ * where a sibling `file_redirect` begins; `cat a 0 >&-` keeps its operand.
+ */
+export function claimedDescriptor(command: TSNodeLike, last: TSNodeLike): number | null {
+  if (last.type !== NT.NUMBER || command.parent == null) return null
+  for (const sibling of command.parent.namedChildren) {
+    if (sibling.type === NT.FILE_REDIRECT && sibling.startIndex === last.endIndex) {
+      return parseInt(getText(last), 10)
+    }
+  }
+  return null
+}
+
 export function getParts(node: TSNodeLike): TSNodeLike[] {
   // A bare `$` word is an anonymous token rather than a named child, but
   // bash passes it through as a literal argument (`echo $` prints `$`), so
@@ -42,6 +62,7 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
     const c = children[position]
     if (c === undefined) continue
     if (c.isNamed === true && !SKIP_PARTS.has(c.type)) {
+      if (position === children.length - 1 && claimedDescriptor(node, c) !== null) continue
       parts.push(c)
     } else if (c.type === '$') {
       const nxt = children[position + 1]
@@ -205,8 +226,16 @@ export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike
  * separated by `;` tokens, and any of them may be empty (null):
  * `for ((;;))`.
  */
-export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLike[]] {
-  const exprs: (TSNodeLike | null)[] = [null, null, null]
+/**
+ * ([init, cond, update], body) from a C-style for. The expression slots
+ * are positional between the (( )) delimiters, separated by `;` tokens,
+ * and any of them may be empty: `for ((;;))`. A slot holds every
+ * comma-separated expression the parser found in it, in order, since
+ * bash evaluates `for ((a=1, i=0; ...))` as one comma expression;
+ * keeping only the last child dropped `a=1`.
+ */
+export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
+  const exprs: TSNodeLike[][] = [[], [], []]
   let slot = 0
   let inside = false
   let body: TSNodeLike[] = []
@@ -221,7 +250,7 @@ export function getCforParts(node: TSNodeLike): [(TSNodeLike | null)[], TSNodeLi
     }
     if (inside) {
       if (child.type === NT.SEMI) slot += 1
-      else if (child.isNamed === true && slot < 3) exprs[slot] = child
+      else if (child.isNamed === true && slot < 3) exprs[slot]?.push(child)
       continue
     }
     if (child.type === NT.DO_GROUP) body = [...child.namedChildren]
@@ -233,7 +262,7 @@ export function getSubshellBody(node: TSNodeLike): TSNodeLike[] {
   return [...node.namedChildren]
 }
 
-const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
+export const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
   NT.HEREDOC_REDIRECT,
   NT.HERESTRING_REDIRECT,
@@ -257,36 +286,51 @@ const TARGET_TYPES: ReadonlySet<string> = new Set([
   NT.PROCESS_SUBSTITUTION,
 ])
 
-function parseFileRedirect(child: TSNodeLike): Redirect {
-  let fd = 1
+const INPUT_OPERATORS: ReadonlySet<string> = new Set([
+  NT.REDIRECT_IN,
+  NT.REDIRECT_DUP_IN,
+  NT.REDIRECT_CLOSE_IN,
+])
+const CLOSE_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_CLOSE_OUT, NT.REDIRECT_CLOSE_IN])
+const DUP_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_STDERR, NT.REDIRECT_DUP_IN])
+const BOTH_OPERATORS: ReadonlySet<string> = new Set([NT.REDIRECT_BOTH, NT.REDIRECT_BOTH_APPEND])
+const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
+  ...INPUT_OPERATORS,
+  ...CLOSE_OPERATORS,
+  ...DUP_OPERATORS,
+  ...BOTH_OPERATORS,
+  NT.REDIRECT_OUT,
+  NT.REDIRECT_CLOBBER,
+  NT.REDIRECT_APPEND,
+])
+
+/**
+ * Parse a single file_redirect node into a Redirect.
+ *
+ * The operator token decides the shape and the explicit descriptor, when
+ * there is one, is kept as typed: `3<f` claims fd 3 and `<&3` duplicates
+ * from it, and both are refused downstream rather than read as stdin
+ * (`shell/descriptors.ts`). Three forms carry a numeric target: a dup
+ * (`2>&1`, `>&2`, `<&0`) names the descriptor it copies, a close (`>&-`,
+ * `<&-`) carries FD_CLOSE, and `&>` claims FD_BOTH. `2>&1` alone keeps the
+ * STDERR_TO_STDOUT kind the fd router keys on; every other output redirect
+ * is STDOUT or STDERR by the descriptor it claims.
+ */
+function parseFileRedirect(child: TSNodeLike, claimed: number | null = null): Redirect {
+  // `claimed` is the descriptor the grammar left as the command's last
+  // operand (`claimedDescriptor`), which a `file_descriptor` child
+  // overrides.
+  let fd: number | null = claimed
   let target: string | number = ''
   let targetNode: TSNodeLike | null = null
-  let kind: RedirectKind = RedirectKind.STDOUT
-  let append = false
-  let clobber = false
+  let op: string | null = null
   let dupFd: number | null = null
 
   for (const c of child.children) {
     if (c.type === NT.FILE_DESCRIPTOR) {
       fd = parseInt(getText(c), 10)
-    } else if (c.type === NT.REDIRECT_OUT) {
-      // default STDOUT
-    } else if (c.type === NT.REDIRECT_CLOBBER) {
-      clobber = true
-    } else if (c.type === NT.REDIRECT_APPEND) {
-      append = true
-    } else if (c.type === NT.REDIRECT_IN) {
-      kind = RedirectKind.STDIN
-      fd = 0
-    } else if (c.type === NT.REDIRECT_STDERR) {
-      kind = RedirectKind.STDERR_TO_STDOUT
-    } else if (c.type === NT.REDIRECT_BOTH) {
-      kind = RedirectKind.STDOUT
-      fd = -1
-    } else if (c.type === NT.REDIRECT_BOTH_APPEND) {
-      kind = RedirectKind.STDOUT
-      fd = -1
-      append = true
+    } else if (REDIRECT_OPERATORS.has(c.type)) {
+      op = c.type
     } else if (c.type === NT.NUMBER) {
       dupFd = parseInt(getText(c), 10)
     }
@@ -300,35 +344,46 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     }
   }
 
-  if (dupFd !== null && kind === RedirectKind.STDERR_TO_STDOUT) {
-    if (fd === 2 && dupFd === 1) {
-      kind = RedirectKind.STDERR_TO_STDOUT
-      target = dupFd
-    } else if (fd === 1 && dupFd === 2) {
-      kind = RedirectKind.STDOUT
-      fd = 1
-      target = 2
-    } else {
-      target = dupFd
-    }
+  // `>&word` with a word rather than a number is bash's other spelling
+  // of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
+  // too, pinned on bash 5.2). On any other explicit descriptor bash
+  // refuses it as `word: ambiguous redirect`, before the command runs and
+  // before any file opens, so the parse keeps the word for the message
+  // rather than turning `3>&foo` into a both-streams file.
+  const wordDup = op === NT.REDIRECT_STDERR && dupFd === null && targetNode !== null
+  if (wordDup && fd !== null && fd !== FD_STDOUT) {
+    return new Redirect({ fd, target, targetNode, kind: RedirectKind.AMBIGUOUS })
   }
-
-  if (fd === -1) {
+  if ((op !== null && BOTH_OPERATORS.has(op)) || wordDup) {
     return new Redirect({
-      fd: -1,
+      fd: FD_BOTH,
       target,
       targetNode,
       kind: RedirectKind.STDOUT,
-      append,
-      clobber,
+      append: op === NT.REDIRECT_BOTH_APPEND,
     })
   }
 
-  if (fd === 2 && kind !== RedirectKind.STDERR_TO_STDOUT) {
-    kind = RedirectKind.STDERR
-  }
+  const input = op !== null && INPUT_OPERATORS.has(op)
+  fd ??= input ? FD_STDIN : FD_STDOUT
+  if (op !== null && CLOSE_OPERATORS.has(op)) target = FD_CLOSE
+  else if (op !== null && DUP_OPERATORS.has(op) && dupFd !== null) target = dupFd
 
-  return new Redirect({ fd, target, targetNode, kind, append, clobber })
+  let kind: RedirectKind
+  if (input) kind = RedirectKind.STDIN
+  else if (fd === FD_STDERR && target === FD_STDOUT && op === NT.REDIRECT_STDERR) {
+    kind = RedirectKind.STDERR_TO_STDOUT
+  } else if (fd === FD_STDERR) kind = RedirectKind.STDERR
+  else kind = RedirectKind.STDOUT
+
+  return new Redirect({
+    fd,
+    target,
+    targetNode,
+    kind,
+    append: op === NT.REDIRECT_APPEND,
+    clobber: op === NT.REDIRECT_CLOBBER,
+  })
 }
 
 function parseHerestringRedirect(child: TSNodeLike): Redirect {
@@ -357,15 +412,19 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
   const command = first !== undefined && !REDIRECT_NODE_TYPES.has(first.type) ? first : null
   const redirects: Redirect[] = []
 
+  let claimed: number | null = null
   if (command !== null && command.type === NT.COMMAND) {
     for (const child of command.namedChildren) {
       if (child.type === NT.HERESTRING_REDIRECT) {
         redirects.push(parseHerestringRedirect(child))
       }
     }
+    const last = command.children[command.children.length - 1]
+    if (last !== undefined) claimed = claimedDescriptor(command, last)
   }
 
   let recoverHerestring = false
+  const commandEnd = command === null ? -1 : command.endIndex
   for (let i = command === null ? 0 : 1; i < nc.length; i++) {
     const child = nc[i]
     if (child === undefined) continue
@@ -416,7 +475,12 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
       continue
     }
 
-    redirects.push(recoverHerestring ? parseHerestringRedirect(child) : parseFileRedirect(child))
+    if (recoverHerestring) {
+      redirects.push(parseHerestringRedirect(child))
+    } else {
+      // Only the redirect touching the operand can own it.
+      redirects.push(parseFileRedirect(child, child.startIndex === commandEnd ? claimed : null))
+    }
     recoverHerestring = false
   }
 

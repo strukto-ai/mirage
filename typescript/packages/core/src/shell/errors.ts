@@ -10,11 +10,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+import type { ArithWrite } from './types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // A bash arithmetic syntax or evaluation error. Mirrors Python's
 // mirage.shell.errors.ArithError.
-export class ArithError extends Error {}
+/**
+ * A bash arithmetic syntax or evaluation error. `writes` carries the
+ * assignments the expression made before it failed: bash binds each at
+ * once, so `x=5, 1/0` leaves `x` at 5 and `RANDOM=42, RANDOM + 1/0`
+ * leaves the generator seeded and drawn from. The evaluator fills it as
+ * it throws; a caller lands them the way it lands a successful result's,
+ * then reports the error.
+ */
+export class ArithError extends Error {
+  writes: ArithWrite[] = []
+}
 
 // An arithmetic assignment to a readonly shell variable. Mirrors
 // Python's mirage.shell.errors.ReadonlyError.

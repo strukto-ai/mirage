@@ -19,7 +19,7 @@ from mirage.core.hierarchy.scope import (DetectFn, Scope, ScopeMatch, Segment,
                                          Slot, make_detect_scope)
 from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import ContentType
-from mirage.utils.filetype import image_type_for_extension
+from mirage.utils.filetype import content_type_for_extension
 
 CARD = Codec(suffix=".md")
 
@@ -58,7 +58,7 @@ def scopes_for(config: LanceDBConfig) -> tuple[Scope, ...]:
             Scope(kind="row_blob",
                   segments=full + (Slot("row_id", blob), ),
                   leaf=True,
-                  filetype=image_type_for_extension(config.blob_ext)))
+                  filetype=content_type_for_extension(config.blob_ext)))
     return tuple(scopes)
 
 

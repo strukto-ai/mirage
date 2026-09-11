@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from mirage.core.ssh.config import SSHConfig
+from mirage.resource.secrets import reveal_secret
 
 
 def _key(path: str) -> str:
@@ -38,8 +39,12 @@ def _connect_kwargs(config: SSHConfig) -> dict[str, Any]:
         kwargs["port"] = config.port
     if config.username:
         kwargs["username"] = config.username
+    if config.password is not None:
+        kwargs["password"] = reveal_secret(config.password)
     if config.identity_file:
         kwargs["client_keys"] = [str(Path(config.identity_file).expanduser())]
+        if config.passphrase is not None:
+            kwargs["passphrase"] = reveal_secret(config.passphrase)
     if config.known_hosts is not None:
         kwargs["known_hosts"] = config.known_hosts
     else:

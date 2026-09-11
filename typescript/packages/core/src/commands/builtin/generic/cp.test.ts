@@ -16,6 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import {
+  ContentType,
   FileStat,
   FileType,
   PathSpec,
@@ -70,7 +71,8 @@ function makeBackend(
     return Promise.resolve(
       new FileStat({
         name: k.split('/').pop() ?? '',
-        type: FileType.TEXT,
+        type: FileType.FILE,
+        content: ContentType.TEXT,
         modified: mtimes?.get(k) ?? null,
       }),
     )

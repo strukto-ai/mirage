@@ -124,6 +124,7 @@ export function buildSecretsEnv(kind: string): {
   const env: EnvEntries = {
     APP_NAME: 'integ',
     EDITOR: { value: 'vi', readonly: true },
+    FROZEN_TOKEN: { from: 'counter', ref: 'frozen', key: 'token', readonly: true },
     TOKEN: { from: 'counter', ref: 'tok', key: 'token' },
     DB_USER: { from: 'counter', ref: 'db', key: 'user' },
     DB_PASS: { from: 'counter', ref: 'db', key: 'pass' },

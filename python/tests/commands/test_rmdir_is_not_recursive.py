@@ -60,7 +60,7 @@ def test_rmdir_is_never_the_recursive_removal():
     Wiring both slots to the same callable silently turns ``rmdir`` into a
     subtree delete for every caller that does not pre-check emptiness
     itself, and the command builders are the only callers that do -- FUSE,
-    ``ws.ops`` and the sandbox runtimes all reach the op directly. That is
+    ``ws.fs`` and the sandbox runtimes all reach the op directly. That is
     the shape the bug took in five backends at once: two shared the object
     store kit's prefix delete, three aliased the op outright.
 

@@ -35,6 +35,8 @@ export interface OpRecordInit {
    * replay to pin reads to the exact recorded version.
    */
   revision?: string | null
+  /** In-process ownership for snapshot capture; not a persisted backend revision. */
+  mountId?: string | null
 }
 
 export class OpRecord {
@@ -46,6 +48,7 @@ export class OpRecord {
   durationMs: number
   fingerprint: string | null
   revision: string | null
+  readonly mountId: string | null
 
   constructor(init: OpRecordInit) {
     this.op = init.op
@@ -56,6 +59,7 @@ export class OpRecord {
     this.durationMs = init.durationMs
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
+    this.mountId = init.mountId ?? null
   }
 
   get isCache(): boolean {

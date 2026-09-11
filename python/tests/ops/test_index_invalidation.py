@@ -76,14 +76,14 @@ async def test_readdir_drops_dir_removed_after_listing_cached(disk_ws):
 
 @pytest.mark.asyncio
 async def test_ops_facade_readdir_reflects_mkdir(disk_ws):
-    assert _names(await disk_ws.ops.readdir("/d/")) == ["seed"]
-    await disk_ws.ops.mkdir("/d/sub")
-    assert _names(await disk_ws.ops.readdir("/d/")) == ["seed", "sub"]
+    assert _names(await disk_ws.fs.readdir("/d/")) == ["seed"]
+    await disk_ws.fs.mkdir("/d/sub")
+    assert _names(await disk_ws.fs.readdir("/d/")) == ["seed", "sub"]
 
 
 @pytest.mark.asyncio
 async def test_ops_facade_readdir_reflects_write_then_unlink(disk_ws):
-    await disk_ws.ops.write("/d/a.txt", b"a")
-    assert _names(await disk_ws.ops.readdir("/d/")) == ["a.txt", "seed"]
-    await disk_ws.ops.unlink("/d/a.txt")
-    assert _names(await disk_ws.ops.readdir("/d/")) == ["seed"]
+    await disk_ws.fs.write("/d/a.txt", b"a")
+    assert _names(await disk_ws.fs.readdir("/d/")) == ["a.txt", "seed"]
+    await disk_ws.fs.unlink("/d/a.txt")
+    assert _names(await disk_ws.fs.readdir("/d/")) == ["seed"]

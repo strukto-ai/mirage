@@ -81,15 +81,26 @@ async function inProcess(): Promise<void> {
   // The same fake twice, which is the reason the config is a map and not a
   // list: CI serves github seeded `cli` for the gh battery and github seeded
   // `empty` for the watch battery, and the two run at once.
-  const started = await launch({
-    github: { fixture: 'cli' },
-    'github-empty': { fake: 'github', fixture: 'empty', token: 'GITHUB_EMPTY_URL' },
-    mail: { imapPort: 0, smtpPort: 0 },
-  })
+  const live: string[] = []
+  const started = await launch(
+    {
+      github: { fixture: 'cli' },
+      'github-empty': { fake: 'github', fixture: 'empty', token: 'GITHUB_EMPTY_URL' },
+      mail: { imapPort: 0, smtpPort: 0 },
+    },
+    (a) => live.push(a.token),
+  )
   const lines = new Map<string, string>()
   for (const inst of started) for (const a of inst.announces) lines.set(a.token, a.url)
   try {
     check('one call started three instances', started.length === 3, String(started.length))
+    // Announced as each came up, in config order, so a stalled startup's log
+    // names the fake it is waiting on rather than sitting empty.
+    eq(
+      'every announce was delivered as its fake started',
+      live,
+      started.flatMap((i) => i.announces.map((a) => a.token)),
+    )
     check(
       'every announce line is well formed',
       [...lines].every(

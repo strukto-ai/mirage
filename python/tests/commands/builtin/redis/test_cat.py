@@ -36,7 +36,7 @@ async def workspace():
 
 @pytest.mark.asyncio
 async def test_cat_basic(workspace):
-    await workspace.ops.write("/f.txt", b"hello\nworld\n")
+    await workspace.fs.write("/f.txt", b"hello\nworld\n")
     io = await workspace.execute("cat /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello\nworld\n"
@@ -44,7 +44,7 @@ async def test_cat_basic(workspace):
 
 @pytest.mark.asyncio
 async def test_cat_n_single_digit_alignment(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\n")
+    await workspace.fs.write("/f.txt", b"a\nb\n")
     io = await workspace.execute("cat -n /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"     1\ta\n     2\tb\n"
@@ -53,7 +53,7 @@ async def test_cat_n_single_digit_alignment(workspace):
 @pytest.mark.asyncio
 async def test_cat_n_multidigit_alignment(workspace):
     body = b"".join(f"line{i}\n".encode() for i in range(1, 13))
-    await workspace.ops.write("/big.txt", body)
+    await workspace.fs.write("/big.txt", body)
     io = await workspace.execute("cat -n /big.txt")
     assert io.exit_code == 0
     lines = io.stdout.split(b"\n")
@@ -65,7 +65,7 @@ async def test_cat_n_multidigit_alignment(workspace):
 
 @pytest.mark.asyncio
 async def test_cat_preserves_no_trailing_newline(workspace):
-    await workspace.ops.write("/partial.txt", b"hello")
+    await workspace.fs.write("/partial.txt", b"hello")
     io = await workspace.execute("cat /partial.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello"
@@ -73,7 +73,7 @@ async def test_cat_preserves_no_trailing_newline(workspace):
 
 @pytest.mark.asyncio
 async def test_cat_n_preserves_no_trailing_newline(workspace):
-    await workspace.ops.write("/partial.txt", b"hello")
+    await workspace.fs.write("/partial.txt", b"hello")
     io = await workspace.execute("cat -n /partial.txt")
     assert io.exit_code == 0
     assert io.stdout == b"     1\thello"
@@ -81,8 +81,8 @@ async def test_cat_n_preserves_no_trailing_newline(workspace):
 
 @pytest.mark.asyncio
 async def test_cat_multi_file_concatenation(workspace):
-    await workspace.ops.write("/a.txt", b"aaa\n")
-    await workspace.ops.write("/b.txt", b"bbb\n")
+    await workspace.fs.write("/a.txt", b"aaa\n")
+    await workspace.fs.write("/b.txt", b"bbb\n")
     io = await workspace.execute("cat /a.txt /b.txt")
     assert io.exit_code == 0
     assert io.stdout == b"aaa\nbbb\n"

@@ -27,7 +27,7 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -95,7 +95,12 @@ describe('gslides core find', () => {
       }
       if (spec.virtual === '/owned/Deck_A__p1.gslide.json') {
         return Promise.resolve(
-          new FileStat({ name: 'Deck_A__p1.gslide.json', size: 1, type: FileType.TEXT }),
+          new FileStat({
+            name: 'Deck_A__p1.gslide.json',
+            size: 1,
+            type: FileType.FILE,
+            content: ContentType.TEXT,
+          }),
         )
       }
       return Promise.reject(enoent(spec.virtual))

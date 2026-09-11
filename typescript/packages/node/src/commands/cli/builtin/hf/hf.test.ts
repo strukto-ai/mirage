@@ -396,7 +396,7 @@ describe('where an upload lands', () => {
         return Promise.reject(Object.assign(new Error('nope'), { code: 'ENOENT' }))
       }
       if (op === 'stat') {
-        return Promise.resolve([{ type: node.dir ? FileType.DIRECTORY : FileType.TEXT }, null])
+        return Promise.resolve([{ type: node.dir ? FileType.DIRECTORY : FileType.FILE }, null])
       }
       if (op === 'readdir') return Promise.resolve([node.kids, null])
       return Promise.resolve([new TextEncoder().encode(node.data), null])

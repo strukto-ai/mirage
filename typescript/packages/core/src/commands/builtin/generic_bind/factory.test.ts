@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType } from '../../../types.ts'
+import { ContentType, FileStat, FileType } from '../../../types.ts'
 import type { CommandIO } from './adapter.ts'
 import { makeGenericCommands } from './factory.ts'
 
@@ -23,7 +23,8 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
     readStream: async function* () {},
     readBytes: () => Promise.resolve(new Uint8Array()),
     readdir: () => Promise.resolve([]),
-    stat: () => Promise.resolve(new FileStat({ name: 'x', type: FileType.TEXT })),
+    stat: () =>
+      Promise.resolve(new FileStat({ name: 'x', type: FileType.FILE, content: ContentType.TEXT })),
     isMounted: () => true,
     local: true,
     ...overrides,

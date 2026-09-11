@@ -93,12 +93,12 @@ def test_prepare_backend_runs_every_fskit_guard(monkeypatch, caplog):
         prepare_backend("fskit", mountpoint="/tmp/x")
     # size guard: warns but the mount proceeds
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        assert prepare_backend("fskit", ops=ws.ops,
+        assert prepare_backend("fskit", ops=ws.fs,
                                mountpoint="/Volumes/m") is MountBackend.FSKIT
     assert "will read as empty" in caplog.text
     # both satisfied
     ram = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    assert prepare_backend("fskit", ops=ram.ops,
+    assert prepare_backend("fskit", ops=ram.fs,
                            mountpoint="/Volumes/m") is MountBackend.FSKIT
 
 
@@ -140,7 +140,7 @@ def test_check_mountpoint_ignores_fuse_backend():
 def test_check_writes_warns_for_writable_mount(caplog):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FSKIT, ws.ops, "")
+        check_writes(MountBackend.FSKIT, ws.fs, "")
     assert "zeroed pages" in caplog.text
     assert "/ (ram)" in caplog.text
 
@@ -148,29 +148,29 @@ def test_check_writes_warns_for_writable_mount(caplog):
 def test_check_writes_silent_for_read_mounts(caplog):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FSKIT, ws.ops, "")
+        check_writes(MountBackend.FSKIT, ws.fs, "")
     assert caplog.text == ""
 
 
 def test_check_writes_ignores_other_backends(caplog):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FUSE, ws.ops, "")
+        check_writes(MountBackend.FUSE, ws.fs, "")
     assert caplog.text == ""
 
 
 def test_check_sizes_passes_for_byte_stores(caplog):
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    assert ws.ops.unsized_mounts() == []
+    assert ws.fs.unsized_mounts() == []
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.ops, "")
+        check_sizes(MountBackend.FSKIT, ws.fs, "")
     assert caplog.text == ""
 
 
 def test_check_sizes_warns_for_size_unknown_resource(caplog):
     ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.ops, "")
+        check_sizes(MountBackend.FSKIT, ws.fs, "")
     assert "will read as empty" in caplog.text
 
 
@@ -181,7 +181,7 @@ def test_check_sizes_names_the_offending_mount(caplog):
     },
                    mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.ops, "")
+        check_sizes(MountBackend.FSKIT, ws.fs, "")
     assert "/notion/ (notion)" in caplog.text
     assert "/ram/" not in caplog.text
 
@@ -195,18 +195,18 @@ def test_check_sizes_respects_the_root_prefix(caplog):
     # Scoping the mount to the byte-store subtree keeps the warning quiet
     # for a workspace that also holds API resources.
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.ops, "/ram/")
+        check_sizes(MountBackend.FSKIT, ws.fs, "/ram/")
     assert caplog.text == ""
 
 
 def test_check_sizes_ignores_fuse_backend():
     ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
-    check_sizes(MountBackend.FUSE, ws.ops, "")
+    check_sizes(MountBackend.FUSE, ws.fs, "")
 
 
 def test_history_mount_does_not_block_a_root_fskit_mount():
     # /.bash_history is mounted into every workspace; it renders from
     # in-memory events, so it must not be treated as size-unknown.
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    prefixes = [p for p, _ in ws.ops.unsized_mounts()]
+    prefixes = [p for p, _ in ws.fs.unsized_mounts()]
     assert "/.bash_history/" not in prefixes

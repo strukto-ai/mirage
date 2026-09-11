@@ -161,6 +161,12 @@ def build_secrets_env(
             "value": "vi",
             "readonly": True
         },
+        "FROZEN_TOKEN": {
+            "from": "counter",
+            "ref": "frozen",
+            "key": "token",
+            "readonly": True
+        },
         "TOKEN": {
             "from": "counter",
             "ref": "tok",

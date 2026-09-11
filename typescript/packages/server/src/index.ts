@@ -14,6 +14,7 @@
 
 export { buildApp, type BuildAppOptions, type MirageApp } from './app.ts'
 export {
+  absolutizeScripts,
   checkWorkspaceConfig,
   checkWorkspaceConfigFile,
   configToWorkspaceArgs,

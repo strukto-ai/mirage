@@ -52,8 +52,8 @@ async def tally_cat(accessor, paths, *texts, **kwargs):
 async def main() -> None:
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
 
-    await ws.ops.write("/data/hits.tally", encode({"alpha": 3, "beta": 11}))
-    await ws.ops.write("/data/notes.txt", b"plain text\n")
+    await ws.fs.write("/data/hits.tally", encode({"alpha": 3, "beta": 11}))
+    await ws.fs.write("/data/notes.txt", b"plain text\n")
 
     mount = ws.mount("/data/")
     mount.register(

@@ -17,7 +17,6 @@ import { DISK_IO } from './disk/io.ts'
 import { GRIDFS_IO } from './gridfs/io.ts'
 import { HF_IO } from './hf/io.ts'
 import { NEXTCLOUD_IO } from './nextcloud/io.ts'
-import { REDIS_IO } from './redis/io.ts'
 import { SSH_IO } from './ssh/io.ts'
 import { EMAIL_IO } from './email/io.ts'
 
@@ -28,7 +27,6 @@ const NATIVE = {
   gridfs: GRIDFS_IO,
   hf: HF_IO,
   nextcloud: NEXTCLOUD_IO,
-  redis: REDIS_IO,
   ssh: SSH_IO,
 }
 

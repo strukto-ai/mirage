@@ -67,6 +67,40 @@
         "stdout": "apple\nbanana\ncherry\nbanana\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pipe_segment_expands_the_pre_pipeline_status",
+      "seq": 594,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "false; { true; } | echo $?; f() { true; }; false; f | echo $?; false; { false; } | true; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

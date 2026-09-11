@@ -241,6 +241,47 @@ def _command_io() -> dict[str, dict[str, Any]]:
     return out
 
 
+def _configs() -> dict[str, dict[str, Any] | None]:
+    """Per-resource config field sets, read off the pydantic model.
+
+    Registry membership says a backend can be built; ``capabilities`` says
+    how it behaves; this says what it can be *told*. A YAML block is
+    written once in python's snake_case and has to reach both
+    implementations, and nothing compared the two field sets: TypeScript
+    accepted a Google ``access_token`` it never read, dropped an ``oci``
+    ``path_style`` its rename map had lost, and refused an ``ntn``
+    ``api_version`` python had declared. Keys are wire names -- the alias
+    when a field carries one (``DatabricksVolumeConfig.schema_name`` is
+    ``schema`` on the wire) -- so the parity check compares what a config
+    block says, not what an attribute is called. A resource whose entry
+    names no config class (ram, disk, redis take raw kwargs) dumps null.
+
+    Returns:
+        dict[str, dict[str, Any] | None]: per registry name, ``fields``
+            mapping each wire name to whether it is required.
+    """
+    out: dict[str, dict[str, Any] | None] = {}
+    for name in sorted(REGISTRY):
+        entry = REGISTRY[name]
+        ref = entry.config_path
+        if ref is None:
+            ref = getattr(resolve_class(entry.resource_path), "CONFIG_CLS",
+                          None)
+        if ref is None:
+            out[name] = None
+            continue
+        cls = resolve_class(ref) if isinstance(ref, str) else ref
+        out[name] = {
+            "fields": {
+                (field.alias or fname): {
+                    "required": field.is_required()
+                }
+                for fname, field in cls.model_fields.items()
+            }
+        }
+    return out
+
+
 def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
     """Dump the two resource-name sets the parity gate compares.
 
@@ -266,6 +307,7 @@ def _emit_resources(registry: dict[str, list[RegisteredCommand]]) -> None:
         "command_resources": sorted(command_resources),
         "capabilities": _capabilities(),
         "command_io": _command_io(),
+        "configs": _configs(),
     }
     path = OUT.parent / "resources.json"
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

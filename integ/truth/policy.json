@@ -1,0 +1,41 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/permissions/policy.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "permissions/policy.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "reviewer  cat /repo/notes.txt            [0] hello",
+    "                                         pre_command read the file and found no marker",
+    "reviewer  cat /repo/flagged.txt          [126] cat: Permission denied",
+    "                                         and refuses one that holds it; the reason is for the operator",
+    "reviewer  cat /scratch/cold/k            [0] keep",
+    "                                         pre_ops lets a read through",
+    "reviewer  echo x > /scratch/cold/f       [1] /scratch/cold/f: Permission denied",
+    "                                         and refuses a write at the op door",
+    "reviewer  rm /scratch/cold/k             [1] rm: cannot remove '/scratch/cold/k': Permission denied",
+    "                                         whichever command asked for it",
+    "reviewer  export AWS_SECRET=x            [1] credentials are set by the operator",
+    "                                         the coded policy, at the session door",
+    "reviewer  export SAFE=1 && echo $SAFE    [0] 1",
+    "                                         silence where no hook objects",
+    "host      cat /repo/flagged.txt          [0] marker",
+    "                                         no profile, so no program",
+    "host      export AWS_SECRET=x            [1] credentials are set by the operator",
+    "                                         the coded policy speaks for every session"
+  ]
+}

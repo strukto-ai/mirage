@@ -225,19 +225,24 @@ function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
 // console block rides ram alone: an unwired opener would run the target
 // unbound and it would read as covered.
 /**
- * Wrap a profile's inline script source the way the config door does.
+ * Wrap a profile's inline policy source the way the config door does.
  *
- * A target is JSON, so it carries a profile's script as source rather than
+ * A target is JSON, so it carries a profile's policy as source rather than
  * as the path a YAML config would name. Loading is the config layer's
  * job everywhere else, so the battery does that one step here and hands
  * the workspace what code would pass.
  */
 function scriptedProfile(doc: unknown): unknown {
   if (typeof doc !== 'object' || doc === null) return doc
-  const script = (doc as { script?: unknown }).script
+  const policy = (doc as { policy?: unknown }).policy
+  if (typeof policy !== 'object' || policy === null) return doc
+  const { script, runtime } = policy as { script?: unknown; runtime?: unknown }
   if (typeof script !== 'object' || script === null) return doc
   const { source, language } = script as { source: string; language?: 'python' | 'js' }
-  return { ...(doc as object), script: new ScriptSource(source, language ?? 'python') }
+  return {
+    ...(doc as object),
+    policy: { script: new ScriptSource(source, language ?? 'python'), runtime },
+  }
 }
 
 function permissionOptions(target: Target): {

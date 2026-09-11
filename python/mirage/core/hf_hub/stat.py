@@ -19,7 +19,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.hf_hub.lookup import dir_stat_entry, key_of, lookup
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 
 log = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def stat_of(entry: IndexEntry) -> FileStat:
         size=entry.size,
         modified=entry.remote_time or None,
         type=FileType.FILE,
-        content=guess_type(entry.name),
+        content=content_type_for_path(entry.name),
         # git is content-addressed, so the object id is the strongest
         # fingerprint any backend here has: identical bytes carry an
         # identical oid, and a rewrite that changed nothing correctly

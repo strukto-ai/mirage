@@ -18,6 +18,7 @@ import { QuickJsRuntime } from './js/quickjs.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide.ts'
 import type { RuntimeOptions } from './types.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 /**
  * The workspace's built-in command engine as a routing marker.
@@ -120,17 +121,49 @@ const PYTHON_ONLY_HINTS: Record<string, string> = {
 // literal would silently swallow a typo key without it.
 const ENTRY_KEYS: readonly string[] = ['captures', 'config', 'script']
 
+// The names core ships, frozen before any package or host registers its
+// own, so `registerRuntime` can refuse to shadow one the way the resource
+// and CLI registries refuse a builtin name.
+const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set(Object.keys(NAMED))
+
 /**
- * Register a runtime class under a config name. Runtime packages
- * extend the table with their own runtimes (e.g. `daytona` from
- * `@struktoai/mirage-node`), mirroring Python's NAMED dict; existing
- * entries are overwritten.
+ * Register a runtime class under a config name. Host-side only, like
+ * `registerResourceFactory` and `registerCliSpec`: the embedding program
+ * calls it, never a line the agent types. Once registered the name works
+ * everywhere a builtin's does: a `runtimes:` entry in workspace config, a
+ * string in `new Workspace(..., { runtimes })`, and `execute({ runtime })`.
+ * Runtime packages use the same door for their own runtimes (`daytona`
+ * from `@struktoai/mirage-node`). Mirrors `register_runtime` in
+ * `mirage/runtime/table.py`: a core builtin cannot be shadowed, and
+ * re-registering any other name replaces it.
  */
 export function registerRuntime(
   name: string,
   cls: new (options?: RuntimeOptions<never>) => Runtime,
 ): void {
+  if (BUILTIN_RUNTIMES.has(name)) throw new Error(`cannot register '${name}': shadows a builtin`)
   NAMED[name] = cls
+}
+
+/** Every name `buildRuntime` can resolve, builtin and registered. */
+export function knownRuntimes(): string[] {
+  return Object.keys(NAMED).sort(compareCodePoints)
+}
+
+/**
+ * Refuse an entry key no runtime takes, naming the entry. Every runtime
+ * is constructed the same way, so this is one check for a builtin, a
+ * registered name and a `source:Class` reference alike: `buildRuntime`
+ * runs it for the names it resolves, and the config loader runs it for
+ * a reference, whose class it constructs itself.
+ */
+export function checkRuntimeOptions(name: string, options: Record<string, unknown>): void {
+  for (const key of Object.keys(options)) {
+    if (!ENTRY_KEYS.includes(key)) {
+      const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
+      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
+    }
+  }
 }
 
 /**
@@ -147,12 +180,7 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)
   }
-  for (const key of Object.keys(options)) {
-    if (!ENTRY_KEYS.includes(key)) {
-      const knownKeys = ENTRY_KEYS.map((k) => `'${k}'`).join(', ')
-      throw new Error(`unknown ${name} runtime option '${key}' (expected: ${knownKeys})`)
-    }
-  }
+  checkRuntimeOptions(name, options)
   return new cls(options as RuntimeOptions<never>)
 }
 

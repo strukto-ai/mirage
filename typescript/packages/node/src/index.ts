@@ -49,16 +49,16 @@ export {
   type RedisResourceOptions,
   type RedisResourceState,
 } from './resource/redis/redis.ts'
-export { REDIS_PROMPT } from './resource/redis/prompt.ts'
+export { REDIS_PROMPT } from '@struktoai/mirage-core/resource/redis/prompt'
 export { RedisStore, type RedisStoreOptions } from './resource/redis/store.ts'
-export { RedisAccessor } from './accessor/redis.ts'
-export { REDIS_OPS } from './ops/redis/index.ts'
+export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
+export { REDIS_OPS } from '@struktoai/mirage-core/ops/redis/index'
 export {
   fileReadProvision,
   headTailProvision,
   metadataProvision,
   type RedisResourceLike,
-} from './commands/builtin/redis/_provision.ts'
+} from '@struktoai/mirage-core/commands/builtin/redis/_provision'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
 export { FuseManager } from './workspace/fuse.ts'
 export { MirageFS, type MirageFSOptions, type MountAttrs } from './fuse/fs.ts'
@@ -447,9 +447,10 @@ export {
 } from './resource/registry.ts'
 export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './resource/loader.ts'
 export { DISK_COMMANDS } from './commands/builtin/disk/index.ts'
-export { REDIS_COMMANDS } from './commands/builtin/redis/index.ts'
+export { REDIS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/redis/index'
 export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'
 export {
+  absolutizeScripts,
   checkWorkspaceConfig,
   checkWorkspaceConfigFile,
   configToWorkspaceArgs,
@@ -460,3 +461,54 @@ export {
   type WorkspaceArgs,
   type WorkspaceConfigRaw,
 } from './config.ts'
+
+// The authoring surface: what a host reaches for to bring its own
+// resource, CLI, policy or runtime, and the types the Workspace's own
+// signatures hand back. Core's barrel is the front door for a program
+// that mounts and runs; these are the doors behind it, re-exported by
+// module so a consumer of this package needs no second dependency on
+// core to reach them (`@struktoai/mirage-core/<path>` works too).
+export {
+  BaseResource,
+  recordResourceRef,
+  resourceRefOf,
+} from '@struktoai/mirage-core/resource/base'
+export { op, type RegisteredOp } from '@struktoai/mirage-core/ops/registry'
+export { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
+export { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { FlagView, type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
+export type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
+export { UsageError } from '@struktoai/mirage-core/commands/errors'
+export { PolicyDenied, PolicyError } from '@struktoai/mirage-core/policy/errors'
+export {
+  type Ask,
+  type AskHandler,
+  type Decision,
+  Decisions,
+  type Deny,
+  type Explanation,
+  Outcome,
+  Scope,
+  type SessionContext,
+} from '@struktoai/mirage-core/policy/index'
+export { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
+export { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+export type { HomeConfig, RuntimeConfig } from '@struktoai/mirage-core/runtime/config'
+export { knownRuntimes, registerRuntime } from '@struktoai/mirage-core/runtime/table'
+export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
+export { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
+export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
+export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
+export {
+  DenyResult,
+  type RouteContext,
+  type RoutePolicy,
+  RouteResult,
+} from '@struktoai/mirage-core/runtime/routing/types'
+export {
+  type ExecuteOptions,
+  ExecuteResult,
+  type WorkspaceOptions,
+} from '@struktoai/mirage-core/workspace/workspace/types'
+export { Ops } from '@struktoai/mirage-core/ops/ops'
+export { Namespace } from '@struktoai/mirage-core/workspace/mount/namespace/namespace'

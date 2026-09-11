@@ -15,7 +15,6 @@
 import { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
-import type { IndexCacheStore } from '../../cache/index/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
 import { getExtension } from '../../commands/resolve.ts'
 import { Precision, ProvisionResult, combineSum } from '../../provision/types.ts'
@@ -150,76 +149,78 @@ export async function handleCommandProvision(
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
 
-  const extension = firstScope !== null ? getExtension(firstScope.virtual) : null
-  const cmd = mount.resolveCommand(cmdName, extension)
-  if (cmd?.provisionFn == null) {
-    return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
-  }
-
-  const mountPrefix = rstripSlash(mount.prefix)
-  const scopedParts: (string | PathSpec)[] = [parts2[0] ?? '']
-  const resourceScopes: PathSpec[] = []
-  for (let i = 1; i < parts2.length; i++) {
-    const p = parts2[i]
-    if (p instanceof PathSpec) {
-      const scoped = new PathSpec({
-        virtual: p.virtual,
-        directory: p.directory,
-        pattern: p.pattern,
-        resolved: p.resolved,
-        resourcePath: mountKey(p.virtual, mountPrefix),
-      })
-      scopedParts.push(scoped)
-      resourceScopes.push(scoped)
-    } else if (p !== undefined) {
-      scopedParts.push(p)
+  return mount.use(async (): Promise<ProvisionResult> => {
+    const extension = firstScope !== null ? getExtension(firstScope.virtual) : null
+    const cmd = mount.resolveCommand(cmdName, extension)
+    if (cmd?.provisionFn == null) {
+      return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
     }
-  }
 
-  const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.virtual : p))
-  const spec = mount.specFor(cmdName)
-  let flagKwargs: Record<string, FlagValue> = {}
-  let textArgs: string[]
-  if (spec !== null) {
-    const parsed = parseCommand(spec, argv, session.cwd)
-    flagKwargs = parseToKwargs(parsed)
-    textArgs = parsed.texts()
-  } else {
-    textArgs = scopedParts.slice(1).filter((p): p is string => typeof p === 'string')
-  }
+    const mountPrefix = rstripSlash(mount.prefix)
+    const scopedParts: (string | PathSpec)[] = [parts2[0] ?? '']
+    const resourceScopes: PathSpec[] = []
+    for (let i = 1; i < parts2.length; i++) {
+      const p = parts2[i]
+      if (p instanceof PathSpec) {
+        const scoped = new PathSpec({
+          virtual: p.virtual,
+          directory: p.directory,
+          pattern: p.pattern,
+          resolved: p.resolved,
+          resourcePath: mountKey(p.virtual, mountPrefix),
+        })
+        scopedParts.push(scoped)
+        resourceScopes.push(scoped)
+      } else if (p !== undefined) {
+        scopedParts.push(p)
+      }
+    }
 
-  const resource = mount.resource as Resource & { accessor?: Accessor }
-  const accessor = resource.accessor
-  if (accessor === undefined) {
-    return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
-  }
+    const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.virtual : p))
+    const spec = mount.specFor(cmdName)
+    let flagKwargs: Record<string, FlagValue> = {}
+    let textArgs: string[]
+    if (spec !== null) {
+      const parsed = parseCommand(spec, argv, session.cwd)
+      flagKwargs = parseToKwargs(parsed)
+      textArgs = parsed.texts()
+    } else {
+      textArgs = scopedParts.slice(1).filter((p): p is string => typeof p === 'string')
+    }
 
-  const rawIndex = (resource as { index?: IndexCacheStore | null }).index ?? null
-  const opts: CommandOpts = {
-    flags: flagKwargs,
-    stdin: null,
-    cwd: session.cwd,
-    filetypeFns: null,
-    mountPrefix,
-    command: cmdStr,
-    ...(spec !== null ? { spec } : {}),
-    index: rawIndex,
-  }
+    const resource = mount.resource as Resource & { accessor?: Accessor }
+    const accessor = resource.accessor
+    if (accessor === undefined) {
+      return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
+    }
 
-  const raw = await cmd.provisionFn(accessor, resourceScopes, textArgs, opts)
-  const result = raw instanceof ProvisionResult ? raw : new ProvisionResult({ command: cmdStr })
-  if (result.command === '') {
-    result.command = cmdStr
-  }
+    const rawIndex = mount.index ?? null
+    const opts: CommandOpts = {
+      flags: flagKwargs,
+      stdin: null,
+      cwd: session.cwd,
+      filetypeFns: null,
+      mountPrefix,
+      command: cmdStr,
+      ...(spec !== null ? { spec } : {}),
+      index: rawIndex,
+    }
 
-  const hits = await checkCacheHits(registry.fileCache, scopedParts)
-  if (hits > 0) {
-    result.cacheHits = hits
-    result.cacheReadLow = result.networkReadLow
-    result.cacheReadHigh = result.networkReadHigh
-    result.networkReadLow = 0
-    result.networkReadHigh = 0
-  }
+    const raw = await cmd.provisionFn(accessor, resourceScopes, textArgs, opts)
+    const result = raw instanceof ProvisionResult ? raw : new ProvisionResult({ command: cmdStr })
+    if (result.command === '') {
+      result.command = cmdStr
+    }
 
-  return result
+    const hits = await checkCacheHits(registry.fileCache, scopedParts)
+    if (hits > 0) {
+      result.cacheHits = hits
+      result.cacheReadLow = result.networkReadLow
+      result.cacheReadHigh = result.networkReadHigh
+      result.networkReadLow = 0
+      result.networkReadHigh = 0
+    }
+
+    return result
+  })
 }

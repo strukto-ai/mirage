@@ -64,7 +64,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: both: needs a nod (ask d2c4107e8cd1)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -120,7 +120,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: both: needs a nod (ask 8a63c4d87a83)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -162,7 +162,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "git: policy denied: no branches\n"
+        "stderr": "git: Permission denied\n"
       }
     },
     {
@@ -203,7 +203,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cat: requires approval: span review (ask 18558a102920)\n"
+        "stderr": "cat: Permission denied\n"
       }
     },
     {
@@ -217,7 +217,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "rm: requires approval: carve nod (ask 4b76fdb133ff)\n"
+        "stderr": "rm: Permission denied\n"
       }
     },
     {
@@ -272,7 +272,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cp: requires approval: outbox nod (ask 69487f1bef15)\n"
+        "stderr": "cp: Permission denied\n"
       }
     },
     {
@@ -326,7 +326,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "cp: requires approval: staging nod (ask 6b6e0a5b765b)\n"
+        "stderr": "cp: Permission denied\n"
       }
     },
     {

@@ -15,7 +15,7 @@
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -30,7 +30,8 @@ function dirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileSt
 function fileStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     modified: entry.remoteTime,
     size: entry.size,
     extra: { event_id: entry.id, ...entry.extra },

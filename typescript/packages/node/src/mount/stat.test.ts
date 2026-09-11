@@ -21,7 +21,7 @@ import { applyStatAttrs, dirStat, fileStat, linkStat } from './stat.ts'
 const NOW = new Date(1_700_000_000_000)
 
 function row(over: Partial<FileStatInit>): FileStat {
-  return new FileStat({ name: 'f', type: FileType.TEXT, ...over })
+  return new FileStat({ name: 'f', type: FileType.FILE, ...over })
 }
 
 describe('mount stat rows', () => {

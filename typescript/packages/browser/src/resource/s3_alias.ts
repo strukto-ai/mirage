@@ -16,8 +16,12 @@ import { S3Resource } from './s3/s3.ts'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { remapCommandsResource, remapOpsResource } from '@struktoai/mirage-core/resource/s3/remap'
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import { S3_BROWSER_RENAME } from './s3/config.ts'
 import type { S3BrowserPresignedUrlProvider, S3Config, S3ConfigRedacted } from './s3/config.ts'
 
@@ -140,7 +144,8 @@ export function makeBrowserS3Alias<
       }
     },
     redact: (config) => redactConfigWithSchema(schema, config) as unknown as R,
-    normalize: (input) => normalizeFields(input, { rename: S3_BROWSER_RENAME }) as unknown as C,
+    normalize: (input) =>
+      parseConfigWithSchema(schema, input, { rename: S3_BROWSER_RENAME }) as unknown as C,
   }
 }
 

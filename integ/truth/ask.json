@@ -1,0 +1,38 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/permissions/ask.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "permissions/ask.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "approve? rm /data/a.txt",
+    "rm /data/a.txt: ran, exit 0",
+    "approve? rm /data/a.txt",
+    "rm /data/a.txt: ran, exit 0",
+    "approve? rm -f /data/a.txt",
+    "for i in 1 2; do rm -f /data/a.txt; done: ran, exit 0",
+    "approve? rm /data/a.txt",
+    "printf /data/a.txt | xargs rm: ran, exit 0",
+    "approve? rm -f /data/a.txt",
+    "sleep 0.2 && eval 'rm -f /data/a.txt' &: ran, exit 0",
+    "wait: ran, exit 0",
+    "shopt -s expand_aliases; alias d='rm -f /data/a.txt': ran, exit 0",
+    "approve? rm -f /data/a.txt",
+    "approve? rm -f /data/a.txt",
+    "d && d: ran, exit 0"
+  ]
+}

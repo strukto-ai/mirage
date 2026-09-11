@@ -78,7 +78,7 @@ export function makeRemovePrefix<A extends Accessor, C>(
  * `rmdir`. Sharing one function between the two slots made `rmdir` destroy
  * a whole subtree for every caller that does not pre-check emptiness
  * itself, and the command builders are the only callers that do: FUSE,
- * `ws.ops` and the sandbox runtimes all reach the op directly.
+ * `ws.fs` and the sandbox runtimes all reach the op directly.
  *
  * The listing is the same one `readdir` reads, so the two agree on what a
  * child is: a `marker` entry is the prefix's own marker (or a key the

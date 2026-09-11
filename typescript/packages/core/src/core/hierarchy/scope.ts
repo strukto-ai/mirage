@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, type FileType } from '../../types.ts'
+import { PathSpec, type ContentType } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { RAW, type Codec } from './codec.ts'
 
@@ -54,7 +54,7 @@ export class Slot {
  *
  * `kind` is the position's name; listers, probes and readers key on it.
  * `segments` is the path shape, literals and slots. `leaf` marks a file
- * rather than a directory, `filetype` its rendered type. `probed` is whether
+ * rather than a directory, `filetype` its rendered content type. `probed` is whether
  * stat must prove existence (parent listing by default); false for positions
  * that exist by construction, like the top-level directories.
  */
@@ -62,14 +62,14 @@ export class Scope {
   readonly kind: string
   readonly segments: readonly (string | Slot)[]
   readonly leaf: boolean
-  readonly filetype: FileType | null
+  readonly filetype: ContentType | null
   readonly probed: boolean
 
   constructor(init: {
     kind: string
     segments: readonly (string | Slot)[]
     leaf?: boolean
-    filetype?: FileType
+    filetype?: ContentType
     probed?: boolean
   }) {
     this.kind = init.kind

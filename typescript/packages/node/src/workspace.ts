@@ -29,6 +29,10 @@ import type {
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { KernelMounts } from './workspace/workspace/kernel_mounts.ts'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { savedResourceBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
+import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
+import { buildResource, knownResources } from './resource/registry.ts'
+import type { Resource } from '@struktoai/mirage-core/resource/base'
 import './compression_codecs.ts'
 import './runtime/sandbox/daytona/runtime.ts'
 import './secrets/constants.ts'
@@ -51,6 +55,14 @@ function loadShellParser(): Promise<ShellParser> {
 export type NodeWorkspaceOptions = WorkspaceOptions
 
 export class Workspace extends CoreWorkspace {
+  /** A saved mount rebuilds through this package's resource registry. */
+  protected static override async buildSavedResource(
+    entry: MountSnapshot,
+  ): Promise<Resource | null> {
+    const build = savedResourceBuild(entry, (name) => knownResources().includes(name))
+    return build === null ? null : buildResource(build.name, build.config)
+  }
+
   private fuseSetupPromise: Promise<void> | null = null
   private readonly kernelMounts = new KernelMounts(this)
 

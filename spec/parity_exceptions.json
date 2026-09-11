@@ -1,7 +1,7 @@
 {
   "command_io": {
     "hf": {
-      "slots": "find is a slot in python and a bespoke command in typescript (see notion) \u2014 the same query, expressed at a different layer."
+      "slots": "find is a slot in python and a bespoke command in typescript (see notion) — the same query, expressed at a different layer."
     },
     "notion": {
       "slots": "find is a slot in python and a bespoke command in typescript (notion/find.ts). Both pass stat=None, so the -mtime behavior matches; only the layer differs."
@@ -20,6 +20,41 @@
         ]
       },
       "reason": "TypeScript has no github grep provision. Python's is a bespoke cost model that walks the index to sum matched bytes and read ops, and it reaches IndexCacheStore internals, so porting it needs its own change rather than riding along with the parity gate."
+    }
+  },
+  "config_fields": {
+    "dropbox": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "gcal": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "gdocs": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "gdrive": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "github": {
+      "owner": "Python leaves owner/repo nullable because GitHubResource also takes them as constructor arguments and raises when neither supplied them; TypeScript has no such escape hatch, so requiring them in the schema is its honest contract. A YAML mount naming neither is refused by both, at different moments.",
+      "repo": "See owner."
+    },
+    "gmail": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "gsheets": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "gslides": {
+      "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
+    },
+    "qdrant": {
+      "cloud_inference": "Python sends it as a query option; the TypeScript qdrant client has no cloud-inference path yet. An open gap, not a naming difference."
+    },
+    "s3": {
+      "defaultContentType": "Content type stamped on uploads. TypeScript-only today; an open gap python's S3Config has yet to close.",
+      "httpAgentProvider": "A caller-supplied HTTP agent factory, a callable no YAML block can carry; python's aiohttp session pool is configured through the accessor.",
+      "presignedUrlProvider": "The browser's authentication model: a signer callable in place of credentials. Python has no browser runtime."
     }
   },
   "language_only_resources": {

@@ -17,8 +17,9 @@ import { createRequire } from 'node:module'
 import { OpsRegistry } from '../../ops/registry.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type Refusal } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { describeRefusal, saysWhy } from '../../policy/index.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -97,6 +98,17 @@ export function stdoutStr(io: { stdout: Uint8Array }): string {
 
 export function stderrStr(io: { stderr: Uint8Array }): string {
   return DEC.decode(io.stderr)
+}
+
+/**
+ * stderr as bash prints it, then the refusal record as one more line,
+ * unless the text already says why (an operand-scoped refusal's own GNU
+ * line): what a text surface hands an agent.
+ */
+export function voicedStderr(io: { stderr: Uint8Array; refusal: Refusal | null }): string {
+  const text = DEC.decode(io.stderr)
+  if (io.refusal === null || saysWhy(text, io.refusal)) return text
+  return `${text}${describeRefusal(io.refusal)}\n`
 }
 
 export function countOccurrences(buf: Uint8Array, needle: string): number {

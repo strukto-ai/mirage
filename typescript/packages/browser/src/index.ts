@@ -274,8 +274,69 @@ export {
   type GCalConfigRedacted,
 } from '@struktoai/mirage-core/resource/gcal/config'
 export {
+  RedisResource,
+  type RedisResourceOptions,
+  type RedisResourceState,
+} from './resource/redis/redis.ts'
+export { UpstashRedisStore, type UpstashRedisStoreOptions } from './resource/redis/store.ts'
+export { REDIS_PROMPT } from '@struktoai/mirage-core/resource/redis/prompt'
+export { REDIS_OPS } from '@struktoai/mirage-core/ops/redis/index'
+export { REDIS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/redis/index'
+export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
+export {
   buildResource,
   knownResources,
   register as registerResourceFactory,
   type ResourceFactory,
 } from './resource/registry.ts'
+
+// The authoring surface: what a host reaches for to bring its own
+// resource, CLI, policy or runtime, and the types the Workspace's own
+// signatures hand back. Core's barrel is the front door for a program
+// that mounts and runs; these are the doors behind it, re-exported by
+// module so a consumer of this package needs no second dependency on
+// core to reach them (`@struktoai/mirage-core/<path>` works too).
+export {
+  BaseResource,
+  recordResourceRef,
+  resourceRefOf,
+} from '@struktoai/mirage-core/resource/base'
+export { op, type RegisteredOp } from '@struktoai/mirage-core/ops/registry'
+export { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
+export { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
+export { FlagView, type FlagValue, UsageStyle } from '@struktoai/mirage-core/commands/spec/types'
+export type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
+export { UsageError } from '@struktoai/mirage-core/commands/errors'
+export { PolicyDenied, PolicyError } from '@struktoai/mirage-core/policy/errors'
+export {
+  type Ask,
+  type AskHandler,
+  type Decision,
+  Decisions,
+  type Deny,
+  type Explanation,
+  Outcome,
+  Scope,
+  type SessionContext,
+} from '@struktoai/mirage-core/policy/index'
+export { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
+export { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+export type { HomeConfig, RuntimeConfig } from '@struktoai/mirage-core/runtime/config'
+export { knownRuntimes, registerRuntime } from '@struktoai/mirage-core/runtime/table'
+export { type MountResolver, PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
+export { RuntimeVFS } from '@struktoai/mirage-core/runtime/vfs'
+export { CrossMountError } from '@struktoai/mirage-core/runtime/errors'
+export type { RunArgs, RuntimeReach } from '@struktoai/mirage-core/runtime/types'
+export {
+  DenyResult,
+  type RouteContext,
+  type RoutePolicy,
+  RouteResult,
+} from '@struktoai/mirage-core/runtime/routing/types'
+export {
+  type ExecuteOptions,
+  ExecuteResult,
+  type WorkspaceOptions,
+} from '@struktoai/mirage-core/workspace/workspace/types'
+export { Ops } from '@struktoai/mirage-core/ops/ops'
+export { Namespace } from '@struktoai/mirage-core/workspace/mount/namespace/namespace'

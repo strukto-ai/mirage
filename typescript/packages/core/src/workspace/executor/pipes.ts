@@ -17,17 +17,20 @@ import { asyncChain, closeQuietly, mergeStdoutStderr } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { divertStatement } from './builtins/exec/index.ts'
-import { finishStatement } from './statement.ts'
+import { divertStatement, stdoutToStderr } from './builtins/exec/index.ts'
+import { carryStatus, finishStatement, recordStatus } from './statement.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
+import { unreadableStdin } from '../../shell/descriptors.ts'
 import type { Session } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -44,6 +47,14 @@ export async function handlePipe(
   const childNodes: ExecutionNode[] = []
   const ios: IOResult[] = []
   const intermediate: ByteSource[] = []
+  // Every segment is a child shell forked before the pipeline ran, so
+  // each expands `$?` to the status the pipeline started with, not to
+  // what a sibling's inner statements left behind (`false; { true; } |
+  // echo $?` prints 1). The snapshot does not carry it: after a child
+  // shell `$?` is the child's status, which is the one thing it reports
+  // back. Seeded through the status door, which leaves `${PIPESTATUS[@]}`
+  // alone.
+  const before = session.lastExitCode
 
   try {
     for (let i = 0; i < commands.length; i++) {
@@ -52,6 +63,8 @@ export async function handlePipe(
       let stdout: ByteSource | null
       let io: IOResult
       let childExec: ExecutionNode
+      const saved = session.snapshot()
+      recordStatus(session, before, true)
       try {
         ;[stdout, io, childExec] = await executeNode(cmd, session, currentStdin, callStack)
       } catch (err) {
@@ -65,6 +78,8 @@ export async function handlePipe(
           exitCode: err.containedCode,
           stderr: err.stderr,
         })
+      } finally {
+        session.restore(saved)
       }
       ios.push(io)
       childNodes.push(childExec)
@@ -92,6 +107,10 @@ export async function handlePipe(
   }
 
   const lastIo = ios[ios.length - 1] ?? new IOResult()
+  // Parked for the boundary that closes this statement to claim as
+  // `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
+  // rewrites the pipeline's own.
+  session.pipeStatusPending = ios.map((io) => io.exitCode)
   if (session.shellOptions.pipefail === true) {
     let rightmostFailure = 0
     for (let k = ios.length - 1; k >= 0; k--) {
@@ -161,11 +180,13 @@ export async function handleConnection(
   const children = [leftExec]
 
   if (op === NT.AND) {
-    const leftBytes = await finishStatement(leftStdout, leftIo, session)
+    const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode !== 0) {
       // The failing command is left of the final `&&`, which bash
-      // exempts from `set -e`.
+      // exempts from `set -e`. The list ran only its left side, so the
+      // list boundary reports that pipeline.
       session.errexitImmune = true
+      carryStatus(session)
       return [
         leftBytes,
         leftIo,
@@ -189,8 +210,9 @@ export async function handleConnection(
   }
 
   if (op === NT.OR) {
-    const leftBytes = await finishStatement(leftStdout, leftIo, session)
+    const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
     if (leftIo.exitCode === 0) {
+      carryStatus(session)
       return [
         leftBytes,
         leftIo,
@@ -214,7 +236,7 @@ export async function handleConnection(
   }
 
   // ; (semicolon) or other: run both regardless
-  const leftBytes = await finishStatement(leftStdout, leftIo, session)
+  const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
   let rightStdout: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
@@ -258,6 +280,9 @@ export async function handleSubshell(
   // installs is restored with the rest of the snapshot when the body
   // ends.
   dispatch?: DispatchFn,
+  // The line's hand-off and its ledger, for a background job to borrow.
+  handed: HandOff | null = null,
+  decisions: Decisions | null = null,
 ): Promise<Result> {
   const saved = session.snapshot()
   try {
@@ -286,11 +311,13 @@ export async function handleSubshell(
           agentId ?? '',
           stdin,
           callStack,
+          handed,
+          decisions,
         )
         if (bgStdout !== null) allStdout.push(bgStdout)
         mergedIo = await mergedIo.merge(bgIo)
         // Seed $? for later body commands (mirrors program loop).
-        session.lastExitCode = bgIo.exitCode
+        recordStatus(session, bgIo.exitCode)
         lastExec = bgExec
         i += 2
         continue
@@ -300,7 +327,8 @@ export async function handleSubshell(
       let io: IOResult
       let childExec: ExecutionNode
       try {
-        const childStdin = stdin ?? session.execStdin
+        const childStdin =
+          stdin ?? (session.execStdinUnreadable ? unreadableStdin() : session.execStdin)
         ;[stdout, io, childExec] = await executeNode(child, session, childStdin, callStack)
       } catch (err) {
         if (!(err instanceof ExitSignal)) throw err
@@ -310,7 +338,7 @@ export async function handleSubshell(
         const sigIo = new IOResult({ exitCode: err.containedCode, stderr: err.stderr })
         mergedIo = await mergedIo.merge(sigIo)
         mergedIo.exitCode = err.containedCode
-        session.lastExitCode = err.containedCode
+        recordStatus(session, err.containedCode)
         lastExec = new ExecutionNode({
           command: '()',
           exitCode: err.containedCode,
@@ -318,10 +346,19 @@ export async function handleSubshell(
         })
         break
       }
-      stdout = await finishStatement(stdout, io, session)
+      stdout = await finishStatement(stdout, io, session, child, childExec)
       if (dispatch !== undefined && (session.execStdout !== null || session.execStderr !== null)) {
         const bytes = stdout === null ? null : await materialize(stdout)
-        stdout = await divertStatement(dispatch, session, bytes, io)
+        const beforeDivert = io.exitCode
+        stdout = await divertStatement(
+          dispatch,
+          session,
+          bytes,
+          io,
+          childExec.command ?? '',
+          stdoutToStderr(child),
+        )
+        if (io.exitCode !== beforeDivert) recordStatus(session, io.exitCode)
       }
       if (stdout !== null) allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)

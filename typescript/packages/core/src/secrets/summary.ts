@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { z } from 'zod'
+
 import { compareCodePoints } from '../utils/sort.ts'
 
 // Past this many, what came back is not a secret's shape, and reciting
@@ -42,4 +44,29 @@ export function fieldSummary(fields: Readonly<Record<string, string>>, source: s
     return `${String(names.length)} fields`
   }
   return `{${names.sort(compareCodePoints).join(', ')}}`
+}
+
+/**
+ * How a refusal names what a config schema rejected.
+ *
+ * The field path and the issue code per issue, and nothing else -- not
+ * zod's rendered message, which a custom refinement is free to build
+ * out of the input it refused. Every config this plane parses is one a
+ * fetched credential may have just landed in: a source's own, a mount's,
+ * an account CLI's. An unrecognized key carries no path, so its own
+ * names stand in; they are what the deployment wrote in the block, not
+ * anything fetched. Mirrors Python's `error_summary`, which has the
+ * harder job: pydantic's rendering quotes the input outright.
+ */
+export function errorSummary(error: z.ZodError): string {
+  return error.issues.map(issueDetail).join('; ')
+}
+
+function issueDetail(issue: z.core.$ZodIssue): string {
+  const path = issue.path.map(String).join('.')
+  // A model-level refinement (one credential of two, one drive target of
+  // four) carries no path; python's `error_summary` reports it as `config`.
+  const where =
+    path !== '' ? path : issue.code === 'unrecognized_keys' ? issue.keys.join(', ') : 'config'
+  return `${where}: ${issue.code}`
 }

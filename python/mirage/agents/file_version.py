@@ -82,9 +82,9 @@ class FileVersionTracker:
         return self._ws.namespace.follow(path)
 
     async def _current_version(self, path: str) -> str | None:
-        if not await self._ws.ops.exists(path):
+        if not await self._ws.fs.exists(path):
             return None
-        return fingerprint(await self._ws.ops.read(path))
+        return fingerprint(await self._ws.fs.read(path))
 
     async def _assert_version(self, path: str, expected: str) -> None:
         if await self._current_version(path) != expected:
@@ -113,7 +113,7 @@ class FileVersionTracker:
         Returns:
             bytes: The stored bytes.
         """
-        content = await self._ws.ops.read(path)
+        content = await self._ws.fs.read(path)
         if self._enabled:
             self._read_versions[self._key(path)] = fingerprint(content)
         return content
@@ -130,7 +130,7 @@ class FileVersionTracker:
         Raises:
             StaleMirageFileError: The file moved since it was last read.
         """
-        content = await self._ws.ops.read(path)
+        content = await self._ws.fs.read(path)
         if not self._enabled:
             return content
         key = self._key(path)
@@ -156,7 +156,7 @@ class FileVersionTracker:
             read_version = self._read_versions.get(key)
             if read_version is not None:
                 await self._assert_version(path, read_version)
-        await self._ws.ops.write(path, content.encode("utf-8"))
+        await self._ws.fs.write(path, content.encode("utf-8"))
         await self._record_write(path, key)
 
     async def write_edit(self, path: str, content: str) -> None:
@@ -174,5 +174,5 @@ class FileVersionTracker:
             edit_version = self._edit_versions.get(key)
             if edit_version is not None:
                 await self._assert_version(path, edit_version)
-        await self._ws.ops.write(path, content.encode("utf-8"))
+        await self._ws.fs.write(path, content.encode("utf-8"))
         await self._record_write(path, key)

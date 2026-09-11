@@ -24,7 +24,7 @@ from mirage.core.box.readdir import resource_type_for
 from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
         name=vfs_name,
         size=item.get("size"),
         type=FileType.FILE,
-        content=guess_type(vfs_name),
+        content=content_type_for_path(vfs_name),
         modified=remote_time,
         fingerprint=sha1 or remote_time or None,
         extra={
@@ -120,7 +120,7 @@ async def stat(
         name=result.entry.vfs_name or result.entry.name,
         size=result.entry.size,
         type=FileType.FILE,
-        content=guess_type(result.entry.vfs_name),
+        content=content_type_for_path(result.entry.vfs_name),
         modified=result.entry.remote_time,
         fingerprint=sha1 or result.entry.remote_time or None,
         extra={

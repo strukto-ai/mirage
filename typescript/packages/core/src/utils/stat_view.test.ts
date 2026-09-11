@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { FileStat, FileType } from '../types.ts'
+import { ContentType, FileStat, FileType } from '../types.ts'
 import {
   CHAR_MODE,
   contentSize,
@@ -36,29 +36,46 @@ const UTC_MS = Date.UTC(2026, 0, 2, 3, 4, 5)
 
 describe('mtimeMs', () => {
   it('reads an offset-less stamp as UTC', () => {
-    const st = new FileStat({ name: 'f', type: FileType.TEXT, modified: NAIVE })
+    const st = new FileStat({
+      name: 'f',
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      modified: NAIVE,
+    })
     expect(mtimeMs(st)).toBe(UTC_MS)
   })
 
   it('agrees across naive, offset and zulu spellings', () => {
     const spellings = [NAIVE, `${NAIVE}+00:00`, `${NAIVE}Z`]
     const stamps = spellings.map((modified) =>
-      mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT, modified })),
+      mtimeMs(
+        new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, modified }),
+      ),
     )
     expect(new Set(stamps).size).toBe(1)
   })
 
   it('answers null for a missing or garbage stamp', () => {
-    expect(mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT }))).toBeNull()
     expect(
-      mtimeMs(new FileStat({ name: 'f', type: FileType.TEXT, modified: 'yesterday-ish' })),
+      mtimeMs(new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })),
+    ).toBeNull()
+    expect(
+      mtimeMs(
+        new FileStat({
+          name: 'f',
+          type: FileType.FILE,
+          content: ContentType.TEXT,
+          modified: 'yesterday-ish',
+        }),
+      ),
     ).toBeNull()
   })
 
   it('answers 0 for epoch zero, a real time distinct from unknown', () => {
     const st = new FileStat({
       name: 'f',
-      type: FileType.TEXT,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
       modified: '1970-01-01T00:00:00Z',
     })
     expect(mtimeMs(st)).toBe(0)
@@ -73,8 +90,14 @@ describe('contentSize', () => {
   })
 
   it('is zero for an unknown size and passes a known one through', () => {
-    expect(contentSize(new FileStat({ name: 'f', type: FileType.TEXT }))).toBe(0)
-    expect(contentSize(new FileStat({ name: 'f', type: FileType.TEXT, size: 11 }))).toBe(11)
+    expect(
+      contentSize(new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })),
+    ).toBe(0)
+    expect(
+      contentSize(
+        new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, size: 11 }),
+      ),
+    ).toBe(11)
   })
 })
 
@@ -89,13 +112,18 @@ describe('mode constants', () => {
 describe('posixMode', () => {
   it('keeps the default pair when the backend reports no mode', () => {
     const dir = new FileStat({ name: 'd', type: FileType.DIRECTORY })
-    const file = new FileStat({ name: 'f', type: FileType.TEXT })
+    const file = new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })
     expect(posixMode(dir)).toBe(DIR_MODE)
     expect(posixMode(file)).toBe(FILE_MODE)
   })
 
   it('takes the permission bits from the overlay and the type bits from the kind', () => {
-    const st = new FileStat({ name: 'f', type: FileType.TEXT, mode: 0o600 })
+    const st = new FileStat({
+      name: 'f',
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      mode: 0o600,
+    })
     expect(posixMode(st)).toBe((FILE_MODE & ~0o7777) | 0o600)
   })
 
@@ -115,6 +143,8 @@ describe('posixMode', () => {
 describe('isLink', () => {
   it('reads the kind', () => {
     expect(isLink(new FileStat({ name: 'l', type: FileType.SYMLINK }))).toBe(true)
-    expect(isLink(new FileStat({ name: 'f', type: FileType.TEXT }))).toBe(false)
+    expect(
+      isLink(new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT })),
+    ).toBe(false)
   })
 })

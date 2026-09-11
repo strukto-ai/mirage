@@ -17,10 +17,13 @@ import { Outcome } from './types.ts'
 import type {
   Abandoned,
   Ask,
+  Claimant,
   CommandContext,
   CommandRule,
   Decision,
   Deny,
+  HandOff,
+  Occurrence,
   Pending,
   SessionDecisionsQuery,
 } from './types.ts'
@@ -174,10 +177,55 @@ export function covers(
  *
  * Mirrors the Python Decisions.
  */
+/**
+ * A hand-off and every line it was evaluated from, innermost first;
+ * empty outside a line.
+ */
+export function lineage(handed: HandOff | null): HandOff[] {
+  const out: HandOff[] = []
+  for (let h = handed; h !== null; h = h.parent) out.push(h)
+  return out
+}
+
+/**
+ * Whether two occurrences are one place: the same span of the same
+ * text, under the same node all the way up.
+ */
+export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): boolean {
+  let x = a
+  let y = b
+  while (x !== null && y !== null) {
+    if (x.source !== y.source || x.start !== y.start || x.end !== y.end) return false
+    x = x.parent
+    y = y.parent
+  }
+  return x === null && y === null
+}
+
+/**
+ * Whether a command stands inside a scope: within the scope's span of
+ * the same text, or on a line evaluated from a node that does.
+ *
+ * @param scope the enclosing node, a background job's.
+ * @param occurrence the command's place.
+ */
+export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
+  for (let within: Occurrence | null = occurrence; within !== null; within = within.parent) {
+    if (sameOccurrence(within.parent, scope.parent) && within.source === scope.source) {
+      return scope.start <= within.start && within.end <= scope.end
+    }
+  }
+  return false
+}
+
 export class Decisions {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
   private readonly memory = new Map<string, Decision[]>()
+  // The hand-offs holding a claim, per session: a reservation is a fact
+  // about a line running in this process, so it lives here and not in
+  // the store the records persist to.
+  private readonly live = new Map<string, Set<HandOff>>()
 
   constructor(sessions: SessionDecisionsQuery | null = null, onAsk: AskHandler | null = null) {
     this.sessions = sessions
@@ -198,10 +246,13 @@ export class Decisions {
   /**
    * Answer a waiting record, yes or no.
    *
-   * ALLOW at ONCE passes the retry of the exact line and is consumed by
-   * it; at SESSION it passes every line the rule covers for the rest of
-   * the session. DENY refuses the retry in the deny voice, once, and
-   * asking again raises a new record.
+   * ALLOW at ONCE passes the one line it was given for and is consumed
+   * by it — the line that asked, when the host answers while it waits,
+   * or that line's retry when the answer comes later; at SESSION it
+   * passes every line the rule covers for the rest of the session. DENY
+   * refuses the retry of the line in the deny voice, once, whether the
+   * host answered inline or later, and asking again raises a new
+   * record.
    */
   async answer(
     decisionId: string,
@@ -209,6 +260,23 @@ export class Decisions {
     scope: Scope = Scope.ONCE,
     note = '',
   ): Promise<void> {
+    this.writeAnswer(decisionId, outcome, scope, note)
+    await this.flush()
+  }
+
+  /**
+   * Settle a waiting record in the session's records, leaving the store
+   * to be flushed by the caller.
+   *
+   * Synchronous on purpose: the records change and nothing yields, so a
+   * line that answered inline can claim the grant in the same step
+   * (`raise`), and a line judged while the flush then waits on the store
+   * finds it claimed rather than standing.
+   *
+   * @returns the settled record.
+   * @throws when no waiting record has that id, or the outcome is ASK.
+   */
+  private writeAnswer(decisionId: string, outcome: Outcome, scope: Scope, note: string): Decision {
     if (outcome === Outcome.ASK) throw new Error('ASK is the question, not an answer')
     for (const key of this.keys()) {
       const records = [...this.records(key)]
@@ -216,10 +284,10 @@ export class Decisions {
       if (index === -1) continue
       const record = records[index]
       if (record === undefined) continue
-      records[index] = { ...record, outcome, scope, note }
+      const settled: Decision = { ...record, outcome, scope, note }
+      records[index] = settled
       this.set(key, records)
-      await this.flush()
-      return
+      return settled
     }
     throw new Error(`no decision waiting with id ${decisionId}`)
   }
@@ -231,14 +299,38 @@ export class Decisions {
    * Every rule the ask names has to be answered, because each won a
    * subject of its own and a nod covers the subject it was given for.
    * They are asked one at a time, the retry of the line raising the
-   * next, and a ONCE answer is only spent once the whole line is
+   * next, and a ONCE grant is only spent once the whole line is
    * answered: spending one while another is still waiting would make
-   * the first question come back on every retry.
+   * the first question come back on every retry. Once the line IS
+   * answered, every ONCE grant behind it, the ones already on file and
+   * the one a host gave inline moments ago alike, is the line's. Off a
+   * line it is spent here, so a nod never outlives the line it was
+   * given for. On a line it is claimed on the line's hand-off for the
+   * reader's occurrence instead, whether the reader is a pass that
+   * judges the line before it runs or the gate that runs it, and spent
+   * when the line ends (`revoke`): the pass and the gate then read one
+   * claim, so a compound line costs one question per run rather than
+   * one per reader, and a gate the run reaches again at the same place
+   * (a loop body, the next batch `xargs` hands on) runs on the same nod
+   * rather than asking after the rest of the body already ran once
+   * more.
+   *
+   * A refusal is deliberately not spent by the line it was given for.
+   * The record stands to refuse the agent's immediate retry of the
+   * same line from the ledger, and is spent by that retry, so a human
+   * who said no is not asked twice about it; the run after that is an
+   * open question again.
    *
    * @param ctx the classified command being admitted.
    * @param ask the chain's Ask.
    * @param signal the run's abort signal, so a question outlives
    *   neither its run's deadline nor a caller's kill.
+   * @param claimant the reading command and its line, null outside a
+   *   line (a bare chain). A claimed grant is on offer to a reader at
+   *   the occurrence it was claimed for, on the same line or one
+   *   evaluated from it, and to nobody else: not to another spelling
+   *   of the command on the line, and not to another line judged at
+   *   the same time.
    * @returns the refusal, the question left waiting, an Abandoned for a
    *   run killed mid-question, or null to run.
    */
@@ -246,29 +338,248 @@ export class Decisions {
     ctx: CommandContext,
     ask: Ask,
     signal?: AbortSignal,
+    claimant: Claimant | null = null,
   ): Promise<Deny | Pending | Abandoned | null> {
     const rules = ask.rules ?? [askRule(ctx, ask)]
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const held = this.records(sessionId)
+    const held = this.standing(sessionId, claimant)
     const answers = rules.map(
       (rule) => [rule, Decisions.settled(held, rule, argv, ctx.cwd)] as const,
     )
-    const spent = answers
-      .map(([, r]) => r)
-      .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)
     const refused = answers.find(([, r]) => r !== null && r.outcome === Outcome.DENY)
     if (refused !== undefined) {
-      await this.spend(sessionId, spent)
+      // A standing refusal refuses this line in place, whichever pass reads
+      // it: a line that does not run has no later pass to hand anything to.
+      await this.spend(
+        sessionId,
+        answers
+          .map(([, r]) => r)
+          .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE),
+      )
       return { kind: 'deny', reason: refused[0].reason, scope: 'command' }
     }
     for (const [rule, record] of answers) {
       if (record !== null) continue
-      const action = await this.raise(ctx, rule, argv, signal)
+      const action = await this.raise(ctx, rule, argv, signal, claimant)
       if (action !== null) return action
     }
-    await this.spend(sessionId, spent)
+    // Every rule is answered and the line may run. The ledger is read again
+    // rather than trusting the entry snapshot, because a host that answered
+    // inline settled its record during the loop above (and, on a line,
+    // `raise` has already claimed it): without the re-read, the grant it
+    // gave THIS line would still be standing for the next identical one,
+    // and whoever allowed once would have allowed twice.
+    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, claimant)
+    if (claimant === null) {
+      await this.spend(sessionId, once)
+      return null
+    }
+    this.claim(sessionId, claimant, once)
     return null
+  }
+
+  /**
+   * Bind the grants behind a command to its place on the line, for the
+   * line's end to spend.
+   *
+   * A grant the line already holds for this place, claimed by its pass
+   * or by an earlier visit of the same gate, is left as it is: the
+   * reader found it through that claim, and a second claim would say
+   * nothing new. What is new is claimed on the reader's own hand-off,
+   * which goes live with it, so every other line of the session stops
+   * seeing the grant until this one ends.
+   *
+   * @param sessionId the asking session.
+   * @param claimant the reading command and its line.
+   * @param once the settled ONCE records standing behind the command as
+   *   this reader sees them.
+   */
+  private claim(sessionId: string, claimant: Claimant, once: readonly Decision[]): void {
+    const handed = claimant.line
+    const held = lineage(handed).flatMap((h) => h.claimed.map((c) => c.decision))
+    const fresh = once.filter((r) => !held.includes(r))
+    if (fresh.length === 0) return
+    handed.claimed.push(...fresh.map((decision) => ({ occurrence: claimant.occurrence, decision })))
+    const live = this.live.get(sessionId) ?? new Set<HandOff>()
+    live.add(handed)
+    this.live.set(sessionId, live)
+  }
+
+  /**
+   * Spend every grant claimed on a hand-off that no other live hand-off
+   * still holds: the line's end.
+   *
+   * The claims in `resolve` leave the grants behind a line's commands
+   * standing while the line runs, each bound to the place it was given
+   * for, and this is where they are spent, however the line ended: run
+   * to completion, refused by the pass on a later command, failed on a
+   * fetch before the run, killed, or short-circuited past the command.
+   * Left standing, a grant would pass the next line spelling that
+   * command on a nod given to this one, so the executor calls this
+   * whichever way a typed line or a job ends, except when a line is
+   * held on a question still waiting (`release`); a nested evaluation
+   * hands its claims up instead (`handUp`). A grant a job launched from
+   * the line still holds a copy of (`split`) is left standing for the
+   * job's own end to spend. A grant already gone from the ledger is
+   * passed over; the hand-off is emptied so a second call is a no-op.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param handed the line's hand-off.
+   */
+  async revoke(sessionId: string, handed: HandOff): Promise<void> {
+    const elsewhere: Decision[] = []
+    for (const other of this.live.get(sessionId) ?? []) {
+      if (other !== handed) elsewhere.push(...other.claimed.map((c) => c.decision))
+    }
+    await this.spend(
+      sessionId,
+      handed.claimed.map((c) => c.decision).filter((d) => !elsewhere.includes(d)),
+    )
+    this.release(sessionId, handed)
+  }
+
+  /**
+   * Share the claims made for one part of a line with a run of its own:
+   * a background job, whose gates run after the line has returned and
+   * which ends on its own clock.
+   *
+   * Every claim standing inside the scope, on the line or a line it was
+   * evaluated from, is copied onto the new hand-off, and the line keeps
+   * its own: a grant is spent when the last hand-off holding it ends
+   * (`revoke`), so the line's end, a release for a question still
+   * waiting included, leaves the job's copy standing and hidden from
+   * every other line, and a loop that launches the same job again hands
+   * the next job a copy of the same grant. Moving the claim instead left
+   * the second job with nothing, and it asked again after it had already
+   * been launched; sharing one hand-off between line and job let a
+   * release for a pending foreground gate let go of the job's grants
+   * with the rest, and a line judged while the job slept could take
+   * them.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param handed the line's hand-off.
+   * @param scope the job's node on the line.
+   * @returns the job's hand-off, live while it holds a claim.
+   */
+  split(sessionId: string, handed: HandOff, scope: Occurrence): HandOff {
+    const job: HandOff = { claimed: [], parent: handed.parent, origin: handed.origin }
+    for (const owner of lineage(handed)) {
+      for (const claim of owner.claimed) {
+        if (
+          encloses(scope, claim.occurrence) &&
+          !job.claimed.some((c) => c.decision === claim.decision)
+        ) {
+          job.claimed.push(claim)
+        }
+      }
+    }
+    if (job.claimed.length > 0) {
+      const live = this.live.get(sessionId) ?? new Set<HandOff>()
+      live.add(job)
+      this.live.set(sessionId, live)
+    }
+    return job
+  }
+
+  /**
+   * Leave a nested line's claims with the line it was evaluated from, at
+   * the line's end.
+   *
+   * A line the executor evaluates from inside another (`$( )`, `eval`, a
+   * batch `xargs` hands on, the line an alias rewrites to) ends before
+   * the outer line does, and what
+   * its gates claimed is the outer line's: the next evaluation from the
+   * same node (the next batch, the next iteration of a loop around the
+   * `eval`) stands at the same occurrence and runs on it, and the typed
+   * line's end spends it. Spending here instead asked again for every
+   * batch.
+   *
+   * @param sessionId the session the line was judged in.
+   * @param handed the nested line's hand-off, whose `parent` is the line
+   *   it was evaluated from.
+   * @throws when the hand-off is a typed line's, whose claims are spent
+   *   (`revoke`), not handed up.
+   */
+  handUp(sessionId: string, handed: HandOff): void {
+    const parent = handed.parent
+    if (parent === null) throw new Error("a typed line's claims are spent, not handed up")
+    const known = parent.claimed.map((c) => c.decision)
+    parent.claimed.push(...handed.claimed.filter((c) => !known.includes(c.decision)))
+    if (parent.claimed.length > 0) {
+      const live = this.live.get(sessionId) ?? new Set<HandOff>()
+      live.add(parent)
+      this.live.set(sessionId, live)
+    }
+    this.release(sessionId, handed)
+  }
+
+  /**
+   * Let go of a hand-off's claims without spending them.
+   *
+   * For a line held on a question still waiting: its retry is a new
+   * line with a hand-off of its own, and it has to find the grants this
+   * one claimed standing, or the human is asked again for what they
+   * already allowed. Left live, the held line would hide them from every
+   * line after it.
+   */
+  release(sessionId: string, handed: HandOff): void {
+    handed.claimed.length = 0
+    this.live.get(sessionId)?.delete(handed)
+  }
+
+  /**
+   * The session's records as one line may read them.
+   *
+   * A claimed grant is on offer to exactly one place: the command it
+   * was claimed for, read on the line that claimed it, a line evaluated
+   * from that line, or a job launched from it holding a copy of the
+   * claim, whether the pass or the gate is reading. Every other claim is
+   * hidden. A grant claimed by another line is that line's to run on,
+   * and reading it here would let two lines judged at once both pass on
+   * one nod, the second of them running its earlier commands before its
+   * gate found the grant gone. A grant claimed for another occurrence
+   * on this line is that occurrence's: reading it would let a word that
+   * expands at run time into the same command run on the nod a literal
+   * spelling was given, and would let one nod answer two spellings. A
+   * pass re-reading an occurrence its outer line's pass already claimed
+   * finds it answered, which is how a nested line runs on the outer
+   * line's questions rather than asking them again.
+   */
+  private standing(sessionId: string, claimant: Claimant | null): readonly Decision[] {
+    const held = this.records(sessionId)
+    const live = this.live.get(sessionId)
+    if (live === undefined || live.size === 0) return held
+    const offered: Decision[] =
+      claimant === null
+        ? []
+        : lineage(claimant.line).flatMap((h) =>
+            h.claimed
+              .filter((c) => sameOccurrence(c.occurrence, claimant.occurrence))
+              .map((c) => c.decision),
+          )
+    const taken: Decision[] = []
+    for (const other of live) {
+      for (const claim of other.claimed) {
+        if (!offered.includes(claim.decision)) taken.push(claim.decision)
+      }
+    }
+    if (taken.length === 0) return held
+    return held.filter((r) => !taken.includes(r))
+  }
+
+  /** Every ONCE answer standing behind this line, as the ledger holds it now. */
+  private onceAnswers(
+    sessionId: string,
+    rules: readonly CommandRule[],
+    argv: readonly string[],
+    cwd: string,
+    claimant: Claimant | null,
+  ): Decision[] {
+    const held = this.standing(sessionId, claimant)
+    return rules
+      .map((rule) => Decisions.settled(held, rule, argv, cwd))
+      .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)
   }
 
   /**
@@ -279,12 +590,21 @@ export class Decisions {
    * spending nothing, recording no question and never reaching the
    * host. So `explain` can report that a line would be refused, or
    * would still be waiting, without a question arriving for a line
-   * nobody typed.
+   * nobody typed. It reads through the same reservations a run does,
+   * so a grant a live line has claimed reads as waiting here exactly as
+   * a run would find it.
+   *
+   * @param claimant the reading command and its line, null for a dry
+   *   run outside any line.
    */
-  async held(ctx: CommandContext, ask: Ask): Promise<Deny | Pending | null> {
+  async held(
+    ctx: CommandContext,
+    ask: Ask,
+    claimant: Claimant | null = null,
+  ): Promise<Deny | Pending | null> {
     const argv = [ctx.command, ...ctx.argv]
     const sessionId = ctx.sessionId ?? ''
-    const records = this.records(sessionId)
+    const records = this.standing(sessionId, claimant)
     const answers = (ask.rules ?? [askRule(ctx, ask)]).map(
       (rule) => [rule, Decisions.settled(records, rule, argv, ctx.cwd)] as const,
     )
@@ -332,6 +652,15 @@ export class Decisions {
     rule: CommandRule,
     argv: readonly string[],
     signal?: AbortSignal,
+    // The asking command and its line, null outside a line: a ONCE grant
+    // the host gives is claimed for it in the same step that records it,
+    // before the store is flushed. The write to the records is
+    // synchronous and the flush is not, and a line judged while the flush
+    // waited on a persistent store found the grant standing, claimed it
+    // and ran on it, while this line, resuming to find its own nod claimed
+    // by another, ran on nothing: one nod, two runs. Claimed first, the
+    // grant is hidden from the other line, which asks for itself.
+    claimant: Claimant | null = null,
   ): Promise<Deny | Pending | Abandoned | null> {
     let record = this.waiting(ctx, rule, argv)
     if (record === null) {
@@ -359,7 +688,11 @@ export class Decisions {
     if (said?.outcome == null) {
       return { kind: 'pending', id: record.id, reason: rule.reason }
     }
-    await this.answer(record.id, said.outcome, said.scope, said.note)
+    const settled = this.writeAnswer(record.id, said.outcome, said.scope, said.note)
+    if (claimant !== null && settled.outcome === Outcome.ALLOW && settled.scope === Scope.ONCE) {
+      this.claim(ctx.sessionId ?? '', claimant, [settled])
+    }
+    await this.flush()
     if (said.outcome === Outcome.DENY) {
       return { kind: 'deny', reason: rule.reason, scope: 'command' }
     }

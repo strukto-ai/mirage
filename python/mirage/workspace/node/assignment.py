@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from collections.abc import Awaitable
 from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
-from mirage.shell.array import (array_extent, array_get, array_set,
+from mirage.shell.array import (ShellArray, array_extent, array_get, array_set,
                                 build_assoc_literal, build_indexed_literal)
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ExitSignal
@@ -30,14 +31,57 @@ from mirage.types import word_text
 from mirage.workspace.executor.statement import assignment_status
 from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.variable import _array_index
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
-from mirage.workspace.session.state import (deref, element_index,
-                                            session_elements, session_view,
-                                            visible_env)
+from mirage.workspace.session.state import (conversion_scalar, deref,
+                                            session_view, subscript_index)
 from mirage.workspace.types import ExecutionNode
+
+
+def _arith_fatal(exc: ArithError) -> ExitSignal:
+    """The line's death for a subscript that does not evaluate.
+
+    bash aborts the line on ``a[1/0]=v`` with ``1/0: division by 0``,
+    the way it does for a bad ``-i`` value.
+
+    Args:
+        exc (ArithError): the evaluator's refusal, subscript leading.
+    """
+    return ExitSignal(1, stderr=f"bash: {exc}\n".encode(), contained_code=1)
+
+
+async def _fatal_index(session: Session, subscript: str,
+                       view: SessionView | None) -> int:
+    """``subscript_index`` whose failure ends the line, in bash's words.
+
+    Args:
+        session (Session): the session the subscript reads.
+        subscript (str): the raw subscript text.
+        view (SessionView | None): the gated door.
+    """
+    try:
+        return await subscript_index(session, subscript, view)
+    except ArithError as exc:
+        raise _arith_fatal(exc) from exc
+
+
+async def _fatal_index_literal(
+        held: ShellArray | None, items: list[str], append: bool,
+        index_of: Callable[[str], Awaitable[int]]) -> ShellArray:
+    """``build_indexed_literal`` whose subscript failure ends the line.
+
+    Args:
+        held (ShellArray | None): the existing array, for ``+=``.
+        items (list[str]): the expanded element words.
+        append (bool): extend rather than replace.
+        index_of (Callable[[str], Awaitable[int]]): the subscript
+            resolver, bound to the session and door.
+    """
+    try:
+        return await build_indexed_literal(held, items, append, index_of)
+    except ArithError as exc:
+        raise _arith_fatal(exc) from exc
 
 
 async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
@@ -228,17 +272,15 @@ async def execute_assignment(
                 command=text, exit_code=code)
         held = session.arrays.get(key)
         if append and held is None:
-            scalar = session.env.get(key)
+            scalar = conversion_scalar(session, key)
             held = None if scalar is None else [scalar]
         # `arr+=(...)` starts at the extent, so it fills the hole a
         # trailing `unset arr[last]` left but skips interior ones;
         # a `[i]=v` element places at i and the next plain word
         # continues from there.
-        base = build_indexed_literal(
+        base = await _fatal_index_literal(
             held, items, append,
-            functools.partial(element_index,
-                              env=visible_env(session),
-                              elements=session_elements(session)))
+            functools.partial(subscript_index, session, view=view))
         await _assign_var(view, key, base)
         code = assignment_status(session, sub_seq)
         return None, IOResult(exit_code=code), ExecutionNode(command=text,
@@ -280,12 +322,11 @@ async def execute_assignment(
                 command=text, exit_code=code)
         arr = session.arrays.get(key)
         if arr is None:
-            scalar = session.env.get(key)
+            scalar = conversion_scalar(session, key)
             arr = [] if scalar is None else [scalar]
         else:
             arr = list(arr)
-        idx = _array_index(sub_text, visible_env(session),
-                           session_elements(session))
+        idx = await _fatal_index(session, sub_text, view)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:

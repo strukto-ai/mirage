@@ -20,7 +20,7 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
 import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { resolveKey } from './resolve.ts'
 
 const MIME_TO_RT: Readonly<Record<string, string>> = {
@@ -56,7 +56,8 @@ async function statFromApi(
   return new FileStat({
     name: vfsName,
     size,
-    type: guessType(vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(vfsName),
     modified,
     fingerprint: modified !== '' ? modified : null,
     extra: {
@@ -107,7 +108,8 @@ export async function stat(
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
     size: entry.size,
-    type: guessType(entry.vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.vfsName),
     modified: entry.remoteTime,
     fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
     extra: {

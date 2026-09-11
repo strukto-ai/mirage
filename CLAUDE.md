@@ -464,8 +464,9 @@ did when the fuse adapter was simply the one written first.
   `Mount(..., backend=MountBackend.FSKIT)` routes through macFUSE 5.x's FSKit
   shim (no kernel extension). Rules live in `fuse/backend.py` and are enforced
   at mount time: macOS-only, mountpoint must be under `/Volumes`, and every
-  mounted resource must set `SIZES_ALWAYS_KNOWN` (FSKit has no `direct_io`, so
-  a size-unknown resource would serve silent empty files). `resolve_backend`
+  mounted resource should set `SIZES_ALWAYS_KNOWN` (FSKit has no `direct_io`, so
+  a size-unknown resource serves silent empty files; `check_sizes` names such
+  mounts in a warning, it does not refuse them). `resolve_backend`
   rejects `vfs`: reaching it means a kernel mount was requested. In YAML the
   keys are `backend:` and `mountpoint:`.
   TypeScript serves fskit too: `fuse.node` links `/usr/local/lib/libfuse.2.dylib`
@@ -830,3 +831,43 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   it; a layering test in each language fails if that returns. The two clients
   deliberately do not merge: different concurrency contract, different blob
   layout, different key shape.
+
+## Config doors
+
+A mount config is a snake_case block written once and read by both
+implementations, and each side has exactly one door it comes through:
+`build_resource` constructs the pydantic model, `buildResource` calls the
+resource's `normalize*Config`. Three rules keep the two doors saying the same
+thing.
+
+- **Every TypeScript normalizer is `parseConfigWithSchema(schema, input, normalizer?)`** (`resource/secrets.ts`, beside `redactConfigWithSchema`):
+  rename the python spellings, then `schema.parse`. It used to be
+  `normalizeFields` alone in 56 of 60 normalizers, which let `bucket: 123`
+  reach an S3 client and left every requiredness rule in those schemas dead
+  on the mount path. A refusal renders as `<name>: <field>: <code>` through
+  `errorSummary`, the twin of python's `error_summary`, and never carries the
+  value it refused; a model-level refinement reports as `config` on both
+  sides. A callable a config carries (a token provider, a refresh hook) is
+  declared in the schema through `secretSchema(z.custom(...))`, the msgraph
+  precedent, because parse strips what the schema does not name and the
+  secret marker is what keeps it out of snapshot state. Do not add a
+  normalizer that bypasses the door, and do not keep a callback out of the
+  schema "because no snapshot can carry it": that is exactly what the marker
+  is for.
+- **One rename map per family.** The S3 aliases share `S3_FAMILY_NORMALIZER`
+  (`node/src/resource/s3/config.ts`): `aws_profile`, `endpoint_url`,
+  `path_style`, and `timeout` in seconds to `timeoutMs`. `oci` and `supabase`
+  each hand-copied that map without `path_style`, so `path_style: false` was
+  honored on python and silently ignored on TypeScript; a copy is where an
+  entry goes missing.
+- **The field sets are gated.** `spec/*/resources.json` carries a `configs`
+  table (python: `model_fields`, alias-aware; typescript: a static walk from
+  the registry entry to its normalizer's schema, `configFacts` in
+  `typescript/scripts/resource_facts.ts`), and `check_spec_parity.py` maps
+  every python wire name onto a typescript field with the same requiredness,
+  the reverse, and that every door parses. Exemptions live under
+  `config_fields` with a reason. `integ/config/` runs one snake_case block
+  through both registries and compares the redacted state or the refusal's
+  `<resource>: <field>` prefix, which is the case kind the shell-line battery
+  cannot be: its runners construct every mount by hand in each language's own
+  idiom and never cross the door.

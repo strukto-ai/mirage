@@ -39,6 +39,7 @@ class MountKey(StrEnum):
     MODE = "mode"
     CONSISTENCY = "consistency"
     RESOURCE_CLASS = "resource_class"
+    RESOURCE_REF = "resource_ref"
     RESOURCE_STATE = "resource_state"
 
 
@@ -70,6 +71,7 @@ class JobKey(StrEnum):
 class ResourceStateKey(StrEnum):
     TYPE = "type"
     CONFIG = "config"
+    NEEDS_OVERRIDE = "needs_override"
     FILES = "files"
     DIRS = "dirs"
     MODIFIED = "modified"

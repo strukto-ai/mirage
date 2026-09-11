@@ -343,7 +343,8 @@ async def handle_df(
 
     data: list[list[str]] = []
     for mount in mounts:
-        cap = await mount.resource.statfs()
+        async with mount.use():
+            cap = await mount.resource.statfs()
         cells = [mount.resource.name]
         if show_type:
             cells.append(mount.resource.name)

@@ -204,17 +204,29 @@ export function knownFakes(): string[] {
   return Object.keys(REGISTRY).sort()
 }
 
-export async function launch(config: Record<string, JsonValue>): Promise<Instance[]> {
+// `announce` is called for each fake THE MOMENT it is up, not once the whole
+// fleet is. The fakes start one at a time, so a startup that stalls on the
+// seventh has six announce lines in the log and the config order names the
+// seventh; announcing at the end left CI with sixty seconds of empty log and
+// nothing to say which fake it was waiting on.
+export async function launch(
+  config: Record<string, JsonValue>,
+  announce: (a: Announce) => void = () => {},
+): Promise<Instance[]> {
   const out: Instance[] = []
   try {
-    return await launchAll(config, out)
+    return await launchAll(config, out, announce)
   } catch (e) {
     for (const inst of out) await inst.close()
     throw e
   }
 }
 
-async function launchAll(config: Record<string, JsonValue>, out: Instance[]): Promise<Instance[]> {
+async function launchAll(
+  config: Record<string, JsonValue>,
+  out: Instance[],
+  announce: (a: Announce) => void,
+): Promise<Instance[]> {
   for (const [name, raw] of Object.entries(config)) {
     // JSON has no comments and this config has three pinned ports that need a
     // stated reason, so a leading underscore marks a key that is prose. It is
@@ -233,15 +245,15 @@ async function launchAll(config: Record<string, JsonValue>, out: Instance[]): Pr
     // Started one at a time rather than in parallel. Seeding writes SQLite, and
     // a failure has to name the fake that caused it: Promise.all would report
     // the first rejection with nine other startups still in flight.
-    out.push(
-      await entry({
-        port: portOf(spec as Record<string, JsonValue>, 'port'),
-        fixture: str(spec, 'fixture'),
-        fixtureRoot: str(spec, 'fixtureRoot'),
-        token: str(spec, 'token'),
-        extras: spec as Record<string, JsonValue>,
-      }),
-    )
+    const inst = await entry({
+      port: portOf(spec as Record<string, JsonValue>, 'port'),
+      fixture: str(spec, 'fixture'),
+      fixtureRoot: str(spec, 'fixtureRoot'),
+      token: str(spec, 'token'),
+      extras: spec as Record<string, JsonValue>,
+    })
+    out.push(inst)
+    for (const a of inst.announces) announce(a)
   }
   // A config naming nothing is a broken config, not a healthy empty fleet:
   // returning [] would announce no URL lines and wait for a signal, turning
@@ -267,8 +279,7 @@ if (import.meta.url === `file://${process.argv[1] ?? ''}`) {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new KitError('config must be a JSON object mapping instance names to specs')
   }
-  const started = await launch(raw)
-  for (const inst of started) for (const a of inst.announces) emit(a)
+  const started = await launch(raw, emit)
   const bye = (): void => {
     void Promise.all(started.map((i) => i.close())).then(() => {
       process.exit(0)

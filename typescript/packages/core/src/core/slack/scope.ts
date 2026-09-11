@@ -14,7 +14,7 @@
 
 import { Codec, DATE, JSON_NAME } from '../hierarchy/codec.ts'
 import { makeDetectScope, ROOT, Scope, type ScopeMatch, Slot } from '../hierarchy/scope.ts'
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 
 /** Whether a segment names a message container. */
 export function isContainer(text: string): boolean {
@@ -43,7 +43,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'user',
     segments: ['users', new Slot('user', JSON_NAME, 'user_id')],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'channel', segments: CHANNEL }),
   new Scope({ kind: 'day', segments: DAY }),
@@ -51,7 +51,7 @@ export const SCOPES: readonly Scope[] = [
     kind: 'messages',
     segments: [...DAY, 'chat.jsonl'],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
   new Scope({ kind: 'files', segments: [...DAY, 'files'] }),
   new Scope({

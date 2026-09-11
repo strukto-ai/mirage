@@ -44,7 +44,8 @@ function valueAt(args: readonly Word[], index: number): string {
  * `timeout`, `xargs`, `find -exec`, `nohup`, `nice`, `time`); neither
  * is a line the gate cannot read at all (a sourced file, a script, a
  * program from stdin). `open` says the runtime appends operands the
- * gate cannot read (`xargs`'s items, `find`'s `{}` paths).
+ * gate cannot read (`xargs`'s items, `find`'s `{}` paths, the index and
+ * record `mapfile -C` hands its callback).
  */
 export interface InnerLine {
   readonly line: string | null
@@ -54,8 +55,8 @@ export interface InnerLine {
 
 const UNREADABLE: InnerLine = { line: null, argv: [], open: false }
 
-function asLine(line: string): InnerLine {
-  return { line, argv: [], open: false }
+function asLine(line: string, open = false): InnerLine {
+  return { line, argv: [], open }
 }
 
 function asArgv(argv: readonly Word[], open = false): InnerLine[] {
@@ -158,7 +159,7 @@ function xargsInner(args: readonly Word[]): InnerLine[] {
 function mapfileInner(args: readonly Word[]): InnerLine[] {
   const parsed = parseShellOptions(SHELL_SPECS.mapfile, args.map(wordValue))
   const callback = parsed.flags.C
-  return typeof callback === 'string' ? [asLine(callback)] : []
+  return typeof callback === 'string' ? [asLine(callback, true)] : []
 }
 
 // `find ... -exec COMMAND [ARG]... ;` (and `-execdir`, `-ok`, `-okdir`,

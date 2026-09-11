@@ -14,3 +14,4 @@ declare const __LANGFUSE_SECRET_KEY__: string
 declare const __LANGFUSE_HOST__: string
 declare const __DROPBOX_CLIENT_ID__: string
 declare const __BOX_CLIENT_ID__: string
+declare const __UPSTASH_REDIS_URL__: string

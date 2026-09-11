@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import type { FileStat } from '../types.ts'
-import { FileType } from '../types.ts'
+import { ContentType, FileType } from '../types.ts'
 import { handleTest } from './executor/builtins/condition/index.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
@@ -222,7 +222,13 @@ function prefixStoreDispatch(listing: string[]): DispatchFn {
  * size-unknown for a regular file.
  */
 function unknownSizeDispatch(content: Uint8Array): DispatchFn {
-  const stat = { name: 'x', size: null, type: FileType.TEXT, mode: null } as unknown as FileStat
+  const stat = {
+    name: 'x',
+    size: null,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+    mode: null,
+  } as unknown as FileStat
   const dispatch = (op: string) => {
     if (op === 'stat') return Promise.resolve([stat, new IOResult({})])
     if (op === 'read') return Promise.resolve([content, new IOResult({})])

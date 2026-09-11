@@ -34,7 +34,7 @@ ws = Workspace({"/seaweedfs/": resource}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -44,15 +44,15 @@ async def main():
         f"=== SeaweedFS at {config.endpoint_url} (bucket {config.bucket}) ===")
 
     # Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.ops.write(
+    await ws.fs.write(
         "/seaweedfs/data/example.jsonl",
         b'{"event":"queue-operation","tool":"mirage"}\n'
         b'{"event":"read","tool":"mirage"}\n'
         b'{"event":"queue-operation","tool":"other"}\n')
-    await ws.ops.write(
+    await ws.fs.write(
         "/seaweedfs/data/config.json",
         b'{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}')
-    await ws.ops.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
+    await ws.fs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
 
     # chmod/chown/touch never hit the SeaweedFS API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into

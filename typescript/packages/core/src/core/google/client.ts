@@ -83,6 +83,12 @@ export class GoogleApiError extends Error {
 }
 
 export async function refreshAccessToken(config: GoogleConfig): Promise<[string, number]> {
+  if (config.clientId === undefined || config.refreshToken === undefined) {
+    throw new Error(
+      'refreshAccessToken needs clientId and refreshToken; this config authenticates with a ' +
+        'pre-minted accessToken',
+    )
+  }
   const body = new URLSearchParams({
     client_id: config.clientId,
     refresh_token: config.refreshToken,
@@ -108,8 +114,23 @@ export class TokenManager extends OAuthTokenManager {
     this.config = config
   }
 
+  /**
+   * A supplied token short-circuits the grant entirely, and is read every
+   * call rather than cached: a provider callable is the caller's own cache,
+   * and caching its answer here would outlive the refresh it just performed.
+   * Mirrors python's `TokenManager.get_token`.
+   */
+  override async getToken(): Promise<string> {
+    const supplied = this.config.accessToken
+    if (supplied !== undefined) return typeof supplied === 'function' ? await supplied() : supplied
+    return super.getToken()
+  }
+
   protected async refreshPair(): Promise<[string, number]> {
     if (this.config.refreshFn !== undefined) {
+      if (this.config.refreshToken === undefined) {
+        throw new Error('refreshFn needs a refreshToken to hand to the caller')
+      }
       const result = await this.config.refreshFn(this.config.refreshToken)
       return [result.accessToken, result.expiresIn]
     }

@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface SupabaseConfig {
@@ -26,6 +31,7 @@ export interface SupabaseConfig {
   endpoint?: string
   sessionToken?: string
   profile?: string
+  forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
@@ -35,18 +41,19 @@ const SupabaseConfigSchema = z.object({
   bucket: z.string(),
   region: z.string(),
   projectRef: z.string().optional(),
-  endpoint: z.string(),
+  endpoint: z.string().optional(),
   accessKeyId: secretStr().optional(),
   secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
   profile: z.string().optional(),
+  forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the region and endpoint the redactor fills in.
+// Only the redacted twin derives; the redactor fills in the region and
+// endpoint the provider's rule resolves.
 export type SupabaseConfigRedacted = RedactedConfig<
   ConfigOf<typeof SupabaseConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
@@ -69,7 +76,7 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    forcePathStyle: true,
+    forcePathStyle: config.forcePathStyle ?? true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
@@ -80,18 +87,10 @@ export function redactSupabaseConfig(config: SupabaseConfig): SupabaseConfigReda
   return redactConfigWithSchema(SupabaseConfigSchema, {
     ...config,
     endpoint: resolvedSupabaseEndpoint(config),
+    forcePathStyle: config.forcePathStyle ?? true,
   }) as unknown as SupabaseConfigRedacted
 }
 
 export function normalizeSupabaseConfig(input: Record<string, unknown>): SupabaseConfig {
-  return normalizeFields(input, {
-    rename: {
-      aws_profile: 'profile',
-      endpoint_url: 'endpoint',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as SupabaseConfig
+  return parseConfigWithSchema(SupabaseConfigSchema, input, S3_FAMILY_NORMALIZER)
 }

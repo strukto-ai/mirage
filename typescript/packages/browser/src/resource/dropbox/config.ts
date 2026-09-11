@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 export interface DropboxConfig {
   clientId: string
@@ -33,13 +38,15 @@ const DropboxConfigSchema = z.object({
   rootPath: z.string().optional(),
   contentSearch: z.boolean().optional(),
   endpoint: z.string().optional(),
+  // Declared so parse keeps it, marked secret so no snapshot carries it.
+  refreshFn: secretSchema(
+    z.custom<NonNullable<DropboxConfig['refreshFn']>>((value) => typeof value === 'function'),
+  ).optional(),
 })
 
-// Only the redacted twin derives: the schema deliberately omits
-// `refreshFn`, which no snapshot can carry.
 export type DropboxConfigRedacted = RedactedConfig<
   ConfigOf<typeof DropboxConfigSchema>,
-  'clientSecret' | 'refreshToken'
+  'clientSecret' | 'refreshToken' | 'refreshFn'
 >
 
 export function redactDropboxConfig(config: DropboxConfig): DropboxConfigRedacted {
@@ -47,5 +54,5 @@ export function redactDropboxConfig(config: DropboxConfig): DropboxConfigRedacte
 }
 
 export function normalizeDropboxConfig(input: Record<string, unknown>): DropboxConfig {
-  return normalizeFields(input) as unknown as DropboxConfig
+  return parseConfigWithSchema(DropboxConfigSchema, input)
 }

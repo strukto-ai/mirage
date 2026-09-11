@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export const GCS_ENDPOINT = 'https://storage.googleapis.com'
@@ -39,16 +44,16 @@ const GCSConfigSchema = z.object({
   secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
   profile: z.string().optional(),
-  endpoint: z.string(),
-  region: z.string(),
+  endpoint: z.string().optional(),
+  region: z.string().optional(),
   timeoutMs: z.number().optional(),
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   proxy: secretStr().optional(),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the region and endpoint the redactor fills in.
+// Only the redacted twin derives; the redactor fills in the region and
+// endpoint the provider's rule resolves.
 export type GCSConfigRedacted = RedactedConfig<
   ConfigOf<typeof GCSConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
@@ -79,15 +84,5 @@ export function redactGcsConfig(config: GCSConfig): GCSConfigRedacted {
 }
 
 export function normalizeGcsConfig(input: Record<string, unknown>): GCSConfig {
-  return normalizeFields(input, {
-    rename: {
-      aws_profile: 'profile',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as GCSConfig
+  return parseConfigWithSchema(GCSConfigSchema, input, S3_FAMILY_NORMALIZER)
 }

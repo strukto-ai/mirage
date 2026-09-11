@@ -27,11 +27,12 @@ class RouteDeny(Exception):
     """The policy refused the line before anything ran.
 
     A legitimate policy outcome, not a mistake: execute() folds it into
-    the line's IOResult (exit 126, the reason on stderr) instead of
-    propagating like RouteError.
+    the line's IOResult (exit 126, ``Permission denied`` on stderr,
+    the reason on the ``refusal`` record) instead of propagating like
+    RouteError.
 
     Args:
-        reason (str): why the line was denied, shown on stderr.
+        reason (str): why the line was denied.
     """
 
     def __init__(self, reason: str) -> None:

@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const JaegerConfigSchema = z.object({
   host: z.string().optional(),
@@ -34,5 +37,5 @@ export function redactJaegerConfig(config: JaegerConfig): JaegerConfigRedacted {
 }
 
 export function normalizeJaegerConfig(input: Record<string, unknown>): JaegerConfig {
-  return normalizeFields(input) as unknown as JaegerConfig
+  return parseConfigWithSchema(JaegerConfigSchema, input)
 }

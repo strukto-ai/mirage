@@ -1,0 +1,20 @@
+# The reviewer's policy as a document: the block policy.py passes in
+# code, with the program in guard.py beside this file. One file, read by
+# both implementations:
+#
+#   ./python/.venv/bin/python examples/python/permissions/policy_yaml.py
+#   pnpm -C examples/typescript exec tsx permissions/policy_yaml.ts
+
+mode: WRITE
+
+mounts:
+  /repo:
+    resource: ram
+  /scratch:
+    resource: ram
+
+profiles:
+  reviewer:
+    policy:
+      script: guard.py
+      runtime: monty

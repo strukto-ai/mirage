@@ -31,6 +31,12 @@
         "has_provision": false,
         "has_write": true
       },
+      "redis": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "s3": {
         "filetypes": [],
         "has_aggregate": false,
@@ -54,6 +60,7 @@
       "onedrive",
       "opfs",
       "ram",
+      "redis",
       "s3",
       "sharepoint"
     ]

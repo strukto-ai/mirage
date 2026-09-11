@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { JSON_NAME } from './codec.ts'
@@ -31,7 +31,7 @@ const SCOPES: readonly Scope[] = [
     kind: 'note',
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 
@@ -121,7 +121,7 @@ describe('hierarchy makeStat', () => {
   it('proves a leaf exists through the parent listing', async () => {
     const index = new RAMIndexCacheStore()
     const st = await STAT(new FakeAccessor(), spec('/rooms/red/a.json'), index)
-    expect(st.type).toBe(FileType.JSON)
+    expect(st.content).toBe(ContentType.JSON)
     expect(st.size).toBe(7)
     await expect(
       STAT(new FakeAccessor(), spec('/rooms/red/nope.json'), index),
@@ -139,7 +139,9 @@ describe('hierarchy makeStat', () => {
 
   it('lets an override replace the whole shape', async () => {
     const bespoke: StatHook<FakeAccessor> = (_accessor, _match, _path, _index) =>
-      Promise.resolve(new FileStat({ name: 'custom', type: FileType.TEXT, size: 1 }))
+      Promise.resolve(
+        new FileStat({ name: 'custom', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+      )
     const stat = makeStat<FakeAccessor>(detectScope, READDIR, { overrides: { note: bespoke } })
     const accessor = new FakeAccessor()
     const st = await stat(accessor, spec('/rooms/red/a.json'))
@@ -151,7 +153,8 @@ describe('hierarchy makeStat', () => {
     const fromEntry: EntryStatFn = (_match, _path, entry) =>
       new FileStat({
         name: entry.vfsName,
-        type: FileType.JSON,
+        type: FileType.FILE,
+        content: ContentType.JSON,
         size: entry.size,
         extra: { doc_id: entry.id },
       })

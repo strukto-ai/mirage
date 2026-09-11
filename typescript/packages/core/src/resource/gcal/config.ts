@@ -12,11 +12,45 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  normalizeGoogleConfig as normalizeGCalConfig,
-  redactGoogleConfig as redactGCalConfig,
-} from '../../core/google/config.ts'
-export type {
-  GoogleConfig as GCalConfig,
-  GoogleConfigRedacted as GCalConfigRedacted,
-} from '../../core/google/config.ts'
+import { z } from 'zod'
+import { GoogleConfigSchema } from '../../core/google/config.ts'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  type RedactedConfig,
+} from '../secrets.ts'
+
+// Calendar-only knobs live here, not on the shared Google base, so a drive
+// or docs mount cannot be handed a time zone that means nothing to it.
+// `safeExtend` is zod's spelling for extending a refined object: the base's
+// credential check rides along, and unlike `.extend` it cannot throw at
+// import time should a key here ever shadow one of the base's. Mirrors
+// python's `GCalConfig(GoogleConfig)`.
+export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
+  // One zone for the whole mount, not one per calendar: the Calendar UI
+  // draws its whole grid in the primary zone, and per-calendar bucketing
+  // would make the same day directory name mean different 24-hour windows
+  // on different calendars. Defaults to the primary calendar's zone.
+  timeZone: z.string().optional(),
+  // Keep only calendars at or above this accessRole, e.g. "writer" for
+  // ones the agent can actually schedule into.
+  minAccessRole: z.string().optional(),
+  // Pin the day the rolling window centres on; test and snapshot use.
+  today: z.string().optional(),
+})
+
+export type GCalConfig = ConfigOf<typeof GCalConfigSchema>
+
+export type GCalConfigRedacted = RedactedConfig<
+  GCalConfig,
+  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
+>
+
+export function redactGCalConfig(config: GCalConfig): GCalConfigRedacted {
+  return redactConfigWithSchema(GCalConfigSchema, config) as unknown as GCalConfigRedacted
+}
+
+export function normalizeGCalConfig(input: Record<string, unknown>): GCalConfig {
+  return parseConfigWithSchema(GCalConfigSchema, input)
+}

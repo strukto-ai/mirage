@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OpRecord } from '../../observe/record.ts'
 import type { Resource } from '../../resource/base.ts'
-import { FileStat } from '../../types.ts'
+import { FileStat, FileType } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DriftPolicy } from '../../types.ts'
 import {
@@ -165,7 +165,7 @@ describe('liveOnlyMountPrefixes', () => {
 
 describe('checkDrift', () => {
   it('no-op when live fingerprint matches recorded', async () => {
-    const stats = { '/s3/a': new FileStat({ name: 'a', fingerprint: 'fp-a' }) }
+    const stats = { '/s3/a': new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'fp-a' }) }
     const mount = makeMount('/s3/', true)
     await expect(
       checkDrift(makeRegistry([mount]), makeStatFn(stats), '/s3/a', 'fp-a'),
@@ -173,7 +173,9 @@ describe('checkDrift', () => {
   })
 
   it('throws ContentDriftError when live differs from recorded', async () => {
-    const stats = { '/s3/a': new FileStat({ name: 'a', fingerprint: 'fp-live' }) }
+    const stats = {
+      '/s3/a': new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'fp-live' }),
+    }
     const mount = makeMount('/s3/', true)
     await expect(
       checkDrift(makeRegistry([mount]), makeStatFn(stats), '/s3/a', 'fp-snap'),
@@ -193,7 +195,7 @@ describe('checkDrift', () => {
   })
 
   it('no-op when live FileStat has null fingerprint (backend can not fingerprint)', async () => {
-    const stats = { '/s3/a': new FileStat({ name: 'a', fingerprint: null }) }
+    const stats = { '/s3/a': new FileStat({ name: 'a', type: FileType.FILE, fingerprint: null }) }
     const mount = makeMount('/s3/', true)
     await expect(
       checkDrift(makeRegistry([mount]), makeStatFn(stats), '/s3/a', 'fp-snap'),
@@ -201,7 +203,9 @@ describe('checkDrift', () => {
   })
 
   it('no-op when mount opts out of snapshot replay', async () => {
-    const stats = { '/gmail/a': new FileStat({ name: 'a', fingerprint: 'fp-live' }) }
+    const stats = {
+      '/gmail/a': new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'fp-live' }),
+    }
     const mount = makeMount('/gmail/', false)
     await expect(
       checkDrift(makeRegistry([mount]), makeStatFn(stats), '/gmail/a', 'fp-snap'),

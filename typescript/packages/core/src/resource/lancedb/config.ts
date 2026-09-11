@@ -12,24 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { REDACTED_SECRET, type RedactedConfig } from '../secrets.ts'
+import { z } from 'zod'
+import {
+  type ConfigOf,
+  parseConfigWithSchema,
+  REDACTED_SECRET,
+  type RedactedConfig,
+  secretStr,
+} from '../secrets.ts'
 
-export interface LanceDBConfig {
-  uri: string
-  apiKey?: string
-  region?: string
-  hostOverride?: string
-  storageOptions?: Record<string, string>
-  table?: string
-  groupBy?: string[]
-  idColumn?: string
-  titleColumn?: string
-  blobColumn?: string
-  blobExt?: string
-  textColumn?: string
-  vectorColumn?: string
-  searchLimit?: number
-  maxRows?: number
+const LanceDBConfigSchema = z.object({
+  uri: z.string(),
+  apiKey: secretStr().optional(),
+  region: z.string().optional(),
+  hostOverride: z.string().optional(),
+  storageOptions: z.record(z.string(), z.string()).optional(),
+  table: z.string().optional(),
+  groupBy: z.array(z.string()).optional(),
+  idColumn: z.string().optional(),
+  titleColumn: z.string().optional(),
+  blobColumn: z.string().optional(),
+  blobExt: z.string().optional(),
+  textColumn: z.string().optional(),
+  vectorColumn: z.string().optional(),
+  searchLimit: z.number().optional(),
+  maxRows: z.number().optional(),
+})
+
+export type LanceDBConfig = ConfigOf<typeof LanceDBConfigSchema>
+
+export function normalizeLanceDBConfig(input: Record<string, unknown>): LanceDBConfig {
+  return parseConfigWithSchema(LanceDBConfigSchema, input)
 }
 
 export interface LanceDBConfigResolved {

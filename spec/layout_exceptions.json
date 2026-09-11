@@ -1,5 +1,5 @@
 {
- "baseline": 249,
+ "baseline": 248,
  "baseline_reason": "Every divergence below the excused ones predates the gate and each needs its own decision, so --strict fails on a rise rather than demanding zero. Lower this number whenever a divergence is closed; the gate fails on a drop too, so an improvement cannot be silently spent. Items 31-37 of the cleanup plan are scoped from this report. The unit is one module, never one directory: a one-sided directory counts once per module inside it, so it cannot absorb new modules without moving the number. An excused directory is the deliberate exception -- it excuses its whole subtree, because the excuse is that there is no counterpart to mirror, which makes growth inside it expected rather than drift.",
  "directories": {
   "python_only": {

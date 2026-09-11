@@ -666,7 +666,9 @@ export async function fillEnv(
     try {
       secret = await fetchSecret(source, ref, sources)
     } catch (caught) {
-      console.warn(`secret fetch for ${listed} from ${source} failed: ${String(caught)}`)
+      // Not logged, the rule the whole secrets plane keeps: a log is a
+      // copy nobody redacted, and the source's own words ride the
+      // `cause` chain.
       throw new SecretsError(`${listed}: cannot fetch from ${source}`, { cause: caught })
     }
     for (const { name, key, record } of members) {

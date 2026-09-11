@@ -12,13 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export interface ChromaConfig {
-  host?: string
-  port?: number
-  ssl?: boolean
-  collectionName: string
-  slugField?: string
-  chunkIndexField?: string
+import { z } from 'zod'
+import { type ConfigOf, parseConfigWithSchema } from '../secrets.ts'
+
+const ChromaConfigSchema = z.object({
+  host: z.string().optional(),
+  port: z.number().optional(),
+  ssl: z.boolean().optional(),
+  collectionName: z.string(),
+  slugField: z.string().optional(),
+  chunkIndexField: z.string().optional(),
+})
+
+export type ChromaConfig = ConfigOf<typeof ChromaConfigSchema>
+
+export function normalizeChromaConfig(input: Record<string, unknown>): ChromaConfig {
+  return parseConfigWithSchema(ChromaConfigSchema, input)
 }
 
 export interface ChromaConfigResolved {

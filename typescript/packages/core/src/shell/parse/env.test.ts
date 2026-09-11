@@ -105,7 +105,8 @@ describe('envReads', () => {
     ['declare', true, [], []],
     ['declare -p A B', false, ['A', 'B'], []],
     ['declare -x OTHER=1', false, [], []],
-    // readonly and local print sets a managed entry can never be in.
+    // readonly and local print what the session already holds and
+    // never fetch to fill it.
     ['readonly', false, [], []],
     ['echo hi', false, [], []],
     // Inside a substitution counts; inside a definition does not.

@@ -5,5 +5,5 @@
   "overlay_snapshot_mtime": "2026-01-02T15:30:00",
   "overlay_orphan_before": true,
   "overlay_orphan_after": false,
-  "snapshot_ls_line": "-rw------x 1 500 dev 6 Jan  2 15:30 f.txt"
+  "snapshot_ls_line": "-rw------x 1 500 dev 6 Jan  2  2026 f.txt"
 }

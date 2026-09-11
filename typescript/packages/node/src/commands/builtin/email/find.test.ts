@@ -28,7 +28,7 @@ vi.mock('../../../core/email/stat.ts', async () => {
 
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { materialize } from '@struktoai/mirage-core/io/types'
-import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
+import { ContentType, FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import * as readdirMod from '../../../core/email/readdir.ts'
@@ -96,9 +96,13 @@ describe('email find', () => {
       if (DIRS.has(p.virtual))
         return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
       if (p.virtual === MSG)
-        return Promise.resolve(new FileStat({ name, size: 5, type: FileType.JSON }))
+        return Promise.resolve(
+          new FileStat({ name, size: 5, type: FileType.FILE, content: ContentType.JSON }),
+        )
       if (p.virtual === ATT)
-        return Promise.resolve(new FileStat({ name, size: 3, type: FileType.PDF }))
+        return Promise.resolve(
+          new FileStat({ name, size: 3, type: FileType.FILE, content: ContentType.PDF }),
+        )
       const e = new Error(`ENOENT: ${p.virtual}`) as Error & { code: string }
       e.code = 'ENOENT'
       return Promise.reject(e)

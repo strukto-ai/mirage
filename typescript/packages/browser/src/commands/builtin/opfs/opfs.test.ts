@@ -167,6 +167,6 @@ describe('OPFS commands — namespace attr overlay', () => {
     const statOut = await run('stat -c "%A" /data/hello.txt')
     const lsOut = await run('ls -l /data/hello.txt')
     expect(lsOut.stdout.split(' ')[0]).toBe(statOut.stdout.trim())
-    expect(lsOut.stdout).toContain('Jan  1 00:00')
+    expect(lsOut.stdout).toContain('Jan  1  2024')
   })
 })

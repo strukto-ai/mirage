@@ -240,6 +240,109 @@ def check_command_io(loaded: dict[str, dict[str, Any]], aliases: dict[str,
     return failures
 
 
+def snake_to_camel(snake: str) -> str:
+    """Reimplement ``snakeToCamel`` from ``utils/normalize.ts``.
+
+    Args:
+        snake (str): the python-side wire name.
+
+    Returns:
+        str: the camelCase spelling ``normalizeFields`` produces by default.
+    """
+    parts = snake.split("_")
+    return parts[0] + "".join(part[:1].upper() + part[1:]
+                              for part in parts[1:])
+
+
+def _fold(name: str) -> str:
+    return name.replace("_", "").lower()
+
+
+def check_configs(loaded: dict[str, dict[str, Any]],
+                  expansions: dict[str, list[str]], language_only: set[str],
+                  allowed: dict[str, dict[str,
+                                          str]], used: set[str]) -> list[str]:
+    """Per-resource config field sets: what a mount can be told.
+
+    Python dumps its pydantic wire names; TypeScript dumps the zod shape
+    behind each ``normalize*Config`` door plus the rename map the door
+    applies, and whether the door validates at all. A python wire name has
+    to land on a TypeScript field through the rename map or
+    ``snakeToCamel`` with the same requiredness, every TypeScript field has
+    to be reachable from some python name, and every door has to parse.
+    Node against browser is deliberately not compared here: the browser
+    S3 family authenticates with a presigned-URL provider where node holds
+    credentials, so the two runtimes' configs differ by design and the
+    node entry -- the one that mirrors python -- is the one compared.
+
+    Exemptions are keyed by resource then by field, spelled either way
+    (``refreshFn`` or ``refresh_fn``); ``validates`` exempts a door that
+    does not parse.
+
+    Args:
+        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        expansions (dict[str, list[str]]): python alias table.
+        language_only (set[str]): names present in one runtime only.
+        allowed (dict[str, dict[str, str]]): per-resource keys whose
+            divergence is documented, each mapped to its reason.
+        used (set[str]): collects the exemptions that fired.
+    """
+    py: dict[str, Any] = {}
+    for name, entry in loaded["python"].get("configs", {}).items():
+        for alias in expansions.get(name, [name]):
+            py[alias] = entry
+    ts = merge_variants(loaded, "configs", language_only)
+    failures = _membership(py, ts, language_only, "configs")
+
+    def exempt(name: str, key: str) -> bool:
+        table = {_fold(k): k for k in allowed.get(name, {})}
+        hit = table.get(_fold(key))
+        if hit is None:
+            return False
+        used.add(f"configs:{name}:{hit}")
+        return True
+
+    for name in sorted(set(py) & set(ts)):
+        a, b = py[name], ts[name]
+        if a is None and b is None:
+            continue
+        if a is None or b is None:
+            if exempt(name, "door"):
+                continue
+            side = "python" if a is None else "typescript"
+            failures.append(f"configs[{name}]: {side} declares no config "
+                            "class while the other side validates one")
+            continue
+        if not b.get("validates", False) and not exempt(name, "validates"):
+            failures.append(f"configs[{name}]: the typescript normalizer "
+                            "does not parse its schema")
+        rename: dict[str, str] = b.get("rename", {})
+        ts_fields: dict[str, Any] = b.get("fields", {})
+        reached: set[str] = set()
+        for wire, meta in sorted(a["fields"].items()):
+            target = rename.get(wire, snake_to_camel(wire))
+            reached.add(target)
+            if target not in ts_fields:
+                if exempt(name, wire):
+                    continue
+                failures.append(f"configs[{name}].{wire}: python declares it, "
+                                f"no typescript field answers to {target!r}")
+                continue
+            if bool(meta["required"]) != bool(ts_fields[target]["required"]):
+                if exempt(name, wire):
+                    continue
+                failures.append(f"configs[{name}].{wire}: required python="
+                                f"{meta['required']!r} typescript="
+                                f"{ts_fields[target]['required']!r}")
+        for field in sorted(set(ts_fields) - reached):
+            if exempt(name, field):
+                continue
+            failures.append(
+                f"configs[{name}].{field}: typescript declares it, "
+                "no python wire name reaches it")
+    return failures
+
+
 def _membership(py: dict[str, Any], ts: dict[str, Any],
                 language_only: set[str], label: str) -> list[str]:
     only_py = sorted(set(py) - set(ts) - language_only)
@@ -477,6 +580,7 @@ def main() -> int:
     io_aliases: dict[str, str] = exceptions["command_io_aliases"]["python"]
     variant_exempt: dict[str, dict[str, dict[
         str, str]]] = exceptions["variant_resource_facts"]
+    config_exempt: dict[str, dict[str, str]] = exceptions["config_fields"]
 
     py_specs = load_dir(PYTHON)
     ts_variants = [load_dir(p) for p in TYPESCRIPT]
@@ -514,10 +618,18 @@ def main() -> int:
     failures.extend(
         check_command_io(trees, io_aliases, language_only, io_exempt,
                          used_facts))
+    failures.extend(
+        check_configs(trees, expansions, language_only, config_exempt,
+                      used_facts))
     declared = {
         f"{name}:{key}"
         for table in (capability_exempt, io_exempt)
         for name, keys in table.items()
+        for key in keys
+    }
+    declared |= {
+        f"configs:{name}:{key}"
+        for name, keys in config_exempt.items()
         for key in keys
     }
     declared |= {

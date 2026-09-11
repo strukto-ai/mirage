@@ -531,7 +531,7 @@ def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
 
     async def probe():
         try:
-            await ws.ops.rmdir("/a/d")
+            await ws.fs.rmdir("/a/d")
         except OSError as exc:
             return exc
         return None

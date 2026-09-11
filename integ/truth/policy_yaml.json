@@ -1,0 +1,37 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/permissions/policy_yaml.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "permissions/policy_yaml.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "reviewer  cat /repo/notes.txt            [0] hello",
+    "                                         pre_command read the file and found no marker",
+    "reviewer  cat /repo/flagged.txt          [126] cat: Permission denied",
+    "                                         and refuses one that holds it",
+    "reviewer  echo x > /scratch/cold/f       [1] /scratch/cold/f: Permission denied",
+    "                                         pre_ops refuses a write at the op door",
+    "reviewer  export AWS_SECRET=x            [1] credentials are set by the operator",
+    "                                         pre_session refuses a credential",
+    "reviewer  export SAFE=1 && echo $SAFE    [0] 1",
+    "                                         silence where no hook objects",
+    "host      cat /repo/flagged.txt          [0] marker",
+    "                                         no profile, so no program",
+    "host      export AWS_SECRET=x            [0]",
+    "                                         the program is the profile's, not the workspace's"
+  ]
+}

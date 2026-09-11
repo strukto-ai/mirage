@@ -31,12 +31,18 @@ class EnvVar(BaseModel):
     The env block is one map, name -> entry. A bare string in the map
     is the literal short form and never reaches this model; a dict is
     validated through it. `value` and `from` are mutually exclusive and
-    one is required: `readonly`/`export` belong to a literal entry,
-    `ref`/`key`/`fetch` to a managed one.
+    one is required: `export` belongs to a literal entry, `ref`/`key`/
+    `fetch` to a managed one, and `readonly` to either.
 
     Args:
         value (str | None): the literal text; set = a literal entry.
-        readonly (bool): literal-only; compiles to `VarAttr.READONLY`.
+        readonly (bool): compiles to `VarAttr.READONLY`, so the agent
+            cannot assign to the name or unset it. Legal on a managed
+            entry too, and the point of one: the fetch writes the
+            record itself rather than going through the shell's
+            assignment gate, so mirage still fills a readonly
+            credential while a line that tries to overwrite it is
+            refused.
         export (bool): literal-only knob (default on); a managed entry
             is always exported.
         provider (str | None): registered source name; set = a managed
@@ -59,6 +65,15 @@ class EnvVar(BaseModel):
     key: str | None = None
     fetch: Literal["lazy", "eager"] = "lazy"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _from_ref(cls, value: Any) -> Any:
+        # A managed entry is a `SecretRef` plus this block's own knobs,
+        # so one can be handed here directly rather than spelled twice.
+        if isinstance(value, SecretRef):
+            return {"from": value.provider, "ref": value.ref, "key": value.key}
+        return value
+
     @model_validator(mode="after")
     def _one_kind(self) -> "EnvVar":
         if self.value is not None and self.provider is not None:
@@ -66,10 +81,6 @@ class EnvVar(BaseModel):
         if self.value is None and self.provider is None:
             raise ValueError("an env entry needs 'value' or 'from'")
         if self.provider is not None:
-            if self.readonly:
-                raise ValueError(
-                    "'readonly' is for literal entries; a readonly managed "
-                    "variable would change under refresh")
             if not self.export:
                 raise ValueError("'export' is for literal entries; a managed "
                                  "variable is always exported")
@@ -141,12 +152,18 @@ class OnePasswordConfig(BaseModel):
 
 
 class SecretRef(BaseModel):
-    """A source-config value read from a bootstrap source.
+    """A configured value read from a source instead of written down.
 
-    The config plane's pointer, spelled with the same three keys the
-    env plane's managed entry uses, so one grammar covers both. Only a
-    bootstrap source may back one: those take no config of their own,
-    which is what stops the table from needing a dependency graph.
+    The plane's one declarative pointer, spelled with the same three
+    keys the env plane's managed entry uses, so one grammar covers
+    every place a deployment points at a secret: a source's own config,
+    a mount's credential, a CLI's.
+
+    Where it may point is the *context's* rule, not this model's.
+    `SecretSource` narrows its own config to `BOOTSTRAP_SOURCES`,
+    because that is what stops the source table from needing a
+    dependency graph; a mount has no such limit, since every source is
+    already built by the time one is read.
 
     Args:
         provider (str): the bootstrap source, `env` or `dotenv`.
@@ -162,22 +179,12 @@ class SecretRef(BaseModel):
     ref: str = ""
     key: str
 
-    @model_validator(mode="after")
-    def _bootstrap_only(self) -> "SecretRef":
-        if self.provider not in BOOTSTRAP_SOURCES:
-            known = ", ".join(sorted(BOOTSTRAP_SOURCES))
-            raise ValueError(
-                f"a source config reads from {known}, not {self.provider!r}; "
-                "only a source that needs no config of its own can bootstrap "
-                "another")
-        return self
 
-
-class SourceBlock(BaseModel):
+class SecretSource(BaseModel):
     """One declared source instance: which source, and its config.
 
-    The `secrets:` block is one map, instance name -> block, spelled
-    the way `mounts:` and `clis:` are: a type beside a config. The
+    The `secrets:` block is one map, name -> source, spelled the way
+    `mounts:` and `clis:` are: a type beside a config. The
     instance name is what a managed env entry's `from:` names, so two
     accounts of one platform are two instances, and an instance named
     after its source reads as that source configured.
@@ -204,8 +211,21 @@ class SourceBlock(BaseModel):
     def _v_config(cls, value: Any) -> Any:
         if not isinstance(value, Mapping):
             return value
-        return {
-            name: (SecretRef.model_validate(item)
-                   if isinstance(item, Mapping) and "from" in item else item)
-            for name, item in value.items()
-        }
+        out: dict[str, Any] = {}
+        for name, item in value.items():
+            if not (isinstance(item, Mapping) and "from" in item):
+                out[name] = item
+                continue
+            ref = SecretRef.model_validate(item)
+            # The bootstrap restriction lives here, not on `SecretRef`:
+            # it is this model's reason, not the pointer's. A source
+            # needing config of its own cannot bootstrap another
+            # without a dependency graph.
+            if ref.provider not in BOOTSTRAP_SOURCES:
+                known = ", ".join(sorted(BOOTSTRAP_SOURCES))
+                raise ValueError(
+                    f"{name}: a source config reads from {known}, not "
+                    f"{ref.provider!r}; only a source that needs no config "
+                    "of its own can bootstrap another")
+            out[name] = ref
+        return out

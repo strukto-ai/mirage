@@ -35,7 +35,7 @@ ws = Workspace({"/hf/": resource}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -358,11 +358,11 @@ async def main():
     print(f"  object size: {size:,} bytes")
 
     async def measure(label: str, cmd: str) -> None:
-        before = sum(rec.bytes for rec in ws.ops.records)
+        before = sum(rec.bytes for rec in ws.fs.records)
         t0 = time.monotonic()
         r = await ws.execute(cmd)
         dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.ops.records) - before
+        net = sum(rec.bytes for rec in ws.fs.records) - before
         head = (await r.stdout_str()).strip().splitlines()
         first = head[0][:48] if head else ""
         print(f"  {label:42s} bytes={net:>10,}  t={dt:4.2f}s  "
@@ -396,7 +396,7 @@ async def main():
     await measure("non-cancellable: cat | wc -l", f"cat {target} | wc -l")
 
     # WRITE + REMOVE flow. HF Buckets silently drops zero-byte uploads,
-    # so we use ws.ops.write to push non-empty bytes (touch would no-op).
+    # so we use ws.fs.write to push non-empty bytes (touch would no-op).
     # Demonstrates parent-dir index cache invalidation: without it, `ls`
     # after a write would return stale entries.
     test_file = f"/hf/test-{uuid.uuid4().hex[:8]}.txt"
@@ -404,7 +404,7 @@ async def main():
     print(f"\n=== WRITE + REMOVE FLOW (using {test_file}) ===")
 
     print(f"\n--- write '{test_file}' (14 bytes) ---")
-    await ws.ops.write(test_file, b"Hello, Mirage!")
+    await ws.fs.write(test_file, b"Hello, Mirage!")
     print("  written")
 
     print(f"\n--- stat {test_file} (should succeed) ---")

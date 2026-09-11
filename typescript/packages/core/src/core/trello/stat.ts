@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../../types.ts'
+import { ContentType, FileType } from '../../types.ts'
 import { entryStat, makeStat } from '../hierarchy/stat.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -20,15 +20,15 @@ import { detectScope } from './scope.ts'
 export const stat = makeStat(detectScope, readdir, {
   entryStats: {
     workspace: entryStat('workspace_id', FileType.DIRECTORY),
-    workspace_json: entryStat('workspace_id', FileType.JSON),
+    workspace_json: entryStat('workspace_id', ContentType.JSON),
     board: entryStat('board_id', FileType.DIRECTORY),
-    board_json: entryStat('board_id', FileType.JSON),
-    member: entryStat('member_id', FileType.JSON),
-    label: entryStat('label_id', FileType.JSON),
+    board_json: entryStat('board_id', ContentType.JSON),
+    member: entryStat('member_id', ContentType.JSON),
+    label: entryStat('label_id', ContentType.JSON),
     list: entryStat('list_id', FileType.DIRECTORY),
-    list_json: entryStat('list_id', FileType.JSON),
+    list_json: entryStat('list_id', ContentType.JSON),
     card: entryStat('card_id', FileType.DIRECTORY),
-    card_json: entryStat('card_id', FileType.JSON),
-    comments_jsonl: entryStat('card_id', FileType.TEXT),
+    card_json: entryStat('card_id', ContentType.JSON),
+    comments_jsonl: entryStat('card_id', ContentType.TEXT),
   },
 })

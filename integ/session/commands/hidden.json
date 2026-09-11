@@ -93,7 +93,7 @@
       "expect": {
         "exit": 126,
         "stdout": "",
-        "stderr": "git: policy denied: history is read-only here\n"
+        "stderr": "git: Permission denied\n"
       }
     },
     {

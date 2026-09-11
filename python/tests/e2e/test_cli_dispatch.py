@@ -131,11 +131,15 @@ async def test_command_tiers_key_on_the_installed_name():
         io = await ws.execute("h2 message send -t x hi", session_id="c")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
-        assert err == b"h2: policy denied: beta is read-only\n"
+        assert err == b"h2: Permission denied\n"
+        assert io.refusal is not None
+        assert io.refusal.reason == "beta is read-only"
         io = await ws.execute("h1 message send -t x hi", session_id="c")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
-        assert err.startswith(b"h1: requires approval: outbound needs a nod")
+        assert err == b"h1: Permission denied\n"
+        assert io.refusal is not None and io.refusal.kind == "pending"
+        assert io.refusal.reason.startswith("outbound needs a nod")
         (request, ) = ws.decisions.pending()
         assert request.command == "h1"
         await ws.decisions.answer(request.id, Outcome.ALLOW)
@@ -281,7 +285,8 @@ async def test_policy_sees_the_cli_fact():
     io = await workspace.execute("slack-eng message send -t x hi")
     assert io.exit_code == 126
     err = await materialize(io.stderr) if io.stderr else b""
-    assert b"policy denied" in err
+    assert err == b"slack-eng: Permission denied\n"
+    assert io.refusal is not None and io.refusal.kind == "deny"
     assert denied[-1] == "slack-eng"
     io = await workspace.execute("echo unaffected")
     assert io.exit_code == 0

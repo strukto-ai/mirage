@@ -39,6 +39,10 @@ describe('SSHConfig', () => {
     expect(c.identityFile).toBe('~/.ssh/id_ed25519')
   })
 
+  it('refuses a wrong-typed field instead of casting it through', () => {
+    expect(() => normalizeSshConfig({ host: 'example.com', port: '2222' })).toThrow(/port/)
+  })
+
   it('redacts passphrase too', () => {
     const c = redactSshConfig({
       host: 'example.com',

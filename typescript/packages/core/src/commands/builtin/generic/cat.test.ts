@@ -15,7 +15,7 @@
 import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { catGeneric } from './cat.ts'
 
@@ -47,7 +47,9 @@ async function* fileStream(path: string, pulled: string[]): AsyncIterable<Uint8A
 }
 
 function statFn(p: PathSpec): Promise<FileStat> {
-  return Promise.resolve(new FileStat({ name: p.virtual, size: 1, type: FileType.TEXT }))
+  return Promise.resolve(
+    new FileStat({ name: p.virtual, size: 1, type: FileType.FILE, content: ContentType.TEXT }),
+  )
 }
 
 describe('catGeneric multi-file streaming', () => {

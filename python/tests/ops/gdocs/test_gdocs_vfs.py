@@ -25,7 +25,7 @@ from mirage.resource.gdocs import GDocsConfig, GDocsResource
 def _make_gdocs_ops() -> Ops:
     resource = GDocsResource(
         config=GDocsConfig(client_id="x", refresh_token="y"))
-    return Workspace({"/gdocs/": resource}, mode=MountMode.READ).ops
+    return Workspace({"/gdocs/": resource}, mode=MountMode.READ).fs
 
 
 @pytest.mark.asyncio

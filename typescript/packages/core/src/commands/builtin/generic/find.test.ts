@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { IOResult } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { ContentType, type FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { findGeneric, linkResults } from './find.ts'
@@ -76,7 +76,12 @@ describe('generic command find', () => {
   //   find <file> -maxdepth 0 -> <file>   find <file> -mindepth 1 -> (empty)
   //   find <missing>          -> exit 1, find: '<path>': No such file or directory
   describe('start point that is not a directory', () => {
-    const fileStat = { name: 'a.txt', size: 6, type: FileType.TEXT } as FileStat
+    const fileStat = {
+      name: 'a.txt',
+      size: 6,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+    } as FileStat
 
     function unreachedFind(): Promise<string[]> {
       throw new Error('find op must not be called for a file start point')
@@ -298,7 +303,13 @@ describe('generic command find', () => {
 
   describe('-mtime reads timestamps through modifiedTs', () => {
     function linkViewOf(modified: string | null): LinkView {
-      const st = { name: 'l', size: 1, type: FileType.TEXT, modified } as FileStat
+      const st = {
+        name: 'l',
+        size: 1,
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+        modified,
+      } as FileStat
       return {
         statAt: () => null,
         children: () => [],

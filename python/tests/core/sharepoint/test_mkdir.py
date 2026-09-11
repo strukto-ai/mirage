@@ -4,7 +4,6 @@ from aioresponses import CallbackResult, aioresponses
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.client import GraphError
 from mirage.core.sharepoint.mkdir import mkdir
-from mirage.core.sharepoint.resolve import _drive_cache, _site_cache
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -15,7 +14,10 @@ _DRIVE = f"{_BASE}/drives/{_DRIVE_ID}"
 
 
 def _accessor() -> SharePointAccessor:
-    return SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
+    accessor.site_cache["Engineering"] = _SITE_ID
+    accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
+    return accessor
 
 
 def _spec(rel: str) -> PathSpec:
@@ -23,17 +25,6 @@ def _spec(rel: str) -> PathSpec:
     return PathSpec(resource_path=mount_key(virtual, "/sp"),
                     virtual=virtual,
                     directory=virtual)
-
-
-@pytest.fixture(autouse=True)
-def _seeded_caches():
-    _site_cache.clear()
-    _drive_cache.clear()
-    _site_cache["Engineering"] = _SITE_ID
-    _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-    yield
-    _site_cache.clear()
-    _drive_cache.clear()
 
 
 @pytest.mark.asyncio

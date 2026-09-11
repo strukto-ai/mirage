@@ -81,7 +81,7 @@ async def test_chmod_follows_symlink():
     _, out, _ = await _run(ws, "ls -l /data")
     # The mode lands on the target, not the link. The link's own row is
     # listed too and is wider, so the size column pads f.txt's 5.
-    assert "-rw-r----- 1 user user  5 Jan  1 00:00 f.txt" in out
+    assert "-rw-r----- 1 - -  5 Jan  1 00:00 f.txt" in out
     assert "lrwxrwxrwx" in out
 
 

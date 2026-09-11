@@ -13,9 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 const NotionConfigSchema = z.object({
   authProvider: secretSchema(
@@ -40,5 +44,5 @@ export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
  * wrong. Mirrors node's `normalizeNotionConfig`.
  */
 export function normalizeNotionConfig(input: Record<string, unknown>): NotionConfig {
-  return normalizeFields(input) as unknown as NotionConfig
+  return parseConfigWithSchema(NotionConfigSchema, input)
 }

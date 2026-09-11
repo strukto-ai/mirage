@@ -14,8 +14,8 @@
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
-import { FileType } from '../../types.ts'
-import { imageTypeForExtension } from '../../utils/filetype.ts'
+import { ContentType } from '../../types.ts'
+import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import { Codec, JSON_NAME } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope, type DetectFn, type ScopeMatch } from '../hierarchy/scope.ts'
@@ -49,7 +49,7 @@ export function scopesFor(config: QdrantConfigResolved): Scope[] {
       kind: 'row_json',
       segments: [...full, new Slot('row_id', JSON_NAME)],
       leaf: true,
-      filetype: FileType.TEXT,
+      filetype: ContentType.TEXT,
     }),
   )
   if (config.textField !== null) {
@@ -58,7 +58,7 @@ export function scopesFor(config: QdrantConfigResolved): Scope[] {
         kind: 'row_text',
         segments: [...full, new Slot('row_id', TXT)],
         leaf: true,
-        filetype: FileType.TEXT,
+        filetype: ContentType.TEXT,
       }),
     )
   }
@@ -69,7 +69,7 @@ export function scopesFor(config: QdrantConfigResolved): Scope[] {
         kind: 'row_blob',
         segments: [...full, new Slot('row_id', blob)],
         leaf: true,
-        filetype: imageTypeForExtension(config.blobExt),
+        filetype: contentTypeForExtension(config.blobExt),
       }),
     )
   }

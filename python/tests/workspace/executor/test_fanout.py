@@ -9,12 +9,19 @@ from mirage.commands.spec.types import spec_flag_names
 from mirage.io import IOResult
 from mirage.ops.types import NamespaceView
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.fanout import (_adjust_depth_texts,
                                               _fan_out_traversal,
                                               _filter_under_prefixes,
                                               _synthesize_find_mount_entries)
+
+
+def _shown_mount_entries(target, descendants, texts, raw, stat_path=None):
+    return "\n".join(p.raw_path
+                     for p in asyncio.run(
+                         _synthesize_find_mount_entries(
+                             target, descendants, texts, raw, stat_path)))
 
 
 class TraversalMount:
@@ -41,7 +48,14 @@ class TraversalMount:
         if self.error is not None:
             raise self.error
         stderr = b"backend failed\n" if self.exit_code else None
-        return self.output, IOResult(exit_code=self.exit_code, stderr=stderr)
+        return self.output, IOResult(
+            exit_code=self.exit_code,
+            stderr=stderr,
+            matched_runs=[[
+                PathSpec(
+                    virtual=row, directory=row, resource_path="", raw_path=row)
+                for row in self.output.decode().splitlines()
+            ]] if name == "find" else None)
 
 
 class TraversalRegistry:
@@ -59,58 +73,55 @@ def _mounts(*prefixes):
 
 def test_synthesize_no_expression_emits_all():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, [], "/") == "/ram\n/disk"
+    assert _shown_mount_entries("/", desc, [], "/") == "/ram\n/disk"
 
 
 def test_synthesize_positive_name():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, ["-name", "ram"],
-                                          "/") == "/ram"
+    assert _shown_mount_entries("/", desc, ["-name", "ram"], "/") == "/ram"
 
 
 def test_synthesize_honors_not():
     desc = _mounts("/ram/", "/disk/", "/notes/")
-    out = _synthesize_find_mount_entries("/", desc, ["-not", "-name", "ram"],
-                                         "/")
+    out = _shown_mount_entries("/", desc, ["-not", "-name", "ram"], "/")
     assert out == "/disk\n/notes"
 
 
 def test_synthesize_honors_or():
     desc = _mounts("/ram/", "/disk/", "/notes/")
-    out = _synthesize_find_mount_entries(
-        "/", desc, ["-name", "ram", "-o", "-name", "disk"], "/")
+    out = _shown_mount_entries("/", desc,
+                               ["-name", "ram", "-o", "-name", "disk"], "/")
     assert out == "/ram\n/disk"
 
 
 def test_synthesize_type_file_excludes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, ["-type", "f"], "/") == ""
+    assert _shown_mount_entries("/", desc, ["-type", "f"], "/") == ""
 
 
 def test_synthesize_type_dir_includes_mount_dirs():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, ["-type", "d"],
-                                          "/") == "/ram\n/disk"
+    assert _shown_mount_entries("/", desc, ["-type", "d"],
+                                "/") == "/ram\n/disk"
 
 
 def test_synthesize_maxdepth_window():
     desc = _mounts("/ram/", "/a/b/")
-    assert _synthesize_find_mount_entries("/", desc, ["-maxdepth", "1"],
-                                          "/") == "/ram\n/a"
+    assert _shown_mount_entries("/", desc, ["-maxdepth", "1"],
+                                "/") == "/ram\n/a"
 
 
 def test_synthesize_namespace_ancestors():
     desc = _mounts("/ghost/very/deep/")
-    assert _synthesize_find_mount_entries(
-        "/", desc, [], "/") == "/ghost\n/ghost/very\n/ghost/very/deep"
-    assert _synthesize_find_mount_entries(
-        "/ghost", desc, [], "/ghost") == "/ghost/very\n/ghost/very/deep"
+    assert _shown_mount_entries("/", desc, [],
+                                "/") == "/ghost\n/ghost/very\n/ghost/very/deep"
+    assert _shown_mount_entries("/ghost", desc, [],
+                                "/ghost") == "/ghost/very\n/ghost/very/deep"
 
 
 def test_synthesize_shared_ancestor_once():
     desc = _mounts("/a/b/", "/a/c/")
-    assert _synthesize_find_mount_entries("/", desc, [],
-                                          "/") == "/a\n/a/b\n/a/c"
+    assert _shown_mount_entries("/", desc, [], "/") == "/a\n/a/b\n/a/c"
 
 
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():
@@ -616,6 +627,30 @@ def test_ls_r_spanning_mounts_separates_every_group():
 
 def test_synthesize_respells_entries_with_the_typed_base():
     desc = _mounts("/ram/", "/disk/")
-    assert _synthesize_find_mount_entries("/", desc, [],
-                                          ".") == "./ram\n./disk"
-    assert _synthesize_find_mount_entries("/", desc, [], "") == "ram\ndisk"
+    assert _shown_mount_entries("/", desc, [], ".") == "./ram\n./disk"
+    assert _shown_mount_entries("/", desc, [], "") == "ram\ndisk"
+
+
+def test_synthesize_honors_the_time_window():
+    # -newermt lives beside the predicate tree; a mount point is held to
+    # it like every real row, so a future cutoff drops it and a past one
+    # keeps it, and a candidate that cannot be statted is dropped.
+    mounts = [TraversalMount("/child")]
+    stats = {
+        "/child":
+        FileStat(name="child",
+                 type=FileType.DIRECTORY,
+                 modified="2026-01-02T00:00:00Z")
+    }
+
+    async def stat_path(path):
+        return stats.get(path)
+
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2099-01-01"], "/",
+                                stat_path) == ""
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2020-01-01"], "/",
+                                stat_path) == "/child"
+    assert _shown_mount_entries("/", mounts, [], "/", stat_path) == "/child"
+    stats.clear()
+    assert _shown_mount_entries("/", mounts, ["-newermt", "2020-01-01"], "/",
+                                stat_path) == ""

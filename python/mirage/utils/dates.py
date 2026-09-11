@@ -29,6 +29,8 @@ _CALENDAR_UNITS = ("month", "year")
 _NUMBER_UNIT_RE = re.compile(r"([+-]?\d+)([a-z]+)\Z")
 _NUMBER_RE = re.compile(r"[+-]?\d+\Z")
 
+_EPOCH_RE = re.compile(r"@\s*[+-]?\d+(?:\.\d+)?")
+
 
 def _date_unit(word: str) -> str | None:
     unit = word.removesuffix("s") if word != "s" else word
@@ -165,10 +167,13 @@ def parse_date_expr(text: str,
     if not raw:
         return None
     if raw.startswith("@"):
-        try:
-            epoch = float(raw[1:])
-        except ValueError:
+        # gnulib's epoch grammar (findutils 4.10): blanks, a sign, a
+        # decimal count of seconds and a fraction with digits on both
+        # sides; `@0x1`, `@1e2`, `@1.` and `@.5` are not dates, however
+        # readily float() would take them.
+        if _EPOCH_RE.fullmatch(raw) is None:
             return None
+        epoch = float(raw[1:])
         return datetime.fromtimestamp(epoch, tz=timezone.utc if utc else None)
     try:
         return _localize(datetime.fromisoformat(raw), utc)

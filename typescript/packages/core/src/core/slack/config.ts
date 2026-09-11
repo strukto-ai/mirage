@@ -14,12 +14,12 @@
 
 import { z } from 'zod'
 import {
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
   secretStr,
 } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
 export const SlackConfigSchema = z.object({
   token: secretStr(),
@@ -36,5 +36,5 @@ export function redactSlackConfig(config: SlackConfig): SlackConfigRedacted {
 }
 
 export function normalizeSlackConfig(input: Record<string, unknown>): SlackConfig {
-  return normalizeFields(input) as unknown as SlackConfig
+  return parseConfigWithSchema(SlackConfigSchema, input)
 }

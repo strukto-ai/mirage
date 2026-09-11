@@ -53,7 +53,7 @@ async def opened(ws) -> LazyFile:
 async def ram_ws():
     """A workspace holding one binary blob."""
     with Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.ops.write(PATH, CONTENT)
+        await ws.fs.write(PATH, CONTENT)
         yield ws
 
 

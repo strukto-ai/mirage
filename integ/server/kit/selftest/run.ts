@@ -15,11 +15,13 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createConnection } from 'node:net'
 import type { ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../typescript/announce.ts'
+import { HEALTH_PATH, KEEP_ALIVE_TIMEOUT_MS } from '../typescript/http.ts'
 import { Prisma } from '../../../generated/selftest/index.js'
 import { clearTenants, deleteOrder, untenanted } from '../typescript/clear.ts'
 import type { Dmmf } from '../typescript/seed.ts'
@@ -75,6 +77,34 @@ async function launch(env: Record<string, string> = {}, argv: string[] = []): Pr
   })
   check('announce line matches ANNOUNCE_RE', ANNOUNCE_RE.test(first), first)
   return { child, endpoint: first.split('=').slice(1).join('='), stderr: () => err }
+}
+
+// The Keep-Alive header, read off the wire. It is hop-by-hop, so whether a
+// fetch surfaces it is the client's business; what the server SENDS is the
+// fact under test.
+function keepAliveHeader(endpoint: string): Promise<string> {
+  const { hostname, port } = new URL(endpoint)
+  return new Promise((resolve, reject) => {
+    let raw = ''
+    const sock = createConnection({ host: hostname, port: Number(port) }, () => {
+      sock.write(
+        `GET ${HEALTH_PATH} HTTP/1.1\r\nHost: ${hostname}\r\nConnection: keep-alive\r\n\r\n`,
+      )
+    })
+    sock.setEncoding('utf8')
+    sock.on('error', reject)
+    sock.on('data', (chunk: string) => {
+      raw += chunk
+      const end = raw.indexOf('\r\n\r\n')
+      if (end === -1) return
+      sock.destroy()
+      const line = raw
+        .slice(0, end)
+        .split('\r\n')
+        .find((l) => l.toLowerCase().startsWith('keep-alive:'))
+      resolve(line === undefined ? '' : line.slice('keep-alive:'.length).trim())
+    })
+  })
 }
 
 interface CallOpts {
@@ -924,6 +954,29 @@ async function main(): Promise<void> {
       rooted.child.kill('SIGTERM')
       rmSync(rootDir, { recursive: true, force: true })
     }
+
+    // The python host rides every backend on one aiohttp pool, which reuses a
+    // socket idle for up to 15s and never reads the timeout a server
+    // advertises. Node closes an idle keep-alive socket one second after its
+    // keepAliveTimeout, 5s by default, so a request written at that instant is
+    // answered with a disconnect, and aiohttp re-sends only an idempotent
+    // method: dropbox posts every read, and its grep died in CI with
+    // `Server disconnected` after a run of shell-only cases left the pool
+    // idle. The fake has to hold the socket past the pool's reuse window, and
+    // the header is where that promise is visible.
+    process.stdout.write('\n21. an idle keep-alive socket outlives the python pool reuse window\n')
+    const advertised = await keepAliveHeader(fake.endpoint)
+    eq(
+      'the server advertises the kit keep-alive timeout',
+      advertised,
+      `timeout=${String(KEEP_ALIVE_TIMEOUT_MS / 1000)}`,
+    )
+    const AIOHTTP_KEEPALIVE_S = 15
+    check(
+      'and it is longer than aiohttp will reuse an idle socket',
+      Number(advertised.replace('timeout=', '')) > AIOHTTP_KEEPALIVE_S,
+      advertised,
+    )
 
     process.stdout.write(`\nselftest: ${String(checks)} checks passed\n`)
   } finally {

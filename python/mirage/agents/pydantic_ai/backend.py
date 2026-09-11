@@ -70,7 +70,7 @@ class PydanticAIWorkspace(SandboxProtocol):
         return self._run(self.aread_bytes(path))
 
     async def aread_bytes(self, path: str) -> bytes:
-        ops = self._ws.ops
+        ops = self._ws.fs
         return await ops.read(path)
 
     def exists(self, path: str) -> bool:
@@ -78,7 +78,7 @@ class PydanticAIWorkspace(SandboxProtocol):
 
     async def aexists(self, path: str) -> bool:
         try:
-            await self._ws.ops.stat(path)
+            await self._ws.fs.stat(path)
         except (FileNotFoundError, ValueError):
             return False
         return True
@@ -130,7 +130,7 @@ class PydanticAIWorkspace(SandboxProtocol):
                     path: str,
                     offset: int = 0,
                     limit: int = 2000) -> str:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             data = await ops.read(path)
         except (FileNotFoundError, ValueError) as exc:
@@ -149,7 +149,7 @@ class PydanticAIWorkspace(SandboxProtocol):
         return self._run(self.awrite(path, content))
 
     async def awrite(self, path: str, content: str | bytes) -> WriteResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             await ops.stat(path)
             return WriteResult(error=f"Error: file '{path}' already exists")
@@ -184,7 +184,7 @@ class PydanticAIWorkspace(SandboxProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        ops = self._ws.ops
+        ops = self._ws.fs
         try:
             data = await ops.read(path)
         except (FileNotFoundError, ValueError):

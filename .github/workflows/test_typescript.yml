@@ -12,6 +12,7 @@ permissions:
       - integ/**
       - conformance/**
       - .github/workflows/test_typescript.yml
+      - .github/actions/setup-node-pnpm/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -39,11 +40,17 @@ jobs:
               - 'integ/**'
               - 'conformance/**'
               - '.github/workflows/test_typescript.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
 
   test:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: TypeScript (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "24"]
     services:
       redis:
         image: redis:7
@@ -58,17 +65,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
+          node-version: ${{ matrix.node-version }}
 
       - name: Install node-gyp
         run: npm install -g node-gyp
@@ -119,6 +119,10 @@ jobs:
           run integ/truth/typescript/disk_vfs.json
           run integ/truth/watch_delta.json
           run integ/truth/permissions.json
+          run integ/truth/policy.json
+          run integ/truth/policy_yaml.json
+          run integ/truth/ask.json
+          run integ/truth/ask_pending.json
           run integ/truth/typescript/custom_command.json
           run integ/truth/custom_resource.json
           run integ/truth/custom_cli.json
@@ -132,6 +136,7 @@ jobs:
           run integ/truth/typescript/redis_index.json
           run integ/truth/typescript/redis_cache.json
           run integ/truth/typescript/redis_vfs.json
+          run integ/truth/typescript/redis_browser.json
           run integ/truth/version_branching.json
           exit $bad
 
@@ -142,17 +147,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node 24
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: "24"
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install node-gyp
         run: npm install -g node-gyp
@@ -183,9 +181,7 @@ jobs:
         with:
           version: 10.32.1
 
-      # 24 rather than the 22 the test job uses: this step runs no project
-      # code, so it is free to track the newer line the integ workflow is
-      # already on. No `cache: pnpm` here on purpose: the audit step below
+      # No `cache: pnpm` here on purpose: the audit step below
       # resolves straight from the lockfile and never installs, so the pnpm
       # store does not exist and the post-run save fails path validation on
       # every cache miss.
@@ -199,8 +195,15 @@ jobs:
       # pins were the only thing between a published advisory and this
       # tree, and nothing re-checked them. Informational like the Python
       # audit: a fresh CVE reports without blocking a merge.
+      # The registry's quick-audit endpoint stalls for minutes at a time,
+      # and pnpm's defaults (a 60s socket timeout, two retries) reported
+      # that stall as a failed audit three runs out of four. A longer
+      # timeout and more retries ride it out; a real advisory still fails.
       - name: Audit dependencies for known vulnerabilities (informational)
         working-directory: typescript
+        env:
+          npm_config_fetch_timeout: "300000"
+          npm_config_fetch_retries: "5"
         run: pnpm audit --no-color
 
   gate:

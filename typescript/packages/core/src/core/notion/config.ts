@@ -14,16 +14,19 @@
 
 import { z } from 'zod'
 import {
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
   secretStr,
 } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
 export const NotionConfigSchema = z.object({
   apiKey: secretStr(),
   baseUrl: z.string().optional(),
+  // Pins the `Notion-Version` header. Absent means the generation the client
+  // is written against; `ntn --notion-version` overrides it per line.
+  apiVersion: z.string().optional(),
 })
 
 export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
@@ -35,5 +38,5 @@ export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
 }
 
 export function normalizeNotionConfig(input: Record<string, unknown>): NotionConfig {
-  return normalizeFields(input) as unknown as NotionConfig
+  return parseConfigWithSchema(NotionConfigSchema, input)
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { truncateGeneric } from './truncate.ts'
 
@@ -31,7 +31,10 @@ async function runTruncate(size: string, current = 10): Promise<number[]> {
   await truncateGeneric(
     [fPath()],
     size,
-    () => Promise.resolve(new FileStat({ name: 'f', type: FileType.TEXT, size: current })),
+    () =>
+      Promise.resolve(
+        new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, size: current }),
+      ),
     (_p, length) => {
       lengths.push(length)
       return Promise.resolve()
@@ -130,7 +133,10 @@ describe('truncate sizes', () => {
       truncateGeneric(
         [fPath()],
         value,
-        () => Promise.resolve(new FileStat({ name: 'f', type: FileType.TEXT, size: 10 })),
+        () =>
+          Promise.resolve(
+            new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, size: 10 }),
+          ),
         (_p, length) => {
           truncateCalls.push(length)
           return Promise.resolve()

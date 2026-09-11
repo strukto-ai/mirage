@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 export interface BoxConfig {
   // API origin override (e.g. an integ fake). Defaults to api.box.com.
@@ -54,13 +59,23 @@ const BoxConfigSchema = z.object({
   refreshToken: secretStr().optional(),
   enterpriseId: z.string().optional(),
   accessToken: secretStr().optional(),
+  // The callbacks are declared so parse keeps them, and marked secret so
+  // no snapshot carries them.
+  refreshFn: secretSchema(
+    z.custom<NonNullable<BoxConfig['refreshFn']>>((value) => typeof value === 'function'),
+  ).optional(),
+  onRefreshTokenRotated: secretSchema(
+    z.custom<NonNullable<BoxConfig['onRefreshTokenRotated']>>(
+      (value) => typeof value === 'function',
+    ),
+  ).optional(),
 })
 
-// Only the redacted twin derives: the schema deliberately omits the
-// callbacks, which no snapshot can carry.
+// Only the redacted twin derives; the interface above stays the readable
+// statement of the callback signatures.
 export type BoxConfigRedacted = RedactedConfig<
   ConfigOf<typeof BoxConfigSchema>,
-  'clientSecret' | 'refreshToken' | 'accessToken'
+  'clientSecret' | 'refreshToken' | 'accessToken' | 'refreshFn' | 'onRefreshTokenRotated'
 >
 
 export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
@@ -68,9 +83,9 @@ export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
 }
 
 export function normalizeBoxConfig(input: Record<string, unknown>): BoxConfig {
-  return normalizeFields(input, {
+  return parseConfigWithSchema(BoxConfigSchema, input, {
     rename: {
       developer_token: 'accessToken',
     },
-  }) as unknown as BoxConfig
+  })
 }

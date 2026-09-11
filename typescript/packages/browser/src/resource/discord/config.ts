@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretSchema,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
@@ -41,5 +45,5 @@ export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacte
  * wrong. Mirrors node's `normalizeDiscordConfig`.
  */
 export function normalizeDiscordConfig(input: Record<string, unknown>): DiscordConfig {
-  return normalizeFields(input) as unknown as DiscordConfig
+  return parseConfigWithSchema(DiscordConfigSchema, input)
 }

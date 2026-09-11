@@ -39,7 +39,7 @@ from mirage.types import (ConsistencyPolicy, FileStat, FileType, PathSpec,
 from mirage.utils.errors import MISS_ERRORS, no_mount
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import norm_dir
+from mirage.utils.path import norm_dir, owner_prefix
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.workspace.dispatcher.lineage import require_turf_writable
@@ -347,6 +347,7 @@ class Dispatcher:
         if op == "rename" and isinstance(dst, PathSpec):
             await pre_ops_gate(policies, op, dst, True, mount.prefix,
                                _session_id())
+        await mount.ensure_ready()
         caches_reads = mount.resource.caches_reads
         # The file cache is keyed on the path alone, and what a command
         # put there is the rendered read. A raw read asks for a
@@ -357,8 +358,9 @@ class Dispatcher:
 
         if caches_reads and not raw and op in DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
-            if cached is not None and await self._reconciler.may_serve_cached(
-                    mount, path.virtual):
+            if (cached is not None and await self._reconciler.may_serve_cached(
+                    mount, path.virtual) and not mount.retiring
+                    and self._namespace.try_mount_for(path.virtual) is mount):
                 # The cache holds the whole object, so a ranged read is
                 # answered by slicing it, never by handing back the
                 # whole file: the window is what the caller asked for
@@ -873,19 +875,34 @@ class Dispatcher:
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 
-    async def apply_io(self,
-                       io: IOResult,
-                       records: list[OpRecord] | None = None) -> None:
+    async def apply_io(
+            self,
+            io: IOResult,
+            records: list[OpRecord] | None = None,
+            is_cacheable: Callable[[str], bool] | None = None) -> None:
         await cache_io.apply_io(self._cache,
                                 io,
-                                self.is_cacheable_path,
+                                is_cacheable or self.is_cacheable_path,
                                 records=records)
+
+    def capture_cacheable_paths(self) -> Callable[[str], bool]:
+        """Bind deferred command results to the mounts that produced them."""
+        mounts = {m.prefix: m for m in self._namespace.registry.mounts()}
+
+        def cacheable(path: str) -> bool:
+            prefix = owner_prefix(mounts, path)
+            original = mounts.get(prefix) if prefix is not None else None
+            mount = self._namespace.try_mount_for(path)
+            return (mount is not None and original is mount
+                    and not mount.retiring and mount.resource.caches_reads)
+
+        return cacheable
 
     def is_cacheable_path(self, path: str) -> bool:
         mount = self._namespace.try_mount_for(path)
         if mount is None:
             return False
-        return mount.resource.caches_reads
+        return not mount.retiring and mount.resource.caches_reads
 
     async def invalidate_all_after_remote(self) -> None:
         """Drop the file cache and every mount index wholesale.
@@ -903,7 +920,11 @@ class Dispatcher:
         if self._cache is not None:
             await self._cache.clear()
         for mount in self._namespace.registry.mounts():
-            await mount.resource.index.clear()
+            if mount.cache_manager is not None:
+                await mount.cache_manager.clear_index(mount.resource.index)
+            else:
+                async with mount.use():
+                    await mount.resource.index.clear()
 
     async def invalidate_after_write(self,
                                      mount: MountEntry,

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode } from '../types.ts'
@@ -40,8 +40,14 @@ const BATTERY = [
 
 const open: Workspace[] = []
 
+beforeEach(() => {
+  // Independent workspaces must render the same fixture timestamps.
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-01-01T00:00:00Z') })
+})
+
 afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
+  vi.useRealTimers()
 })
 
 async function seeded(): Promise<Workspace> {

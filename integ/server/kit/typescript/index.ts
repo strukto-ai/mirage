@@ -45,7 +45,14 @@ export {
   loadFixture,
   schemaFor,
 } from './fixture.ts'
-export { HEALTH_PATH, RESET_PATH, createKitServer, makeRuntime, parseBody } from './http.ts'
+export {
+  HEALTH_PATH,
+  KEEP_ALIVE_TIMEOUT_MS,
+  RESET_PATH,
+  createKitServer,
+  makeRuntime,
+  parseBody,
+} from './http.ts'
 export { Minter } from './mint.ts'
 export { checkArgv, parseFixture, parseFixtureRoot, parseFlagPort, parsePort } from './port.ts'
 export { parseRange, rangeHeaderOf, rangeReply } from './range.ts'

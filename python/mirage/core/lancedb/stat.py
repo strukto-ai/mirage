@@ -26,7 +26,7 @@ from mirage.core.lancedb.readdir import readdir_for
 from mirage.core.lancedb.scope import detect_for, table_of
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import image_type_for_extension
+from mirage.utils.filetype import content_type_for_extension
 
 
 def _name_of(path: PathSpec) -> str:
@@ -46,7 +46,7 @@ async def _stat_row(accessor: LanceDBAccessor, match: ScopeMatch,
     if not await table_exists(accessor, table_of(config, match)):
         raise enoent(path.virtual)
     if match.kind == "row_blob":
-        file_type = image_type_for_extension(config.blob_ext)
+        file_type = content_type_for_extension(config.blob_ext)
     else:
         file_type = ContentType.TEXT
     # The row-dir readdir seeds exact card sizes; blob entries and a cold

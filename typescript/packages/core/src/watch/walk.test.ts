@@ -62,13 +62,22 @@ describe('entryOf', () => {
   it('prefers the backend fingerprint over the composite', () => {
     const entry = entryOf(
       '/m/f.txt',
-      new FileStat({ name: 'f.txt', size: 3, modified: 'T', fingerprint: 'etag-1' }),
+      new FileStat({
+        name: 'f.txt',
+        type: FileType.FILE,
+        size: 3,
+        modified: 'T',
+        fingerprint: 'etag-1',
+      }),
     )
     expect(entry.fingerprint).toBe('etag-1')
   })
 
   it('falls back to mtime|size when the backend has no version', () => {
-    const entry = entryOf('/m/f.txt', new FileStat({ name: 'f.txt', size: 3, modified: 'T' }))
+    const entry = entryOf(
+      '/m/f.txt',
+      new FileStat({ name: 'f.txt', type: FileType.FILE, size: 3, modified: 'T' }),
+    )
     expect(entry.fingerprint).toBe('T|3')
   })
 })
@@ -103,14 +112,26 @@ describe('ReaddirWalk', () => {
         stat: new FileStat({ name: 'data', type: FileType.DIRECTORY }),
       },
       '/m/data/a.txt': {
-        stat: new FileStat({ name: 'a.txt', size: 5, modified: 'T1', fingerprint: 'fp-a' }),
+        stat: new FileStat({
+          name: 'a.txt',
+          type: FileType.FILE,
+          size: 5,
+          modified: 'T1',
+          fingerprint: 'fp-a',
+        }),
       },
       '/m/data/sub': {
         children: ['/m/data/sub/deep.txt'],
         stat: new FileStat({ name: 'sub', type: FileType.DIRECTORY }),
       },
       '/m/data/sub/deep.txt': {
-        stat: new FileStat({ name: 'deep.txt', size: 4, modified: 'T2', fingerprint: 'fp-d' }),
+        stat: new FileStat({
+          name: 'deep.txt',
+          type: FileType.FILE,
+          size: 4,
+          modified: 'T2',
+          fingerprint: 'fp-d',
+        }),
       },
     })
     const entries = await collect(walk, root('/m/data', 'data'))
@@ -146,7 +167,13 @@ describe('ReaddirWalk', () => {
         stat: new FileStat({ name: 'data', type: FileType.DIRECTORY }),
       },
       '/m/data/here.txt': {
-        stat: new FileStat({ name: 'here.txt', size: 1, modified: 'T', fingerprint: 'fp' }),
+        stat: new FileStat({
+          name: 'here.txt',
+          type: FileType.FILE,
+          size: 1,
+          modified: 'T',
+          fingerprint: 'fp',
+        }),
       },
     })
     const entries = await collect(walk, root('/m/data', 'data'))
@@ -165,7 +192,15 @@ describe('ReaddirWalk', () => {
       return Promise.resolve(path.virtual === '/m/data' ? ['/m/data/a.txt'] : [])
     }
     const stat = (): Promise<FileStat> =>
-      Promise.resolve(new FileStat({ name: 'a.txt', size: 1, modified: 'T', fingerprint: 'fp' }))
+      Promise.resolve(
+        new FileStat({
+          name: 'a.txt',
+          type: FileType.FILE,
+          size: 1,
+          modified: 'T',
+          fingerprint: 'fp',
+        }),
+      )
     const walk = new ReaddirWalk(readdir as never, stat as never)
     await collect(walk, root('/m/data', 'data'))
     await collect(walk, root('/m/data', 'data'))

@@ -51,7 +51,7 @@ function makeDeps(
           name,
           size: entry.size ?? null,
           modified: entry.modified ?? null,
-          type: entry.size === undefined ? FileType.DIRECTORY : FileType.TEXT,
+          type: entry.size === undefined ? FileType.DIRECTORY : FileType.FILE,
         }),
       )
     },
@@ -235,26 +235,63 @@ describe('isEnoent', () => {
 const SEARCH_DIRS = new Set(['/', '/guides', '/api'])
 const SEARCH_SIZES: Record<string, number> = { '/api/reference': 900 }
 
-function makeSearchDeps(keys: string[]): SearchFindDeps<unknown> & { resolveCalls: number } {
+function makeSearchDeps(
+  keys: string[],
+): SearchFindDeps<unknown> & { resolveCalls: number; probes: PathSpec[] } {
   const deps = {
     resolveCalls: 0,
+    probes: [] as PathSpec[],
     walk: () => Promise.resolve([...keys]),
     resolvePath: (_a: unknown, spec: PathSpec) => {
+      deps.probes.push(spec)
       deps.resolveCalls += 1
       return Promise.resolve({ isDir: SEARCH_DIRS.has(rstripSlash(spec.mountPath) || '/') })
     },
-    stat: (_a: unknown, spec: PathSpec) =>
-      Promise.resolve(
+    stat: (_a: unknown, spec: PathSpec) => {
+      deps.probes.push(spec)
+      return Promise.resolve(
         new FileStat({
           name: spec.mountPath.split('/').pop() ?? '',
+          type: SEARCH_DIRS.has(rstripSlash(spec.mountPath) || '/')
+            ? FileType.DIRECTORY
+            : FileType.FILE,
           size: SEARCH_SIZES[spec.mountPath] ?? null,
         }),
-      ),
+      )
+    },
   }
   return deps
 }
 
 describe('makeSearchBackedFind — -empty', () => {
+  it.each(
+    ['', '/knowledge', '/api', '/nested/mount'].flatMap((prefix) =>
+      ['/', '/api'].map((root) => ({ prefix, root })),
+    ),
+  )(
+    'preserves both paths for metadata probes at $prefix with root $root',
+    async ({ prefix, root }) => {
+      const keys = root === '/' ? ['/', '/api', '/api/reference'] : ['/api', '/api/reference']
+      const deps = makeSearchDeps(keys)
+      const path = PathSpec.fromStrPath(rstripSlash(prefix + root) || '/', root.replace(/^\//, ''))
+      expect(
+        await makeSearchBackedFind(deps)(
+          {},
+          path,
+          { type: 'f', minSize: 1 },
+          new RAMIndexCacheStore(),
+        ),
+      ).toEqual(['/api/reference'])
+      expect(new Set(deps.probes.map((p) => JSON.stringify([p.virtual, p.resourcePath])))).toEqual(
+        new Set(
+          keys.map((key) =>
+            JSON.stringify([rstripSlash(prefix + key) || '/', key.replace(/^\//, '')]),
+          ),
+        ),
+      )
+    },
+  )
+
   it('reads a directory off the walked list', async () => {
     const deps = makeSearchDeps(['/', '/guides', '/api', '/api/reference'])
     const find = makeSearchBackedFind(deps)

@@ -32,21 +32,28 @@ def _session() -> Session:
 
 def test_element_is_set():
     session = _session()
-    assert element_is_set(session, "m[a]")
-    assert not element_is_set(session, "m[zz]")
-    # The subscript is the key verbatim, never arithmetic.
-    assert not element_is_set(session, "m[1+1]")
-    assert element_is_set(session, "m[@]")
-    assert element_is_set(session, "arr[2]")
-    assert not element_is_set(session, "arr[9]")
-    assert element_is_set(session, "arr[@]")
-    # A bare name over an array checks element 0 (the literal key "0"
-    # for an associative one).
-    assert element_is_set(session, "m")
-    assert element_is_set(session, "arr")
-    assert element_is_set(session, "s5")
-    assert not element_is_set(session, "missing")
-    assert not element_is_set(session, "not a ref")
+
+    async def run():
+        assert await element_is_set(session, "m[a]")
+        assert not await element_is_set(session, "m[zz]")
+        # The subscript is the key verbatim, never arithmetic.
+        assert not await element_is_set(session, "m[1+1]")
+        assert await element_is_set(session, "m[@]")
+        assert await element_is_set(session, "arr[2]")
+        assert not await element_is_set(session, "arr[9]")
+        assert await element_is_set(session, "arr[@]")
+        # An indexed subscript is arithmetic, and what it assigns lands.
+        assert await element_is_set(session, "arr[j=2]")
+        assert session.vars["j"].value == "2"
+        # A bare name over an array checks element 0 (the literal key
+        # "0" for an associative one).
+        assert await element_is_set(session, "m")
+        assert await element_is_set(session, "arr")
+        assert await element_is_set(session, "s5")
+        assert not await element_is_set(session, "missing")
+        assert not await element_is_set(session, "not a ref")
+
+    asyncio.run(run())
 
 
 def test_assign_element_assoc_and_append():

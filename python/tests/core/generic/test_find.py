@@ -24,18 +24,21 @@ class Ops:
         self.walk_kwargs: dict[str, object] = {}
         self.resolve_calls = 0
         self.stat_calls = 0
+        self.probes: list[PathSpec] = []
 
     async def walk(self, accessor, path, index, **kwargs):
         self.walk_kwargs = kwargs
         return list(self.keys)
 
     async def resolve_path(self, accessor, spec, index):
+        self.probes.append(spec)
         self.resolve_calls += 1
         return Resolved(is_dir=spec.mount_path.rstrip("/") in
                         {d.rstrip("/")
                          for d in DIRS} or spec.mount_path == "/")
 
     async def stat(self, accessor, spec, index):
+        self.probes.append(spec)
         self.stat_calls += 1
         return FileStat(type=FileType.FILE,
                         name=spec.mount_path.rsplit("/", 1)[-1],
@@ -47,6 +50,23 @@ def build(ops: Ops):
 
 
 ROOT = PathSpec.from_str_path("/", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "/knowledge", "/api", "/nested/mount"])
+@pytest.mark.parametrize("root", ["/", "/api"])
+async def test_metadata_probes_preserve_both_paths(prefix, root):
+    keys = ["/", "/api", "/api/reference"
+            ] if root == "/" else ["/api", "/api/reference"]
+    ops = Ops(keys=keys)
+    path = PathSpec.from_str_path((prefix + root).rstrip("/") or "/",
+                                  root.lstrip("/"))
+    assert await build(ops)(object(), path, type="f",
+                            min_size=1) == ["/api/reference"]
+    assert {(p.virtual, p.resource_path)
+            for p in ops.probes} == {((prefix + key).rstrip("/")
+                                      or "/", key.lstrip("/"))
+                                     for key in keys}
 
 
 @pytest.mark.asyncio

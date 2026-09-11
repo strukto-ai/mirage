@@ -32,7 +32,7 @@ def test_filetype_fns_passed_to_generic_command():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.ops.write("/tmp/a.txt", b"hello"))
+    asyncio.run(ws.fs.write("/tmp/a.txt", b"hello"))
 
     received = {}
 
@@ -68,7 +68,7 @@ def test_filetype_fns_not_passed_to_filetype_command():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.ops.write("/tmp/a.parquet", b"fake-parquet"))
+    asyncio.run(ws.fs.write("/tmp/a.parquet", b"fake-parquet"))
 
     received = {}
 
@@ -103,7 +103,7 @@ def test_filetype_fns_empty_when_no_variants():
         {"/tmp/": RAMResource()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.ops.write("/tmp/a.txt", b"hello"))
+    asyncio.run(ws.fs.write("/tmp/a.txt", b"hello"))
 
     received = {}
 
@@ -139,8 +139,8 @@ def test_a_directory_does_not_route_to_a_filetype_handler():
 
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     _run(ws, "mkdir -p /data/dir.tally")
-    asyncio.run(ws.ops.write("/data/dir.tally/inside.txt", b"nested\n"))
-    asyncio.run(ws.ops.write("/data/file.tally", b"raw\n"))
+    asyncio.run(ws.fs.write("/data/dir.tally/inside.txt", b"nested\n"))
+    asyncio.run(ws.fs.write("/data/file.tally", b"raw\n"))
     ws._registry.mount_for("/data/").register(
         RegisteredCommand("cat",
                           spec=SPECS["cat"],

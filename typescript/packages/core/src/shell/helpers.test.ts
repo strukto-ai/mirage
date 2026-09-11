@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
 import {
   braceExpands,
@@ -435,5 +436,29 @@ describe('literalWord', () => {
     expect(braceExpands('{abc}')).toBe(false)
     expect(braceExpands('a,b')).toBe(false)
     expect(braceExpands('{a,b')).toBe(false)
+  })
+})
+
+describe('claimedDescriptor', () => {
+  function statement(parser: ShellParser, line: string): [TSNodeLike, TSNodeLike] {
+    const stmt = parser.parse(line).children[0]
+    const command = stmt?.namedChildren[0]
+    if (stmt === undefined || command === undefined) throw new Error(`no statement in ${line}`)
+    return [stmt, command]
+  }
+
+  it('reads a bare 0 touching the operator as the descriptor', async () => {
+    const parser = await getTestParser()
+    const [stmt, command] = statement(parser, 'cat a 0>&-')
+    expect(getParts(command).map((c) => c.text)).toEqual(['cat', 'a'])
+    expect(getRedirects(stmt)[1].map((r) => [r.fd, r.target])).toEqual([[0, -1]])
+    const [spaced, spacedCommand] = statement(parser, 'cat a 0 >&-')
+    expect(getParts(spacedCommand).map((c) => c.text)).toEqual(['cat', 'a', '0'])
+    expect(getRedirects(spaced)[1].map((r) => r.fd)).toEqual([1])
+    const [chained] = statement(parser, 'cat 0<a >b')
+    expect(getRedirects(chained)[1].map((r) => [r.fd, r.target])).toEqual([
+      [0, 'a'],
+      [1, 'b'],
+    ])
   })
 })

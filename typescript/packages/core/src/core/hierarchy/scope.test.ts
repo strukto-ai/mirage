@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { Codec, INT_JSON, JSON_NAME, RAW } from './codec.ts'
 import { Slot, Scope, makeDetectScope, matchScope } from './scope.ts'
@@ -37,19 +37,19 @@ const SCOPES: readonly Scope[] = [
     kind: 'note',
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'revision',
     segments: ['rooms', new Slot('room'), 'revisions', new Slot('rev', INT_JSON)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({
     kind: 'tagged',
     segments: ['tags', new Slot('tag', new Codec({ validate: (t) => t === t.toLowerCase() }))],
     leaf: true,
-    filetype: FileType.TEXT,
+    filetype: ContentType.TEXT,
   }),
 ]
 

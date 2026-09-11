@@ -16,7 +16,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Protocol, TypeAlias
+from typing import (TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Protocol,
+                    TypeAlias)
 
 from pydantic import (BaseModel, ConfigDict, Field, NonNegativeInt,
                       model_validator)
@@ -70,11 +71,12 @@ class FileType(str, Enum):
     FileStat.content. Distinct from ContentType, which is only a
     rendering hint for a FILE.
 
-    The full POSIX set is enumerated so the model is comprehensive. Only
-    DIRECTORY, FILE and SYMLINK are produced today; CHAR_DEVICE,
-    BLOCK_DEVICE, FIFO and SOCKET are declared but not yet emitted, and
-    the render/derivation tables (find letter, st_mode bits, ls char)
-    grow a row for one the moment a backend starts producing it.
+    The full POSIX set is enumerated so the model is comprehensive.
+    DIRECTORY, FILE, SYMLINK and CHAR_DEVICE (the /dev mount) are
+    produced today; BLOCK_DEVICE, FIFO and SOCKET are declared but not
+    yet emitted, and the render/derivation tables (find letter, st_mode
+    bits, ls char) grow a row for one the moment a backend starts
+    producing it.
     """
     DIRECTORY = "directory"
     FILE = "file"
@@ -520,8 +522,9 @@ class Producer:
     boundary; merge keeps the rightmost producer, so this names the
     command whose stream the caller actually sees. Post-layer policies
     (output caps today; budgets and attribution later) read it as
-    context. Facts only: policy decisions never travel on the
-    envelope.
+    context. Facts only: no policy reads a decision off the
+    envelope; the one a chain hands down is written beside it as
+    ``IOResult.refusal`` after the last hook has spoken.
 
     Args:
         command (str): the producing command's name.
@@ -534,6 +537,40 @@ class Producer:
     command: str
     prefixes: tuple[str, ...] = ()
     declared: Limit | None = None
+
+
+RefusalKind = Literal["deny", "pending", "failed"]
+RefusalScope = Literal["command", "operand"]
+
+
+@dataclass(frozen=True, slots=True)
+class Refusal:
+    """Why a line did not run, for the caller that reads the result.
+
+    stderr keeps bash's voice (``<cmd>: Permission denied``), which
+    says nothing about who refused or why; this record carries that
+    beside the envelope, so a host or an agent adapter can show the
+    reason without the shell having to. None on every run that was
+    not refused, and absent on the 127 ``command not found`` row,
+    which must not reveal that the word names anything.
+
+    Args:
+        kind (RefusalKind): ``deny`` for a policy's refusal, ``pending``
+            for an ask the host has not answered, ``failed`` for a
+            policy that raised and so refused by default.
+        reason (str): the policy's own words, or the ask's.
+        policy (str): the class name of the policy that spoke; empty
+            for an ask, which belongs to the host rather than a policy.
+        scope (RefusalScope): whether the whole command or one operand
+            was refused.
+        ask_id (str | None): the approval id to quote, for ``pending``.
+    """
+
+    kind: RefusalKind
+    reason: str
+    policy: str = ""
+    scope: RefusalScope = "command"
+    ask_id: str | None = None
 
 
 class VFSWriteOp(str, Enum):

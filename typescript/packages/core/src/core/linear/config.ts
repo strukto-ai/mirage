@@ -14,12 +14,12 @@
 
 import { z } from 'zod'
 import {
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
   secretStr,
 } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
 export const LinearConfigSchema = z.object({
   apiKey: secretStr(),
@@ -37,5 +37,5 @@ export function redactLinearConfig(config: LinearConfig): LinearConfigRedacted {
 }
 
 export function normalizeLinearConfig(input: Record<string, unknown>): LinearConfig {
-  return normalizeFields(input) as unknown as LinearConfig
+  return parseConfigWithSchema(LinearConfigSchema, input)
 }

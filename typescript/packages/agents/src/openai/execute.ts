@@ -15,18 +15,31 @@
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { tool } from '@openai/agents'
 import { z } from 'zod'
+import type { Refusal } from '@struktoai/mirage-core/types'
+import { withRefusal } from '../io-text.ts'
 
-function formatExecuteOutput(stdout: string, stderr: string, exitCode: number): string {
+function formatExecuteOutput(
+  stdout: string,
+  stderr: string,
+  exitCode: number,
+  refusal: Refusal | null,
+): string {
   const sections = [`exit code: ${String(exitCode)}`]
   if (stdout !== '') sections.push(`stdout:\n${stdout}`)
-  if (stderr !== '') sections.push(`stderr:\n${stderr}`)
+  const err = withRefusal(stderr, refusal)
+  if (err !== '') sections.push(`stderr:\n${err}`)
   return sections.join('\n')
 }
 
 async function executeOutput(ws: Workspace, command: string): Promise<string> {
   try {
     const result = await ws.execute(command)
-    return formatExecuteOutput(result.stdoutText, result.stderrText, result.exitCode)
+    return formatExecuteOutput(
+      result.stdoutText,
+      result.stderrText,
+      result.exitCode,
+      result.refusal,
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return `Unable to execute command: ${message}`

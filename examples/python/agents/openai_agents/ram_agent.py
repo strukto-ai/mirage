@@ -67,7 +67,7 @@ async def main():
         cat_result = await ws.execute(f"cat {path}")
         print(f"cat {path}:\n{(cat_result.stdout or b'').decode()}")
 
-    records = ws.ops.records
+    records = ws.fs.records
     if records:
         total = sum(r.bytes for r in records)
         print(f"--- {len(records)} ops, {total:,} bytes ---")

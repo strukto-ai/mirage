@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHELL_ARGV0 } from '../../shell/constants.ts'
+import { RANDOM, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
@@ -64,7 +64,13 @@ export interface ChildShellState {
   execStderr: string | null
   execStderrAppend: boolean
   execStdin: Uint8Array | null
+  execStdinUnreadable: boolean
+  execStdinIdentity: string | null
   execOpened: Set<string>
+  randomState: number | null
+  randomSeed: string | null
+  randomLast: number
+  pipeStatus: readonly number[]
 }
 
 /**
@@ -159,6 +165,12 @@ export interface SessionInit {
    */
   script?: ProfileScript | null
   /**
+   * The name of the profile the session runs under, null for an
+   * unrestricted session. What an owner-rendering command prints as the
+   * group. Stamped by the profile like script, so it persists.
+   */
+  profile?: string | null
+  /**
    * The host's standing answers to asked lines (design 3.9): session
    * state like functions and cwd, persisted, read and written through
    * the manager by id so a fork shares them, never another session's.
@@ -226,9 +238,9 @@ export function varsFromDict(
  */
 export function varsFromEntries(entries: EnvEntries): Record<string, ShellVar> {
   const out = ownRecord<ShellVar>()
-  const exported: ReadonlySet<VarAttr> = new Set([VarAttr.Export])
   for (const [name, rawEntry] of Object.entries(entries)) {
     const entry = EnvVarSchema.parse(typeof rawEntry === 'string' ? { value: rawEntry } : rawEntry)
+    const attrs = new Set<VarAttr>()
     if (entry.from !== undefined) {
       const managed: ManagedRef = {
         source: entry.from,
@@ -236,10 +248,11 @@ export function varsFromEntries(entries: EnvEntries): Record<string, ShellVar> {
         key: entry.key ?? name,
         eager: entry.fetch === 'eager',
       }
-      out[name] = { value: null, attrs: exported, managed }
+      attrs.add(VarAttr.Export)
+      if (entry.readonly) attrs.add(VarAttr.Readonly)
+      out[name] = { value: null, attrs, managed }
       continue
     }
-    const attrs = new Set<VarAttr>()
     if (entry.export) attrs.add(VarAttr.Export)
     if (entry.readonly) attrs.add(VarAttr.Readonly)
     out[name] = makeVar(entry.value ?? null, attrs)
@@ -369,6 +382,24 @@ export class Session {
   // frozen things in bash, and each refuses in its own voice.
   readonlyFunctions: Set<string>
   lastExitCode: number
+  // `${PIPESTATUS[@]}`: the exit status of every segment of the last
+  // pipeline, where a simple command is a one-segment pipeline. Written
+  // only through `recordStatus` (`executor/statement.ts`), the one door
+  // `$?` goes through as well, so the two can never disagree.
+  // Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
+  // expands to nothing until a statement records one.
+  pipeStatus: readonly number[] = []
+  // A pipeline's per-segment statuses, parked by `handlePipe` for the
+  // statement boundary that closes it to claim. Null between them.
+  pipeStatusPending: readonly number[] | null = null
+  // `$RANDOM`'s generator state and the seed word it last consumed
+  // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
+  // parent gets its own state back (`snapshot` / `restore`).
+  randomState: number | null = null
+  randomSeed: string | null = null
+  randomLast = 0
+  // Scoped by the executing node so diagnostics follow its redirections.
+  diagnostics: (string | Uint8Array)[] = []
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -432,8 +463,18 @@ export class Session {
   execStderr: string | null = null
   execStderrAppend = false
   execStdin: Uint8Array | null = null
+  execStdinUnreadable = false
+  // What fd 0 holds when it is not its own read end: CLOSED after `exec
+  // <&-`, a writing stream's identity after `exec 0<&1`, so a later dup
+  // from fd 0 copies that (`exec 2<&0` then writes to stdout) or is
+  // refused (`0: Bad file descriptor`); null for the read end itself.
+  execStdinIdentity: string | null = null
   execOpened = new Set<string>()
   localFrames: Map<string, ShellVar | null>[] = []
+  // The caller's `RANDOM` marker for every frame that shadows the name,
+  // innermost last: a local `RANDOM` is an ordinary variable for the
+  // function's extent, and the generator resumes when it returns.
+  localRandom: (string | null)[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   hiddenPaths: HiddenPaths | null
   shownPaths: ShownPaths | null
@@ -441,6 +482,7 @@ export class Session {
   hideReasons: readonly HideReason[]
   commands: AdmissionRules | null
   script: ProfileScript | null
+  profile: string | null
   decisions: readonly Decision[]
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -466,6 +508,7 @@ export class Session {
     this.hideReasons = init.hideReasons ?? []
     this.commands = init.commands ?? null
     this.script = init.script ?? null
+    this.profile = init.profile ?? null
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
@@ -521,11 +564,13 @@ export class Session {
       hideReasons: overrides.hideReasons ?? this.hideReasons,
       commands: overrides.commands ?? this.commands,
       script: overrides.script ?? this.script,
+      profile: overrides.profile ?? this.profile,
       decisions: overrides.decisions ?? this.decisions,
       generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.pipeStatus = [...this.pipeStatus]
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
     forked.abortSignal = this.abortSignal
@@ -540,6 +585,8 @@ export class Session {
     forked.execStderr = this.execStderr
     forked.execStderrAppend = this.execStderrAppend
     forked.execStdin = this.execStdin
+    forked.execStdinUnreadable = this.execStdinUnreadable
+    forked.execStdinIdentity = this.execStdinIdentity
     forked.execOpened = new Set(this.execOpened)
     return forked
   }
@@ -608,7 +655,7 @@ export class Session {
    * their null prototype across the round trip.
    */
   snapshot(): ChildShellState {
-    return {
+    const saved: ChildShellState = {
       cwd: this.cwd,
       logicalCwd: this.logicalCwd,
       sourceDepth: this.sourceDepth,
@@ -629,8 +676,27 @@ export class Session {
       execStderr: this.execStderr,
       execStderrAppend: this.execStderrAppend,
       execStdin: this.execStdin,
+      execStdinUnreadable: this.execStdinUnreadable,
+      execStdinIdentity: this.execStdinIdentity,
       execOpened: new Set(this.execOpened),
+      randomState: this.randomState,
+      randomSeed: this.randomSeed,
+      randomLast: this.randomLast,
+      // Every pipeline segment sees the statuses of the pipeline before
+      // this one, however many statements of its own it runs.
+      pipeStatus: [...this.pipeStatus],
     }
+    // A child shell reseeds `$RANDOM`, as bash's does: the generator
+    // starts fresh, and the seed word follows the stored value so an
+    // assignment the parent made is not replayed as a reseed. `unset
+    // RANDOM` stays unset.
+    if (this.randomSeed !== RANDOM_UNSET) {
+      const word = this.vars[RANDOM]?.value
+      this.randomSeed = typeof word === 'string' ? word : null
+      this.randomState = null
+      this.randomLast = 0
+    }
+    return saved
   }
 
   /** Put back a snapshot, ending a child shell. */
@@ -655,6 +721,12 @@ export class Session {
     this.execStderr = state.execStderr
     this.execStderrAppend = state.execStderrAppend
     this.execStdin = state.execStdin
+    this.execStdinUnreadable = state.execStdinUnreadable
+    this.execStdinIdentity = state.execStdinIdentity
+    this.randomState = state.randomState
+    this.randomSeed = state.randomSeed
+    this.randomLast = state.randomLast
+    this.pipeStatus = state.pipeStatus
     this.execOpened = state.execOpened
   }
 
@@ -743,6 +815,7 @@ export class Session {
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
     if (this.script !== null) data.script = scriptToJSON(this.script)
+    if (this.profile !== null) data.profile = this.profile
     if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToJSON)
     return data
   }
@@ -761,6 +834,7 @@ export class Session {
     hidden_vars?: { names?: string[]; patterns?: string[] } | null
     commands?: CommandsJSON | null
     script?: ScriptJSON | null
+    profile?: string | null
     decisions?: DecisionJSON[] | null
     generation?: number
   }): Session {
@@ -800,6 +874,7 @@ export class Session {
           : [],
       commands: data.commands != null ? commandsFromJSON(data.commands) : null,
       script: data.script != null ? scriptFromJSON(data.script) : null,
+      profile: data.profile ?? null,
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })
   }

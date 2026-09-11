@@ -92,7 +92,7 @@ class WorkspaceWriter:
         parent = key.rsplit("/", 1)[0]
         if parent != key:
             await self.create_dir(parent)
-        await self._ws.ops.write(self._virtual(key), data)
+        await self._ws.fs.write(self._virtual(key), data)
 
     async def delete(self, path: str) -> None:
         """Args:
@@ -112,7 +112,7 @@ class WorkspaceWriter:
             path (str): Mount-relative source.
             to (str): Mount-relative destination.
         """
-        await self._ws.ops.rename(self._virtual(path), self._virtual(to))
+        await self._ws.fs.rename(self._virtual(path), self._virtual(to))
 
     async def close(self) -> None:
         await self._ws.close()

@@ -16,7 +16,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { CommandOpts } from '../../config.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../utils/errors.ts'
 import {
   dirAwareStat,
@@ -127,7 +127,7 @@ function dirOps(implicitDirs: readonly string[], explicitDirs: readonly string[]
       if (implicitDirs.includes(p.virtual)) return Promise.reject(enoent(p))
       if (explicitDirs.includes(p.virtual))
         return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY }))
-      return Promise.resolve(new FileStat({ name: p.virtual, size: 0 }))
+      return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE, size: 0 }))
     },
     isMounted: () => true,
   }
@@ -261,7 +261,9 @@ describe('withRuleGuard', () => {
       readStream: stream,
       stat: (_a, path) => {
         calls.push(['stat', path.virtual])
-        return Promise.resolve(new FileStat({ name: 'k', type: FileType.TEXT, size: 1 }))
+        return Promise.resolve(
+          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+        )
       },
       isMounted: () => true,
       rename: (_a, src, dst) => {
@@ -350,7 +352,9 @@ describe('withPolicyGuard', () => {
       readStream: stream,
       stat: (_a, path) => {
         calls.push(['stat', path.virtual])
-        return Promise.resolve(new FileStat({ name: 'k', type: FileType.TEXT, size: 1 }))
+        return Promise.resolve(
+          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+        )
       },
       isMounted: () => true,
       copy: (_a, src, dst) => {
@@ -499,7 +503,9 @@ function keyedReadOps(opts: {
         return Promise.resolve(new FileStat({ name: p.virtual, type: FileType.DIRECTORY }))
       const hit = files[p.virtual]
       if (hit !== undefined)
-        return Promise.resolve(new FileStat({ name: p.virtual, size: hit.length }))
+        return Promise.resolve(
+          new FileStat({ name: p.virtual, type: FileType.FILE, size: hit.length }),
+        )
       return Promise.reject(enoent(p))
     },
     isMounted: () => true,
@@ -628,7 +634,9 @@ describe('withHiddenGuard rmdir under namespace children', () => {
         throw new Error('not used')
       },
       stat: (_a, path) =>
-        Promise.resolve(new FileStat({ name: path.virtual, type: FileType.TEXT })),
+        Promise.resolve(
+          new FileStat({ name: path.virtual, type: FileType.FILE, content: ContentType.TEXT }),
+        ),
       isMounted: () => true,
       unlink: (_a, path) => {
         removed.push(path.virtual)
@@ -666,7 +674,9 @@ describe('withHiddenGuard rmdir under namespace children', () => {
         throw new Error('not used')
       },
       stat: (_a, path) =>
-        Promise.resolve(new FileStat({ name: path.virtual, type: FileType.TEXT })),
+        Promise.resolve(
+          new FileStat({ name: path.virtual, type: FileType.FILE, content: ContentType.TEXT }),
+        ),
       isMounted: () => true,
       unlink: () => Promise.reject(new Error('never reached')),
       rmdir: () => Promise.reject(notEmpty()),

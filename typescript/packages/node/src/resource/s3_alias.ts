@@ -16,9 +16,14 @@ import { S3Resource } from './s3/s3.ts'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { remapCommandsResource, remapOpsResource } from '@struktoai/mirage-core/resource/s3/remap'
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { S3_FAMILY_NORMALIZER } from './s3/config.ts'
 import type { S3Config, S3ConfigRedacted } from './s3/config.ts'
 
 /**
@@ -52,33 +57,40 @@ export interface S3AliasConfig {
   proxy?: string
 }
 
-// Only the entries `snakeToCamel` would get wrong: python spells the profile
-// `aws_profile`, the endpoint `endpoint_url`, path style `path_style`, and
-// states timeouts in seconds where TypeScript uses milliseconds. Every other
-// field maps by default, so it does not belong here.
-const RENAME: Record<string, string> = {
-  aws_profile: 'profile',
-  endpoint_url: 'endpoint',
-  path_style: 'forcePathStyle',
-  timeout: 'timeoutMs',
-}
-
-const TRANSFORM = {
-  timeout: (v: unknown): unknown => (typeof v === 'number' ? v * 1000 : v),
-}
-
-const ALIAS_SCHEMA = z.object({
+const ALIAS_SHAPE = {
   bucket: z.string(),
   accessKeyId: secretStr().optional(),
   secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
   profile: z.string().optional(),
-  region: z.string(),
-  endpoint: z.string(),
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
+}
+
+// What a caller may write, split the way python splits
+// `RegionEndpointConfig` from `FixedEndpointConfig`: a regional provider
+// must name its region and may override the endpoint; a self-hosted
+// gateway must name its endpoint and may name a region.
+const REGION_ALIAS_SCHEMA = z.object({
+  ...ALIAS_SHAPE,
+  region: z.string(),
+  endpoint: z.string().optional(),
+})
+
+const FIXED_ALIAS_SCHEMA = z.object({
+  ...ALIAS_SHAPE,
+  region: z.string().optional(),
+  endpoint: z.string(),
+})
+
+// The resolved shape, with the region and endpoint each provider's rule
+// fills in, is what redaction and snapshot state see.
+const ALIAS_SCHEMA = z.object({
+  ...ALIAS_SHAPE,
+  region: z.string(),
+  endpoint: z.string(),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with
@@ -131,7 +143,7 @@ export function makeRegionAlias<C extends S3AliasConfig & { region: string }, R>
         endpoint: resolvedEndpoint(config),
       }) as unknown as R,
     normalize: (input) =>
-      normalizeFields(input, { rename: RENAME, transform: TRANSFORM }) as unknown as C,
+      parseConfigWithSchema(REGION_ALIAS_SCHEMA, input, S3_FAMILY_NORMALIZER) as unknown as C,
   }
 }
 
@@ -161,7 +173,7 @@ export function makeFixedAlias<C extends S3AliasConfig & { endpoint: string }, R
         forcePathStyle: pathStyle(config),
       }) as unknown as R,
     normalize: (input) =>
-      normalizeFields(input, { rename: RENAME, transform: TRANSFORM }) as unknown as C,
+      parseConfigWithSchema(FIXED_ALIAS_SCHEMA, input, S3_FAMILY_NORMALIZER) as unknown as C,
   }
 }
 

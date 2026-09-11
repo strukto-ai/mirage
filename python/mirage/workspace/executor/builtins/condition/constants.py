@@ -26,6 +26,9 @@ INT_COMPARATORS: Mapping[str, Callable[[int, int], bool]] = {
 
 STRING_BINARY = frozenset({"=", "==", "!="})
 NUMERIC_BINARY = frozenset(INT_COMPARATORS)
+# `-nt`/`-ot` compare modification times; `-ef` asks for the same file,
+# which mirage answers as the same resolved path (a mount has no device
+# or inode to compare, and one path names one entry).
 FILE_PAIR_BINARY = frozenset({"-nt", "-ot", "-ef"})
 STRING_UNARY = frozenset({"-n", "-z"})
 # `-v NAME` asks whether the variable (or the `NAME[sub]` element) is

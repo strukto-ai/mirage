@@ -65,7 +65,7 @@ async def main():
     if result.stderr:
         print("STDERR:", await result.stderr_str())
     print(f"Exit code: {result.exit_code}")
-    records = ws.ops.records
+    records = ws.fs.records
     total = sum(r.bytes for r in records)
     print(f"Stats: {len(records)} ops, {total} bytes transferred")
 

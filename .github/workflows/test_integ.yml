@@ -12,6 +12,7 @@ permissions:
       - python/**
       - typescript/**
       - .github/workflows/test_integ.yml
+      - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/integ-battery-setup/action.yml
   pull_request:
     branches: [main]
@@ -20,6 +21,12 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# uv times a request out after 30s by default, which a hosted runner has
+# hit on one stalled wheel download (numpy, pulled in by the lancedb
+# extra) before any test ran.
+env:
+  UV_HTTP_TIMEOUT: 120
 
 jobs:
   changes:
@@ -45,11 +52,13 @@ jobs:
               - 'data/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             ts:
               - 'integ/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             database:
               - 'integ/resources/mongodb/**'
@@ -76,11 +85,13 @@ jobs:
               - 'python/mirage/resource/qdrant/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             data:
               - 'integ/**'
               - 'python/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             observability:
               - 'integ/server/langfuse_compose.yml'
@@ -104,6 +115,7 @@ jobs:
               - 'typescript/packages/node/src/resource/langfuse/**'
               - 'typescript/packages/node/src/resource/jaeger/**'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
             fuse:
               - 'integ/fuse/**'
               - 'integ/check_json.py'
@@ -114,6 +126,7 @@ jobs:
               - 'typescript/packages/node/src/workspace/fuse.ts'
               - 'typescript/packages/node/src/workspace.ts'
               - '.github/workflows/test_integ.yml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
             nfs:
               - 'integ/nfs/**'
@@ -142,17 +155,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install TypeScript dependencies
         working-directory: typescript
@@ -197,6 +203,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
@@ -223,6 +230,27 @@ jobs:
 
       - name: Run virtual-root mount switching (ram/disk/yaml)
         run: ./python/.venv/bin/python integ/root.py
+
+      - name: Cache the lifecycle policy engine
+        id: lifecycle-quickjs-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-v0.16.2
+
+      - name: Download the lifecycle policy engine
+        if: steps.lifecycle-quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download v0.16.2 -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Run workspace lifecycle JSON scenarios (Python)
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: ./python/.venv/bin/python integ/lifecycle/run.py
 
   integ-ts:
     needs: [changes, typescript-build]
@@ -260,17 +288,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -303,12 +324,12 @@ jobs:
       - name: Start MinIO
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:latest && break
+            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:latest server /data
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
@@ -342,6 +363,10 @@ jobs:
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ
         run: pnpm exec tsx cross_commands.ts
+
+      - name: Run workspace lifecycle JSON scenarios (Node and browser wrappers)
+        working-directory: integ
+        run: pnpm exec tsx lifecycle/run.ts
 
       - name: Generate integ Prisma clients
         working-directory: integ
@@ -644,11 +669,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       chroma:
-        image: chromadb/chroma:latest
+        image: chromadb/chroma:1.5.9
         ports:
           - 8000:8000
       qdrant:
-        image: qdrant/qdrant:latest
+        image: qdrant/qdrant:v1.19.0
         ports:
           - 6333:6333
     env:
@@ -669,23 +694,17 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -775,6 +794,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
@@ -784,17 +804,10 @@ jobs:
       # The notion fake is a Node server shared by both hosts, so this
       # otherwise python-only job needs node to start it. No package build is
       # required: the notion fake imports only node, prisma and the MCP sdk.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -846,7 +859,7 @@ jobs:
         run: |
           docker run -d --name minio-watch -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:latest server /data
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
@@ -981,7 +994,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install libfuse (fusermount3 + libfuse2 for mfusepy, libfuse3 headers for fuse-native)
+      # fuse-native does not build against any of these. Its binding.gyp
+      # takes both its include dir and its library from the vendored
+      # fuse-shared-library-linux npm package, so what apt is for here is
+      # fusermount3 (to mount at all) and libfuse2 (for python's mfusepy).
+      - name: Install libfuse (fusermount3 to mount, libfuse2 for mfusepy)
         run: |
           sudo apt-get update
           sudo apt-get install -y fuse3 libfuse3-dev libfuse2t64 || \
@@ -995,6 +1012,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
@@ -1006,19 +1024,12 @@ jobs:
           ./python/.venv/bin/python integ/fuse/fuse.py 2>&1 \
             | ./python/.venv/bin/python integ/check_json.py integ/fuse/truth_fuse.json
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
-      - name: Install dependencies (builds @zkochan/fuse-native against libfuse3)
+      - name: Install dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
@@ -1082,6 +1093,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies (base + fuse only)
@@ -1153,6 +1165,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies (base + fuse only)
@@ -1477,23 +1490,17 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install TypeScript dependencies
         working-directory: typescript
@@ -1541,24 +1548,24 @@ jobs:
       - name: Start MinIO
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:latest && break
+            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:latest server /data
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
 
       - name: Start the docker sandbox container (user-provisioned)
-        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:stable-slim sleep infinity
+        run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:trixie-slim sleep infinity
 
       - name: Start the ssh sandbox host (user-provisioned)
         run: |
           ssh-keygen -t ed25519 -N '' -f "$MIRAGE_INTEG_SSH_KEY"
-          docker run -d --name mirage-integ-ssh-box -p 2222:22 debian:stable-slim sleep infinity
+          docker run -d --name mirage-integ-ssh-box -p 2222:22 debian:trixie-slim sleep infinity
           docker exec mirage-integ-ssh-box sh -c \
             'apt-get update -qq && apt-get install -y -qq openssh-server >/dev/null && mkdir -p /run/sshd /root/.ssh'
           # docker cp keeps the host uid on the file; sshd's StrictModes
@@ -1601,23 +1608,17 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript
@@ -1645,7 +1646,7 @@ jobs:
         run: |
           docker run -d --name mirage-jaeger \
             -p 16686:16686 -p 4317:4317 -p 4318:4318 \
-            jaegertracing/jaeger:latest
+            jaegertracing/jaeger:2.20.0
           ./python/.venv/bin/python integ/server/jaeger_seed.py \
             --host http://localhost:16686 --otlp http://localhost:4318
 
@@ -1701,23 +1702,17 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: "0.12.9"
           enable-cache: true
 
       - name: Install Python dependencies
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6.0.10
-        with:
-          version: 10.32.1
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: '24'
-          cache: pnpm
-          cache-dependency-path: typescript/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: typescript

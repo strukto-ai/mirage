@@ -1,0 +1,69 @@
+---
+title: Upstash Redis
+icon: /images/upstash-logo.svg
+description: Mount an Upstash Redis database from Node or from a browser page with one URL.
+---
+
+[Upstash](https://upstash.com) serves a Redis database through two doors: the Redis protocol over
+TLS on port 6379, and a [REST API](https://upstash.com/docs/redis/features/restapi) on the same
+host. `@struktoai/mirage-node` uses the first and `@struktoai/mirage-browser` the second, and one
+configuration covers both, because the token Upstash prints is also the database password.
+
+## Config
+
+The Upstash console prints a `redis-cli` line for the database. Its URL is the whole
+configuration, in Node and in the browser alike.
+
+```ts
+import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
+// or: import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-node'
+
+const redis = new RedisResource({
+  url: process.env.UPSTASH_REDIS_URL!, // rediss://default:<token>@<name>.upstash.io:6379
+  keyPrefix: 'mirage/',
+})
+
+const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
+await ws.execute('echo "hello" | tee /r/greet')
+await ws.execute('cat /r/greet')
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `url` | required | The `rediss://` URL from the console, password included. Redacted in snapshots. |
+| `keyPrefix` | `mirage:fs:` | Prefix prepended to every key. |
+| `token` | from the URL | Browser only. Needed when `url` is the REST URL (`https://<name>.upstash.io`) instead of the redis one. |
+| `maxRequestBytes` | `8388608` | Browser only. Upstash caps a REST request at 10 MB; a larger file is written as one `SET` plus `APPEND`s of this size. |
+
+`process.env` in the browser snippet stands for however your bundler injects the value; the
+[page example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/redis.html)
+uses a Vite `define` fed from `UPSTASH_REDIS_URL` in `.env.development`.
+
+<Warning>
+  That `define` copies the whole URL, password included, into the served JavaScript, so the
+  page is a local demo for a trusted machine: run it from the dev server, do not build or host
+  it. Anyone who reads the token out of a bundle can call the REST API directly and reach every
+  key, whatever `keyPrefix` and mount mode the page used. A page for other people needs a
+  server-side proxy, or a credential scoped to what that page may touch.
+</Warning>
+
+## One database, both runtimes
+
+The browser store keeps every value byte-identical to what the Node mount writes: writes go out
+as raw request bodies and reads come back base64-encoded. A page over REST and a server over the
+Redis protocol can therefore share one database at the same time, and the
+[Node example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/redis/redis_browser.ts)
+shows the two reading each other's files. Python reaches the same database with the same URL
+through its [`RedisResource`](/python/resource/redis).
+
+## Tokens and billing
+
+- The console's read-only token cannot `SCAN`, which directory listings need, so mount with the
+  full token.
+- The free and pay-as-you-go tiers bill per command, and one shell command is several Redis
+  commands (a directory listing costs a few per entry). Worth knowing before pointing an agent at
+  a metered database.
+
+## Mount mode
+
+`read`, `write`, `exec`.

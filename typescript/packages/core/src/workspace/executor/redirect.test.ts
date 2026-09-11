@@ -315,6 +315,52 @@ describe('fd-table routing end-to-end', () => {
 // GNU bash 5.2.37 pinned: both `cat < missing` and `echo x > /nosuchdir/f`
 // answer "bash: line 1: <target>: No such file or directory", exit 1, and
 // never name the command. mirage drops the "bash: line N:" prefix, matching
+describe('handleRedirect numeric targets', () => {
+  it('routes a close or dup by the descriptor claimed, not the operator', async () => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await runResult(ws, 'cat /data/missing 2<&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        '',
+      ])
+      expect(await runResult(ws, 'echo x 1<&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        'echo: write error: Bad file descriptor\n',
+      ])
+      expect(await runResult(ws, 'cat /data/missing 2<&1; echo code=$?')).toEqual([
+        0,
+        'cat: /data/missing: No such file or directory\ncode=1\n',
+        '',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads a bare 0 touching the operator as the descriptor', async () => {
+    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    try {
+      expect(await runResult(ws, 'echo x 0>&-; echo code=$?')).toEqual([0, 'x\ncode=0\n', ''])
+      expect(await runResult(ws, 'cat 0</data/a.txt; echo code=$?')).toEqual([0, 'acode=0\n', ''])
+      expect(await runResult(ws, 'echo 0 >&-; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        'echo: write error: Bad file descriptor\n',
+      ])
+      expect(await runResult(ws, 'exec 2<&-; cat /data/missing; echo code=$?')).toEqual([
+        0,
+        'code=1\n',
+        '',
+      ])
+      expect(await runResult(ws, 'exec 0>&-; echo x; echo code=$?')).toEqual([0, 'x\ncode=0\n', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 // the house style of the other shell-attributed error
 // ("nosuchcmd: command not found").
 describe('handleRedirect missing < source', () => {
@@ -545,5 +591,164 @@ describe('handleRedirect unwritable > target', () => {
     await expect(
       handleRedirect(execute, dispatch, STUB_NODE, redirects, new Session({ sessionId: 'test' })),
     ).rejects.toThrow('backend exploded')
+  })
+})
+
+describe('descriptor zero duplication', () => {
+  it.each([
+    ['echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1],
+    // A self-dup never reopens a closed descriptor, transient or
+    // persistent; a file redirect on it does.
+    [
+      'touch /data/marker 1>&- 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '1: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    [
+      'exec 1>&-; touch /data/marker 1>&1 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '1: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    [
+      'touch /data/marker 1>&- 1>&1 >/data/f 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      'rc=0\ne=0\n',
+      0,
+    ],
+    ['echo x 2>&0 1>&2', '', '', 1],
+    ['echo x 0>&1 1>&0', 'x\n', '', 0],
+    ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0 2>&1', '', '', 1],
+    // A dup from a descriptor closed earlier on the line refuses the
+    // line, and the command never runs; a self-dup stays a no-op.
+    ['touch /data/marker 0<&- 1<&0; test -e /data/marker', '', '0: Bad file descriptor\n', 1],
+    ['echo hi 1>&- 2>&1', '', '1: Bad file descriptor\n', 1],
+    ['cat 0<&- 0<&0 </data/a.txt', 'a', '', 0],
+    // `>&word` on a descriptor other than 1 is bash's ambiguous redirect,
+    // refused before the command runs; bare and on 1 it is the both-streams
+    // file.
+    [
+      'touch /data/marker 3>&/data/foo; test -e /data/marker || test -e /data/foo',
+      '',
+      '/data/foo: ambiguous redirect\n',
+      1,
+    ],
+    ['echo x 2>&/data/foo; test -e /data/foo', '', '/data/foo: ambiguous redirect\n', 1],
+    ['( echo out; echo err >&2 ) 1>&/data/both; cat /data/both', 'out\nerr\n', '', 0],
+    // An output redirect leaves its descriptor write-only.
+    ['cat 1>/data/out 0<&1; wc -c < /data/out', '0\n', 'cat: -: Bad file descriptor\n', 0],
+    ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
+    ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
+    ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],
+    // bash 5.2: stdout is open for writing only, so the read fails.
+    ['cat </data/a.txt 0<&1', '', 'cat: -: Bad file descriptor\n', 1],
+    // A descriptor `exec` closed for the shell refuses a dup from it too;
+    // a redirect that opens it or a rebinding takes it back.
+    [
+      'exec 1>&-; touch /data/marker 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '1: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    [
+      'exec 0<&-; touch /data/marker 1<&0; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      '0: Bad file descriptor\nrc=1\ne=1\n',
+      0,
+    ],
+    ['exec 1>&-; true 1>&1; echo rc=$? >&2', '', 'rc=0\n', 0],
+    [
+      'exec 1>&-; touch /data/marker >/data/f 2>&1; echo rc=$? >&2; test -e /data/marker; echo e=$? >&2',
+      '',
+      'rc=0\ne=0\n',
+      0,
+    ],
+    [
+      'exec 1>&-; exec 1>&2; touch /data/marker 2>&1; echo rc=$?; test -e /data/marker; echo e=$?',
+      '',
+      'rc=0\ne=0\n',
+      0,
+    ],
+    ['exec 2>&-; touch /data/marker 1>&2; test -e /data/marker; echo e=$?', 'e=1\n', '', 0],
+  ])('tracks direction and order: %s', async (line, out, err, code) => {
+    const { ws } = await makeIntegrationWS({ 'a.txt': 'a' })
+    try {
+      expect(await runResult(ws, line)).toEqual([code, out, err])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+it('opens a standard descriptor in the other direction', async () => {
+  // bash accepts `exec 0>f` (fd 0 write-only: a read is EBADF) and `exec
+  // 1<f` / `exec 2<f` (the stream read-only: a write fails), pinned on
+  // 5.2; the file itself stays what the redirect made it.
+  const { ws } = await makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
+  try {
+    const zero = await ws.execute(
+      '( exec 0>/data/input; echo rc=$?; cat; echo rc=$?; read v; echo rc=$? )',
+    )
+    expect(zero.stdoutText).toBe('rc=0\nrc=1\nrc=1\n')
+    expect(zero.stderrText).toContain('cat: -: Bad file descriptor')
+    expect((await ws.execute('cat /data/input')).stdoutText).toBe('')
+    const one = await ws.execute('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
+    expect(one.stdoutText).toBe('')
+    expect(one.stderrText).toBe('echo: write error: Bad file descriptor\nrc=1\n')
+    const two = await ws.execute('( exec 2</data/source; echo hi >&2; echo rc=$? )')
+    expect(two.stdoutText).toBe('rc=1\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('persists an explicit stdin file redirect', async () => {
+  const { ws } = await makeIntegrationWS({ input: 'readable\n' })
+  try {
+    await ws.execute('exec 0</data/input')
+    expect((await ws.execute('read value; echo $value')).stdoutText).toBe('readable\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+describe('descriptor identities survive dups', () => {
+  // bash 5.2 on debian:stable-slim with stdin from /dev/null: a stream
+  // opened for reading keeps the file through a dup (`exec 1<f; exec 0<&1`)
+  // and answers a transient `<&1`; fd 0 opened for writing takes a
+  // transient `>&0`, appending as bash's shared offset does.
+  it.each([
+    ['printf x >/data/f; exec 1</data/f; exec 0<&1; cat >&2', '', 'x', 0],
+    // A stream aliased onto stdin's read end reads what stdin reads, and
+    // keeps the file a `exec <f` bound even after `exec 0<&-`.
+    ['printf x >/data/f; exec </data/f; exec 1<&0; cat <&1 >&2; echo rc=$? >&2', '', 'xrc=0\n', 0],
+    [
+      'printf x >/data/f; exec </data/f; exec 1<&0; exec 0<&-; cat <&1 >&2; echo rc=$? >&2',
+      '',
+      'xrc=0\n',
+      0,
+    ],
+    ['printf x >/data/f; exec </data/f; exec 2<&0; cat <&2 >&2', '', '', 1],
+    ['printf x | { exec 1<&0; cat <&1 >&2; }; echo rc=$? >&2', '', 'xrc=0\n', 0],
+    ['printf xy >/data/f; exec 1</data/f; exec 0<&1; exec 1>&-; cat >&2', '', 'xy', 0],
+    ['printf x >/data/f; exec 1</data/f; exec 0<&1; exec 1>&2; cat', '', 'x', 0],
+    ['printf x >/data/f; exec 2</data/f; exec 0<&2; cat >&2', '', '', 1],
+    ['printf x >/data/f; exec 1</data/f; cat <&1 >&2; echo rc=$? >&2', '', 'xrc=0\n', 0],
+    ['exec 0>/data/f; echo x >&0; echo y >&0; cat /data/f', 'x\ny\n', '', 0],
+    ['exec 0>/data/f; { echo a; echo b; } >&0; cat /data/f', 'a\nb\n', '', 0],
+    ['exec 0>/data/f; echo x >&0; exec 0<&-; cat /data/f', 'x\n', '', 0],
+    ['exec 0>/data/f; echo x >&0; exec 1>&0; echo y; exec 1>&2; cat /data/f >&2', '', 'x\ny\n', 0],
+    ['exec 0>/data/f; echo x 1>&0 2>&0; cat /data/f', 'x\n', '', 0],
+    ['exec 0<&1; echo x >&0', 'x\n', '', 0],
+    ['echo x >&0; echo rc=$?', 'rc=1\n', 'echo: write error: Bad file descriptor\n', 0],
+  ])('%s', async (line, out, err, code) => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await runResult(ws, line)).toEqual([code, out, err])
+    } finally {
+      await ws.close()
+    }
   })
 })

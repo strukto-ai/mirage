@@ -512,6 +512,28 @@ class ProfileMount(BaseModel):
         return parse_mount_mode(v)
 
 
+class ProfilePolicy(BaseModel):
+    """A profile's policy as the document states it: the program, and
+    the engine that runs it. A block, not a path: with no default engine
+    a path alone would name a program nothing could run.
+
+    Args:
+        script (ScriptSource | str): the policy program. A ``str`` is
+            the path form the config door accepts and loads; code
+            passes the loaded ``ScriptSource``, so a path still spelled
+            as a string when the workspace reads it means the config
+            layer never saw it, and is refused there.
+        runtime (str): the engine the program runs on. Required: there
+            is no default engine, because an engine the operator never
+            chose should not be the one their policy runs on.
+    """
+
+    model_config = _DOC
+
+    script: ScriptSource | str
+    runtime: str
+
+
 class SessionProfile(BaseModel):
     """One profile: the whole permission document a session runs under.
 
@@ -532,14 +554,19 @@ class SessionProfile(BaseModel):
     hide, is read by anchor depth: the deeper entry wins, ties break by
     verb.
 
-    A profile may also state a ``script``: a program evaluated at the
-    admission gate for every command a session under the profile runs.
-    It is handed the command's facts as one ``ctx`` value and its last
-    expression answers allow (no opinion), deny or ask, so it expresses
-    the conditions a declarative rule cannot; like every policy, it can
-    only restrict, never grant past a deny. The document is optional
-    beside it: a profile stating only ``script`` and ``runtime`` hides
-    nothing, and the script is its whole admission policy.
+    A profile may also state a ``policy``: a program defining the
+    admission hooks it answers at, the way a coded Policy overrides only
+    the hooks it cares about: ``pre_command(ctx)`` per command,
+    ``pre_ops(ctx)`` per VFS op, ``pre_session(ctx)`` per env write
+    (``preCommand``, ``preOps``, ``preSession`` in JavaScript). Each is
+    handed the door's facts as ``ctx`` and answers with ``return``:
+    allow (no opinion), deny, or at the command gate ask, so it
+    expresses the conditions a declarative rule cannot; like every
+    policy, it can only restrict, never grant past a deny. A block
+    naming the program and the engine it runs on (``ProfilePolicy``),
+    the shape a ``clis`` entry has. The document is optional beside it:
+    a profile stating only a policy hides nothing, and the policy is its
+    whole admission policy.
 
     Args:
         cwd (str | None): the session's working directory at creation.
@@ -553,16 +580,8 @@ class SessionProfile(BaseModel):
         vars (VarsBlock | None): the profile's hidden variables.
         commands (CommandsBlock | None): the profile's allow list and its
             ask / deny rules, absolute paths.
-        script (ScriptSource | str | None): the profile's per-command
-            program. A ``str`` is the path form the config door accepts
-            and loads; code passes the loaded ``ScriptSource``, so a path
-            still spelled as a string when the workspace reads it means
-            the config layer never saw it, and is refused there.
-        runtime (str | None): the engine ``script`` runs on, required
-            beside it: there is no default engine, because an engine the
-            operator never chose should not be the one their policy runs
-            on. Meaningless without a script, so stating one there is an
-            error rather than a knob that does nothing.
+        policy (ProfilePolicy | None): the profile's policy: its program
+            and the engine that runs it.
     """
 
     model_config = _DOC
@@ -573,8 +592,21 @@ class SessionProfile(BaseModel):
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
     commands: CommandsBlock | None = None
-    script: ScriptSource | str | None = None
-    runtime: str | None = None
+    policy: ProfilePolicy | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _v_script_is_policy(cls, data: Any) -> Any:
+        # The keys this was first shipped under, a `script` named for
+        # what the file is rather than what it does and a `runtime`
+        # beside it that read as the profile's own; refused with the new
+        # spelling rather than as two more unknown keys.
+        if isinstance(data, dict) and ("script" in data or "runtime" in data):
+            raise ValueError(
+                "script and runtime are now one policy block, policy: "
+                "{script: <file>, runtime: <engine>}; its program defines "
+                "pre_command(ctx) and answers with return")
+        return data
 
     @field_validator("mounts", mode="before")
     @classmethod
@@ -595,23 +627,6 @@ class SessionProfile(BaseModel):
                 "mode": entry
             } if isinstance(entry, str) else entry)
         return entries
-
-    @model_validator(mode="after")
-    def _v_script_runtime(self) -> "SessionProfile":
-        # The pair travels together: a script must say what runs it (no
-        # default engine exists to guess one), and a runtime without a
-        # script names an engine for a program that does not exist.
-        if self.script is None:
-            if self.runtime is not None:
-                raise ValueError(
-                    "runtime names the engine a script runs on, and this "
-                    "profile states no script")
-            return self
-        if self.runtime is None:
-            raise ValueError(
-                "a profile script states the engine it runs on; set runtime "
-                "beside script")
-        return self
 
     @model_validator(mode="after")
     def _v_absolute(self) -> "SessionProfile":
@@ -649,12 +664,14 @@ class CompiledProfile:
         cwd (str | None): the working directory to start in.
         commands (AdmissionRules | None): the profile's admission rules,
             its own and its mount sections' in one list.
-        script (ProfileScript | None): the profile's per-command script,
-            which ``ScriptPolicy`` evaluates at the admission gate.
+        script (ProfileScript | None): the profile's policy program,
+            which ``ScriptPolicy`` calls at the admission gate.
         shown_paths (ShownPaths | None): every show entry the profile
             states, its own and its mount sections' in one list.
         hide_reasons (tuple[HideReason, ...]): the operator's reasons
             for grouped hides, never rendered to the agent.
+        profile (str | None): the profile's name, None for a document
+            passed without one; what the session reports as its group.
     """
 
     mount_modes: dict[str, MountMode] | None
@@ -666,3 +683,4 @@ class CompiledProfile:
     script: ProfileScript | None = None
     shown_paths: ShownPaths | None = None
     hide_reasons: tuple[HideReason, ...] = ()
+    profile: str | None = None

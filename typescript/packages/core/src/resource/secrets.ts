@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z, type ZodObject, type ZodRawShape } from 'zod'
+import { type FieldNormalizer, normalizeFields } from '../utils/normalize.ts'
 
 // Re-exported so a config schema in the browser or node package is built
 // with the zod core resolves, not with a second copy of its own. The
@@ -69,6 +70,33 @@ export function secretStr(): z.ZodString {
 
 export function secretSchema<T extends z.ZodType>(schema: T): T {
   return schema.meta({ [SECRET_META_KEY]: true })
+}
+
+/**
+ * The one door a mount config comes through: rename the python-side
+ * spellings, then validate.
+ *
+ * Every `normalize*Config` is this call with its schema, so a config that
+ * reaches a resource has been checked the way pydantic checks the python
+ * twin on construction. It used to be `normalizeFields` alone in 56 of 60
+ * normalizers, which let `bucket: 123`, `timeout: "abc"` and a Google
+ * config naming no credential at all reach their clients unrefused, and
+ * left every requiredness rule in these schemas unreachable from the mount
+ * path -- `GitHubConfigSchema` required `owner` and nothing ever asked it.
+ *
+ * Unknown keys are stripped, not refused, because pydantic's default
+ * `extra="ignore"` does the same on the python side; the CLI registry adds
+ * its own fail-loud check on top for both languages. A callable a config
+ * carries (a token provider, a refresh hook) must be declared in the schema
+ * through `secretSchema(z.custom(...))` or parse strips it -- that is also
+ * what keeps it out of snapshot state.
+ */
+export function parseConfigWithSchema<T extends ZodRawShape>(
+  schema: ZodObject<T>,
+  input: Record<string, unknown>,
+  normalizer: FieldNormalizer = {},
+): ConfigOf<ZodObject<T>> {
+  return schema.parse(normalizeFields(input, normalizer)) as ConfigOf<ZodObject<T>>
 }
 
 export function redactConfigWithSchema<T extends ZodRawShape>(

@@ -358,8 +358,9 @@ describe('mirage CLI end-to-end', () => {
 
     const denied = await runCliRaw(env, ['execute', '-w', 'perm-ws', '-c', 'rm /d/x'])
     expect(denied.status).toBe(126)
-    expect((denied.parsed as { stderr: string }).stderr).toBe(
-      'rm: policy denied: no deletes here\n',
+    expect((denied.parsed as { stderr: string }).stderr).toBe('rm: Permission denied\n')
+    expect((denied.parsed as { refusal: { reason: string } }).refusal.reason).toBe(
+      'no deletes here',
     )
 
     const kept = (await runCli(env, ['execute', '-w', 'perm-ws', '-c', 'ls /d'])) as {
@@ -398,7 +399,13 @@ describe('mirage CLI end-to-end', () => {
     const refused = await runCliRaw(env, ['execute', '-w', 'asks-ws', '-c', 'rm /f.txt'])
     expect(refused.status).toBe(126)
     const stderr = (refused.parsed as { stderr: string }).stderr
-    expect(stderr).toContain('requires approval: removal needs sign-off')
+    expect(stderr).toBe('rm: Permission denied\n')
+    expect((refused.parsed as { refusal: { kind: string; reason: string } }).refusal).toMatchObject(
+      {
+        kind: 'pending',
+        reason: 'removal needs sign-off',
+      },
+    )
 
     const asks = (await runCli(env, ['workspace', 'list-asks', 'asks-ws'])) as {
       id: string
@@ -407,7 +414,7 @@ describe('mirage CLI end-to-end', () => {
     }[]
     expect(asks).toHaveLength(1)
     const askId = asks[0]?.id ?? ''
-    expect(stderr).toContain(askId)
+    expect((refused.parsed as { refusal: { askId: string } }).refusal.askId).toBe(askId)
     expect(asks[0]?.outcome).toBeNull()
 
     const allowed = (await runCli(env, ['workspace', 'allow', 'asks-ws', askId])) as {
@@ -436,7 +443,8 @@ describe('mirage CLI end-to-end', () => {
     expect(denied.note).toBe('not now')
     const deniedRun = await runCliRaw(env, ['execute', '-w', 'asks-ws', '-c', 'rm /g.txt'])
     expect(deniedRun.status).toBe(126)
-    expect((deniedRun.parsed as { stderr: string }).stderr).toContain('policy denied')
+    expect((deniedRun.parsed as { stderr: string }).stderr).toBe('rm: Permission denied\n')
+    expect((deniedRun.parsed as { refusal: { kind: string } }).refusal.kind).toBe('deny')
 
     const drained = (await runCli(env, ['workspace', 'list-asks', 'asks-ws'])) as unknown[]
     expect(drained).toHaveLength(0)

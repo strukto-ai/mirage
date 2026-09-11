@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from mirage.shell.constants import (ARITH_ASSIGN_OPS, ARITH_ELEM,
@@ -343,17 +343,31 @@ class ArithEvaluator:
     expression made them.
     """
 
-    def __init__(self, env: Mapping[str, str], updates: dict[str, str],
-                 elem_updates: dict[tuple[str, str],
-                                    str], writes: dict[tuple[str, str | None],
-                                                       str], depth: int,
-                 elements: ElementOps | None) -> None:
+    def __init__(self,
+                 env: Mapping[str, str],
+                 updates: dict[str, str],
+                 elem_updates: dict[tuple[str, str], str],
+                 writes: dict[tuple[str, str | None], str],
+                 depth: int,
+                 elements: ElementOps | None,
+                 read_var: Callable[[str], str | None] | None,
+                 wrote_var: Callable[[str, str], None] | None = None) -> None:
         self.env = env
         self.updates = updates
         self.elem_updates = elem_updates
         self.writes = writes
         self.depth = depth
         self.elements = elements
+        self.read_var = read_var
+        self.wrote_var = wrote_var
+
+    def _merged_env(self) -> dict[str, str]:
+        merged = {
+            name: value
+            for name in self.env if (value := self.env.get(name)) is not None
+        }
+        merged.update(self.updates)
+        return merged
 
     def _coerce(self, raw: str | None) -> int:
         raw = (raw or "").strip()
@@ -362,19 +376,39 @@ class ArithEvaluator:
         try:
             return _parse_literal(raw)
         except (ValueError, ArithError):
-            if self.depth >= ARITH_MAX_DEPTH:
-                raise ArithError(
-                    f"expression recursion level exceeded (error token is "
-                    f'"{raw}")') from None
-            result = evaluate_arith(raw, {
-                **dict(self.env),
-                **self.updates
-            },
-                                    depth=self.depth + 1,
-                                    elements=self.elements)
-            return result.value
+            return self._nested(raw)
+
+    def _nested(self, raw: str) -> int:
+        """Evaluate text as an expression in this expression's record.
+
+        bash evaluates a variable's stored text, and an indexed
+        subscript, in the same context as the expression around them:
+        an assignment they make lands with the expression's own
+        (``x='y=5'; $((x))`` leaves y at 5, ``$((a[x=5] + x))`` is 12),
+        a name they read sees the pending updates, and a ``RANDOM`` seed
+        reaches the reader. So the nested run shares this evaluator's
+        record rather than starting a fresh one.
+
+        Args:
+            raw (str): the text to evaluate.
+        """
+        if self.depth >= ARITH_MAX_DEPTH:
+            raise ArithError(f"expression recursion level exceeded (error "
+                             f'token is "{raw}")')
+        nested = ArithEvaluator(self.env, self.updates, self.elem_updates,
+                                self.writes, self.depth + 1, self.elements,
+                                self.read_var, self.wrote_var)
+        return nested.run(ArithParser(_tokenize(raw)).parse())
 
     def lookup(self, name: str) -> int:
+        # A dynamic name is asked first: the reader has been told of every
+        # assignment this expression made (`wrote_var`), so
+        # `RANDOM=42, RANDOM` draws from the new seed rather than reading
+        # the seed back out of the pending update.
+        if self.read_var is not None:
+            dynamic = self.read_var(name)
+            if dynamic is not None:
+                return self._coerce(dynamic)
         raw = self.updates.get(name)
         if raw is None:
             value = self.env.get(name)
@@ -390,25 +424,59 @@ class ArithEvaluator:
         if self.elements is None:
             raise ArithError('syntax error: operand expected (error token '
                              'is "[")')
-        merged = {**dict(self.env), **self.updates}
-        return self.elements.resolve(name, subscript, merged)
+        is_assoc = self.elements.is_assoc
+        if is_assoc is not None and not is_assoc(name):
+            # An indexed subscript is arithmetic in this expression's
+            # own record (`_nested`), so what it assigns the rest of the
+            # expression reads and the expression lands; the resolver
+            # only normalizes the index it is handed (a negative one
+            # counts from the extent). A literal index skips the run.
+            try:
+                index = int(subscript.strip())
+            except ValueError:
+                index = self._nested(subscript)
+            return self.elements.resolve(name, str(index), self._merged_env())
+        return self.elements.resolve(name, subscript, self._merged_env())
 
-    def read_target(self, target: tuple[Any, ...]) -> int:
+    def key_of(self, target: tuple[Any, ...]) -> str | None:
+        """The canonical element key of a target, None for a scalar.
+
+        Resolved once per reference: a compound assignment or a ``++``
+        reads and writes the same element, and a subscript that draws
+        (``a[RANDOM]+=1``) must draw once, as bash's does.
+
+        Args:
+            target (tuple[Any, ...]): a ``var`` or ``elem`` target node.
+        """
+        if target[0] == "var":
+            return None
+        return self.elem_key(target[1], target[2])
+
+    def read_target(self,
+                    target: tuple[Any, ...],
+                    key: str | None = None) -> int:
         if target[0] == "var":
             return self.lookup(target[1])
-        key = self.elem_key(target[1], target[2])
+        if key is None:
+            key = self.elem_key(target[1], target[2])
         raw = self.elem_updates.get((target[1], key))
         if raw is None and self.elements is not None:
             raw = self.elements.read(target[1], key)
         return self._coerce(raw)
 
-    def write_target(self, target: tuple[Any, ...], value: int) -> None:
+    def write_target(self,
+                     target: tuple[Any, ...],
+                     value: int,
+                     key: str | None = None) -> None:
         text = str(value)
         if target[0] == "var":
             self.updates[target[1]] = text
             self._record(target[1], None, text)
+            if self.wrote_var is not None:
+                self.wrote_var(target[1], text)
             return
-        key = self.elem_key(target[1], target[2])
+        if key is None:
+            key = self.elem_key(target[1], target[2])
         self.elem_updates[(target[1], key)] = text
         self._record(target[1], key, text)
 
@@ -429,10 +497,21 @@ class ArithEvaluator:
             return value
         if kind == "assign":
             _, target, op, rhs = node
-            rhs_val = self.run(rhs)
-            value = (rhs_val if op == "=" else self.apply_binop(
-                op[:-1], self.read_target(target), rhs_val))
-            self.write_target(target, value)
+            if op == "=":
+                # bash evaluates the right side before it resolves a
+                # plain assignment's subscript: `x=0, a[x++]=x++` stores
+                # 0 at index 1 and leaves x at 2.
+                value = self.run(rhs)
+                key = self.key_of(target)
+            else:
+                # A compound assignment reads its target first, and bash
+                # reads it before the right side, which a dynamic name
+                # makes observable: `RANDOM=42, RANDOM-=RANDOM` is the
+                # first draw minus the second.
+                key = self.key_of(target)
+                current = self.read_target(target, key)
+                value = self.apply_binop(op[:-1], current, self.run(rhs))
+            self.write_target(target, value, key)
             return value
         if kind == "ternary":
             _, cond, then, other = node
@@ -458,13 +537,17 @@ class ArithEvaluator:
             return value
         if kind == "pre":
             _, op, target = node
-            value = _wrap(self.read_target(target) + (1 if op == "++" else -1))
-            self.write_target(target, value)
+            key = self.key_of(target)
+            value = _wrap(
+                self.read_target(target, key) + (1 if op == "++" else -1))
+            self.write_target(target, value, key)
             return value
         if kind == "post":
             _, op, target = node
-            value = self.read_target(target)
-            self.write_target(target, _wrap(value + (1 if op == "++" else -1)))
+            key = self.key_of(target)
+            value = self.read_target(target, key)
+            self.write_target(target, _wrap(value + (1 if op == "++" else -1)),
+                              key)
             return value
         raise ArithError(f"unsupported node: {kind}")
 
@@ -508,10 +591,13 @@ class ArithEvaluator:
         raise ArithError(f'unsupported operator "{op}"')
 
 
-def evaluate_arith(expr: str,
-                   env: Mapping[str, str],
-                   depth: int = 0,
-                   elements: ElementOps | None = None) -> ArithResult:
+def evaluate_arith(
+        expr: str,
+        env: Mapping[str, str],
+        depth: int = 0,
+        elements: ElementOps | None = None,
+        read_var: Callable[[str], str | None] | None = None,
+        wrote_var: Callable[[str, str], None] | None = None) -> ArithResult:
     """Evaluate a bash arithmetic expression.
 
     Implements bash's arithmetic grammar over 64-bit wrapping integers:
@@ -534,6 +620,15 @@ def evaluate_arith(expr: str,
         depth (int): recursion depth for variable re-evaluation.
         elements (ElementOps | None): array-element callbacks; None
             outside a session.
+        read_var (Callable[[str], str | None] | None): dynamic scalar
+            reads, asked before the pending assignments and the
+            environment; a None answer falls back to them. Called only
+            for evaluated nodes, including recursive variable expressions.
+        wrote_var (Callable[[str, str], None] | None): told of every
+            scalar assignment as it is made, name and value, so a dynamic
+            name's reader can act on it at once (bash seeds ``RANDOM`` at
+            the assignment, and the reads after it draw from the seed)
+            where the caller lands the assignments only afterwards.
 
     Returns:
         ArithResult: the value plus the assignments made, in order, for
@@ -550,10 +645,22 @@ def evaluate_arith(expr: str,
     updates: dict[str, str] = {}
     elem_updates: dict[tuple[str, str], str] = {}
     writes: dict[tuple[str, str | None], str] = {}
-    value = ArithEvaluator(env, updates, elem_updates, writes, depth,
-                           elements).run(node)
-    return ArithResult(
-        value,
-        tuple(
-            ArithWrite(name, key, text)
-            for (name, key), text in writes.items()))
+    try:
+        value = ArithEvaluator(env, updates, elem_updates, writes, depth,
+                               elements, read_var, wrote_var).run(node)
+    except ArithError as exc:
+        exc.writes = _arith_writes(writes)
+        raise
+    return ArithResult(value, _arith_writes(writes))
+
+
+def _arith_writes(
+        writes: dict[tuple[str, str | None], str]) -> tuple[ArithWrite, ...]:
+    """The evaluator's ordered write record as ``ArithWrite`` rows.
+
+    Args:
+        writes (dict[tuple[str, str | None], str]): target to value, in
+            the order of each target's last write.
+    """
+    return tuple(
+        ArithWrite(name, key, text) for (name, key), text in writes.items())

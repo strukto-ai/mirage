@@ -22,7 +22,7 @@ from mirage.core.slack.scope import detect_scope
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import filetype_from_mimetype
+from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
@@ -70,7 +70,7 @@ def _file_blob_stat(match: ScopeMatch, path: PathSpec,
     return FileStat(
         name=entry.vfs_name or entry.name,
         type=FileType.FILE,
-        content=filetype_from_mimetype(mimetype),
+        content=content_type_for_mime(mimetype),
         size=entry.size,
         modified=_slack_modified(entry.remote_time),
         extra={"file_id": entry.id},

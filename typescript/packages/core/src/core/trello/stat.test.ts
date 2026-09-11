@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec } from '../../types.ts'
 import type { TrelloTransport } from './client.ts'
 import { stat } from './stat.ts'
 
@@ -95,7 +95,7 @@ describe('trello stat workspace nodes', () => {
       spec('/mnt/trello/workspaces/Acme__w1/workspace.json', '/mnt/trello'),
       idx,
     )
-    expect(s.type).toBe(FileType.JSON)
+    expect(s.content).toBe(ContentType.JSON)
     expect(s.name).toBe('workspace.json')
     expect(s.size).toBe(42)
     expect(s.extra.workspace_id).toBe('w1')
@@ -191,7 +191,7 @@ describe('trello stat card leaves', () => {
       spec(`${cardDir}/card.json`, '/mnt/trello'),
       idx,
     )
-    expect(cardJson.type).toBe(FileType.JSON)
+    expect(cardJson.content).toBe(ContentType.JSON)
     expect(cardJson.name).toBe('card.json')
     expect(cardJson.size).toBe(99)
 
@@ -200,7 +200,7 @@ describe('trello stat card leaves', () => {
       spec(`${cardDir}/comments.jsonl`, '/mnt/trello'),
       idx,
     )
-    expect(comments.type).toBe(FileType.TEXT)
+    expect(comments.content).toBe(ContentType.TEXT)
     expect(comments.name).toBe('comments.jsonl')
     expect(comments.size).toBeNull()
   })

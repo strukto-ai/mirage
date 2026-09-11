@@ -195,6 +195,17 @@ async function mcpChecks(): Promise<void> {
       const rows = (structured.results ?? []) as Record<string, JsonValue>[]
       return ((rows[i] ?? {}).error ?? {}) as Record<string, JsonValue>
     }
+    const resultOf = (out: Record<string, JsonValue>, i = 0): Record<string, JsonValue> => {
+      const structured = (out.structuredContent ?? {}) as Record<string, JsonValue>
+      const rows = (structured.results ?? []) as Record<string, JsonValue>[]
+      return ((rows[i] ?? {}).result ?? {}) as Record<string, JsonValue>
+    }
+    const entriesOf = (out: Record<string, JsonValue>, i = 0): Record<string, JsonValue>[] =>
+      (resultOf(out, i).entries ?? []) as Record<string, JsonValue>[]
+    const textOf = (out: Record<string, JsonValue>): string =>
+      ((out.content ?? []) as Record<string, JsonValue>[])
+        .map((one) => String(one.text ?? ''))
+        .join('')
     const ops = (...list: Record<string, unknown>[]): Record<string, unknown> => ({
       operations: list,
     })
@@ -886,6 +897,413 @@ async function mcpChecks(): Promise<void> {
       'and stat finds a file past the first page',
       statLate.includes('- Type: `file`') && statLate.includes('- Exists: yes'),
       statLate.slice(0, 220),
+    )
+
+    // ---- the discovery scopes
+    //
+    // `hf://<kind>` and `hf://<kind>/<owner>` are URIs the captured grammar
+    // names and this fake used to refuse. The refusal was not theoretical: an
+    // agent opened a benchmark run with `ls hf://datasets/<owner> --limit 100`
+    // and `search hf://datasets "Annoy" --limit 50`, was refused both, and
+    // reported the repositories unavailable.
+    // Created the way `paged-model` above is: the owner comes from
+    // `organization`, and the bearer is the tenant rather than the namespace.
+    await fetch(`${mcp.rest.endpoint}/api/repos/create`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${DEFAULT_TENANT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'discovery-dataset', type: 'dataset', organization: 'integ' }),
+    })
+
+    const owned = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models/integ'] }))
+    check(
+      'ls on a namespace lists repositories',
+      entriesOf(owned).length > 0 && entriesOf(owned).every((one) => one.type === 'repo'),
+      JSON.stringify(entriesOf(owned).slice(0, 2)),
+    )
+    check(
+      'and every row carries the repository own URI',
+      entriesOf(owned).every((one) => String(one.uri ?? '').startsWith('hf://models/integ/')),
+      JSON.stringify(entriesOf(owned).map((one) => String(one.uri ?? ''))),
+    )
+    const card = entriesOf(owned).find((one) => one.path === 'integ/card-model') ?? {}
+    // Every key below was captured from the live server rather than chosen:
+    // a model row carries `gated: false` where a Space carries no such key,
+    // and `updated_at` rather than `lastModified`.
+    eq('a row names its repo type', card.repo_type ?? null, 'model')
+    eq('and its visibility', card.private ?? null, false)
+    eq('and gating, present and false rather than absent', card.gated ?? null, false)
+    check('and a download count', typeof card.downloads === 'number', JSON.stringify(card))
+    check('and a modification time', typeof card.updated_at === 'string', JSON.stringify(card))
+    const ownedText = textOf(owned)
+    check(
+      'the table renders the details cell upstream way',
+      ownedText.includes(
+        '| repo | integ/card-model | hf://models/integ/card-model |  | repo=model',
+      ),
+      ownedText.slice(0, 400),
+    )
+
+    // A namespace that holds nothing is empty rather than missing: upstream
+    // answers an empty table for an owner it has never heard of, and calling
+    // that an error would tell an agent the URI was malformed.
+    const nobody = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models/nobody-xyz-42'] }))
+    eq('an owner with nothing lists nothing', entriesOf(nobody).length, 0)
+    check('and is not an error', !('isError' in nobody), JSON.stringify(nobody.isError ?? null))
+
+    const statNs = await call('hf_fs', ops({ cmd: 'stat', args: ['hf://models/integ'] }))
+    eq('stat on a namespace says namespace', resultOf(statNs).type ?? null, 'namespace')
+    eq('and names it', resultOf(statNs).namespace ?? null, 'integ')
+    check(
+      'and prints the namespace line after the path',
+      textOf(statNs).includes('- Path: ``\n- Namespace: `integ`'),
+      textOf(statNs),
+    )
+    // Not looked up, which is upstream's own behaviour: the server is
+    // describing the URI shape, not the Hub contents.
+    const statNobody = await call(
+      'hf_fs',
+      ops({ cmd: 'stat', args: ['hf://models/nobody-xyz-42'] }),
+    )
+    eq('an owner that holds nothing still exists', resultOf(statNobody).exists ?? null, true)
+    const statRoot = await call('hf_fs', ops({ cmd: 'stat', args: ['hf://models'] }))
+    eq('and a kind root is a dir', resultOf(statRoot).type ?? null, 'dir')
+
+    // ---- search
+    const hits = await call('hf_fs', ops({ cmd: 'search', args: ['hf://models', 'card-model'] }))
+    eq(
+      'search finds the model by name',
+      entriesOf(hits).map((one) => String(one.path ?? '')),
+      ['integ/card-model'],
+    )
+    eq('and answers under its own op', resultOf(hits).op ?? null, 'search')
+    const crossKind = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://datasets', 'card-model'] }),
+    )
+    eq('the kind in the URI scopes the search', entriesOf(crossKind).length, 0)
+    const inDatasets = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://datasets', 'discovery'] }),
+    )
+    eq(
+      'and the dataset is found under its own kind',
+      entriesOf(inDatasets).map((one) => String(one.path ?? '')),
+      ['integ/discovery-dataset'],
+    )
+    const owner = await call('hf_fs', ops({ cmd: 'search', args: ['hf://models/integ', 'card'] }))
+    check('search accepts an owner scope', entriesOf(owner).length > 0, '')
+    const elsewhere = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models/nobody-xyz-42', 'card'] }),
+    )
+    eq('and the owner narrows it', entriesOf(elsewhere).length, 0)
+    const nothing = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models', 'zzz-nothing'] }),
+    )
+    eq('a query that matches nothing is empty, not an error', entriesOf(nothing).length, 0)
+    check('and carries no error flag', !('isError' in nothing), '')
+
+    // Search has its OWN ceiling -- 1,000 where a listing is 10,000 -- and its
+    // own truncation notice, which carries no message beside it.
+    const searchLimit = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models', 'card', '--limit', '1001'] }),
+    )
+    eq(
+      'search names its own ceiling',
+      errorOf(searchLimit).message ?? null,
+      'EINVAL: limit must be between 1 and 1000 for this command',
+    )
+    const cutSearch = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models', '--limit', '1'] }),
+    )
+    eq('a cut search says so', resultOf(cutSearch).truncated ?? null, true)
+    eq('in search own vocabulary', resultOf(cutSearch).truncation_reason ?? null, 'limit')
+    check(
+      'and carries no message, where a listing does',
+      !('truncation_message' in resultOf(cutSearch)),
+      JSON.stringify(Object.keys(resultOf(cutSearch))),
+    )
+    check(
+      'and the prose notice is search own sentence',
+      textOf(cutSearch).trimEnd().endsWith('Result truncated: limit.'),
+      textOf(cutSearch).slice(-120),
+    )
+
+    // A repository is the one URI search refuses, and upstream refuses it by
+    // naming every scope that would have worked.
+    const atRepoSearch = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models/integ/card-model', 'anything'] }),
+    )
+    eq(
+      'search refuses a repository in upstream words',
+      errorOf(atRepoSearch).message ?? null,
+      'EINVAL: search requires hf://models|datasets|spaces[/OWNER], hf://collections[/OWNER], ' +
+        'any hf://docs scope, or exactly hf://papers',
+    )
+
+    // `--sort` is accepted where the fake can order by it and refused by name
+    // where it cannot, rather than accepted and ignored.
+    const sorted = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ', '--sort', 'likes'] }),
+    )
+    check(
+      'a namespace listing sorts',
+      entriesOf(sorted).length > 0,
+      JSON.stringify(errorOf(sorted)),
+    )
+    const unsortable = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ', '--sort', 'mainSize'] }),
+    )
+    eq(
+      'and a sort key with nothing behind it is an honest EINVAL',
+      errorOf(unsortable).message ?? null,
+      'EINVAL: the mirage hf_hub fake sorts by createdAt, downloads, likes, ' +
+        'lastModified, trendingScore: mainSize',
+    )
+    // Captured: a discovery scope holds no files, so `--type file` answers an
+    // empty table rather than an error.
+    const typed = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ', '--type', 'file'] }),
+    )
+    eq('a discovery scope holds no files', entriesOf(typed).length, 0)
+    // ...but only for a type that EXISTS. The grammar's TYPE is a closed set
+    // of seven, and four of them name entry kinds this fake holds nothing of;
+    // those still answer empty, because the value is valid and matches
+    // nothing. A value off the list is a typo, and answering it empty would
+    // make `--type repos` indistinguishable from an owner with no
+    // repositories.
+    const validButAbsent = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ', '--type', 'bucket'] }),
+    )
+    eq('a valid type this fake has none of is empty', entriesOf(validButAbsent).length, 0)
+    check('and not an error', !('isError' in validButAbsent), '')
+    const mistyped = await call(
+      'hf_fs',
+      ops({ cmd: 'ls', args: ['hf://models/integ', '--type', 'repos'] }),
+    )
+    eq(
+      'while a type off the list is refused in upstream words',
+      errorOf(mistyped).message ?? null,
+      'EINVAL: invalid entry type: repos. Use --type file for files.',
+    )
+    const mistypedSearch = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models', 'card', '--type', 'nonsense'] }),
+    )
+    eq(
+      'and search says the same thing',
+      errorOf(mistypedSearch).message ?? null,
+      'EINVAL: invalid entry type: nonsense. Use --type file for files.',
+    )
+
+    // ---- `trending` is RESERVED, not an owner
+    //
+    // `ls hf://models/trending --limit 10` is the first example the captured
+    // tool description prints, so a model WILL send it. Classified as a
+    // namespace it would query `author=trending`, match nothing, and answer
+    // an empty listing with status 200 -- a successful-looking reply that
+    // says the Hub has no trending repositories. Every check below exists to
+    // keep that from being the answer.
+    const feed = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models/trending'] }))
+    check(
+      'ls on the feed is refused, not answered empty',
+      'error' in
+        ((
+          (((feed.structuredContent ?? {}) as Record<string, JsonValue>).results ?? []) as Record<
+            string,
+            JsonValue
+          >[]
+        )[0] ?? {}),
+      JSON.stringify(resultOf(feed)),
+    )
+    check(
+      'and it names what is missing and what works instead',
+      String(errorOf(feed).message ?? '').includes('no trending feed: hf://models/trending'),
+      String(errorOf(feed).message ?? ''),
+    )
+    // The other three commands on the feed need no feed at all, so they are
+    // upstream's answers rather than this fake's.
+    const feedStat = await call('hf_fs', ops({ cmd: 'stat', args: ['hf://datasets/trending'] }))
+    eq('stat calls the feed a dir', resultOf(feedStat).type ?? null, 'dir')
+    eq('and the feed names itself as the path', resultOf(feedStat).path ?? null, 'trending')
+    const feedFind = await call('hf_fs', ops({ cmd: 'find', args: ['hf://models/trending'] }))
+    eq(
+      'find on the feed is ENOTSUP, not EINVAL',
+      errorOf(feedFind).code ?? null,
+      'HF_FS_UNSUPPORTED_OPERATION',
+    )
+    eq(
+      'and names the command that works',
+      errorOf(feedFind).message ?? null,
+      'ENOTSUP: find is not supported on hf://models/trending; use ls',
+    )
+    const feedCat = await call('hf_fs', ops(catOp('hf://models/trending')))
+    eq(
+      'cat on the feed says directory, where a namespace says file path',
+      errorOf(feedCat).message ?? null,
+      'EISDIR: hf://models/trending is a directory',
+    )
+    const feedSearch = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models/trending', 'llama'] }),
+    )
+    check(
+      'search on the feed is refused the way it is on a repository',
+      String(errorOf(feedSearch).message ?? '').startsWith('EINVAL: search requires hf://models'),
+      String(errorOf(feedSearch).message ?? ''),
+    )
+    // A third segment is an ordinary repository again, owned by someone
+    // called `trending`: upstream resolves `hf://models/trending/foo` through
+    // the repository route, so the reservation is exactly two segments deep.
+    const deeper = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models/trending/foo'] }))
+    eq('and the reservation is two segments deep', errorOf(deeper).code ?? null, 'HF_FS_NOT_FOUND')
+
+    // The kind roots part company between the two listing commands, because
+    // upstream does: `ls hf://models` succeeds there with the feed as its one
+    // row, and `find hf://models` refuses outright.
+    const rootLs = await call('hf_fs', ops({ cmd: 'ls', args: ['hf://models'] }))
+    check(
+      'ls on a kind root says what is missing and what works',
+      String(errorOf(rootLs).message ?? '').includes('no trending feed: hf://models'),
+      String(errorOf(rootLs).message ?? ''),
+    )
+    const rootFind = await call('hf_fs', ops({ cmd: 'find', args: ['hf://models'] }))
+    eq(
+      'and find on one is refused in upstream words',
+      errorOf(rootFind).message ?? null,
+      'Listing models requires an explicit owner. Use hf://models/<owner>.',
+    )
+
+    // ---- `find` at a namespace filters, rather than ignoring its own flags
+    //
+    // `find hf://<kind>/<owner> --name GLOB` is the row the captured
+    // README gives find: "Recursive name/path matching inside an owner
+    // namespace". What it matches is the repository's LEAF name -- probed,
+    // `--name "deepseek-ai/*"` finds nothing on the live server where
+    // `--name "DeepSeek-V4*"` finds every V4 model.
+    const byName = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--name', 'card-*'] }),
+    )
+    eq(
+      'find globs the repository name',
+      entriesOf(byName).map((one) => String(one.path ?? '')),
+      ['integ/card-model'],
+    )
+    const byId = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--name', 'integ/*'] }),
+    )
+    eq('and the owner is not part of what it matches', entriesOf(byId).length, 0)
+    const byCase = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--name', 'CARD-*'] }),
+    )
+    eq('and the match is case-sensitive', entriesOf(byCase).length, 0)
+    const byPath = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--path', '*-model'] }),
+    )
+    check('--path globs the same string', entriesOf(byPath).length > 0, '')
+    const bothGlobs = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--name', 'card-*', '--path', 'paged-*'] }),
+    )
+    eq('and two globs must both hold', entriesOf(bothGlobs).length, 0)
+    // `--sort` rides `ls` and `search` in the captured grammar and is absent
+    // from `find`'s line, so `find` refuses it.
+    const findSort = await call(
+      'hf_fs',
+      ops({ cmd: 'find', args: ['hf://models/integ', '--sort', 'likes'] }),
+    )
+    eq(
+      'find takes no --sort, which is its own grammar',
+      errorOf(findSort).message ?? null,
+      'EINVAL: unexpected argument for find: --sort',
+    )
+
+    // ---- `--tag` and `--kind` belong to exactly one URI
+    const taggedElsewhere = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://datasets', 'discovery', '--tag', 'gradio'] }),
+    )
+    eq(
+      'the tag flags name where they apply, in upstream words',
+      errorOf(taggedElsewhere).message ?? null,
+      'EINVAL: --tag and --kind are supported only with search hf://spaces',
+    )
+    const mcpKind = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://models', 'card', '--kind', 'mcp'] }),
+    )
+    eq(
+      'and --kind mcp gets the same sentence off spaces',
+      errorOf(mcpKind).message ?? null,
+      'EINVAL: --tag and --kind are supported only with search hf://spaces',
+    )
+
+    // ---- the one search this fake will not fake
+    //
+    // `search hf://spaces` is semantically ranked upstream: every row carries
+    // `semantic relevance=93.8%`, a classifier `category` and a `title`, and
+    // the percentage moves between calls for the same repository. The plain
+    // shape would be a row no live server produces.
+    await fetch(`${mcp.rest.endpoint}/api/repos/create`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${DEFAULT_TENANT}`, 'Content-Type': 'application/json' },
+      // The fake refuses a Space without one, the way the Hub does.
+      body: JSON.stringify({
+        name: 'discovery-space',
+        type: 'space',
+        organization: 'integ',
+        sdk: 'gradio',
+      }),
+    })
+    const spacesRoot = await call('hf_fs', ops({ cmd: 'search', args: ['hf://spaces', 'disc'] }))
+    check(
+      'search on the spaces root is refused, with the reason',
+      String(errorOf(spacesRoot).message ?? '').includes('cannot rank hf://spaces'),
+      String(errorOf(spacesRoot).message ?? ''),
+    )
+    // Narrow on purpose: the owner-scoped form IS the plain shape upstream,
+    // so it is answered rather than swept into the same refusal.
+    const spacesOwner = await call(
+      'hf_fs',
+      ops({ cmd: 'search', args: ['hf://spaces/integ', 'discovery'] }),
+    )
+    eq(
+      'while the owner-scoped form still answers',
+      entriesOf(spacesOwner).map((one) => String(one.path ?? '')),
+      ['integ/discovery-space'],
+    )
+    eq('and a space row names its kind', entriesOf(spacesOwner)[0]?.repo_type ?? null, 'space')
+    check(
+      'and carries no downloads, the way upstream spaces do not',
+      !('downloads' in (entriesOf(spacesOwner)[0] ?? {})),
+      JSON.stringify(entriesOf(spacesOwner)[0] ?? {}),
+    )
+    check(
+      'nor a gated key, which only a model or dataset row has',
+      !('gated' in (entriesOf(spacesOwner)[0] ?? {})),
+      JSON.stringify(entriesOf(spacesOwner)[0] ?? {}),
+    )
+    eq('but does carry its sdk', entriesOf(spacesOwner)[0]?.sdk ?? null, 'gradio')
+
+    // `attach` says the same thing at every non-file URI, which is upstream's
+    // sentence and not the EINVAL this fake used to invent.
+    const attachNs = await call('hf_fs', ops({ cmd: 'attach', args: ['hf://models/integ'] }))
+    eq(
+      'attach on a namespace is NOT_A_FILE in upstream words',
+      errorOf(attachNs).message ?? null,
+      'attach requires a direct repository or bucket file URI.',
     )
 
     // ---- the shared attachment budget

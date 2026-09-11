@@ -32,15 +32,16 @@ from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.ops import Ops
-from mirage.policy import (AskHandler, Decisions, Explanation,
+from mirage.policy import (AskHandler, Decisions, Explanation, HandOff,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
 from mirage.provision import ProvisionResult
+from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
-from mirage.secrets.config import EnvVar, SourceBlock
+from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
 from mirage.secrets.sources import resolve_sources
@@ -48,7 +49,8 @@ from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
-                          JsonValue, MountBackend, MountMode, PathSpec)
+                          JsonValue, MountBackend, MountMode, PathSpec,
+                          parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
@@ -58,6 +60,7 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.node.explain import explain_line
 from mirage.workspace.session import Session, SessionManager, SessionStore
+from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (apply_profile, compile_profile,
                                               resolve_profile, with_inline)
 from mirage.workspace.session.session import vars_from_entries
@@ -81,8 +84,10 @@ from mirage.workspace.workspace.lifecycle import (close_async, patch_process,
                                                   stop_vfs_loop,
                                                   unpatch_process)
 from mirage.workspace.workspace.meta import WorkspaceMeta
-from mirage.workspace.workspace.mounts import (install_mounts, kernel_targets,
-                                               normalize_resources)
+from mirage.workspace.workspace.mounts import (check_resource, install_mounts,
+                                               kernel_targets,
+                                               normalize_resources,
+                                               prepare_added_mount)
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import ResourceMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
@@ -124,7 +129,7 @@ class Workspace:
         clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]]
         | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
-        secrets: Mapping[str, SourceBlock | Mapping[str, Any]] | None = None,
+        secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
         # The permission profiles: one per name, and the one a session
@@ -157,7 +162,9 @@ class Workspace:
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
         self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
+        self._index_config = index
         self._closed = False
+        self._closing = False
         self._async_closed = False
         self._close_lock = asyncio.Lock()
         # Resources reused from another live workspace (copy() / load
@@ -188,20 +195,20 @@ class Workspace:
         if secrets is not None and not isinstance(secrets, Mapping):
             raise SecretsError("config `secrets` must be a mapping, got "
                                f"{type(secrets).__name__}")
-        self._source_blocks: dict[str, SourceBlock] = {
-            name: (block if isinstance(block, SourceBlock) else
-                   SourceBlock.model_validate(block))
+        self._declared_sources: dict[str, SecretSource] = {
+            name: (block if isinstance(block, SecretSource) else
+                   SecretSource.model_validate(block))
             for name, block in (secrets or {}).items()
         }
         self._secret_sources_built: dict[str, ResolvedSource] | None = None
         self._secret_sources_task: asyncio.Task[dict[
             str, ResolvedSource]] | None = None
-        for block in self._source_blocks.values():
+        for block in self._declared_sources.values():
             source_for(block.source)
         seed_vars = vars_from_entries(env) if env else None
         for var in (seed_vars or {}).values():
             if (var.managed is not None
-                    and var.managed.source not in self._source_blocks):
+                    and var.managed.source not in self._declared_sources):
                 source_for(var.managed.source)
         self._session_mgr = SessionManager(session_id,
                                            store=stores.sessions,
@@ -210,14 +217,23 @@ class Workspace:
         # built-ins the registry seeds: the profile's admission rules
         # (PermissionsPolicy, reading each session's compiled rules
         # from the manager by the id the door puts in the context), the
-        # profile's script (ScriptPolicy, evaluated per command through
-        # the same manager), then Policy instances, then anything added
+        # profile's policy (ScriptPolicy, calling its hook per command
+        # through the same manager), then Policy instances, then anything added
         # later through ws.policies.add(). The route policy
         # (route_policy=) is the line-level counterpart until it is
         # absorbed as a hook.
         self._registry.policies.add(PermissionsPolicy(self._session_mgr))
+        # The doors the runtime world attaches (below), so a profile
+        # script reads the mounts an agent's program would, and through
+        # the same gate. The link source is a lambda because the
+        # namespace is built after this and read only at run time.
+        self._sandbox_resolver = PrefixResolver(
+            self._sandbox_visible_mounts,
+            lambda directory: self._namespace.link_names_under(directory))
         self._script_policy = ScriptPolicy(self._session_mgr,
-                                           self._mount_prefixes)
+                                           self._mount_prefixes,
+                                           dispatch=self.dispatch,
+                                           resolver=self._sandbox_resolver)
         self._registry.policies.add(self._script_policy)
         for entry in policies or []:
             self._registry.policies.add(entry)
@@ -263,7 +279,7 @@ class Workspace:
                              HistoryViewResource(self.observer),
                              MountMode.READ)
         # The facade delegates every op to the dispatcher, so FUSE and
-        # programmatic ws.ops walk the same pipeline as a shell command
+        # programmatic ws.fs walk the same pipeline as a shell command
         # and the policy gates fire exactly once, at that door.
         self._ops = Ops(self._registry.ops_mounts(),
                         observer=self.observer,
@@ -282,9 +298,7 @@ class Workspace:
         self._vfs_loop: asyncio.AbstractEventLoop | None = None
 
         self._runtimes, self._router = wire_runtime_world(
-            self._registry, self.dispatch,
-            PrefixResolver(self._sandbox_visible_mounts,
-                           self._namespace.link_names_under), runtimes)
+            self._registry, self.dispatch, self._sandbox_resolver, runtimes)
         reject_config_script("route_policy", route_policy)
         self._route_policy = route_policy
 
@@ -351,7 +365,7 @@ class Workspace:
                                   self._namespace)
 
     @property
-    def declared_sources(self) -> Mapping[str, SourceBlock]:
+    def declared_sources(self) -> Mapping[str, SecretSource]:
         """The `secrets:` declarations this workspace was built with.
 
         Read by the paths that rebuild a workspace from state: a
@@ -360,7 +374,7 @@ class Workspace:
         carry it across or the restored pointers name instances the new
         workspace never heard of.
         """
-        return self._source_blocks
+        return self._declared_sources
 
     async def _secret_sources(self) -> Mapping[str, ResolvedSource]:
         """The declared source instances, built once.
@@ -384,7 +398,8 @@ class Workspace:
         # forever.
         task = self._secret_sources_task
         if task is None:
-            task = asyncio.ensure_future(resolve_sources(self._source_blocks))
+            task = asyncio.ensure_future(
+                resolve_sources(self._declared_sources))
             self._secret_sources_task = task
         try:
             # Shielded: the task is shared, so a waiter whose own
@@ -414,7 +429,13 @@ class Workspace:
         return self._session_mgr.has_managed_env
 
     @property
-    def ops(self) -> Ops:
+    def fs(self) -> Ops:
+        """The op facade: read/write/stat/readdir/... against the mounts.
+
+        Named as TypeScript names it (`ws.fs`), so one host API reads the
+        same in both languages; the `Ops` class name stays, since it is
+        the op vocabulary the dispatcher speaks, not a filesystem.
+        """
         return self._ops
 
     @property
@@ -471,10 +492,60 @@ class Workspace:
     def mount(self, prefix: str):
         return self._registry.mount_for(prefix)
 
-    async def unmount(self, prefix: str) -> None:
-        if self._closed:
+    @property
+    def _shutting_down(self) -> bool:
+        """Reject lifecycle changes while runtimes drain into open mounts."""
+        return self._closing or self._closed
+
+    def add_mount(self,
+                  prefix: str,
+                  resource: BaseResource,
+                  mode: MountMode = MountMode.READ) -> MountEntry:
+        """Add a resource to a running workspace, mirroring TS ``addMount``.
+
+        Args:
+            prefix (str): virtual mount point; duplicates are refused.
+            resource (BaseResource): resource providing commands and ops.
+            mode (MountMode): access mode, read-only unless explicitly raised.
+
+        Returns:
+            MountEntry: the installed mount, with its normalized prefix.
+        """
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
-        await unmount_prefix(self._registry, self._ops, prefix)
+        check_resource(prefix, resource)
+        self._registry.check_resource_available(resource)
+        previous = self._registry.mounts()
+        # Configure before mount() captures the index in its CacheManager.
+        # An alias must retain the index used by the resource's other mounts.
+        if (self._registry.try_mount_for_prefix(prefix) is None
+                and not any(m.resource is resource
+                            for m in self._registry.mounts())):
+            resource.set_index(self._index_config)
+        entry = self._registry.mount(prefix, resource, mode)
+        prepare_added_mount(self._registry, entry, previous)
+        self._ops.set_mounts(self._registry.ops_mounts())
+        return entry
+
+    async def unmount(self, prefix: str) -> None:
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        await unmount_prefix(self._registry, self._ops, prefix,
+                             lambda: self._shutting_down,
+                             self._shared_resources)
+
+    def set_mount_mode(self, prefix: str, mode: MountMode) -> None:
+        """Change an exact mount's ceiling, retaining data and session caps.
+
+        Args:
+            prefix (str): mount prefix, not a path inside a mount.
+            mode (MountMode): the replacement read, write or exec mode.
+        """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        mode = parse_mount_mode(mode)
+        self._registry.mount_for_prefix(prefix).mode = mode
+        self._ops.set_mounts(self._registry.ops_mounts())
 
     def add_fuse_mount(self,
                        prefix: str,
@@ -576,6 +647,8 @@ class Workspace:
                 validated through the spec's ``config_model`` (fail
                 loud at install time).
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         return self._registry.clis.install(name, spec, config)
 
     def unregister_cli(self, name: str) -> None:
@@ -584,6 +657,8 @@ class Workspace:
         Args:
             name (str): installed head word.
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         self._registry.clis.uninstall(name)
 
     def clis(self) -> dict[str, CLIInstall]:
@@ -623,6 +698,8 @@ class Workspace:
         Raises:
             ValueError: unknown name or duplicate entry.
         """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
         return self._runtimes.add(runtime)
 
     @property
@@ -677,7 +754,7 @@ class Workspace:
             RuntimeError: The workspace is closed, or a runtime is
                 already attached.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         self._watch.attach(runtime)
 
@@ -713,7 +790,7 @@ class Workspace:
             p if isinstance(p, PathSpec) else PathSpec.from_str_path(p)
             for p in raw
         ]
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         return self._watch.watch(specs)
 
@@ -729,7 +806,7 @@ class Workspace:
         Args:
             change (FileEvent): Observed change.
         """
-        if self._closed:
+        if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         await self._watch.notify(change)
 
@@ -774,7 +851,7 @@ class Workspace:
             *,
             resources: dict[str, Any] | None = None,
             clis: CLIOverrides | None = None,
-            secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+            secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace from a tar.
@@ -826,7 +903,7 @@ class Workspace:
             *,
             resources: dict[str, Any] | None = None,
             clis: CLIOverrides | None = None,
-            secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+            secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None,
             drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
@@ -881,7 +958,7 @@ class Workspace:
         return await type(self)._from_state(state,
                                             resources=resources,
                                             clis=reusable_clis(self),
-                                            secrets=self._source_blocks)
+                                            secrets=self._declared_sources)
 
     @classmethod
     async def _from_state(
@@ -890,7 +967,7 @@ class Workspace:
         *,
         resources: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
-        secrets: Mapping[str, SourceBlock | Mapping[str, Any]]
+        secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None
     ) -> "Workspace":
         args = build_mount_args(state, resources, clis)
@@ -996,8 +1073,8 @@ class Workspace:
 
     def _profile_name(self, profile: str | SessionProfile | None) -> str:
         """The name of the profile ``_base_profile`` resolves, which its
-        script reads as ``ctx["profile"]``; empty for a profile document
-        passed without one.
+        script reads as ``ctx["profile"]`` and the session reports as
+        its group; empty for a profile document passed without one.
 
         Args:
             profile (str | SessionProfile | None): what the caller
@@ -1007,16 +1084,50 @@ class Workspace:
             return profile
         if profile is None and self._default_profile_name is not None:
             return self._default_profile_name
+        if profile is None and DEFAULT_PROFILE in self._profiles:
+            return DEFAULT_PROFILE
         return ""
 
     def _mount_prefixes(self) -> list[str]:
-        """The mount prefixes a profile script reads as
+        """The mount prefixes a profile policy reads as
         ``ctx["mounts"]``, read per evaluation so a later mount shows.
         """
         return [entry.prefix for entry in self._registry.mounts()]
 
     def get_session(self, session_id: str) -> Session:
         return self._session_mgr.get(session_id)
+
+    async def set_session_profile(
+        self,
+        session_id: str,
+        profile: str | SessionProfile | Mapping[str, Any] | None,
+    ) -> Session:
+        """Replace a live session's permissions, including its policy runtime.
+
+        Compilation succeeds before anything changes. This replaces modes,
+        hides, shows and policy rules; cwd/env presets apply only at creation.
+        Existing cwd, variables, functions and history survive. This is a
+        host-side operation, like creating a session.
+
+        Args:
+            session_id (str): the session to update.
+            profile: named profile or complete document; None selects the
+                workspace default, and an empty document clears restrictions.
+        """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        if isinstance(profile, Mapping):
+            profile = SessionProfile.model_validate(profile)
+        compiled = compile_profile(self._base_profile(profile),
+                                   self._profile_name(profile))
+        check_cli_verbs(compiled.commands, self._cli_verbs())
+        was_default = session_id == self.default_session_id
+        await self.ensure_sessions_loaded()
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        if was_default:
+            session_id = self.default_session_id
+        return await self._session_mgr.set_profile(session_id, compiled)
 
     def list_sessions(self) -> list[Session]:
         return self._session_mgr.list()
@@ -1082,42 +1193,46 @@ class Workspace:
 
     # ── execution ────────────────────────────────────────────────────────────
 
-    async def apply_io(self,
-                       io: IOResult,
-                       records: list[OpRecord] | None = None) -> None:
-        await self._dispatcher.apply_io(io, records=records)
+    async def apply_io(
+            self,
+            io: IOResult,
+            records: list[OpRecord] | None = None,
+            is_cacheable: Callable[[str], bool] | None = None) -> None:
+        await self._dispatcher.apply_io(io,
+                                        records=records,
+                                        is_cacheable=is_cacheable)
 
     @overload
-    async def execute(
-            self,
-            command: str,
-            session_id: str | None = ...,
-            stdin: ByteSource | None = ...,
-            provision: Literal[False] = ...,
-            agent_id: str | None = ...,
-            cwd: str | None = ...,
-            env: dict[str, str] | None = ...,
-            cancel: asyncio.Event | None = ...,
-            record: bool = ...,
-            runtime: str | None = ...,
-            routing_decision: "RouteDecision | None" = ...) -> IOResult:
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: ByteSource | None = ...,
+                      provision: Literal[False] = ...,
+                      agent_id: str | None = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...,
+                      runtime: str | None = ...,
+                      routing_decision: "RouteDecision | None" = ...,
+                      handed: "HandOff | None" = ...) -> IOResult:
         ...
 
     @overload
-    async def execute(
-            self,
-            command: str,
-            session_id: str | None = ...,
-            stdin: ByteSource | None = ...,
-            *,
-            provision: Literal[True],
-            agent_id: str | None = ...,
-            cwd: str | None = ...,
-            env: dict[str, str] | None = ...,
-            cancel: asyncio.Event | None = ...,
-            record: bool = ...,
-            runtime: str | None = ...,
-            routing_decision: "RouteDecision | None" = ...) -> ProvisionResult:
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: ByteSource | None = ...,
+                      *,
+                      provision: Literal[True],
+                      agent_id: str | None = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...,
+                      runtime: str | None = ...,
+                      routing_decision: "RouteDecision | None" = ...,
+                      handed: "HandOff | None" = ...) -> ProvisionResult:
         ...
 
     async def execute(
@@ -1133,6 +1248,7 @@ class Workspace:
         record: bool = True,
         runtime: str | None = None,
         routing_decision: RouteDecision | None = None,
+        handed: HandOff | None = None,
     ) -> IOResult | ProvisionResult:
         """Execute a shell command in the workspace.
 
@@ -1169,8 +1285,12 @@ class Workspace:
             routing_decision: Internal. The typed line's routing decision,
                 forwarded by the executor's nested evals so inner
                 lines never re-route.
+            handed: Internal. The hand-off the line runs on, made by the
+                executor's nested evals under the outer line's so an
+                inner line spends the grants the outer line's pass
+                claimed for it.
         """
         await self.nfs_ready()
         return await execute_line(self, command, session_id, stdin, provision,
                                   agent_id, cwd, env, cancel, record, runtime,
-                                  routing_decision)
+                                  routing_decision, handed)

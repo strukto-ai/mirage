@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EVENT_SUFFIX } from '../../resource/gcal/event_entry.ts'
-import { FileType } from '../../types.ts'
+import { ContentType } from '../../types.ts'
 import { Codec } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope } from '../hierarchy/scope.ts'
 import { validDay } from './day.ts'
@@ -45,14 +45,14 @@ export const SCOPES: readonly Scope[] = [
     kind: 'calendar_json',
     segments: [...CAL, 'calendar.json'],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
   new Scope({ kind: 'day', segments: DAY_SEGS }),
   new Scope({
     kind: 'event',
     segments: [...DAY_SEGS, new Slot('event', EVENT_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 

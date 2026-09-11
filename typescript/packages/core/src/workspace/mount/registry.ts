@@ -65,6 +65,8 @@ export interface OpsMountInfo {
 
 export class MountRegistry {
   private readonly mountList: MountEntry[]
+  readonly retiringResources = new Map<Resource, Promise<void>>()
+  readonly retiredResources = new WeakSet<Resource>()
   private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
@@ -121,6 +123,7 @@ export class MountRegistry {
       m.resource.index ?? null,
       m.prefix,
       cachesReads(m.resource),
+      (path) => !m.retiring && this.tryMountFor(path) === m,
     )
   }
 
@@ -145,9 +148,14 @@ export class MountRegistry {
       if (seen.has(prefix)) {
         throw new Error(`duplicate mount prefix: ${prefix}`)
       }
+      if (resource.isClosed === true)
+        throw new Error('resource is closed; create a new resource instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
-      mounts.push(new MountEntry({ prefix, resource, mode }))
+      const entry = new MountEntry({ prefix, resource, mode })
+      const alias = mounts.find((existing) => existing.resource === resource)
+      if (alias !== undefined) entry.activity = alias.activity
+      mounts.push(entry)
     }
     mounts.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = mounts
@@ -162,6 +170,19 @@ export class MountRegistry {
     return this.consistency
   }
 
+  /** A removed resource instance cannot start a second lifecycle. */
+  checkResourceAvailable(resource: Resource): void {
+    if (
+      this.retiringResources.has(resource) ||
+      this.mountList.some((m) => m.resource === resource && m.retiring)
+    ) {
+      throw new Error('resource is being unmounted')
+    }
+    if (resource.isClosed === true || this.retiredResources.has(resource)) {
+      throw new Error('resource is closed; create a new resource instance')
+    }
+  }
+
   /**
    * Add a mount dynamically. Mirrors Python's `registry.mount(...)`.
    * Registers the resource's commands and ops on the new mount and
@@ -173,6 +194,7 @@ export class MountRegistry {
     mode: MountMode = MountMode.READ,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
   ): MountEntry {
+    this.checkResourceAvailable(resource)
     const norm = normalizePrefix(prefix)
     for (const existing of this.mountList) {
       if (existing.prefix === norm) {
@@ -180,6 +202,8 @@ export class MountRegistry {
       }
     }
     const m = new MountEntry({ prefix: norm, resource, mode, consistency })
+    const alias = this.mountList.find((existing) => existing.resource === resource)
+    if (alias !== undefined) m.activity = alias.activity
     const cmds = resource.commands?.()
     if (cmds !== undefined) {
       for (const cmd of cmds) {
@@ -445,6 +469,7 @@ export class MountRegistry {
       mount = this.mountForCommand(cmdName)
     }
     if (mount === null) return null
+    await mount.ensureReady()
     // Warm reads are served in place by withReadCache, so a read-only command
     // stays on its real mount. Single-mount reads do not go through the
     // dispatcher, so this is where they reconcile against backend truth: the

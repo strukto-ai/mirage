@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-server",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
@@ -60,7 +60,7 @@
     "@fastify/rate-limit": "^10.0.0",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
-    "fastify": "^5.8.5",
+    "fastify": "^5.12.1",
     "isomorphic-git": "^1.38.1",
     "jose": "^6.2.3",
     "rate-limiter-flexible": "^11.2.0"

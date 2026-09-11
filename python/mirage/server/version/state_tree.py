@@ -115,6 +115,8 @@ def tree_inputs_from_state(
             mount[MountKey.CONSISTENCY],
             MountKey.RESOURCE_CLASS:
             mount[MountKey.RESOURCE_CLASS],
+            MountKey.RESOURCE_REF:
+            mount.get(MountKey.RESOURCE_REF),
             MountKey.RESOURCE_STATE:
             resource_state,
         })
@@ -158,12 +160,22 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
                 files[_rel_path(prefix, tree_path)] = data
         resource_state[ResourceStateKey.FILES] = files
         mounts.append({
-            MountKey.INDEX: mount[MountKey.INDEX],
-            MountKey.PREFIX: prefix,
-            MountKey.MODE: mount[MountKey.MODE],
-            MountKey.CONSISTENCY: mount[MountKey.CONSISTENCY],
-            MountKey.RESOURCE_CLASS: mount[MountKey.RESOURCE_CLASS],
-            MountKey.RESOURCE_STATE: resource_state,
+            MountKey.INDEX:
+            mount[MountKey.INDEX],
+            MountKey.PREFIX:
+            prefix,
+            MountKey.MODE:
+            mount[MountKey.MODE],
+            MountKey.CONSISTENCY:
+            mount[MountKey.CONSISTENCY],
+            MountKey.RESOURCE_CLASS:
+            mount[MountKey.RESOURCE_CLASS],
+            # ``get``: a meta committed before the ref was recorded reads
+            # as None, the answer for a resource constructed in code.
+            MountKey.RESOURCE_REF:
+            mount.get(MountKey.RESOURCE_REF),
+            MountKey.RESOURCE_STATE:
+            resource_state,
         })
     config = meta.get("config", {})
     sessions_blob = entries.get(SESSIONS_PATH)

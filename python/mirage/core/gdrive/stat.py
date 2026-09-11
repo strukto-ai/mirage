@@ -23,7 +23,7 @@ from mirage.core.gdrive.resolve import resolve_key
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, get_file
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 _MIME_TO_RT = {
@@ -63,7 +63,7 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
         name=vfs_name,
         size=size,
         type=FileType.FILE,
-        content=guess_type(vfs_name),
+        content=content_type_for_path(vfs_name),
         modified=modified,
         fingerprint=modified or None,
         extra={
@@ -109,7 +109,7 @@ async def stat(
         name=entry.vfs_name or entry.name,
         size=entry.size,
         type=FileType.FILE,
-        content=guess_type(entry.vfs_name),
+        content=content_type_for_path(entry.vfs_name),
         modified=entry.remote_time,
         fingerprint=entry.remote_time or None,
         extra={

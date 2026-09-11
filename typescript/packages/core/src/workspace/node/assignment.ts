@@ -34,11 +34,10 @@ import { assignmentStatus } from '../executor/statement.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAndClassify } from '../expand/parts.ts'
-import { arrayIndex } from '../expand/variable.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { deref, elementIndex, sessionElements, sessionView, visibleEnv } from '../session/state.ts'
+import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -52,6 +51,40 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
  * mirrors the readonly case: a fatal variable-assignment error that
  * abandons the rest of the line.
  */
+/**
+ * The line's death for a subscript that does not evaluate: bash aborts
+ * the line on `a[1/0]=v` with `1/0: division by 0`, the way it does for a
+ * bad `-i` value.
+ */
+function arithFatal(err: ArithError): ExitSignal {
+  return new ExitSignal(1, new TextEncoder().encode(`bash: ${err.message}\n`), null, 1)
+}
+
+/** `subscriptIndex` whose failure ends the line, in bash's words. */
+async function fatalIndex(session: Session, subscript: string, view: SessionView): Promise<number> {
+  try {
+    return await subscriptIndex(session, subscript, view)
+  } catch (err) {
+    if (err instanceof ArithError) throw arithFatal(err)
+    throw err
+  }
+}
+
+/** `buildIndexedLiteral` whose subscript failure ends the line. */
+async function fatalIndexLiteral(
+  held: ShellArray | null,
+  items: readonly string[],
+  append: boolean,
+  indexOf: (subscript: string) => Promise<number>,
+): Promise<ShellArray> {
+  try {
+    return await buildIndexedLiteral(held, items, append, indexOf)
+  } catch (err) {
+    if (err instanceof ArithError) throw arithFatal(err)
+    throw err
+  }
+}
+
 async function assignVar(view: SessionView, key: string, value: ShellValue): Promise<void> {
   try {
     await view.set(key, value)
@@ -215,15 +248,15 @@ export async function executeAssignment(
     }
     let held: ShellArray | null = session.arrays[key] ?? null
     if (append && held === null) {
-      const scalar = session.env[key]
+      const scalar = conversionScalar(session, key)
       held = scalar === undefined ? null : [scalar]
     }
     // `arr+=(...)` starts at the extent, so it fills the hole a
     // trailing `unset arr[last]` left but skips interior ones; a
     // `[i]=v` element places at i and the next plain word continues
     // from there.
-    const base = buildIndexedLiteral(held, items, append, (sub) =>
-      elementIndex(sub, visibleEnv(session), sessionElements(session)),
+    const base = await fatalIndexLiteral(held, items, append, (sub) =>
+      subscriptIndex(session, sub, view),
     )
     await assignVar(view, key, base)
     const arrCode = assignmentStatus(session, subSeq)
@@ -284,12 +317,12 @@ export async function executeAssignment(
     const existing = session.arrays[key]
     let arr: ShellArray
     if (existing === undefined) {
-      const scalar = session.env[key]
+      const scalar = conversionScalar(session, key)
       arr = scalar === undefined ? [] : [scalar]
     } else {
       arr = [...existing]
     }
-    let idx = arrayIndex(subText, visibleEnv(session), sessionElements(session))
+    let idx = await fatalIndex(session, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
     if (idx < 0) {
       // Same fatal shape as the empty subscript above.

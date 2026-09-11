@@ -24,7 +24,7 @@ def workspace():
 
 @pytest.mark.asyncio
 async def test_wc_default(workspace):
-    await workspace.ops.write("/f.txt", b"hello world\nfoo bar\n")
+    await workspace.fs.write("/f.txt", b"hello world\nfoo bar\n")
     io = await workspace.execute("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().split()
@@ -36,7 +36,7 @@ async def test_wc_default(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_l(workspace):
-    await workspace.ops.write("/f.txt", b"a\nb\nc\n")
+    await workspace.fs.write("/f.txt", b"a\nb\nc\n")
     io = await workspace.execute("wc -l /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
@@ -44,7 +44,7 @@ async def test_wc_l(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_w(workspace):
-    await workspace.ops.write("/f.txt", b"hello world\nfoo\n")
+    await workspace.fs.write("/f.txt", b"hello world\nfoo\n")
     io = await workspace.execute("wc -w /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
@@ -52,7 +52,7 @@ async def test_wc_w(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_c(workspace):
-    await workspace.ops.write("/f.txt", b"hello\n")
+    await workspace.fs.write("/f.txt", b"hello\n")
     io = await workspace.execute("wc -c /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "6"
@@ -61,7 +61,7 @@ async def test_wc_c(workspace):
 @pytest.mark.asyncio
 async def test_wc_m_multibyte(workspace):
     """`café` is 4 chars / 5 bytes."""
-    await workspace.ops.write("/f.txt", "café".encode())
+    await workspace.fs.write("/f.txt", "café".encode())
     io = await workspace.execute("wc -m /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "4"
@@ -69,7 +69,7 @@ async def test_wc_m_multibyte(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_L(workspace):
-    await workspace.ops.write("/f.txt", b"short\na much longer line\nmed\n")
+    await workspace.fs.write("/f.txt", b"short\na much longer line\nmed\n")
     io = await workspace.execute("wc -L /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == str(len("a much longer line"))
@@ -77,7 +77,7 @@ async def test_wc_L(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_empty_file(workspace):
-    await workspace.ops.write("/f.txt", b"")
+    await workspace.fs.write("/f.txt", b"")
     io = await workspace.execute("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().split()
@@ -123,8 +123,8 @@ async def test_wc_L_stdin(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_multi_file_emits_total(workspace):
-    await workspace.ops.write("/a.txt", b"hello\n")
-    await workspace.ops.write("/b.txt", b"world\nfoo\n")
+    await workspace.fs.write("/a.txt", b"hello\n")
+    await workspace.fs.write("/b.txt", b"world\nfoo\n")
     io = await workspace.execute("wc /a.txt /b.txt")
     assert io.exit_code == 0
     assert io.stdout.endswith(b"\n")

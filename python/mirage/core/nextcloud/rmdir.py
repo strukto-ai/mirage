@@ -17,7 +17,7 @@ async def rmdir(accessor: NextcloudAccessor,
     only thing separating them. Without it ``rmdir`` destroyed the whole
     subtree for every caller that does not pre-check emptiness itself,
     and the command builders are the only callers that do: FUSE,
-    ``ws.ops`` and the sandbox runtimes all reach the op directly.
+    ``ws.fs`` and the sandbox runtimes all reach the op directly.
 
     PROPFIND on a collection returns the collection itself, so the
     listing is read for the first entry that is not the collection --

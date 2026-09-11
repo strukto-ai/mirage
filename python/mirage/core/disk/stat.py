@@ -21,7 +21,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.filetype import guess_type
+from mirage.utils.filetype import content_type_for_path
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -59,6 +59,6 @@ async def stat(accessor: DiskAccessor,
                     modified=modified,
                     fingerprint=modified,
                     type=FileType.FILE,
-                    content=guess_type(p.name),
+                    content=content_type_for_path(p.name),
                     mode=st.st_mode & 0o7777,
                     atime=epoch_to_iso(st.st_atime))

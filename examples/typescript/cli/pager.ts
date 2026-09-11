@@ -58,7 +58,11 @@ function accountIncidents(account: PagerConfig['account']): Record<string, Incid
   return INCIDENTS[account]
 }
 
-function listIncidents(inv: CLIInvocation): CommandFnResult {
+// A leaf returns its result directly or as a promise, whichever its body
+// needs: the executor awaits either, so a handler that reaches a service
+// and one that answers from memory are written the same way, and one that
+// throws before any await is refused exactly like one that rejects.
+function listIncidents(inv: CLIInvocation): Promise<CommandFnResult> {
   const { account } = configOf(inv)
   const lines = Object.entries(accountIncidents(account))
     .sort(([left], [right]) => left.localeCompare(right))
@@ -69,7 +73,7 @@ function listIncidents(inv: CLIInvocation): CommandFnResult {
           : `acknowledged-by=${incident.acknowledgedBy}`
       return `[${account}] ${incidentId} ${state} ${incident.summary}`
     })
-  return [enc.encode(`${lines.join('\n')}\n`), new IOResult()]
+  return Promise.resolve([enc.encode(`${lines.join('\n')}\n`), new IOResult()])
 }
 
 function acknowledge(inv: CLIInvocation): CommandFnResult {

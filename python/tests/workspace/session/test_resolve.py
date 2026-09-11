@@ -395,3 +395,17 @@ def test_narrow_stamps_the_path_axis():
     assert session.hide_reasons == compiled.hide_reasons
     empty = compile_profile(None)
     assert empty.shown_paths is None and empty.hide_reasons == ()
+
+
+def test_compile_profile_carries_the_name_and_narrow_stamps_it():
+    compiled = compile_profile(PROFILES["reviewer"], "reviewer")
+    assert compiled.profile == "reviewer"
+    session = Session(session_id="s1")
+    narrow(session, compiled)
+    assert session.profile == "reviewer"
+    # A document passed without a name, and no document at all, leave
+    # the session with no profile to report.
+    assert compile_profile(PROFILES["reviewer"]).profile is None
+    assert compile_profile(None).profile is None
+    narrow(session, compile_profile(None))
+    assert session.profile is None

@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface R2Config {
@@ -38,8 +43,8 @@ const R2ConfigSchema = z.object({
   secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
   accountId: z.string().optional(),
-  endpoint: z.string(),
-  region: z.string(),
+  endpoint: z.string().optional(),
+  region: z.string().optional(),
   profile: z.string().optional(),
   forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
@@ -47,8 +52,8 @@ const R2ConfigSchema = z.object({
   proxy: secretStr().optional(),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the region and endpoint the redactor fills in.
+// Only the redacted twin derives; the redactor fills in the region and
+// endpoint the provider's rule resolves.
 export type R2ConfigRedacted = RedactedConfig<
   ConfigOf<typeof R2ConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
@@ -87,15 +92,5 @@ export function redactR2Config(config: R2Config): R2ConfigRedacted {
 }
 
 export function normalizeR2Config(input: Record<string, unknown>): R2Config {
-  return normalizeFields(input, {
-    rename: {
-      aws_profile: 'profile',
-      endpoint_url: 'endpoint',
-      path_style: 'forcePathStyle',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as R2Config
+  return parseConfigWithSchema(R2ConfigSchema, input, S3_FAMILY_NORMALIZER)
 }

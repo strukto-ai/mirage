@@ -339,6 +339,40 @@
         "stdout": "hi\nc=1\nzcfi=5\n",
         "stderr": "bash: zcfi: readonly variable\n"
       }
+    },
+    {
+      "id": "cfor_slot_keeps_every_comma_expression",
+      "seq": 502170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for ((zca=5, zci=1; zci>0; zci=0)); do echo $zca$zci; done; for ((zci=0; zci<1, zci<2; zci++, zci++)); do echo $zci; done; echo $zci; RANDOM=1; for ((RANDOM=42, zci=RANDOM; zci>0; zci=0)); do echo $zci; done; echo $RANDOM",
+      "expect": {
+        "exit": 0,
+        "stdout": "51\n0\n2\n17772\n26794\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -193,6 +193,54 @@ describe('edge cases', () => {
 })
 
 describe('background drain', () => {
+  it('retires an evicted fill before a replacement starts at the same path', async () => {
+    const cache = new RAMFileCacheStore()
+    let releaseOld = (): void => undefined
+    let releaseNew = (): void => undefined
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve
+    })
+    const newGate = new Promise<void>((resolve) => {
+      releaseNew = resolve
+    })
+    async function* stream(gate: Promise<void>, data: string) {
+      await gate
+      yield ENC.encode(data)
+    }
+    const path = '/data/file'
+    await applyIo(
+      cache,
+      new IOResult({
+        reads: { [path]: new CachableAsyncIterator(stream(oldGate, 'old account')) },
+        cache: [path],
+      }),
+    )
+    const old = cache.drainTasks.get(path)
+    await cache.evictPrefix('/data/')
+    expect(cache.drainTasks.has(path)).toBe(false)
+    await applyIo(
+      cache,
+      new IOResult({
+        reads: { [path]: new CachableAsyncIterator(stream(newGate, 'new account')) },
+        cache: [path],
+      }),
+    )
+    const fresh = cache.drainTasks.get(path)
+    try {
+      releaseOld()
+      await old
+      expect(await cache.get(path)).toBeNull()
+      expect(cache.drainTasks.get(path)).toBe(fresh)
+      releaseNew()
+      await fresh
+      expect(DEC.decode((await cache.get(path)) ?? undefined)).toBe('new account')
+    } finally {
+      releaseOld()
+      releaseNew()
+      await Promise.allSettled([old, fresh])
+    }
+  })
+
   it('does not start a duplicate drain for the same path', async () => {
     const cache = new RAMFileCacheStore()
     const io1 = new IOResult({ reads: { '/f.txt': makeStream('first') }, cache: ['/f.txt'] })

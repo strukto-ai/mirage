@@ -28,11 +28,15 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLISpec
 from mirage.policy.profile import SessionProfile
+from mirage.resource.loader import load_attr
 from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
-from mirage.secrets.config import EnvVar, SourceBlock
+from mirage.secrets.config import EnvVar, SecretSource
+from mirage.secrets.sources import (config_holds_pointer,
+                                    resolve_config_secrets,
+                                    resolve_sources_for)
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import ConsoleFactory
 from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
@@ -308,6 +312,18 @@ class CLIBlock(BaseModel):
         if self.runtime is not None and self.script is None:
             raise ValueError(
                 "runtime pins the script's runtime; it takes script")
+        # A pointer may only fill a config that a model validates,
+        # because the model is what a snapshot redacts by. A script's
+        # config is opaque: nothing declares which key is a credential,
+        # so the snapshot captures it verbatim, and a pointer resolved
+        # into it would be written out as the value it fetched. The
+        # block refuses rather than the dump, so every door that reads
+        # a config inherits the rule.
+        if self.script is not None and config_holds_pointer(self.config):
+            raise ValueError(
+                "a script's config is opaque and a pointer in it would be "
+                "written into every snapshot; read the credential from a "
+                "managed env var instead")
         return self
 
 
@@ -369,6 +385,24 @@ def _load_script_source(value: str) -> ScriptSource:
                         module=path.suffix == ".mjs")
 
 
+def _load_profile_policy(profile: SessionProfile) -> SessionProfile:
+    """Embed a profile's path-form policy program as source.
+
+    Args:
+        profile (SessionProfile): the profile as validated; returned
+            as is when it states no policy or already carries source.
+    """
+    policy = profile.policy
+    if policy is None or not isinstance(policy.script, str):
+        return profile
+    return profile.model_copy(
+        update={
+            "policy":
+            policy.model_copy(
+                update={"script": _load_script_source(policy.script)})
+        })
+
+
 def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     """Resolve relative script paths against the config file's dir.
 
@@ -387,9 +421,12 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
         raw["route_policy"] = str(base / policy.strip())
     runtimes = raw.get("runtimes")
     if isinstance(runtimes, list):
-        for entry in runtimes:
+        for i, entry in enumerate(runtimes):
             if isinstance(entry, dict):
                 _absolutize_script_key(entry, base)
+                _absolutize_code_ref(entry, "name", base)
+            elif isinstance(entry, str):
+                runtimes[i] = _rebase_code_ref(entry, base)
     clis = raw.get("clis")
     if isinstance(clis, dict):
         for block in clis.values():
@@ -404,16 +441,19 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     profiles = raw.get("profiles")
     if isinstance(profiles, dict):
         for block in profiles.values():
-            if isinstance(block, dict):
-                _absolutize_script_key(block, base)
+            # A profile's policy block carries its program the way a
+            # clis entry does, so its script rebases the same way.
+            policy = block.get("policy") if isinstance(block, dict) else None
+            if isinstance(policy, dict):
+                _absolutize_script_key(policy, base)
 
 
 def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
     """Rebase one mapping's relative ``script`` path onto ``base``.
 
     Args:
-        entry (dict[str, Any]): a ``runtimes`` or ``clis`` mapping
-            entry, mutated in place.
+        entry (dict[str, Any]): a ``runtimes``, ``clis`` or profile
+            ``policy`` mapping entry, mutated in place.
         base (Path): directory containing the config file.
     """
     script = entry.get("script")
@@ -425,30 +465,69 @@ def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
 def _absolutize_code_ref(entry: dict[str, Any], key: str, base: Path) -> None:
     """Rebase a path-form colon reference under ``key``.
 
-    ``cli: ./tool.py:TREE`` and ``resource: ./wiki.py:WikiResource`` both
-    mean "next to the config file", the same build-context rule
-    ``script:`` follows; without this the pointer reaches ``load_attr``
-    relative and resolves against the server process's cwd. A module
-    dotpath (``pkg.mod:TREE``) is left alone: importlib resolves it, not
-    the filesystem. The split matches ``load_attr``'s own test, so the
-    two cannot disagree about what a path is.
+    ``cli: ./tool.py:TREE``, ``resource: ./wiki.py:WikiResource`` and a
+    runtime entry's ``name: ./box.py:EchoBox`` all mean "next to the
+    config file", the same build-context rule ``script:`` follows;
+    without this the pointer reaches ``load_attr`` relative and resolves
+    against the server process's cwd. A module dotpath (``pkg.mod:TREE``)
+    is left alone: importlib resolves it, not the filesystem. The split
+    matches ``load_attr``'s own test, so the two cannot disagree about
+    what a path is.
 
     Args:
-        entry (dict[str, Any]): a ``clis`` or ``mounts`` mapping entry,
-            mutated in place.
-        key (str): the field holding the reference, ``cli`` or
-            ``resource``.
+        entry (dict[str, Any]): a ``clis``, ``mounts`` or ``runtimes``
+            mapping entry, mutated in place.
+        key (str): the field holding the reference, ``cli``,
+            ``resource`` or ``name``.
         base (Path): directory containing the config file.
     """
     ref = entry.get(key)
-    if not isinstance(ref, str) or ":" not in ref:
-        return
+    if isinstance(ref, str):
+        entry[key] = _rebase_code_ref(ref, base)
+
+
+def _rebase_code_ref(ref: str, base: Path) -> str:
+    """``ref`` with a relative path-form source rebased onto ``base``.
+
+    Anything that is not a relative path-form reference (a bare name, a
+    module dotpath, an absolute path) comes back unchanged, so the bare
+    string runtime entry (``- ./box.py:EchoBox`` beside ``- monty``) reads
+    the same way the keyed forms do.
+
+    Args:
+        ref (str): a config value that may be a ``source:attr`` reference.
+        base (Path): directory containing the config file.
+    """
+    if ":" not in ref:
+        return ref
     source, attr = ref.rsplit(":", 1)
     if "/" not in source and not source.endswith(".py"):
-        return
+        return ref
     if Path(source).is_absolute():
-        return
-    entry[key] = f"{base / source}:{attr}"
+        return ref
+    return f"{base / source}:{attr}"
+
+
+def _runtime_class(ref: str) -> type[Runtime]:
+    """Load the ``Runtime`` subclass a ``source:Class`` reference names.
+
+    The runtime twin of the ``resource:`` and ``cli:`` reference forms:
+    a deployment ships a runtime as a file and names it from yaml with no
+    host program calling ``register_runtime``. The class is constructed
+    with the uniform ``(captures, config, script)`` options like a
+    builtin, so the entry's other keys reach it unchanged.
+
+    Args:
+        ref (str): ``./box.py:EchoBox`` or ``pkg.mod:EchoBox``.
+
+    Raises:
+        ValueError: the reference does not load, or names something
+            that is not a ``Runtime`` subclass.
+    """
+    loaded = load_attr(ref)
+    if not (isinstance(loaded, type) and issubclass(loaded, Runtime)):
+        raise ValueError(f"{ref!r} is not a Runtime subclass")
+    return loaded
 
 
 def _build_runtime_entries(
@@ -456,17 +535,19 @@ def _build_runtime_entries(
     """Turn config runtime entries into workspace runtime entries.
 
     Args:
-        entries (list[str | dict[str, Any]]): name strings, or maps
-            carrying a name plus the uniform runtime options
-            (``captures``, ``config``, ``script``).
+        entries (list[str | dict[str, Any]]): names, or maps carrying a
+            name plus the uniform runtime options (``captures``,
+            ``config``, ``script``). A name is a registered runtime or a
+            ``source:Class`` reference to a ``Runtime`` subclass.
 
     Raises:
-        ValueError: a map entry without a name, or a non-path script.
+        ValueError: a map entry without a name, a non-path script, or a
+            reference that is not a ``Runtime`` subclass.
     """
     out: list[Runtime | str] = []
     for entry in entries:
         if isinstance(entry, str):
-            out.append(entry)
+            out.append(_runtime_class(entry)() if ":" in entry else entry)
             continue
         options = dict(entry)
         name = options.pop("name", None)
@@ -478,6 +559,9 @@ def _build_runtime_entries(
                 "a runtime entry script must be a .py path string")
         if script is not None:
             options["script"] = _load_script_source(script)
+        if ":" in name:
+            out.append(_runtime_class(name)(**options))
+            continue
         out.append(build_runtime(name, **options))
     return out
 
@@ -545,7 +629,7 @@ class WorkspaceConfig(BaseModel):
     # the way `mounts:` is. A managed env entry's `from` names an
     # instance here, or a source directly when the deployment has one
     # account of it and nothing to configure.
-    secrets: dict[str, SourceBlock] | None = None
+    secrets: dict[str, SecretSource] | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -614,11 +698,7 @@ class WorkspaceConfig(BaseModel):
             kwargs["route_policy"] = _load_script_source(self.route_policy)
         if self.profiles is not None:
             kwargs["profiles"] = {
-                name:
-                (profile if profile.script is None else profile.model_copy(
-                    update={
-                        "script": _load_script_source(str(profile.script))
-                    }))
+                name: _load_profile_policy(profile)
                 for name, profile in self.profiles.items()
             }
         if self.profile is not None:
@@ -754,6 +834,60 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
     return RAMWorkspaceStateStore(namespace=namespace,
                                   observer=observer,
                                   workspace=workspace)
+
+
+async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
+    """A config with every mount and CLI pointer replaced by its secret.
+
+    The async half of the YAML door, and the reason
+    :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
+    `{from, ref, key}` in `mounts.*.config` or `clis.*.config` is
+    fetched here, so `build_resource` receives the credential itself
+    and no resource config, client or backend learns that this plane
+    exists. Mirrors the TypeScript `configToWorkspaceArgs`, which does
+    the same thing inline because it is async already.
+
+    A `secrets:` block is not required: `fetch_secret` builds an
+    undeclared builtin source from ambient defaults, so
+    `{from: env, key: TOKEN}` resolves with no block at all and the
+    walk runs either way. A config holding no pointer does no I/O.
+
+    Args:
+        config (WorkspaceConfig): the validated config.
+
+    Returns:
+        WorkspaceConfig: the same config, pointers resolved.
+
+    Raises:
+        SecretsError: a source could not answer, or answered without
+            the wanted field.
+    """
+    configs = [block.config for block in config.mounts.values()]
+    configs += [block.config for block in (config.clis or {}).values()]
+    sources = await resolve_sources_for(config.secrets, configs)
+    mounts = {
+        prefix:
+        block.model_copy(
+            update={
+                "config":
+                await resolve_config_secrets(block.config, sources,
+                                             f"mounts.{prefix}.config")
+            })
+        for prefix, block in config.mounts.items()
+    }
+    update: dict[str, Any] = {"mounts": mounts}
+    if config.clis is not None:
+        update["clis"] = {
+            name:
+            block.model_copy(
+                update={
+                    "config":
+                    await resolve_config_secrets(block.config, sources,
+                                                 f"clis.{name}.config")
+                })
+            for name, block in config.clis.items()
+        }
+    return config.model_copy(update=update)
 
 
 def load_config(source: str | Path | dict[str, Any],

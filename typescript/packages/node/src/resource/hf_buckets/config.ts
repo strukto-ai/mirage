@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { type FieldNormalizer, secondsToMs } from '@struktoai/mirage-core/utils/normalize'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
 
@@ -55,10 +60,18 @@ export interface HfBucketsConfig {
   keyPrefix?: string
 }
 
+// Python states the timeout in seconds; the redactor fills `endpoint`
+// from HF_ENDPOINT, so it is optional on the wire exactly as python's
+// default makes it.
+const HF_NORMALIZER: FieldNormalizer = {
+  rename: { timeout: 'timeoutMs' },
+  transform: { timeout: secondsToMs },
+}
+
 const HfBucketsConfigSchema = z.object({
   bucket: z.string(),
   token: secretStr().optional(),
-  endpoint: z.string(),
+  endpoint: z.string().optional(),
   timeoutMs: z.number().optional(),
   keyPrefix: z.string().optional(),
 })
@@ -78,14 +91,7 @@ export function redactHfBucketsConfig(config: HfBucketsConfig): HfBucketsConfigR
 }
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
-  const config = normalizeFields(input, {
-    rename: {
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as HfBucketsConfig
+  const config = parseConfigWithSchema(HfBucketsConfigSchema, input, HF_NORMALIZER)
   assertHfRepoId(config.bucket, 'bucket')
   return config
 }
@@ -111,7 +117,7 @@ export interface HfRepoConfig {
 const HfRepoConfigSchema = z.object({
   repoId: z.string(),
   token: secretStr().optional(),
-  endpoint: z.string(),
+  endpoint: z.string().optional(),
   timeoutMs: z.number().optional(),
   keyPrefix: z.string().optional(),
   revision: z.string().optional(),
@@ -130,14 +136,7 @@ export function redactHfRepoConfig(config: HfRepoConfig): HfRepoConfigRedacted {
 }
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {
-  const config = normalizeFields(input, {
-    rename: {
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as HfRepoConfig
+  const config = parseConfigWithSchema(HfRepoConfigSchema, input, HF_NORMALIZER)
   assertHfRepoRef(config.repoId, 'repo_id')
   return config
 }

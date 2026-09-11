@@ -15,7 +15,7 @@
 import { varsFromEnv } from '../../../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
-import { FileType } from '../../../../types.ts'
+import { ContentType, FileType } from '../../../../types.ts'
 import { Session } from '../../../session/session.ts'
 import type { DispatchFn } from '../../cross_mount.ts'
 import { handleCd } from './cd.ts'
@@ -28,7 +28,10 @@ function dispatcher(dirs: string[] = [], files: string[] = []) {
       return Promise.resolve([{ name: scope.virtual, type: FileType.DIRECTORY }, null])
     }
     if (files.includes(scope.virtual)) {
-      return Promise.resolve([{ name: scope.virtual, type: FileType.TEXT }, null])
+      return Promise.resolve([
+        { name: scope.virtual, type: FileType.FILE, content: ContentType.TEXT },
+        null,
+      ])
     }
     const err = new Error(`no such file: ${scope.virtual}`)
     ;(err as { code?: string }).code = 'ENOENT'

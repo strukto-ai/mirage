@@ -50,7 +50,7 @@ export function betterMatch(
  * rule refuses (or asks about) the whole line, and the operand as typed
  * when the rule is path-scoped and one operand fell under its paths, so
  * the refusal is scoped to that operand (`rm: x: <reason>`, exit 1)
- * rather than to the command (`rm: policy denied: <reason>`, 126).
+ * rather than to the command (`rm: Permission denied`, 126).
  */
 export interface RuleMatch {
   operand: string | null

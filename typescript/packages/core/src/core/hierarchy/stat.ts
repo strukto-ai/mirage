@@ -16,7 +16,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { assertListed, listedSize, resolveEntry, type ReaddirFn } from './probe.ts'
@@ -40,11 +40,23 @@ export type EntryStatFn = (match: ScopeMatch, path: PathSpec, entry: IndexEntry)
  * entry's id under `idField` in `extra`. A kind whose shape differs writes
  * its own `EntryStatFn` instead.
  */
-export function entryStat(idField: string, filetype: FileType): EntryStatFn {
+// The node kinds, so `entryStat` can tell a FileType from a ContentType:
+// both are string unions and the two vocabularies do not overlap.
+const KINDS: ReadonlySet<string> = new Set(Object.values(FileType))
+
+/**
+ * `kind` is the node's kind: a FileType for a non-regular node (a
+ * directory), or a ContentType for a regular file, whose node kind is
+ * then FILE. Mirrors `entry_stat` in `mirage/core/hierarchy/stat.py`.
+ */
+export function entryStat(idField: string, kind: FileType | ContentType): EntryStatFn {
+  const shape = KINDS.has(kind)
+    ? { type: kind as FileType }
+    : { type: FileType.FILE, content: kind as ContentType }
   return function build(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
     return new FileStat({
       name: entry.vfsName,
-      type: filetype,
+      ...shape,
       size: entry.size,
       modified: entry.remoteTime !== '' ? entry.remoteTime : null,
       extra: { [idField]: entry.id },
@@ -111,7 +123,8 @@ export function makeStat<A extends Accessor>(
     if (!scope.leaf) return new FileStat({ name, type: FileType.DIRECTORY, extra })
     return new FileStat({
       name,
-      type: scope.filetype ?? FileType.JSON,
+      type: FileType.FILE,
+      content: scope.filetype ?? ContentType.JSON,
       size: await listedSize(store, path),
       extra,
     })

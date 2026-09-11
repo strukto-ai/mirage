@@ -29,7 +29,7 @@ import * as readModule from '../../../core/mongodb/read.ts'
 import * as statModule from '../../../core/mongodb/stat.ts'
 import { resolveMongoDBConfig } from '../../../resource/mongodb/config.ts'
 import { materialize } from '../../../io/types.ts'
-import { FileStat, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { MONGODB_CAT } from './cat.ts'
 
 const DEC = new TextDecoder()
@@ -77,7 +77,9 @@ describe('mongodb cat error surfacing', () => {
   })
 
   it('concatenates all files when multiple paths are given', async () => {
-    vi.mocked(statModule.stat).mockResolvedValue(new FileStat({ name: 'documents.jsonl' }))
+    vi.mocked(statModule.stat).mockResolvedValue(
+      new FileStat({ name: 'documents.jsonl', type: FileType.FILE }),
+    )
     vi.mocked(readModule.streamAny).mockImplementation((_accessor, path) => bytesFor(path))
     const cmd = MONGODB_CAT[0]
     if (cmd === undefined) throw new Error('cat not registered')

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.resource.ram import RAMResource
 from mirage.runtime.python import LocalRuntime
-from mirage.types import MountMode
+from mirage.types import FileType, MountMode
 from mirage.workspace import Workspace
 
 
@@ -441,6 +441,11 @@ def test_c_style_for():
         ("n=2; for ((i=n;i<4;i++)); do echo $i; done", b"2\n3\n"),
         ("for ((i=0;i<2;i++)); do echo a; done; echo i=$i", b"a\na\ni=2\n"),
         ("for ((i=0;i<1;i++)); do false; echo s=$?; done", b"s=1\n"),
+            # Each slot is one comma expression: bash 5.2 keeps every part
+            # (only the last child of a slot used to survive).
+        ("for ((a=5, i=1; i>0; i=0)); do echo $a$i; done", b"51\n"),
+        ("for ((i=0; i<1, i<2; i++, i++)); do echo $i; done; echo $i",
+         b"0\n2\n"),
     ]:
         io = _exec(ws, cmd)
         assert _stdout(io) == want, cmd
@@ -1926,10 +1931,10 @@ def test_cache_hit_serves_from_ram():
     ws = _ws()
     io1 = _exec(ws, "cat /s3/data.txt")
     assert _stdout(io1) == b"hello from s3\n"
-    records_after_first = list(ws.ops.records)
+    records_after_first = list(ws.fs.records)
     io2 = _exec(ws, "cat /s3/data.txt")
     assert _stdout(io2) == b"hello from s3\n"
-    new_records = ws.ops.records[len(records_after_first):]
+    new_records = ws.fs.records[len(records_after_first):]
     sources = [r.source for r in new_records if r.op == "read"]
     assert all(s == "ram" for s in sources)
 
@@ -1938,7 +1943,7 @@ def test_cache_miss_reads_from_resource():
     ws = _ws()
     io = _exec(ws, "cat /s3/data.txt")
     assert _stdout(io) == b"hello from s3\n"
-    sources = [r.source for r in ws.ops.records if r.op == "read"]
+    sources = [r.source for r in ws.fs.records if r.op == "read"]
     assert sources[0] == "ram"
 
 
@@ -1955,10 +1960,10 @@ def test_cache_invalidation_after_write():
 def test_grep_uses_cache():
     ws = _ws()
     _exec(ws, "cat /s3/report.csv")
-    records_before = len(ws.ops.records)
+    records_before = len(ws.fs.records)
     io = _exec(ws, "grep alice /s3/report.csv")
     assert b"alice" in _stdout(io)
-    new_records = ws.ops.records[records_before:]
+    new_records = ws.fs.records[records_before:]
     sources = [r.source for r in new_records if r.op == "read"]
     assert all(s == "ram" for s in sources)
 
@@ -2536,9 +2541,9 @@ def test_special_var_at_split():
 
 
 def test_background_then_foreground():
-    """echo bg &; echo fg — foreground runs after background."""
+    """echo bg & echo fg — foreground runs after background."""
     ws = _ws()
-    io = _exec(ws, "echo bg &; echo fg")
+    io = _exec(ws, "echo bg & echo fg")
     assert b"fg" in _stdout(io)
 
 
@@ -2678,7 +2683,133 @@ def test_while_loop_under_limit_no_warning():
     assert err == ""
 
 
-# ── unmount ────────────────────────────────────────────────────────────
+# ── dynamic mounts ─────────────────────────────────────────────────────
+
+
+def test_add_mount_refreshes_the_existing_filesystem_facade():
+    ws = Workspace({}, mode=MountMode.WRITE)
+    fs = ws.fs
+
+    async def run():
+        try:
+            await fs.write("/root.txt", b"root")
+            records = list(fs.records)
+            resource = RAMResource()
+            entry = ws.add_mount("/data/nested", resource, MountMode.WRITE)
+            assert entry.prefix == "/data/nested/"
+            assert entry.resource is resource
+            assert ws.fs is fs
+            assert fs.records == records
+            assert "/data/nested/" in fs.mount_prefixes()
+            assert ("/data/nested/", "ram") in fs.writable_mounts()
+            assert not fs.unsized_mounts("/data/nested")
+            await fs.write("/data/nested/file.txt", b"dynamic")
+            assert await fs.read("/data/nested/file.txt") == b"dynamic"
+            result = await ws.execute("cat /data/nested/file.txt")
+            assert result.exit_code == 0 and result.stdout == b"dynamic"
+            await ws.unmount("/data/nested")
+            assert "/data/nested/" not in fs.mount_prefixes()
+            assert await fs.read("/root.txt") == b"root"
+        finally:
+            await ws.close()
+
+    asyncio.run(run())
+
+
+def test_add_mount_defaults_to_read_only():
+    ws = Workspace({}, mode=MountMode.WRITE)
+    entry = ws.add_mount("/data", RAMResource())
+    assert entry.mode == MountMode.READ
+
+    async def run():
+        try:
+            with pytest.raises(PermissionError):
+                await ws.fs.write("/data/file.txt", b"refused")
+        finally:
+            await ws.close()
+
+    asyncio.run(run())
+
+
+def test_add_mount_refuses_duplicates_invalid_resources_and_closed_workspace():
+    ws = Workspace({"/data": RAMResource()})
+    before = ws.mounts()
+    with pytest.raises(ValueError, match="duplicate mount prefix"):
+        ws.add_mount("data/", RAMResource())
+    with pytest.raises(TypeError, match="expected a BaseResource"):
+        ws.add_mount("/bad", None)
+    assert ws.mounts() == before
+    asyncio.run(ws.close())
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        ws.add_mount("/late", RAMResource())
+
+
+def test_add_mount_keeps_a_shared_resource_open_until_its_last_unmount():
+    closed = []
+
+    class TrackingRAM(RAMResource):
+
+        async def close(self):
+            closed.append("closed")
+
+    resource = TrackingRAM()
+    ws = Workspace({})
+    ws.add_mount("/a", resource, MountMode.WRITE)
+    ws.add_mount("/b", resource, MountMode.WRITE)
+
+    async def run():
+        try:
+            await ws.fs.write("/a/file.txt", b"shared")
+            await ws.unmount("/a")
+            assert closed == []
+            assert await ws.fs.read("/b/file.txt") == b"shared"
+            await ws.unmount("/b")
+            assert closed == ["closed"]
+        finally:
+            await ws.close()
+        assert closed == ["closed"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_unmount_preserves_root_operations(explicit_root):
+    resources = {"/data": RAMResource()}
+    if explicit_root:
+        resources["/"] = RAMResource()
+    ws = Workspace(resources)
+
+    async def run():
+        try:
+            await ws.unmount("/data")
+            assert "/dev" in await ws.fs.readdir("/")
+            assert (await ws.fs.stat("/")).type == FileType.DIRECTORY
+            result = await ws.execute("ls /")
+            assert result.exit_code == 0
+            assert result.stdout == b"dev\n"
+            assert not result.stderr
+        finally:
+            await ws.close()
+
+    asyncio.run(run())
+
+
+def test_unmount_keeps_other_ram_instances_readable():
+    a, b = RAMResource(), RAMResource()
+    content = b"surviving mount\n"
+    b._store.files["/file.txt"] = content
+    ws = Workspace({"/a": a, "/b": b})
+
+    async def run():
+        try:
+            await ws.unmount("/a")
+            assert await ws.fs.read("/b/file.txt") == content
+            await ws.unmount("/b")
+            assert "/dev" in await ws.fs.readdir("/")
+        finally:
+            await ws.close()
+
+    asyncio.run(run())
 
 
 def test_unmount_removes_mount():
@@ -2838,3 +2969,51 @@ def test_man_index_lists_commands():
     assert text.startswith("# commands\n\n")
     assert "- bc" in text
     assert "# general" not in text
+
+
+@pytest.mark.asyncio
+async def test_set_mount_mode_refreshes_facade_without_remounting():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        fs = ws.fs
+        mount = ws.mount("/data")
+        await fs.write("/data/file", b"kept")
+        for mode in (MountMode.READ, MountMode.EXEC, MountMode.WRITE):
+            ws.set_mount_mode("data/", mode)
+            assert ws.fs is fs
+            assert ws.mount("/data") is mount
+            assert mount.mode == mode
+            assert (("/data/", "ram")
+                    in fs.writable_mounts()) == (mode != MountMode.READ)
+            assert await fs.read("/data/file") == b"kept"
+        with pytest.raises(ValueError):
+            ws.set_mount_mode("/data", "invalid")
+        assert mount.mode == MountMode.WRITE
+
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_live_default_profile_updates_unbound_policy():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        session = ws.get_session(ws.default_session_id)
+        await ws.fs.write("/data/file", b"kept")
+        profile = {
+            "commands": {
+                "deny": [{
+                    "paths": ["/data/file"],
+                    "reason": "sealed"
+                }]
+            }
+        }
+        assert await ws.set_session_profile(ws.default_session_id,
+                                            profile) is session
+        with pytest.raises(PermissionError):
+            await ws.fs.read("/data/file")
+        await ws.set_session_profile(ws.default_session_id, {})
+        assert ws.get_session(ws.default_session_id) is session
+        assert await ws.fs.read("/data/file") == b"kept"
+    finally:
+        await ws.close()

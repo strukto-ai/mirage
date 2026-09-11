@@ -19,11 +19,26 @@ import { materialize } from '../../io/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { LineExecutor } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
-import { type Policies, postExecuteGate, renderDeny, resolveLimit } from '../../policy/index.ts'
+import {
+  type Policies,
+  postExecuteGate,
+  refusalOf,
+  renderDeny,
+  resolveLimit,
+} from '../../policy/index.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Session } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
+import type { Refusal } from '../../types.ts'
+
+/**
+ * What a whole line answers: the runtime's own result plus the
+ * refusal record when the boundary's post_execute gate refused it.
+ */
+export interface LineResult extends RunResult {
+  refusal: Refusal | null
+}
 
 /**
  * Hand the raw line to one runtime instead of walking its tree.
@@ -43,7 +58,7 @@ export async function runWholeLine(
   mounts: readonly MountEntry[],
   policies: Policies,
   invalidate: () => Promise<void>,
-): Promise<RunResult> {
+): Promise<LineResult> {
   const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
   const guard = resolveLimit(name, mounts)
@@ -81,7 +96,7 @@ export async function runWholeLine(
     const mergedErr = new Uint8Array(priorErr.byteLength + denyBytes.byteLength)
     mergedErr.set(priorErr, 0)
     mergedErr.set(denyBytes, priorErr.byteLength)
-    return { stdout: new Uint8Array(), stderr: mergedErr, exitCode }
+    return { stdout: new Uint8Array(), stderr: mergedErr, exitCode, refusal: refusalOf(deny) }
   }
   const [capped, cappedErr, cappedCode] = await guardOutput(
     result.stdout,
@@ -93,5 +108,6 @@ export async function runWholeLine(
     stdout: capped !== null ? await materialize(capped) : new Uint8Array(),
     stderr: cappedErr !== null ? await materialize(cappedErr) : null,
     exitCode: cappedCode,
+    refusal: null,
   }
 }

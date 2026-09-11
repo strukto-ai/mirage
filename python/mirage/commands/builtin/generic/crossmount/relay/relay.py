@@ -26,7 +26,7 @@ from mirage.commands.builtin.generic.crossmount.relay.tar import run_tar
 from mirage.commands.builtin.generic.crossmount.relay.unzip import run_unzip
 from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.commands.spec.types import FlagValue
-from mirage.ops.types import NamespaceView
+from mirage.ops.types import NamespaceView, SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
@@ -37,7 +37,8 @@ async def run_relay(cmd_name: str,
                     flag_kwargs: dict[str, FlagValue],
                     dispatch: DispatchFn,
                     storage_key: Callable[[PathSpec], str] | None = None,
-                    ns: NamespaceView | None = None) -> CrossResult:
+                    ns: NamespaceView | None = None,
+                    session_view: SessionView | None = None) -> CrossResult:
     """Run a command whose work must see every operand at once.
 
     Pure wiring: every operand is read or written through ``dispatch``
@@ -57,9 +58,11 @@ async def run_relay(cmd_name: str,
             move from one whose two prefixes address a single store.
         ns (NamespaceView | None): Name-plane facts for the generics that
             render them (ls: links, attr overlay, child mounts).
+        session_view (SessionView | None): The session plane's door, for
+            the generic that renders the session's profile (ls -l).
     """
     if cmd_name == Cmd.LS:
-        return await run_ls(scopes, flag_kwargs, dispatch, ns)
+        return await run_ls(scopes, flag_kwargs, dispatch, ns, session_view)
     if cmd_name == Cmd.CP:
         return await run_cp(scopes, flag_kwargs, dispatch, storage_key)
     if cmd_name == Cmd.MV:

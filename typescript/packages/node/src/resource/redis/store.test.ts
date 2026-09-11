@@ -61,6 +61,17 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.getFile('/nope')).toBeNull()
   })
 
+  it('getFileRange returns empty for zero-length reads and preserves missing', async () => {
+    await store.setFile('/data', new TextEncoder().encode('payload'))
+    await store.setFile('/empty', new Uint8Array(0))
+    expect(await store.getFileRange('/data', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/data', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 0, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/empty', 4, 0)).toEqual(new Uint8Array(0))
+    expect(await store.getFileRange('/missing', 0, 0)).toBeNull()
+    expect(await store.getFileRange('/missing', 4, 0)).toBeNull()
+  })
+
   it('hasFile / delFile', async () => {
     await store.setFile('/x', new Uint8Array([1]))
     expect(await store.hasFile('/x')).toBe(true)
@@ -111,5 +122,12 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.getModified('/a')).toBeNull()
     // after clear, dir set is deleted, so / is no longer seeded
     expect((await store.listDirs()).size).toBe(0)
+  })
+
+  it('clear drops a staging key left by a chunked browser write', async () => {
+    const c = await store.client()
+    await c.set(`${prefix}tmp:/big:abc`, 'partial')
+    await store.clear()
+    expect(await c.exists(`${prefix}tmp:/big:abc`)).toBe(0)
   })
 })

@@ -434,7 +434,7 @@ async def test_the_hop_rebinds_the_launch_recorder_on_a_bare_thread():
     # threads guest calls arrive on never had it, and the loop task
     # run_coroutine_threadsafe schedules gets the loop's context, not
     # the typed line's. Without the rebind a guest's file I/O never
-    # reaches ws.ops.records while the same op from a shell line does.
+    # reaches ws.fs.records while the same op from a shell line does.
     dispatch = LedgerDispatch()
     scope = RecordingScope()
     try:

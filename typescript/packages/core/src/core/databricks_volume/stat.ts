@@ -16,7 +16,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
 import { isNotFound, notFoundError } from './errors.ts'
@@ -73,7 +73,8 @@ export async function stat(
         name: entry.name,
         size: entry.size ?? null,
         modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-        type: guessType(entry.name),
+        type: FileType.FILE,
+        content: contentTypeForPath(entry.name),
       })
     }
     // Parent was already listed and didn't include this path — it doesn't exist.
@@ -97,5 +98,11 @@ export async function stat(
   const lengthHeader = r.headers.get('content-length')
   const size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
   const modified = modifiedFromHeader(r.headers.get('last-modified'))
-  return new FileStat({ name, size, modified, type: guessType(name) })
+  return new FileStat({
+    name,
+    size,
+    modified,
+    type: FileType.FILE,
+    content: contentTypeForPath(name),
+  })
 }

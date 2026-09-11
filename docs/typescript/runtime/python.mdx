@@ -64,7 +64,11 @@ install hint.
 
 ## Selecting in YAML
 
-Server workspace config files take a top-level `runtimes` list:
+Server workspace config files take a top-level `runtimes` list. Each
+entry is a name or a mapping with the uniform options (`captures`,
+`config`, `script`); the name is a runtime mirage ships, one the host
+registered with `registerRuntime`, or a `./file.mjs:Class` reference to a
+`Runtime` subclass, the form `resource:` and `cli:` take:
 
 ```yaml
 runtimes:

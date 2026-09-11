@@ -1,13 +1,14 @@
 ---
 title: Redis
 icon: /images/redis-logo.svg
-description: Mount Redis keys as a Mirage filesystem (Node only).
+description: Mount Redis keys as a Mirage filesystem.
 ---
 
 `RedisResource` exposes Redis keys as files under a single mount. The base of every key is the configured `keyPrefix`.
 
 <Note>
-  Node only. Requires the `redis@^5` peer dependency. The browser SDK doesn't ship a Redis client.
+  Node needs the `redis@^5` peer dependency and speaks the Redis protocol over a socket. The browser
+  has no socket, so it reaches Redis through the [Upstash REST API](#browser) instead.
 </Note>
 
 ## Install
@@ -39,5 +40,50 @@ await ws.execute('cat /r/greet')
 ## Mount mode
 
 `read`, `write`, `exec`.
+
+## Browser
+
+A page cannot open a TCP connection, and Redis has no HTTP listener of its own, so
+`@struktoai/mirage-browser` mounts Redis through the REST API that
+[Upstash](https://upstash.com/docs/redis/features/restapi) serves in front of its databases. The
+configuration is the one the Node mount takes: the redis URL the Upstash console prints. Its
+password is also the REST token, so the store reaches `https://<name>.upstash.io` with it and no
+second field is needed. [Upstash Redis](/typescript/setup/upstash) covers that database on its own
+page.
+
+```ts
+import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
+
+const redis = new RedisResource({
+  url: 'rediss://default:<token>@<name>.upstash.io:6379',
+  keyPrefix: 'mirage/',
+})
+const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
+await ws.execute('echo "hello" | tee /r/greet')
+await ws.execute('cat /r/greet')
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `url` | required | The database's redis URL, password included; or its REST URL (`https://<name>.upstash.io`) with `token` beside it. Redacted in snapshots. |
+| `token` | from the URL | The REST token. Only needed with a REST URL, which is how a self-hosted [serverless-redis-http](https://github.com/hiett/serverless-redis-http) front is addressed, since its token is not a redis password. A read-only token cannot `SCAN`, which directory listings need, so use the full one. |
+| `keyPrefix` | `mirage:fs:` | Prefix prepended to every key. |
+| `maxRequestBytes` | `8388608` | Upstash caps a request at 10 MB; a larger file is written as one `SET` plus `APPEND`s of this size. |
+
+The key layout is the one the Node and Python mounts use, and the store keeps every value
+byte-identical (writes go out as raw request bodies, reads come back base64-encoded), so one
+Upstash database can be mounted from a page over REST and from a server over the Redis protocol
+at the same time. Upstash bills the free and pay-as-you-go tiers per command, and one shell command
+is several Redis commands (a directory listing costs a few per entry), which is worth knowing
+before pointing an agent at a metered database.
+
+Two examples exercise this path.
+[`examples/typescript/browser/redis.html`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/redis.html)
+mounts a database from a page against Upstash itself, reading `UPSTASH_REDIS_URL` from
+`.env.development`.
+[`examples/typescript/redis/redis_browser.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/redis/redis_browser.ts)
+needs no account: it starts an in-process HTTP front that speaks the same REST shape over a local
+redis, mounts it through `@struktoai/mirage-browser`, and reads every key back through the Node
+mount to show the two stores agree byte for byte. CI replays that one against a pinned transcript.
 
 For the broader Redis semantics (binary keys, key patterns, snapshot caveats) see the [Python Redis docs](/python/resource/redis).

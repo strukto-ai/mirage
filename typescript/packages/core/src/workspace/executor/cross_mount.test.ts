@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { BaseResource, type Resource } from '../../resource/base.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
@@ -62,7 +62,7 @@ describe('isCrossMount', () => {
 const runSingleNoop: RunSingle = () => Promise.resolve([null, new IOResult()])
 
 function fileStat(name: string): FileStat {
-  return new FileStat({ name, size: 0, type: FileType.TEXT })
+  return new FileStat({ name, size: 0, type: FileType.FILE, content: ContentType.TEXT })
 }
 
 function dirStat(name: string): FileStat {

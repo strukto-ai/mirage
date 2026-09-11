@@ -56,11 +56,11 @@ async def main():
     png_path = "/ram/diagram.png"
     png_bytes = LOGO_PATH.read_bytes() if LOGO_PATH.exists() else b""
     if png_bytes:
-        await ws.ops.write(png_path, png_bytes)
+        await ws.fs.write(png_path, png_bytes)
 
     txt_path = "/ram/notes.txt"
-    await ws.ops.write(txt_path,
-                       b"Status: green. INP < 200ms across all routes.\n")
+    await ws.fs.write(txt_path,
+                      b"Status: green. INP < 200ms across all routes.\n")
 
     client = AsyncOpenAI()
     runner = MirageRunner(ws, client=client)

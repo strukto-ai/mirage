@@ -54,6 +54,25 @@ describe('workspace close ownership', () => {
     expect(resource.closeCalls).toBe(1)
   })
 
+  it.each([false, true])('unmount leaves borrowed resources open (used=%s)', async (used) => {
+    const resource = new ProbeRAMResource()
+    const ws = new Workspace({ '/data': resource })
+    const state = await toStateDict(ws)
+    const replica = await Workspace.fromState(state, {}, { '/data': resource })
+    try {
+      if (used) await replica.resolve('/data')
+      await replica.unmount('/data')
+      expect(resource.closeCalls).toBe(0)
+      await replica.close()
+      expect(resource.closeCalls).toBe(0)
+      await ws.close()
+      expect(resource.closeCalls).toBe(1)
+    } finally {
+      await replica.close()
+      await ws.close()
+    }
+  })
+
   it('does not close a caller-passed session store', async () => {
     const sessionStore = new ProbeSessionStore()
     const ws = new Workspace({ '/data': new RAMResource() }, { sessionStore })

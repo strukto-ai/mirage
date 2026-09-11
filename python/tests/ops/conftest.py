@@ -27,7 +27,7 @@ def run(coro):
 def make_ops(mode=MountMode.WRITE) -> tuple[Ops, RAMStore]:
     resource = RAMResource()
     ws = Workspace({"/data/": resource}, mode=mode)
-    return ws.ops, resource._store
+    return ws.fs, resource._store
 
 
 def make_ops_with_dir(mode=MountMode.WRITE):

@@ -20,10 +20,12 @@ import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
 import type { JsonValue } from '../kit/typescript/types.ts'
 
-// The git plumbing write path, which the corpus does not reach: the gh battery
-// exercises the porcelain, and a client that BUILDS history calls
-// `POST /git/trees` then `POST /git/commits`. That is the path a fixture uses
-// to pin a commit's own author and date, so it is the path that has to hold.
+// The routes the corpus does not reach, because the gh battery exercises the
+// porcelain and these three have no porcelain behind them. A client that BUILDS
+// history calls `POST /git/trees` then `POST /git/commits`, which is the path a
+// fixture uses to pin a commit's own author and date; a grader reads an issue's
+// comments back; and `search_repositories` is an MCP tool with no `gh`
+// equivalent, so nothing else here would notice it answering the wrong scope.
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const INTEG = resolve(HERE, '..', '..')
@@ -883,6 +885,45 @@ async function main(): Promise<void> {
     )
     const noSuch = await fetch(`${at}/repos/${REPO}/issues/4242/comments`, { headers: HEADERS })
     check('an issue that is not there is 404', noSuch.status === 404, String(noSuch.status))
+
+    // ---- `user:` and `org:` NARROW, which is the only reason to ask with one.
+    // A caller scoped to one account and handed every account's repositories
+    // cannot tell from the answer that it was not scoped at all.
+    const OTHER = 'integ-archive'
+    const born = await post(`${at}/orgs/${OTHER}/repos`, { name: 'repo-archived' })
+    check('a repo is created under a second owner', born.status === 201, String(born.status))
+
+    const found = async (q: string): Promise<JsonValue[]> => {
+      const body = await get(`${at}/search/repositories?q=${encodeURIComponent(q)}`)
+      const items = field(body, 'items')
+      return Array.isArray(items) ? items.map((r) => field(r, 'full_name')).sort() : []
+    }
+
+    eq('`user:` lists that account and no other', await found('user:integ'), [
+      'integ/repo-cli',
+      'integ/repo-trunc',
+      'integ/repo-v1',
+    ])
+    eq('`org:` scopes the same way', await found(`org:${OTHER}`), [`${OTHER}/repo-archived`])
+    eq('an account holding nothing is empty, not everything', await found('user:nobody'), [])
+    eq('two of them OR together', await found(`user:nobody org:${OTHER}`), [
+      `${OTHER}/repo-archived`,
+    ])
+    // The scope ANDs with the terms: `repo` matches all four rows by name, and
+    // the owner is what keeps the fourth out.
+    eq('a term widens only within the scope', await found('user:integ repo'), [
+      'integ/repo-cli',
+      'integ/repo-trunc',
+      'integ/repo-v1',
+    ])
+    // Unscoped, that same term reaches every owner -- the looseness the fake
+    // keeps on purpose, so that a caller hunting a row is shown it.
+    eq('and reaches every owner when nothing scopes it', await found('repo'), [
+      `${OTHER}/repo-archived`,
+      'integ/repo-cli',
+      'integ/repo-trunc',
+      'integ/repo-v1',
+    ])
 
     process.stdout.write(`github selftest: ${String(checks)} checks passed\n`)
   } finally {

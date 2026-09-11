@@ -42,6 +42,7 @@ import type { Workspace } from '@struktoai/mirage-node'
 import { TailBuffer, tailCap } from './text.ts'
 import { SpillSink, ensureDirPath, type SpillTarget } from './spill.ts'
 import type {} from './service.ts'
+import type { Refusal } from '@struktoai/mirage-core/types'
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const MAX_TIMEOUT_MS = 600_000
@@ -76,29 +77,6 @@ const SINK_PREFIX = '/dev'
 // ran under `read-only`, so the only permission error these can catch is
 // the one this executor just imposed.
 const DENIAL_SIGNATURES = ['read-only mount at ', ': Permission denied', ': Read-only file system']
-
-// How the permission document refuses a line, whatever mode the call
-// carries. A role's own rules are not this executor's narrowing: a
-// `commands.deny` rule refuses under `workspace-write` just as readily,
-// so unlike DENIAL_SIGNATURES these are consulted for every call.
-//
-// Both spellings come from `policy/policies.ts`: `renderDeny` writes
-// `<cmd>: policy denied: <reason>` for a whole-line refusal, and
-// `renderPending` writes `<cmd>: requires approval: <reason> (approval
-// <id>)` for an ask nobody has answered. An operand-scoped deny is
-// deliberately absent — it carries the rule's own reason in the GNU
-// voice (`rm: letters.txt: <reason>`) with no fixed marker to match, and
-// guessing at one would report an ordinary command failure as a policy
-// refusal.
-const POLICY_SIGNATURES = [': policy denied: ', ': requires approval: ']
-
-// The exit code both of those renders carry. Corroboration for reading
-// the same signatures off stdout, where `2>&1` puts them: stdout is the
-// command's own data channel, so a line that merely prints the phrase
-// (`cat audit.log`, `grep denied`) must not be reported as refused. A
-// refusal that reaches stdout reached it by duplication, and the
-// duplicated stream keeps the refusal's status.
-const POLICY_EXIT_CODE = 126
 
 /** Configuration for the mirage shell executor. */
 export interface MirageShellConfig {
@@ -557,69 +535,32 @@ export class MirageShellExecutor extends ShellExecutor {
   }
 
   /**
-   * Whether this run was refused, by the read-only narrowing or by the
-   * session's permission document.
+   * Whether this run was refused, by the session's permission document
+   * or by the read-only narrowing.
    *
-   * mirage has no out-of-band denial channel: a refused line fails
-   * in-band with a nonzero exit, the way EROFS would. So the fact is
-   * read back off the captured output, from two independent
-   * vocabularies.
-   *
-   * The narrowing's signatures are read only for a call that ran
-   * read-only, where this executor is what imposed it. The document's
-   * are read for every call, because a role's `commands.deny` and
-   * `commands.ask` rules are not this executor's doing and bind under
-   * `workspace-write` and `danger-full-access` alike — a mode says what
-   * the mounts allow, and says nothing about whether a rule forbids the
-   * line.
-   *
-   * Stdout is read for the document's signatures too, because a line
-   * that duplicates its diagnostics (`rm secrets 2>&1`) leaves stderr
-   * empty and the refusal is then the only thing on stdout — reading
-   * stderr alone reported such a run as allowed and dsh offered no
-   * escalation for a refusal it never saw. The exit code has to agree
-   * there, so that a command printing the phrase as data is not read as
-   * a refusal; on stderr no corroboration is asked for, since a refusal
-   * whose line goes on to succeed (`rm secrets; echo done`) still
-   * happened and the line's status is no longer its own.
-   *
-   * Asking the exit code to agree costs nothing on a compound line,
-   * because a line of two or more commands is judged before any of it
-   * runs and its refusal is returned above the line's own redirections:
-   * `rm secrets 2>&1; echo done` never reaches the duplication or the
-   * trailing command, and answers 126 on stderr. The residue is a line
-   * whose command *name* comes from an expansion (`C=rm; $C secrets
-   * 2>&1; echo done`), which that pass reads literally and so cannot
-   * name; the refusal then happens inside the redirect at the
-   * per-command gate and the trailing command owns the status.
-   *
-   * That residue and the operand-scoped deny (`rm: letters.txt:
-   * <reason>`, exit 1, no marker at all) are the same missing fact:
-   * `ExecuteResult` carries stdout, stderr and an exit code and no
-   * ruling. Carrying the ruling on the result is what would retire this
-   * whole function, and it is not a heuristic that can be sharpened
-   * into place here — no wording test can tell mirage's own refusal
-   * from a log that quotes one.
+   * The document's refusals ride the result itself: a `Deny`, an
+   * unanswered ask and a policy that raised all leave `refusal` on the
+   * `ExecuteResult`, whatever the line did with its streams (`2>&1`, a
+   * trailing command that owns the status). That record is read for
+   * every call, because a role's `commands.deny` and `commands.ask`
+   * rules bind under `workspace-write` and `danger-full-access` alike:
+   * a mode says what the mounts allow, and says nothing about whether a
+   * rule forbids the line. The narrowing has no record, since it is
+   * EROFS/EACCES from the mounts, so its signatures are still read off
+   * stderr, and only for a call that ran read-only, where this executor
+   * is what imposed it.
    *
    * @param spec the resolved spec this run was built from.
+   * @param result what the workspace answered.
    * @param stderr the run's captured standard error.
-   * @param stdout the run's captured standard output.
-   * @param exitCode the line's exit code.
    * @returns true when something refused the run.
    */
   private wasDenied(
     spec: ShellExecSpec,
+    result: { readonly refusal: Refusal | null },
     stderr: string,
-    stdout: string,
-    exitCode: number,
   ): boolean {
-    if (POLICY_SIGNATURES.some((signature) => stderr.includes(signature))) return true
-    if (
-      exitCode === POLICY_EXIT_CODE &&
-      POLICY_SIGNATURES.some((signature) => stdout.includes(signature))
-    ) {
-      return true
-    }
+    if (result.refusal !== null) return true
     if (this.modeFor(spec) !== 'read-only') return false
     return DENIAL_SIGNATURES.some((signature) => stderr.includes(signature))
   }
@@ -805,10 +746,7 @@ export class MirageShellExecutor extends ShellExecutor {
         executeOptions(spec, workdir, controller.signal, sessionId, bound, this.workdir, console_),
       )
       const captured = await this.collectFrom(console_, spec)
-      const settled = this.sandboxInfo(
-        spec,
-        this.wasDenied(spec, captured.stderr.text, captured.stdout.text, result.exitCode),
-      )
+      const settled = this.sandboxInfo(spec, this.wasDenied(spec, result, captured.stderr.text))
       return {
         exitCode: result.exitCode,
         signal: null,

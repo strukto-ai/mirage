@@ -103,6 +103,11 @@ class EnvUnset(Protocol):
 EnvMark = Callable[[str, VarAttr | None, bool], Awaitable[None]]
 # Whether `readonly` has marked the name.
 EnvIsReadonly = Callable[[str], bool]
+# The name of the profile the session runs under, None for an
+# unrestricted session. What an owner-rendering command (ls -l, stat %g,
+# find -printf %g) prints in the group column: the profile is the
+# permission set the session acts with, which is what a group is.
+ProfileName = Callable[[], "str | None"]
 
 
 @dataclass(frozen=True)
@@ -130,6 +135,7 @@ class SessionView:
     unset: EnvUnset
     mark: EnvMark
     is_readonly: EnvIsReadonly
+    profile: ProfileName
 
 
 @dataclass(frozen=True)
@@ -227,7 +233,7 @@ class NamespaceView:
     field it wants, so there is no signature for the dispatcher to
     inspect and no registry to keep in step. Fields default to None so
     a unit test constructs only what it exercises; inside a workspace
-    the dispatcher fills all four.
+    the dispatcher fills all five.
     """
 
     # The symlink facts; None when the namespace holds no links, which
@@ -239,3 +245,7 @@ class NamespaceView:
     stat_overlay: StatOverlay | None = None
     # Child names the namespace owes a directory (mounts and links).
     child_mounts: ChildMounts | None = None
+    # The workspace user (what whoami prints), None when no agent ever
+    # claimed the workspace. What an owner-rendering command prints in
+    # the owner column for an entry whose backend reports no uid.
+    user: str | None = None

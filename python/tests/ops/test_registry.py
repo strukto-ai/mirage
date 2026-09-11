@@ -222,5 +222,5 @@ class TestFiletypeOps:
         store.files["/test.txt"] = b"hello"
         store.modified["/test.txt"] = "2024-01-01T00:00:00"
         ws = Workspace({"/data/": resource}, mode=MountMode.READ)
-        result = await ws.ops.read("/data/test.txt")
+        result = await ws.fs.read("/data/test.txt")
         assert result == b"hello"

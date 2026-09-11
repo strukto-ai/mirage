@@ -16,8 +16,8 @@ import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
 import { makeStat } from '@struktoai/mirage-core/core/hierarchy/stat'
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { FileStat, FileType } from '@struktoai/mirage-core/types'
-import { guessType } from '@struktoai/mirage-core/utils/filetype'
+import { ContentType, FileStat, FileType } from '@struktoai/mirage-core/types'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -29,7 +29,8 @@ function dirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileSt
 function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     size: entry.size,
     extra: { uid: entry.id },
   })
@@ -46,7 +47,8 @@ function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntr
 function attachmentStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName,
-    type: guessType(entry.vfsName),
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.vfsName),
     size: entry.size,
     extra: { attachment_id: entry.id },
   })

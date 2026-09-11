@@ -15,10 +15,10 @@
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { enoent } from '../../utils/errors.ts'
-import { filetypeFromMimetype } from '../../utils/filetype.ts'
+import { contentTypeForMime } from '../../utils/filetype.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
@@ -46,7 +46,8 @@ function channelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): Fi
 function userStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    type: FileType.JSON,
+    type: FileType.FILE,
+    content: ContentType.JSON,
     ...(entry.size !== null ? { size: entry.size } : {}),
     extra: { user_id: entry.id },
   })
@@ -62,7 +63,8 @@ function chatStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileS
   // sealed day (discord deliberately does; see its override).
   return new FileStat({
     name: 'chat.jsonl',
-    type: FileType.TEXT,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
     ...(entry.size !== null ? { size: entry.size } : {}),
   })
 }
@@ -72,7 +74,8 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
   const modified = slackModified(entry.remoteTime)
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    type: filetypeFromMimetype(mimetype),
+    type: FileType.FILE,
+    content: contentTypeForMime(mimetype),
     size: entry.size ?? null,
     ...(modified !== null ? { modified } : {}),
     extra: { file_id: entry.id },

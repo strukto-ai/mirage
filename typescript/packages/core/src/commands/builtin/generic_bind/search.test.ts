@@ -17,7 +17,7 @@ import { Accessor } from '../../../accessor/base.ts'
 import { JSON_NAME } from '../../../core/hierarchy/codec.ts'
 import { Slot, Scope, makeDetectScope } from '../../../core/hierarchy/scope.ts'
 import type { Searcher, SearchQuery } from '../../../core/hierarchy/search.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -33,7 +33,7 @@ const SCOPES: readonly Scope[] = [
     kind: 'note',
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
-    filetype: FileType.JSON,
+    filetype: ContentType.JSON,
   }),
 ]
 
@@ -61,7 +61,14 @@ function makeIO(overrides: Partial<CommandIO<FakeAccessor>> = {}): CommandIO<Fak
       yield CONTENT
     },
     stat: () =>
-      Promise.resolve(new FileStat({ name: 'a.json', type: FileType.JSON, size: CONTENT.length })),
+      Promise.resolve(
+        new FileStat({
+          name: 'a.json',
+          type: FileType.FILE,
+          content: ContentType.JSON,
+          size: CONTENT.length,
+        }),
+      ),
     isMounted: () => true,
     local: false,
     ...overrides,

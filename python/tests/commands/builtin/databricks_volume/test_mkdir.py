@@ -82,7 +82,7 @@ async def test_mkdir_read_only_mount_rejected(read_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_ops_mkdir(write_ws, dbx_files):
-    await write_ws.ops.mkdir("/dbx/opdir")
+    await write_ws.fs.mkdir("/dbx/opdir")
 
     assert f"{ROOT}/opdir" in dbx_files.directory_metadata
 
@@ -90,4 +90,4 @@ async def test_ops_mkdir(write_ws, dbx_files):
 @pytest.mark.asyncio
 async def test_ops_mkdir_read_only_rejected(read_ws):
     with pytest.raises(PermissionError):
-        await read_ws.ops.mkdir("/dbx/opdir")
+        await read_ws.fs.mkdir("/dbx/opdir")

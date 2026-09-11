@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/resource/secrets'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  secretStr,
+  z,
+} from '@struktoai/mirage-core/resource/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
-import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
+import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface OCIConfig {
@@ -26,6 +31,7 @@ export interface OCIConfig {
   sessionToken?: string
   profile?: string
   endpoint?: string
+  forcePathStyle?: boolean
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
@@ -39,14 +45,15 @@ const OCIConfigSchema = z.object({
   secretAccessKey: secretStr().optional(),
   sessionToken: secretStr().optional(),
   profile: z.string().optional(),
-  endpoint: z.string(),
+  endpoint: z.string().optional(),
+  forcePathStyle: z.boolean().optional(),
   keyPrefix: z.string().optional(),
   timeoutMs: z.number().optional(),
   proxy: secretStr().optional(),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the region and endpoint the redactor fills in.
+// Only the redacted twin derives; the redactor fills in the region and
+// endpoint the provider's rule resolves.
 export type OCIConfigRedacted = RedactedConfig<
   ConfigOf<typeof OCIConfigSchema>,
   'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
@@ -66,7 +73,7 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    forcePathStyle: true,
+    forcePathStyle: config.forcePathStyle ?? true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
@@ -77,18 +84,10 @@ export function redactOciConfig(config: OCIConfig): OCIConfigRedacted {
   return redactConfigWithSchema(OCIConfigSchema, {
     ...config,
     endpoint: resolvedOciEndpoint(config),
+    forcePathStyle: config.forcePathStyle ?? true,
   }) as unknown as OCIConfigRedacted
 }
 
 export function normalizeOciConfig(input: Record<string, unknown>): OCIConfig {
-  return normalizeFields(input, {
-    rename: {
-      aws_profile: 'profile',
-      endpoint_url: 'endpoint',
-      timeout: 'timeoutMs',
-    },
-    transform: {
-      timeout: (v: unknown) => (typeof v === 'number' ? v * 1000 : v),
-    },
-  }) as unknown as OCIConfig
+  return parseConfigWithSchema(OCIConfigSchema, input, S3_FAMILY_NORMALIZER)
 }

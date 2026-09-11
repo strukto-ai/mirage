@@ -15,59 +15,82 @@
 import { z } from 'zod'
 import {
   type ConfigOf,
+  parseConfigWithSchema,
   redactConfigWithSchema,
   type RedactedConfig,
+  secretSchema,
   secretStr,
 } from '../../resource/secrets.ts'
-import { normalizeFields } from '../../utils/normalize.ts'
 
-export interface GoogleConfig {
-  clientId: string
-  // Optional: omit in browser PKCE flows. The PKCE verifier authenticates
-  // the client at the token endpoint, so no secret is sent.
-  clientSecret?: string
-  refreshToken: string
-  // Optional: caller-supplied refresh strategy. When provided, TokenManager
-  // delegates token refresh to this callback instead of calling Google's
-  // token endpoint directly. Useful when the client_secret must stay on a
-  // backend (e.g. a Vercel function proxy).
-  refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-  // Single-host override for every Google API (drive/docs/sheets/slides)
-  // plus the OAuth token endpoint; used to point backends at a fake server.
-  apiBase?: string
-  // Drive-only: scope the mount to this folder ID instead of the Drive
-  // root, the s3 key_prefix analog. Other Google backends ignore it.
-  folderId?: string
-  // Calendar-only. One zone for the whole mount, not one per calendar: the
-  // Calendar UI draws its whole grid in the primary zone, and per-calendar
-  // bucketing would make the same day directory name mean different
-  // 24-hour windows on different calendars. Defaults to the primary
-  // calendar's zone.
-  timeZone?: string
-  // Calendar-only: keep only calendars at or above this accessRole, e.g.
-  // "writer" for ones the agent can actually schedule into.
-  minAccessRole?: string
-  // Calendar-only: pin the day the rolling window centres on; test and
-  // snapshot use.
-  today?: string
+// A pre-minted token read on every request. This is how a caller that
+// already owns the OAuth dance (a service account, a host application's
+// token source) plugs in: it caches and refreshes on its own, so mirage
+// holds no long-lived credential and never contacts the token endpoint.
+// Mirrors python's `access_token: SecretStr | Callable[[], str | SecretStr]`.
+export type GoogleAccessTokenProvider = () => string | Promise<string>
+
+// Caller-supplied refresh strategy. When provided, TokenManager delegates
+// token refresh to this callback instead of calling Google's token endpoint
+// directly. Useful when the client_secret must stay on a backend (e.g. a
+// Vercel function proxy).
+export type GoogleRefreshFn = (
+  refreshToken: string,
+) => Promise<{ accessToken: string; expiresIn: number }>
+
+export const GOOGLE_CREDENTIAL_ERROR =
+  'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken'
+
+// Both grants stand alone, so this is what keeps a mount from being built
+// with no credential at all and failing on the first read instead. Mirrors
+// python's `_one_credential` model validator.
+function hasGoogleCredential(config: {
+  accessToken?: string | GoogleAccessTokenProvider | undefined
+  clientId?: string | undefined
+  refreshToken?: string | undefined
+}): boolean {
+  if (config.accessToken !== undefined) return true
+  return config.clientId !== undefined && config.refreshToken !== undefined
 }
 
-export const GoogleConfigSchema = z.object({
-  clientId: z.string(),
-  clientSecret: secretStr().optional(),
-  refreshToken: secretStr(),
-  apiBase: z.string().optional(),
-  folderId: z.string().optional(),
-  timeZone: z.string().optional(),
-  minAccessRole: z.string().optional(),
-  today: z.string().optional(),
-})
+export const GoogleConfigSchema = z
+  .object({
+    // Two ways to authenticate, the same two MsGraphConfig offers: a token
+    // (or provider) supplied by the caller, or the refresh-token grant where
+    // mirage mints and renews the access token itself through TokenManager.
+    accessToken: secretSchema(
+      z.union([
+        z.string(),
+        z.custom<GoogleAccessTokenProvider>((value) => typeof value === 'function'),
+      ]),
+    ).optional(),
+    clientId: z.string().optional(),
+    // Optional: omit in browser PKCE flows. The PKCE verifier authenticates
+    // the client at the token endpoint, so no secret is sent.
+    clientSecret: secretStr().optional(),
+    refreshToken: secretStr().optional(),
+    // Declared here rather than on a CLI-only extension: parse strips what
+    // the schema does not name, and marking it secret is what keeps a
+    // callback out of snapshot state.
+    refreshFn: secretSchema(
+      z.custom<GoogleRefreshFn>((value) => typeof value === 'function'),
+    ).optional(),
+    // Single-host override for every Google API (drive/docs/sheets/slides)
+    // plus the OAuth token endpoint; used to point backends at a fake server.
+    apiBase: z.string().optional(),
+    // Drive-only: scope the mount to this folder ID instead of the Drive
+    // root, the s3 key_prefix analog. Other Google backends ignore it.
+    folderId: z.string().optional(),
+  })
+  .refine(hasGoogleCredential, { message: GOOGLE_CREDENTIAL_ERROR })
 
-// Only the redacted twin derives: the schema deliberately omits `refreshFn`,
-// which no snapshot can carry.
+// Derived, not declared twice: the schema validates every install and
+// carries the secret markers redaction reads, so a hand-written twin only
+// adds a shape that can drift from it.
+export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
+
 export type GoogleConfigRedacted = RedactedConfig<
-  ConfigOf<typeof GoogleConfigSchema>,
-  'clientSecret' | 'refreshToken'
+  GoogleConfig,
+  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
 >
 
 export function redactGoogleConfig(config: GoogleConfig): GoogleConfigRedacted {
@@ -75,5 +98,5 @@ export function redactGoogleConfig(config: GoogleConfig): GoogleConfigRedacted {
 }
 
 export function normalizeGoogleConfig(input: Record<string, unknown>): GoogleConfig {
-  return normalizeFields(input) as unknown as GoogleConfig
+  return parseConfigWithSchema(GoogleConfigSchema, input)
 }

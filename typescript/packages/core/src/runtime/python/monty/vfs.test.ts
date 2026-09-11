@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
-import { FileStat, FileType } from '../../../types.ts'
+import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { MontyVFS } from './index.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -45,7 +45,9 @@ function listingOf(names: string[]): Mock<BridgeDispatchFn> {
       if (!names.includes(path)) {
         return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
       }
-      return Promise.resolve(new FileStat({ name: path, size: 1, type: FileType.TEXT }))
+      return Promise.resolve(
+        new FileStat({ name: path, size: 1, type: FileType.FILE, content: ContentType.TEXT }),
+      )
     }
     return Promise.resolve(undefined)
   })
@@ -230,7 +232,9 @@ describe('MontyVFS negative cache', () => {
     const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
       if (op === 'readdir') return Promise.resolve(created ? ['/ram/late.txt'] : [])
       if (op === 'stat' && path === '/ram/late.txt') {
-        return Promise.resolve(new FileStat({ name: path, size: 1, type: FileType.TEXT }))
+        return Promise.resolve(
+          new FileStat({ name: path, size: 1, type: FileType.FILE, content: ContentType.TEXT }),
+        )
       }
       return Promise.resolve(undefined)
     })

@@ -27,8 +27,11 @@ export const BOOTSTRAP_SOURCES: readonly string[] = ['dotenv', 'env']
  * The env block is one map, name -> entry. A bare string in the map is
  * the literal short form and never reaches this schema; a mapping is
  * validated through it. `value` and `from` are mutually exclusive and
- * one is required: `readonly`/`export` belong to a literal entry,
- * `ref`/`key`/`fetch` to a managed one. The wire key is `from:` in both
+ * one is required: `export` belongs to a literal entry, `ref`/`key`/
+ * `fetch` to a managed one, and `readonly` to either -- a managed
+ * credential the agent cannot overwrite is filled all the same,
+ * because the fetch writes the record itself rather than going through
+ * the shell's assignment gate. The wire key is `from:` in both
  * languages; Python exposes it as `provider` in code only because
  * `from` is a keyword there.
  */
@@ -52,14 +55,6 @@ export const EnvVarSchema = z
       return
     }
     if (entry.from !== undefined) {
-      if (entry.readonly) {
-        ctx.addIssue({
-          code: 'custom',
-          message:
-            "'readonly' is for literal entries; a readonly managed variable " +
-            'would change under refresh',
-        })
-      }
       if (!entry.export) {
         ctx.addIssue({
           code: 'custom',
@@ -88,12 +83,7 @@ export type EnvEntries = Record<string, string | z.input<typeof EnvVarSchema>>
  * which is what stops the table from needing a dependency graph.
  */
 export const SecretRefSchema = z.strictObject({
-  from: z.string().refine((name) => BOOTSTRAP_SOURCES.includes(name), {
-    message:
-      `a source config reads from ${BOOTSTRAP_SOURCES.join(', ')}, ` +
-      'not that source; only a source that needs no config of its own can ' +
-      'bootstrap another',
-  }),
+  from: z.string(),
   ref: z.string().default(''),
   key: z.string(),
 })
@@ -103,20 +93,20 @@ export type SecretRef = z.infer<typeof SecretRefSchema>
 /**
  * One declared source instance: which source, and its config.
  *
- * The `secrets:` block is one map, instance name -> block, spelled the
- * way `mounts:` and `clis:` are: a type beside a config. The instance
+ * The `secrets:` block is one map, name -> source, spelled the way
+ * `mounts:` and `clis:` are: a type beside a config. The instance
  * name is what a managed env entry's `from:` names, so two accounts of
  * one platform are two instances, and an instance named after its
  * source reads as that source configured.
  *
  * The config map is untyped here, the way `mounts.*.config` is: each
- * source owns its own model, and this block only has to tell a pointer
+ * source owns its own model, and this model only has to tell a pointer
  * from a literal. It does that the way the env plane does, by the
  * presence of `from`, so a mapping carrying one is validated as a
  * `SecretRef` and every other value passes through to the source's
  * model.
  */
-export const SourceBlockSchema = z.strictObject({
+export const SecretSourceSchema = z.strictObject({
   source: z.string(),
   // A custom check rather than `z.record`, which builds its output by
   // keyed assignment and so DROPS a `__proto__` key outright -- the
@@ -147,6 +137,22 @@ export const SourceBlockSchema = z.strictObject({
           }
           continue
         }
+        // The restriction lives here, not on `SecretRefSchema`: it is
+        // this model's reason, not the pointer's. A source that needs
+        // config of its own cannot bootstrap another without a
+        // dependency graph, while a mount reads from any declared
+        // instance because they are all built before it.
+        if (!BOOTSTRAP_SOURCES.includes(parsed.data.from)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [name],
+            message:
+              `a source config reads from ${BOOTSTRAP_SOURCES.join(', ')}, ` +
+              'not that source; only a source that needs no config of its own can ' +
+              'bootstrap another',
+          })
+          continue
+        }
         out.push([name, parsed.data])
       }
       // Object.fromEntries, not keyed assignment: a config key named
@@ -157,7 +163,7 @@ export const SourceBlockSchema = z.strictObject({
     }),
 })
 
-export type SourceBlock = z.infer<typeof SourceBlockSchema>
+export type SecretSource = z.infer<typeof SecretSourceSchema>
 
 /** The `secrets:` block as an embedder or the config door writes it. */
-export type SourceEntries = Record<string, z.input<typeof SourceBlockSchema>>
+export type SecretEntries = Record<string, z.input<typeof SecretSourceSchema>>

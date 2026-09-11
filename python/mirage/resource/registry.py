@@ -16,8 +16,11 @@ import importlib.metadata
 import logging
 from typing import Any, NamedTuple
 
+from pydantic import ValidationError
+
 from mirage.resource.base import BaseResource
 from mirage.resource.loader import load_backend_class
+from mirage.secrets.summary import error_summary
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +259,7 @@ def resolve_class(ref: str | type) -> type:
     return ref if isinstance(ref, type) else load_backend_class(ref)
 
 
-def _resolve_entry(name: str) -> ResourceEntry | None:
+def resolve_entry(name: str) -> ResourceEntry | None:
     """Find the entry a mount's ``resource`` value names, or None.
 
     Four rungs, in the order ``commands.cli.specs.cli_spec_for`` uses for
@@ -331,13 +334,13 @@ def build_resource(name: str,
     then a colon reference naming a class directly
     (``./wiki.py:WikiResource`` or ``mypkg.backends:WikiResource``), then
     ``mirage.resources`` entry points from installed packages. See
-    :func:`_resolve_entry`.
+    :func:`resolve_entry`.
 
     **Synchronous on purpose. Do not make this async.** It is the door
     every caller who describes a mount as data comes through: the YAML
     loader (:meth:`mirage.config.WorkspaceConfig.to_workspace_kwargs`),
     the daemon's create/load routes, ``clone``, and every embedder
-    reaching it through ``mirage.sdk``. 0.0.5 made it async to let one
+    reaching it through the ``mirage`` root. 0.0.5 made it async to let one
     backend fetch over the network at build time; that broke every
     out-of-tree caller, and because nothing validated the return value
     the failure surfaced as ``'coroutine' object has no attribute
@@ -367,7 +370,7 @@ def build_resource(name: str,
         KeyError: ``name`` is neither builtin, registered, a colon
             reference, nor installed.
     """
-    entry = _resolve_entry(name)
+    entry = resolve_entry(name)
     if entry is None:
         raise KeyError(
             f"unknown resource {name!r}; known: {known_resources()}")
@@ -376,13 +379,22 @@ def build_resource(name: str,
     config_ref = entry.config_path
     if config_ref is None:
         config_ref = getattr(resource_cls, "CONFIG_CLS", None)
-    if config_ref is None:
-        built = resource_cls(**cfg_dict)
-    else:
-        config_cls = resolve_class(config_ref)
-        built = resource_cls(config_cls(**cfg_dict))
+    try:
+        if config_ref is None:
+            built = resource_cls(**cfg_dict)
+        else:
+            config_cls = resolve_class(config_ref)
+            built = resource_cls(config_cls(**cfg_dict))
+    except ValidationError as exc:
+        # A mount config is where a fetched credential lands, and the
+        # create route answers `str(e)` as its 400 detail: pydantic's
+        # own rendering would hand the refused value straight back to a
+        # caller whose only way to name it was a pointer. The chain is
+        # cut for the same reason; a logged traceback prints `__cause__`.
+        raise ValueError(f"{name}: {error_summary(exc)}") from None
     if ":" in name:
         defect = _resource_defect(built)
         if defect is not None:
             raise TypeError(f"resource ref {name!r} {defect}")
+    built.resource_ref = name
     return built

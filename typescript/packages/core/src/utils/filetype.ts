@@ -12,44 +12,58 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType } from '../types.ts'
+import { ContentType } from '../types.ts'
 
-export const EXTENSION_MAP: Readonly<Record<string, FileType>> = Object.freeze({
-  json: FileType.JSON,
-  jsonl: FileType.JSON,
-  csv: FileType.CSV,
-  tsv: FileType.CSV,
-  txt: FileType.TEXT,
-  md: FileType.TEXT,
-  log: FileType.TEXT,
-  py: FileType.TEXT,
-  js: FileType.TEXT,
-  ts: FileType.TEXT,
-  yaml: FileType.TEXT,
-  yml: FileType.TEXT,
-  toml: FileType.TEXT,
-  png: FileType.IMAGE_PNG,
-  jpg: FileType.IMAGE_JPEG,
-  jpeg: FileType.IMAGE_JPEG,
-  gif: FileType.IMAGE_GIF,
-  zip: FileType.ZIP,
-  gz: FileType.GZIP,
-  gzip: FileType.GZIP,
-  pdf: FileType.PDF,
+// The rendering hint by extension, what `content_type_for_path` answers for
+// a file whose backend knows nothing better. Mirrors CONTENT_BY_EXTENSION in
+// mirage/utils/filetype.py; the shared fixture integ/fixtures/filetype/
+// tables.json pins both.
+export const CONTENT_BY_EXTENSION: Readonly<Record<string, ContentType>> = Object.freeze({
+  json: ContentType.JSON,
+  jsonl: ContentType.JSON,
+  csv: ContentType.CSV,
+  tsv: ContentType.CSV,
+  txt: ContentType.TEXT,
+  md: ContentType.TEXT,
+  log: ContentType.TEXT,
+  py: ContentType.TEXT,
+  js: ContentType.TEXT,
+  ts: ContentType.TEXT,
+  yaml: ContentType.TEXT,
+  yml: ContentType.TEXT,
+  toml: ContentType.TEXT,
+  png: ContentType.IMAGE_PNG,
+  jpg: ContentType.IMAGE_JPEG,
+  jpeg: ContentType.IMAGE_JPEG,
+  gif: ContentType.IMAGE_GIF,
+  zip: ContentType.ZIP,
+  gz: ContentType.GZIP,
+  gzip: ContentType.GZIP,
+  pdf: ContentType.PDF,
 })
 
-export function guessType(path: string): FileType {
-  const dot = path.lastIndexOf('.')
-  if (dot === -1 || path.slice(dot).includes('/')) return FileType.BINARY
-  const ext = path.slice(dot + 1).toLowerCase()
-  return EXTENSION_MAP[ext] ?? FileType.BINARY
-}
+// A MIME type's rendering hint, for a backend whose API reports one
+// (slack and discord attachments). Anything else under text/ is TEXT and
+// the rest is BINARY.
+export const CONTENT_BY_MIME: Readonly<Record<string, ContentType>> = Object.freeze({
+  'application/pdf': ContentType.PDF,
+  'application/zip': ContentType.ZIP,
+  'application/gzip': ContentType.GZIP,
+  'application/json': ContentType.JSON,
+  'image/png': ContentType.IMAGE_PNG,
+  'image/jpeg': ContentType.IMAGE_JPEG,
+  'image/gif': ContentType.IMAGE_GIF,
+  'text/csv': ContentType.CSV,
+})
 
-// Extension-guessed like upstream mailers' mime_guess, as a deliberate
-// fixed subset: platform MIME tables differ, and the python and
-// TypeScript implementations must guess identically for serialized
-// bytes to match. Anything else is application/octet-stream, which
-// every client treats as "download me".
+// The wire MIME type by extension, what a mail builder puts in an
+// attachment's Content-Type. Extension-guessed like upstream mailers'
+// mime_guess, as a deliberate fixed subset: platform MIME tables differ,
+// and the python and TypeScript implementations must guess identically
+// for serialized bytes to match. Anything else is application/octet-stream,
+// which every client treats as "download me". Separate from
+// CONTENT_BY_EXTENSION on purpose: that table is a rendering hint and may
+// grow freely, this one is pinned to the bytes himalaya sends.
 export const MIME_BY_EXTENSION: Readonly<Record<string, string>> = Object.freeze({
   csv: 'text/csv',
   gif: 'image/gif',
@@ -71,42 +85,33 @@ export const MIME_BY_EXTENSION: Readonly<Record<string, string>> = Object.freeze
 
 const OCTET_STREAM = 'application/octet-stream'
 
-/** Guesses a MIME content type from the filename's extension. */
-export function mimeTypeFor(filename: string): string {
-  const dot = filename.lastIndexOf('.')
-  if (dot < 0) return OCTET_STREAM
-  return MIME_BY_EXTENSION[filename.slice(dot + 1).toLowerCase()] ?? OCTET_STREAM
+/** The lower-cased extension of a path's last segment, '' when it has none. */
+function extensionOf(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot === -1 ? '' : name.slice(dot + 1).toLowerCase()
 }
 
-export const MIMETYPE_MAP: Readonly<Record<string, FileType>> = Object.freeze({
-  'application/pdf': FileType.PDF,
-  'application/zip': FileType.ZIP,
-  'application/gzip': FileType.GZIP,
-  'application/json': FileType.JSON,
-  'image/png': FileType.IMAGE_PNG,
-  'image/jpeg': FileType.IMAGE_JPEG,
-  'image/gif': FileType.IMAGE_GIF,
-  'text/csv': FileType.CSV,
-})
+/** The rendering hint for a bare extension ('png'), BINARY for an unknown one. */
+export function contentTypeForExtension(ext: string): ContentType {
+  return CONTENT_BY_EXTENSION[ext.toLowerCase()] ?? ContentType.BINARY
+}
 
-// Map a standard mimetype to a FileType, TEXT for any text/*, BINARY default.
-// Mirrors Python's filetype_from_mimetype.
-export function filetypeFromMimetype(mime: string): FileType {
-  if (mime === '') return FileType.BINARY
-  const mapped = MIMETYPE_MAP[mime]
+/** The rendering hint for a path, from its extension. */
+export function contentTypeForPath(path: string): ContentType {
+  return contentTypeForExtension(extensionOf(path))
+}
+
+/** The rendering hint for a MIME type: the table, TEXT for any text/*, else BINARY. */
+export function contentTypeForMime(mime: string): ContentType {
+  const mapped = CONTENT_BY_MIME[mime]
   if (mapped !== undefined) return mapped
-  if (mime.startsWith('text/')) return FileType.TEXT
-  return FileType.BINARY
+  if (mime.startsWith('text/')) return ContentType.TEXT
+  return ContentType.BINARY
 }
 
-export const IMAGE_TYPE_BY_EXTENSION: Readonly<Record<string, FileType>> = Object.freeze({
-  png: FileType.IMAGE_PNG,
-  jpg: FileType.IMAGE_JPEG,
-  jpeg: FileType.IMAGE_JPEG,
-  gif: FileType.IMAGE_GIF,
-})
-
-/** FileType for a bare image extension ('png'), BINARY for anything else. */
-export function imageTypeForExtension(ext: string): FileType {
-  return IMAGE_TYPE_BY_EXTENSION[ext.toLowerCase()] ?? FileType.BINARY
+/** The wire MIME type for a filename, from the fixed table. */
+export function mimeTypeFor(filename: string): string {
+  const ext = extensionOf(filename)
+  return ext === '' ? OCTET_STREAM : (MIME_BY_EXTENSION[ext] ?? OCTET_STREAM)
 }

@@ -56,7 +56,7 @@ task = ("Explore and summarize the data in /s3/data/."
 result = agent.run_sync(task, deps=Deps(backend=backend))
 print(result.output)
 
-records = ws.ops.records
+records = ws.fs.records
 if records:
     total = sum(r.bytes for r in records)
     print(f"\n--- {len(records)} ops, {total:,} bytes ---")

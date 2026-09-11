@@ -54,12 +54,28 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     expect(r.status).toBe(LookupStatus.NOT_FOUND)
   })
 
-  it('put + get round-trips entry', async () => {
-    await store.put('/a', entry('id-a', 'a'))
+  it('put + get round-trips entry metadata', async () => {
+    const extra = { drive_id: 'drive-a', nested: { slug: 'alpha', tags: ['x', 'y'] } }
+    await store.put('/a', new IndexEntry({ id: 'id-a', name: 'a', resourceType: 'file', extra }))
     const r = await store.get('/a')
     expect(r.entry?.id).toBe('id-a')
     expect(r.entry?.name).toBe('a')
     expect(r.entry?.indexTime).not.toBe('')
+    expect(r.entry?.extra).toEqual(extra)
+  })
+
+  it('setDir + get round-trips metadata and default empty extra', async () => {
+    const extra = { attachment: { url: 'https://example.test/file', size: 42 } }
+    await store.setDir('/dir', [
+      [
+        'with-extra',
+        new IndexEntry({ id: 'id-extra', name: 'with-extra', resourceType: 'file', extra }),
+      ],
+      ['without-extra', entry('id-empty', 'without-extra')],
+    ])
+
+    expect((await store.get('/dir/with-extra')).entry?.extra).toEqual(extra)
+    expect((await store.get('/dir/without-extra')).entry?.extra).toEqual({})
   })
 
   it('setDir stores entries and listDir preserves insertion (readdir) order', async () => {

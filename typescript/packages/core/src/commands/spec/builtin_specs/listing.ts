@@ -61,6 +61,12 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-path', type: 'str', multiple: true }),
       new Option({ short: '-mindepth', type: 'str', multiple: true }),
       new Option({ short: '-printf', type: 'str', multiple: true }),
+      new Option({ short: '-newer', type: 'str', multiple: true }),
+      new Option({ short: '-newermt', type: 'str', multiple: true }),
+      // `-exec CMD ARGS... ;` is consumed by the expression parser, never
+      // by this spec: the classifier keeps its words as text (`execSpans`),
+      // and there is no argparse shape for an option whose argument is a
+      // program.
       // GNU find's link policy: -P (no follow) is the default, -H
       // follows only the start point, -L follows everything.
       new Option({ short: '-P' }),

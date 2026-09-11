@@ -83,13 +83,13 @@ async def ensure_parents(ws: Workspace, path: str) -> None:
     parent = gnu_dirname(path)
     if parent in ("/", "", "."):
         return
-    if await ws.ops.exists(parent):
+    if await ws.fs.exists(parent):
         return
     await ensure_parents(ws, parent)
     try:
-        await ws.ops.mkdir(parent)
+        await ws.fs.mkdir(parent)
     except OSError:
-        if not await ws.ops.exists(parent):
+        if not await ws.fs.exists(parent):
             raise
 
 
@@ -136,7 +136,7 @@ class MirageToolOperations:
         try:
             data = await self._versions.read(path)
         except (OSError, ValueError) as exc:
-            if not await self._ws.ops.exists(path):
+            if not await self._ws.fs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         return ToolResult(number_lines(decode(data), offset, limit))
@@ -151,7 +151,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The confirmation, or the failure.
         """
-        if await self._ws.ops.exists(path):
+        if await self._ws.fs.exists(path):
             return ToolResult(f"Error: file '{path}' already exists", True)
         await ensure_parents(self._ws, path)
         await self._versions.write(path, content)
@@ -178,7 +178,7 @@ class MirageToolOperations:
         except StaleMirageFileError as exc:
             return ToolResult(f"Error: {exc}", True)
         except (OSError, ValueError) as exc:
-            if not await self._ws.ops.exists(path):
+            if not await self._ws.fs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         count = content.count(old_string)

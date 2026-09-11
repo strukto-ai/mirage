@@ -422,7 +422,7 @@ async function checkMetadata(
     const [lsOut] = await run(ws, `ls -l ${dst}/copied`)
     check(`${label}: ls -l renders overlay bits`, lsOut.includes('-rw-rw-r--'))
     check(`${label}: ls -l renders overlay owner`, lsOut.includes(' 500 dev '))
-    check(`${label}: ls -l renders touched mtime`, lsOut.includes('Mar  4 12:00'))
+    check(`${label}: ls -l renders touched mtime`, lsOut.includes('Mar  4  2026'))
   }
   await run(ws, `touch -r ${dst}/copied/n.txt /ram/tref.txt`)
   st = await statOf(ws, '/ram/tref.txt')

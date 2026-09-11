@@ -48,7 +48,6 @@ from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.email.config import EmailConfig
-from mirage.core.sharepoint import resolve as sharepoint_resolver
 from mirage.resource.aliyun import AliyunConfig, AliyunResource
 from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
 from mirage.resource.box import BoxConfig, BoxResource
@@ -1500,13 +1499,6 @@ class LinearService:
         return None
 
 
-def _clear_sharepoint_caches() -> None:
-    # The resolver's site/drive id caches are module globals; a fresh
-    # fake tenant per run must not see ids from the previous one.
-    sharepoint_resolver._site_cache.clear()
-    sharepoint_resolver._drive_cache.clear()
-
-
 class JaegerService:
     """Points jaeger mounts at a real jaeger all-in-one container.
 
@@ -1583,7 +1575,6 @@ class SharePointService:
     async def create(cls, run_id: str, target: dict) -> "SharePointService":
         service = cls(f"{run_id}-{target['id']}",
                       os.environ["ONEDRIVE_URL"].rstrip("/"))
-        _clear_sharepoint_caches()
         for mount in target["mounts"]:
             await service.provision(mount)
         return service
@@ -1637,7 +1628,7 @@ class SharePointService:
                              key_prefix=mount.get("prefix")))
 
     async def teardown(self) -> None:
-        _clear_sharepoint_caches()
+        return None
 
 
 class NotionService:
@@ -2644,7 +2635,7 @@ def cli_install(service: "Service | None",
 
 async def mutate_write(shadow_ws: Workspace, path: str,
                        content: bytes) -> None:
-    await shadow_ws.ops.write(path, content)
+    await shadow_ws.fs.write(path, content)
 
 
 async def teardown_target(
@@ -2781,9 +2772,9 @@ async def open_consistency(
 
 
 def scripted_profiles(profiles: dict | None) -> dict | None:
-    """Wrap a profile's inline script source the way the config door does.
+    """Wrap a profile's inline policy source the way the config door does.
 
-    A target is JSON, so it carries a profile's script as source rather
+    A target is JSON, so it carries a profile's policy as source rather
     than as the path a YAML config would name. Loading is the config
     layer's job everywhere else, so the battery does that one step here
     and hands the workspace what code would pass.
@@ -2795,12 +2786,17 @@ def scripted_profiles(profiles: dict | None) -> dict | None:
         return profiles
     out: dict = {}
     for name, doc in profiles.items():
-        script = doc.get("script") if isinstance(doc, dict) else None
-        if isinstance(script, dict):
+        policy = doc.get("policy") if isinstance(doc, dict) else None
+        script = policy.get("script") if isinstance(policy, dict) else None
+        if isinstance(policy, dict) and isinstance(script, dict):
+            # Only the program is loaded; the block around it (its
+            # runtime) is the document's and stays as written.
             doc = {
-                **doc, "script":
-                ScriptSource(script["source"],
-                             language=script.get("language", "python"))
+                **doc, "policy": {
+                    **policy, "script":
+                    ScriptSource(script["source"],
+                                 language=script.get("language", "python"))
+                }
             }
         out[name] = doc
     return out

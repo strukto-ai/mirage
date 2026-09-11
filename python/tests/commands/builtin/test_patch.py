@@ -14,6 +14,10 @@
 
 import asyncio
 
+import pytest
+
+from mirage.commands.builtin.generic.patch import patch_generic
+from mirage.commands.config import CommandOpts
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
@@ -87,3 +91,34 @@ def test_patch_N():
     _run_raw(ws, "patch -p1 -N", cwd="/data", stdin=diff_text.encode())
     stdout, _ = _run_raw(ws, "cat /data/hello.txt")
     assert b"universe" in _bytes(stdout)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "/data", "/nested/data"])
+@pytest.mark.parametrize("source", ["stdin", "operand", "input"])
+async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
+    patch_data = (b"--- a/hello.txt\n+++ b/hello.txt\n@@ -1,2 +1,2 @@\n"
+                  b" hello\n-world\n+universe\n")
+    files = {"hello.txt": b"hello\nworld\n", "fix.diff": patch_data}
+    seen = []
+
+    async def read(path):
+        assert path.virtual == prefix + "/" + path.resource_path
+        seen.append(path.resource_path)
+        return files[path.resource_path]
+
+    async def write(path, data):
+        assert path.virtual == prefix + "/" + path.resource_path
+        files[path.resource_path] = data
+
+    input_path = PathSpec.from_str_path(prefix + "/fix.diff", "fix.diff")
+    flags = {"p": "1"}
+    if source == "input":
+        flags["i"] = input_path
+    opts = CommandOpts(flags=flags,
+                       mount_prefix=prefix,
+                       stdin=patch_data if source == "stdin" else None)
+    await patch_generic([input_path] if source == "operand" else [], [], opts,
+                        read, write, True)
+    assert "hello.txt" in seen
+    assert files["hello.txt"] == b"hello\nuniverse\n"

@@ -57,7 +57,8 @@ class InnerLine:
         line (str | None): the text to parse.
         argv (tuple[Word, ...]): the command, name first.
         open (bool): whether the runtime appends operands the gate
-            cannot read (``xargs``'s items, ``find``'s ``{}`` paths).
+            cannot read (``xargs``'s items, ``find``'s ``{}`` paths,
+            the index and record ``mapfile -C`` hands its callback).
     """
 
     line: str | None = None
@@ -164,7 +165,8 @@ def _mapfile_inner(args: Sequence[Word]) -> list[InnerLine]:
     parsed = parse_shell_options(SHELL_SPECS["mapfile"],
                                  [w.value for w in args])
     callback = parsed.flags.get("C")
-    return [InnerLine(line=callback)] if isinstance(callback, str) else []
+    return [InnerLine(line=callback, open=True)] if isinstance(callback,
+                                                               str) else []
 
 
 def _find_inner(args: Sequence[Word]) -> list[InnerLine]:

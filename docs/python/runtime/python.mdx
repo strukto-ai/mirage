@@ -166,8 +166,11 @@ For setup and its host-path security model, see the dedicated
 
 Workspace config files take a top-level `runtimes` list: the ordered
 world of runtimes, each entry a name or a mapping with the uniform
-runtime options (`captures`, `config`, `script`). The first entry that
-captures a command binds it; `vfs` is the in-process catch-all:
+runtime options (`captures`, `config`, `script`). The name is a runtime
+mirage ships, one the host registered with `register_runtime`, or a
+`./file.py:Class` reference to a `Runtime` subclass, the form `resource:`
+and `cli:` take. The first entry that captures a command binds it; `vfs`
+is the in-process catch-all:
 
 ```yaml
 runtimes:

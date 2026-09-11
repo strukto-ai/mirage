@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType } from '../../types.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { rgFull, type RgFullOptions } from './rg_scan.ts'
 
 const ENC = new TextEncoder()
@@ -35,7 +35,9 @@ function statFn(path: string): Promise<FileStat> {
   const content = FILES[path]
   if (content === undefined) return Promise.reject(new Error(`ENOENT: ${path}`))
   const name = path.split('/').pop() ?? ''
-  return Promise.resolve(new FileStat({ name, type: FileType.TEXT, size: content.length }))
+  return Promise.resolve(
+    new FileStat({ name, type: FileType.FILE, content: ContentType.TEXT, size: content.length }),
+  )
 }
 
 function readBytesFn(path: string): Promise<Uint8Array> {
@@ -128,7 +130,9 @@ function logStatFn(path: string): Promise<FileStat> {
   const content = LOG_FILES[path]
   if (content === undefined) return Promise.reject(new Error(`ENOENT: ${path}`))
   const name = path.split('/').pop() ?? ''
-  return Promise.resolve(new FileStat({ name, type: FileType.TEXT, size: content.length }))
+  return Promise.resolve(
+    new FileStat({ name, type: FileType.FILE, content: ContentType.TEXT, size: content.length }),
+  )
 }
 
 function logReadBytesFn(path: string): Promise<Uint8Array> {

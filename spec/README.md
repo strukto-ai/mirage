@@ -87,6 +87,22 @@ factory that exists only to explain that the runtime cannot serve the backend
 (`lancedb`, `email`) dumps `null`, and the node entry is the one compared
 against Python.
 
+`configs` carries, per registry name, what a mount can be *told*: Python dumps
+the pydantic model's wire names (the alias where a field has one) with whether
+each is required; TypeScript dumps the zod shape behind the resource's
+`normalize*Config` door, the rename map that door applies, and whether it
+validates at all. The gate maps every Python name through the rename map (or
+`snakeToCamel`) onto a TypeScript field with the same requiredness, demands the
+reverse reachability, and refuses a door that does not parse. Node against
+browser is not compared for this table, since the browser S3 family
+authenticates with a presigned-URL provider by design; the node entry is the
+one that mirrors Python. Read from source (`configFacts` in
+`scripts/resource_facts.ts`) for the same reason capabilities are: most
+schemas are module-private and construction is not inert. A backend whose
+factory calls no normalizer (ram, disk, redis take raw kwargs on both sides)
+dumps `null`. Exemptions live under `config_fields` in
+`parity_exceptions.json`, keyed by resource then field in either spelling.
+
 `command_io` carries, per backend command package, the wired `CommandIO` slot
 names plus `local`, `max_glob_matches` and `max_du_entries`. The adapter's slot
 set is a hand-filled literal nothing else reads, so a backend could omit `du`

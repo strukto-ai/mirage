@@ -20,9 +20,8 @@ import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
 import { attrLetters } from '../../../../shell/variable.ts'
-import { elementIndex, sessionElements, setAttr } from '../../../session/state.ts'
+import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../../session/state.ts'
 import type { Session } from '../../../session/session.ts'
-import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyRefusal, refusal } from '../shared.ts'
@@ -108,27 +107,30 @@ export async function storeStagedArrays(
       throw err
     }
     let base: ShellValue
-    if (assoc || Object.hasOwn(session.assocs, name)) {
-      const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
-      if (errors !== null) {
-        for (const word of badWords) {
-          errors.push(
-            `bash: ${name}: '${word}': must use subscript when assigning associative array`,
-          )
-        }
-      }
-      base = map
-    } else {
-      let held: ShellArray | null = session.arrays[name] ?? null
-      if (append && held === null) {
-        const scalar = session.env[name]
-        held = scalar === undefined ? null : [scalar]
-      }
-      base = buildIndexedLiteral(held, items, append, (sub) =>
-        elementIndex(sub, visibleEnv(session), sessionElements(session)),
-      )
-    }
+    // One try around the literal and the write: a subscript in the
+    // literal may assign (`([x=2]=v)`), and that lands through the same
+    // door.
     try {
+      if (assoc || Object.hasOwn(session.assocs, name)) {
+        const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
+        if (errors !== null) {
+          for (const word of badWords) {
+            errors.push(
+              `bash: ${name}: '${word}': must use subscript when assigning associative array`,
+            )
+          }
+        }
+        base = map
+      } else {
+        let held: ShellArray | null = session.arrays[name] ?? null
+        if (append && held === null) {
+          const scalar = conversionScalar(session, name)
+          held = scalar === undefined ? null : [scalar]
+        }
+        base = await buildIndexedLiteral(held, items, append, (sub) =>
+          subscriptIndex(session, sub, view),
+        )
+      }
       if (globalScope) await writeGlobal(session, view, name, base)
       else await view.set(name, base)
     } catch (err) {
@@ -441,7 +443,7 @@ export function handleDeclareFunctions(
 export function noteLocalArray(session: Session, name: string): boolean {
   const locals = session.localVars
   if (locals === null) return false
-  if (!locals.has(name)) locals.set(name, sessionEntry(session.vars, name) ?? null)
+  shadowLocal(session, locals, name)
   return true
 }
 

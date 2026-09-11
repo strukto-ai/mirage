@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-dsh",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "DeepSeek Harness (dsh) providers backed by a mirage workspace: ctx.fs and ctx.shell over mounted resources",
   "homepage": "https://github.com/strukto-ai/mirage#readme",
   "bugs": {

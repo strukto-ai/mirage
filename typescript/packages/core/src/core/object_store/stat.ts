@@ -16,7 +16,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import { ResourceType } from '../../cache/index/config.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
-import { guessType } from '../../utils/filetype.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { gnuBasename } from '../../utils/path.ts'
@@ -60,7 +60,8 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
           name: entry.name,
           size: entry.size ?? null,
           modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-          type: guessType(entry.name),
+          type: FileType.FILE,
+          content: contentTypeForPath(entry.name),
         })
       }
       // If the parent directory was already listed by readdir() but this
@@ -92,7 +93,8 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
             modified: meta.modified ?? null,
             fingerprint: meta.fingerprint ?? null,
             revision: meta.revision ?? null,
-            type: guessType(rawPath),
+            type: FileType.FILE,
+            content: contentTypeForPath(rawPath),
             extra: { ...(meta.extra ?? {}) },
           })
         }

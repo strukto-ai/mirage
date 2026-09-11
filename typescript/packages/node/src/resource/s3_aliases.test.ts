@@ -40,9 +40,13 @@ import {
 } from './digitalocean/config.ts'
 import { DigitalOceanResource } from './digitalocean/digitalocean.ts'
 import { gcsToS3Config, type GCSConfig } from './gcs/config.ts'
-import { ociToS3Config, type OCIConfig } from './oci/config.ts'
+import { normalizeOciConfig, ociToS3Config, type OCIConfig } from './oci/config.ts'
 import { r2ToS3Config, type R2Config } from './r2/config.ts'
-import { supabaseToS3Config, type SupabaseConfig } from './supabase/config.ts'
+import {
+  normalizeSupabaseConfig,
+  supabaseToS3Config,
+  type SupabaseConfig,
+} from './supabase/config.ts'
 import { minioToS3Config, normalizeMinIOConfig, type MinIOConfig } from './minio/config.ts'
 import { MinIOResource } from './minio/minio.ts'
 import {
@@ -434,4 +438,43 @@ describe('S3 alias subfolder mounts', () => {
       expect(s3.proxy).toBe('http://localhost:8080')
     })
   }
+})
+
+// Path style is on by default for these two gateways but stays a knob, as
+// python passes `path_style` through `to_s3_config`. Both used to hand-copy
+// the family's rename map without the `path_style` entry and hardcode
+// `forcePathStyle: true`, so `path_style: false` was honored on python and
+// silently ignored here.
+describe('oci and supabase path style', () => {
+  it('oci: defaults on, honors path_style: false', () => {
+    const on = normalizeOciConfig({ bucket: 'b', namespace: 'ns', region: 'us-ashburn-1' })
+    expect(ociToS3Config(on).forcePathStyle).toBe(true)
+    const off = normalizeOciConfig({
+      bucket: 'b',
+      namespace: 'ns',
+      region: 'us-ashburn-1',
+      path_style: false,
+    })
+    expect(off.forcePathStyle).toBe(false)
+    expect(ociToS3Config(off).forcePathStyle).toBe(false)
+  })
+
+  it('supabase: defaults on, honors path_style: false', () => {
+    const on = normalizeSupabaseConfig({ bucket: 'b', project_ref: 'p', region: 'us-east-1' })
+    expect(supabaseToS3Config(on).forcePathStyle).toBe(true)
+    const off = normalizeSupabaseConfig({
+      bucket: 'b',
+      project_ref: 'p',
+      region: 'us-east-1',
+      path_style: false,
+    })
+    expect(supabaseToS3Config(off).forcePathStyle).toBe(false)
+  })
+
+  it('refuses a wrong-typed field for every alias', () => {
+    expect(() => normalizeOciConfig({ bucket: 'b', namespace: 'ns', region: 1 })).toThrow(/region/)
+    expect(() =>
+      normalizeAliyunConfig({ bucket: 'b', region: 'cn-hangzhou', timeout: 'abc' }),
+    ).toThrow(/timeoutMs/)
+  })
 })

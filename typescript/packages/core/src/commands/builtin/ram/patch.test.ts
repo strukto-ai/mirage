@@ -14,6 +14,8 @@
 
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
+import { patchGeneric } from '../generic/patch.ts'
+import { PathSpec } from '../../../types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 const RAM_PATCH = RAM_COMMANDS.filter((c) => c.name === 'patch' && c.filetype == null)
 
@@ -85,3 +87,46 @@ describe('patch', () => {
     expect(DEC.decode(out)).toContain('universe')
   })
 })
+
+it.each(['', '/data', '/nested/data'])(
+  'preserves virtual paths under %s for patch I/O',
+  async (prefix) => {
+    for (const source of ['stdin', 'operand', 'input']) {
+      const diff = ENC.encode(
+        '--- a/hello.txt\n+++ b/hello.txt\n@@ -1,2 +1,2 @@\n hello\n-world\n+universe\n',
+      )
+      const files = new Map<string, Uint8Array>([
+        ['hello.txt', ENC.encode('hello\nworld\n')],
+        ['fix.diff', diff],
+      ])
+      const seen: string[] = []
+      const stream = async function* (path: PathSpec): AsyncIterable<Uint8Array> {
+        expect(path.virtual).toBe(prefix + '/' + path.resourcePath)
+        seen.push(path.resourcePath)
+        const bytes = files.get(path.resourcePath)
+        if (bytes === undefined) throw new Error('missing fixture')
+        yield Promise.resolve(bytes)
+      }
+      const write = (path: PathSpec, data: Uint8Array): Promise<void> => {
+        expect(path.virtual).toBe(prefix + '/' + path.resourcePath)
+        files.set(path.resourcePath, data)
+        return Promise.resolve()
+      }
+      const input = PathSpec.fromStrPath(prefix + '/fix.diff', 'fix.diff')
+      await patchGeneric(
+        source === 'operand' ? [input] : [],
+        {
+          mountPrefix: prefix,
+          filetypeFns: null,
+          cwd: prefix || '/',
+          flags: { p: '1', ...(source === 'input' ? { i: input.virtual } : {}) },
+          stdin: source === 'stdin' ? diff : null,
+        },
+        stream,
+        write,
+      )
+      expect(seen).toContain('hello.txt')
+      expect(DEC.decode(files.get('hello.txt'))).toBe('hello\nuniverse\n')
+    }
+  },
+)

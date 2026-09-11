@@ -132,7 +132,7 @@ def _fake_elements():
     def read(name, key):
         return store.get((name, key))
 
-    ops = ElementOps(resolve=resolve, read=read)
+    ops = ElementOps(resolve=resolve, read=read, is_assoc=lambda n: n == "m")
     cell.append(ops)
     return ops
 
@@ -177,3 +177,56 @@ def test_element_nested_brackets_tokenize():
     ops = _fake_elements()
     result = evaluate_arith("arr[arr[1] - 19]", {}, elements=ops)
     assert result.value == 20
+
+
+def test_dynamic_reader_is_asked_first_and_told_of_every_write():
+    # A dynamic name's reader answers before the pending assignments and
+    # the environment, and hears each scalar assignment as it is made,
+    # nested evaluations included, so it can act on it at once.
+    events: list[tuple[str, str]] = []
+
+    def read(name: str) -> str | None:
+        return "7" if name == "D" else None
+
+    def wrote(name: str, value: str) -> None:
+        events.append((name, value))
+
+    result = evaluate_arith("D=42, x=D, y", {"y": "D+1"},
+                            read_var=read,
+                            wrote_var=wrote)
+    assert result.value == 8
+    assert events == [("D", "42"), ("x", "7")]
+    assert [(w.name, w.value) for w in result.writes] == [("D", "42"),
+                                                          ("x", "7")]
+
+
+def test_compound_assignment_reads_the_target_before_the_right_side():
+    # bash 5.2: `RANDOM=42, RANDOM-=RANDOM` is the first draw minus the
+    # second, so a dynamic name is read for the target first.
+    draws = iter(["17772", "26794"])
+    result = evaluate_arith("D-=D", {}, read_var=lambda n: next(draws))
+    assert result.value == -9022
+
+
+def test_a_variable_evaluated_as_an_expression_shares_the_record():
+    # bash: `x='y=5'; $((x))` leaves y at 5, and the nested read sees the
+    # pending updates of the expression around it.
+    result = evaluate_arith("x, y + 1", {"x": "y=5"})
+    assert result.value == 6
+    assert [(w.name, w.value) for w in result.writes] == [("y", "5")]
+    result = evaluate_arith("y=1, x, y", {"x": "y+=1"})
+    assert result.value == 2
+    assert [(w.name, w.value) for w in result.writes] == [("y", "2")]
+
+
+def test_an_indexed_subscript_evaluates_in_the_expression_record():
+    # bash: `a[5]=7; $((a[x=5] + x))` is 12 and leaves x at 5; the
+    # subscript's assignment is seen by the rest of the expression and
+    # recorded with it.
+    result = evaluate_arith("arr[x=1] + x", {}, elements=_fake_elements())
+    assert result.value == 21
+    assert [(w.name, w.key, w.value)
+            for w in result.writes] == [("x", None, "1")]
+    # An associative subscript stays a key, never an expression.
+    result = evaluate_arith("m[a] + 1", {}, elements=_fake_elements())
+    assert result.value == 8 and result.writes == ()

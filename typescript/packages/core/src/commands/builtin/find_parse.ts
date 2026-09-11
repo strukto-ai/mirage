@@ -13,32 +13,40 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FindParseError } from '../errors.ts'
+import { parseDateExpr } from '../../utils/dates.ts'
 import type { PredNode } from './find_eval.ts'
+import {
+  EXEC_BATCH_END,
+  EXEC_END,
+  EXEC_PLACEHOLDER,
+  FIND_BARE_PREDICATES,
+  FIND_EXEC_PREDICATES,
+  FIND_EXPRESSION_TOKENS,
+  FIND_MAX_DEPTH,
+  FIND_ROW_ACTIONS,
+  FIND_VALID_TYPES,
+  FIND_VALUE_PREDICATES,
+} from './constants.ts'
+import type { ExecAction, FindAction } from './types.ts'
 
-const VALUE_PREDICATES = new Set([
-  '-name',
-  '-iname',
-  '-path',
-  '-type',
-  '-size',
-  '-mtime',
-  '-maxdepth',
-  '-mindepth',
-  '-printf',
-])
+const EXEC_PLACEMENT =
+  'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
 
-const BARE_PREDICATES = new Set(['-empty', '-print', '-print0', '-delete', '-ls', '-depth'])
-
-const OPERATORS = new Set(['-not', '!', '-o', '-or', '-a', '-and', '(', ')'])
-
-function isExpressionToken(tok: string): boolean {
-  return VALUE_PREDICATES.has(tok) || BARE_PREDICATES.has(tok) || OPERATORS.has(tok)
+/** The `-exec` actions of an expression, in order. */
+export function execActions(actions: readonly FindAction[]): ExecAction[] {
+  return actions.filter((a): a is ExecAction => a.kind === 'exec')
 }
 
-const VALID_TYPES = new Set(['b', 'c', 'd', 'p', 'f', 'l', 's'])
-
-const MAX_DEPTH = 100
-
+/**
+ * One parsed find expression: the predicate tree plus everything the flat
+ * window lifts out of it. The tests a backend can answer per entry stay in
+ * `tree`; the windows (depth, size, mtime) and the actions are global to
+ * the expression, because a native find op evaluates the tree and the
+ * executor applies the actions to what came back. `newer` holds `-newer`
+ * reference operands as typed, for the executor to resolve against the
+ * dispatcher into `-newermt` bounds before any backend sees the
+ * expression.
+ */
 export interface FindExpr {
   tree: PredNode
   maxDepth: number | null
@@ -49,6 +57,74 @@ export interface FindExpr {
   mtimeMax: number | null
   usesEmpty: boolean
   printf: string | null
+  // In the order written: GNU runs actions per position, so
+  // `-exec echo {} ";" -print -exec echo again {} ";"` alternates the
+  // three per match.
+  actions: FindAction[]
+  newer: string[]
+  // GNU's -depth: every directory's contents come before the directory
+  // itself. -delete turns it on, since a directory can only be removed
+  // once what it holds is gone.
+  depthFirst: boolean
+}
+
+/**
+ * The inclusive lower bound that means "later than `timestamp`". `-newer`
+ * and `-newermt` are strict (GNU: modified *more recently than*), and the
+ * window is inclusive, so the bound is the next representable float:
+ * exact, where adding an epsilon would either miss a timestamp or admit
+ * the reference itself.
+ */
+export function strictlyAfter(timestamp: number): number {
+  const view = new DataView(new ArrayBuffer(8))
+  view.setFloat64(0, timestamp)
+  const bits = view.getBigUint64(0)
+  view.setBigUint64(0, timestamp >= 0 ? bits + 1n : bits - 1n)
+  return view.getFloat64(0)
+}
+
+/** One `-newermt` argument as a GNU date expression; naive times are UTC. */
+export function parseNewermt(value: string): number {
+  const ts = parseDateExpr(value, true)
+  if (ts === null || !Number.isFinite(ts.getTime()) || value.trim() === '@') {
+    throw new FindParseError(
+      `find: I cannot figure out how to interpret '${value}' as a date or time`,
+    )
+  }
+  return ts.getTime() / 1000
+}
+
+/**
+ * The argv index ranges, inclusive, that `-exec` owns. Every word from
+ * `-exec` to its terminator is the action's, never an operand of find's
+ * own: the classifier reads this so `echo`, `{}` and `;` are not turned
+ * into start points. A span with no terminator runs to the end; the
+ * parser reports that one.
+ */
+export function execSpans(argv: readonly string[]): [number, number][] {
+  const spans: [number, number][] = []
+  let i = 0
+  while (i < argv.length) {
+    if (!FIND_EXEC_PREDICATES.has(argv[i] ?? '')) {
+      i += 1
+      continue
+    }
+    const start = i
+    i += 1
+    while (i < argv.length) {
+      const tok = argv[i]
+      if (
+        tok === EXEC_END ||
+        (tok === EXEC_BATCH_END && i > start + 1 && (argv[i - 1] ?? '').includes(EXEC_PLACEHOLDER))
+      ) {
+        break
+      }
+      i += 1
+    }
+    spans.push([start, Math.min(i, argv.length - 1)])
+    i += 1
+  }
+  return spans
 }
 
 // Number.parseInt accepts trailing garbage ('12abc' -> 12), which silently
@@ -89,7 +165,7 @@ export function parseMtime(spec: string): [number | null, number | null] {
 function typeNode(value: string): PredNode {
   if (value === 'f' || value === 'file') return { op: 'type', kind: 'f' }
   if (value === 'd' || value === 'directory') return { op: 'type', kind: 'd' }
-  if (VALID_TYPES.has(value)) return { op: 'type', kind: value }
+  if (FIND_VALID_TYPES.has(value)) return { op: 'type', kind: value }
   throw new FindParseError(`find: Unknown argument to -type: ${value}`)
 }
 
@@ -111,7 +187,7 @@ export function findExprTail(rawArgv: string[]): string[] {
   for (let i = start; i < rawArgv.length; i++) {
     const tok = rawArgv[i]
     if (tok === undefined) continue
-    if (isExpressionToken(tok) || (tok.startsWith('-') && tok.length > 1)) {
+    if (FIND_EXPRESSION_TOKENS.has(tok) || (tok.startsWith('-') && tok.length > 1)) {
       return rawArgv.slice(i)
     }
   }
@@ -128,10 +204,50 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     mtimeMax: null as number | null,
     usesEmpty: false,
     printf: null as string | null,
+    actions: [] as FindAction[],
+    newer: [] as string[],
+    depthFirst: false,
   }
   let pos = 0
   let depth = 0
+  // How many parentheses and negations enclose the current token, and
+  // whether a top-level `-o` has been seen: an action under either would
+  // need per-position evaluation the flat window cannot do.
+  let nested = 0
+  let inOr = false
   let mtimeSeen = false
+  let newerToken: string | null = null
+  const checkActionPlacement = (token: string): void => {
+    if (nested > 0 || inOr) {
+      throw new FindParseError(
+        `find: ${token} is supported only in a top-level -a chain, not under -o, ! or parentheses`,
+      )
+    }
+  }
+  // Fold one mtime window into the expression's single window. The flat
+  // window cannot evaluate a time test per predicate node, so repeated
+  // ones fold by where they sit. In the top-level `-a` chain every test
+  // must hold, so the windows intersect: `-newer old -newer new` keeps
+  // only what is newer than both, and `-mtime +2 -mtime -1` keeps
+  // nothing, as GNU answers. Under `-o`, `!` or parentheses the window
+  // cannot be exact, so they widen to the union: the tautology `-mtime
+  // +0 -o -mtime -1` imposes no bounds instead of last-wins dropping
+  // everything (documented divergence from GNU: such a window
+  // over-matches).
+  const mergeWindow = (lo: number | null, hi: number | null): void => {
+    if (!mtimeSeen) {
+      ;[g.mtimeMin, g.mtimeMax] = [lo, hi]
+      mtimeSeen = true
+      return
+    }
+    if (nested === 0 && !inOr) {
+      g.mtimeMin = g.mtimeMin === null ? lo : lo === null ? g.mtimeMin : Math.max(g.mtimeMin, lo)
+      g.mtimeMax = g.mtimeMax === null ? hi : hi === null ? g.mtimeMax : Math.min(g.mtimeMax, hi)
+      return
+    }
+    g.mtimeMin = g.mtimeMin === null || lo === null ? null : Math.min(g.mtimeMin, lo)
+    g.mtimeMax = g.mtimeMax === null || hi === null ? null : Math.max(g.mtimeMax, hi)
+  }
   const peek = (): string | undefined => (pos < tokens.length ? tokens[pos] : undefined)
   const advance = (): string | undefined => {
     const t = peek()
@@ -150,10 +266,61 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       throw new FindParseError(`find: expected an expression between '${op}' and ')'`)
   }
 
+  // The words after `-exec` up to `;` or a `{} +`. GNU's rules, in GNU's
+  // words: no terminator is a missing argument, a `+` counts as the
+  // terminator only right after a word holding `{}`, and the batched form
+  // allows exactly one `{}` and only by itself.
+  function parseExec(): ExecAction {
+    const argv: string[] = []
+    let batch = false
+    for (;;) {
+      const tok = advance()
+      if (tok === undefined) throw new FindParseError("find: missing argument to `-exec'")
+      if (tok === EXEC_END) break
+      if (
+        tok === EXEC_BATCH_END &&
+        argv.length > 0 &&
+        (argv.at(-1) ?? '').includes(EXEC_PLACEHOLDER)
+      ) {
+        batch = true
+        break
+      }
+      argv.push(tok)
+    }
+    if (argv.length === 0) throw new FindParseError("find: missing argument to `-exec'")
+    if (batch) {
+      for (const word of argv) {
+        if (word.includes(EXEC_PLACEHOLDER) && word !== EXEC_PLACEHOLDER) {
+          throw new FindParseError(
+            `find: In '-exec ... {} +' the '{}' must appear by itself, but you specified '${word}'`,
+          )
+        }
+      }
+      if (argv.filter((w) => w === EXEC_PLACEHOLDER).length > 1) {
+        throw new FindParseError('find: Only one instance of {} is supported with -exec ... +')
+      }
+    }
+    if (nested > 0 || inOr) {
+      // The executor runs the action on the matches the tree produced,
+      // which is an AND with every test; under `-o`, `!` or parentheses
+      // GNU would run it per position, and silently running it on the
+      // wrong set is worse than refusing.
+      throw new FindParseError(EXEC_PLACEMENT)
+    }
+    return { kind: 'exec', argv, batch }
+  }
+
   function primary(): PredNode {
     const tok = advance()
     if (tok === undefined) throw new FindParseError('find: expected predicate')
-    if (VALUE_PREDICATES.has(tok)) {
+    if (
+      (g.actions.length > 0 || g.printf !== null) &&
+      (tok === '-empty' ||
+        (FIND_VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
+    ) {
+      throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
+    }
+    if (FIND_VALUE_PREDICATES.has(tok)) {
       const value = advance()
       if (value === undefined) throw new FindParseError(`find: missing argument to '${tok}'`)
       if (tok === '-name') return { op: 'name', pattern: value, icase: false }
@@ -161,6 +328,10 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok === '-path') return { op: 'path', pattern: value }
       if (tok === '-type') return typeNode(value)
       if (tok === '-printf') {
+        if (g.printf !== null) {
+          throw new FindParseError('find: multiple -printf actions are not supported')
+        }
+        checkActionPlacement(tok)
         // An action, not a test: it always matches, replaces the default
         // -print rendering, and one format applies to every row (GNU
         // evaluates actions per expression position, which the flat
@@ -181,42 +352,71 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         ;[g.minSize, g.maxSize] = parseSize(value)
         return { op: 'true' }
       }
-      // The flat window cannot evaluate -mtime per predicate node, so
-      // repeated -mtime flatten to the union of their windows: the
-      // tautology `-mtime +0 -o -mtime -1` imposes no bounds instead of
-      // last-wins dropping everything. An AND of disjoint windows
-      // over-matches (documented divergence from GNU).
-      const [mtLo, mtHi] = parseMtime(value)
-      if (!mtimeSeen) {
-        ;[g.mtimeMin, g.mtimeMax] = [mtLo, mtHi]
-        mtimeSeen = true
-      } else {
-        g.mtimeMin = g.mtimeMin === null || mtLo === null ? null : Math.min(g.mtimeMin, mtLo)
-        g.mtimeMax = g.mtimeMax === null || mtHi === null ? null : Math.max(g.mtimeMax, mtHi)
+      if (tok === '-newer' || tok === '-newermt') {
+        checkActionPlacement(tok)
+        newerToken = tok
       }
+      if (tok === '-newer') {
+        // Resolved by the executor (`find_refs.ts`) into -newermt, since
+        // only the dispatcher can stat the reference.
+        g.newer.push(value)
+        return { op: 'true' }
+      }
+      if (tok === '-newermt') {
+        mergeWindow(strictlyAfter(parseNewermt(value)), null)
+        return { op: 'true' }
+      }
+      const [mtLo, mtHi] = parseMtime(value)
+      mergeWindow(mtLo, mtHi)
+      return { op: 'true' }
+    }
+    if (FIND_EXEC_PREDICATES.has(tok)) {
+      g.actions.push(parseExec())
       return { op: 'true' }
     }
     if (tok === '-empty') {
       g.usesEmpty = true
       return { op: 'empty' }
     }
-    if (BARE_PREDICATES.has(tok)) return { op: 'true' }
+    const rowKind = FIND_ROW_ACTIONS.get(tok)
+    if (rowKind !== undefined) {
+      checkActionPlacement(tok)
+      g.actions.push({ kind: rowKind })
+      if (rowKind === 'delete') g.depthFirst = true
+      return { op: 'true' }
+    }
+    if (tok === '-depth') {
+      g.depthFirst = true
+      return { op: 'true' }
+    }
+    if (FIND_BARE_PREDICATES.has(tok)) return { op: 'true' }
     throw new FindParseError(`find: unknown predicate '${tok}'`)
   }
 
   function factor(): PredNode {
     depth += 1
-    if (depth > MAX_DEPTH) throw new FindParseError('find: expression too deeply nested')
+    if (depth > FIND_MAX_DEPTH) throw new FindParseError('find: expression too deeply nested')
     try {
       const tok = peek()
       if (tok === '-not' || tok === '!') {
         advance()
         afterOperator(tok)
-        return { op: 'not', kid: factor() }
+        nested += 1
+        try {
+          return { op: 'not', kid: factor() }
+        } finally {
+          nested -= 1
+        }
       }
       if (tok === '(') {
         advance()
-        const node = orExpr()
+        nested += 1
+        let node: PredNode
+        try {
+          node = orExpr()
+        } finally {
+          nested -= 1
+        }
         if (peek() !== ')') throw new FindParseError('find: unbalanced parentheses')
         advance()
         return node
@@ -252,6 +452,18 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok !== '-o' && tok !== '-or') break
       advance()
       afterOperator(tok)
+      if (nested === 0) {
+        inOr = true
+        if (newerToken !== null) checkActionPlacement(newerToken)
+        // An action already parsed sits on the left of this `-o`, which
+        // is the same detachment from the tree seen from the other side:
+        // `-exec false {} ; -o -print` would run the action and then
+        // print nothing.
+        if (execActions(g.actions).length > 0) throw new FindParseError(EXEC_PLACEMENT)
+        const action = g.actions[0]
+        if (action !== undefined) checkActionPlacement(`-${action.kind}`)
+        if (g.printf !== null) checkActionPlacement('-printf')
+      }
       terms.push(andExpr())
     }
     const [firstTerm, ...restTerms] = terms
@@ -263,5 +475,13 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   const tree = orExpr()
   const trailing = peek()
   if (trailing !== undefined) throw new FindParseError(`find: unexpected token '${trailing}'`)
+  if (execActions(g.actions).length > 0 && g.printf !== null) {
+    // -printf rows are rendered by the backend's generic before the
+    // executor sees them, so there is no path left to hand -exec.
+    throw new FindParseError('find: -exec cannot be combined with -printf')
+  }
+  if (g.actions.length > 0 && g.printf !== null) {
+    throw new FindParseError('find: -printf cannot be combined with other actions')
+  }
   return { tree, ...g }
 }

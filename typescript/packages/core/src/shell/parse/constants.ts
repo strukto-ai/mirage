@@ -50,6 +50,16 @@ export const STRUCTURAL_TOKENS: ReadonlySet<string> = new Set([
   '`',
 ])
 
+// Statement separators. One that lands inside an ERROR node has nothing
+// to separate (a line starting with `;`, `| s`, `a ; ; b`, `a &; b`), and
+// bash refuses every such line with `syntax error near unexpected token`.
+export const SEPARATOR_TOKENS: ReadonlySet<string> = new Set([';', '&', '|', '&&', '||'])
+
+// The case-item terminators. The grammar also accepts them as plain
+// statement separators, so `true;;s` parses without an ERROR node; bash
+// only accepts them inside a case item.
+export const CASE_TERMINATORS: ReadonlySet<string> = new Set([';;', ';&', ';;&'])
+
 // Where a `variable_name` node is a write target rather than a read:
 // the assignment's name and the for loop's variable. Everything else --
 // expansions, arithmetic, subscripts -- reads the name.

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Refusal } from '@struktoai/mirage-core/types'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 interface IoResultDict {
@@ -19,6 +20,9 @@ interface IoResultDict {
   exitCode: number
   stdout: string
   stderr: string
+  // Why the line did not run, null on every ordinary run; the reason a
+  // bash-voiced stderr leaves out.
+  refusal: Refusal | null
 }
 
 interface ProvisionResultDict {
@@ -40,6 +44,7 @@ export function ioResultToDict(result: unknown): ResultDict {
       exitCode: result.exitCode,
       stdout: result.stdoutText,
       stderr: result.stderrText,
+      refusal: result.refusal,
     }
   }
   if (typeof result === 'object' && result !== null) {

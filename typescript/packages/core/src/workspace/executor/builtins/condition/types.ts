@@ -14,6 +14,7 @@
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { Session } from '../../../session/session.ts'
+import type { SessionView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CondNode =
@@ -25,11 +26,29 @@ export type CondNode =
   | { kind: 'or'; left: CondNode; right: CondNode }
 
 /** A test/[/[[ usage error: bash prints the message and returns 2. */
-export class CondError extends Error {}
+/**
+ * A test/[/[[ usage error: bash prints the message and returns 2. A `[[`
+ * grammar error is a parse error that kills the line; an arithmetic error
+ * inside a numeric operand (`[[ 0 -eq 1/0 ]]`) is not: bash prints it and
+ * the test answers 1, the line going on, so it carries its own status and
+ * is never fatal.
+ */
+export class CondError extends Error {
+  constructor(
+    message: string,
+    readonly exitCode = 2,
+    readonly fatal = true,
+  ) {
+    super(message)
+  }
+}
 
 export interface CondContext {
   dispatch: DispatchFn
   namespace: Namespace
   session: Session
   name: string
+  // The session plane's gated door, which an assignment inside a numeric
+  // operand lands through; absent outside a workspace.
+  view?: SessionView
 }

@@ -15,7 +15,7 @@
 import os
 from pathlib import Path
 
-from mirage.config import load_config
+from mirage.config import load_config, resolve_secrets
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.workspace import Workspace
 
@@ -91,7 +91,7 @@ async def build_workspace_from_config(config_path: str | Path) -> Workspace:
     Returns:
         Workspace: the constructed workspace.
     """
-    config = load_config(config_path)
+    config = await resolve_secrets(load_config(config_path))
     kwargs = config.to_workspace_kwargs()
     kwargs["workspace_id"] = kwargs.get("workspace_id") or new_workspace_id()
     workspace = Workspace(**kwargs)
