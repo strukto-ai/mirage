@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any
@@ -23,6 +22,7 @@ from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import default_fingerprint, parse_limit
 from mirage.cache.lock import KeyLockMixin
 from mirage.resource.ram import RAMResource
+from mirage.utils.clock import Clock, SystemClock
 
 
 class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
@@ -31,12 +31,25 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
     Data lives in inherited _store.files (RAMStore).
     _entries tracks LRU metadata only.
     All RAM commands (cat, grep, head, ...) inherited.
+
+    This is the one file-cache store that ages entries itself, so it is
+    the one that holds a clock. The redis store expires its keys with
+    server-side ``EXPIRE`` and reads no time client-side, so there is
+    nothing there to inject.
+
+    Args:
+        cache_limit (str | int): capacity, as bytes or a size string.
+        max_drain_bytes (int | None): cap on a background drain's
+            buffer; None derives it from ``cache_limit``.
+        clock (Clock | None): the clock every entry's age is measured
+            against; None means the real one.
     """
 
     def __init__(
         self,
         cache_limit: str | int = "512MB",
         max_drain_bytes: int | None = None,
+        clock: Clock | None = None,
     ) -> None:
         parsed_limit = parse_limit(cache_limit)
         validate_max_drain_bytes(parsed_limit, max_drain_bytes)
@@ -46,14 +59,19 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
         self._entries: OrderedDict[str, CacheEntry] = OrderedDict()
         self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
         self._clear_lock: asyncio.Lock = asyncio.Lock()
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self.max_drain_bytes: int | None = max_drain_bytes
+
+    def _seconds(self) -> int:
+        """The current whole second, as ``cached_at`` records it."""
+        return int(self._clock.now())
 
     async def get(self, key: str) -> bytes | None:
         async with self._lock_for(key):
             entry = self._entries.get(key)
             if entry is None:
                 return None
-            if entry.expired:
+            if entry.is_expired(self._seconds()):
                 self._cache_size -= entry.size
                 del self._entries[key]
                 self._store.files.pop(key, None)
@@ -74,7 +92,7 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
                 fingerprint = default_fingerprint(data)
             entry = CacheEntry(
                 size=len(data),
-                cached_at=int(time.time()),
+                cached_at=self._seconds(),
                 fingerprint=fingerprint,
                 ttl=ttl,
             )
@@ -90,7 +108,8 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
                   ttl: int | None = None) -> bool:
         async with self._lock_for(key):
             existing = self._entries.get(key)
-            if existing is not None and not existing.expired:
+            if existing is not None and not existing.is_expired(
+                    self._seconds()):
                 return False
             if key in self._entries:
                 self._cache_size -= self._entries[key].size
@@ -99,7 +118,7 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
                 fingerprint = default_fingerprint(data)
             entry = CacheEntry(
                 size=len(data),
-                cached_at=int(time.time()),
+                cached_at=self._seconds(),
                 fingerprint=fingerprint,
                 ttl=ttl,
             )
@@ -122,7 +141,7 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
 
     async def exists(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and not entry.expired
+        return entry is not None and not entry.is_expired(self._seconds())
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         entry = self._entries.get(key)

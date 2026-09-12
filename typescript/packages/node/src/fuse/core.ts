@@ -19,6 +19,7 @@ import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileTable, mergeWrites } from '@struktoai/mirage-core/runtime/handles/index'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
+import type { Clock } from '@struktoai/mirage-core/utils/clock'
 import { isMissingOp } from '@struktoai/mirage-core/utils/errors'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -51,7 +52,7 @@ interface PrefetchEntry {
   expires: number
 }
 
-const PREFETCH_TTL_MS = 30_000
+export const PREFETCH_TTL_MS = 30_000
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -85,6 +86,7 @@ export interface MountCoreOptions {
 export class MountCore {
   readonly ops: Ops
   readonly session: Session | null
+  private readonly clock: Clock
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
@@ -108,6 +110,15 @@ export class MountCore {
 
   constructor(ops: Ops, options: MountCoreOptions = {}) {
     this.ops = ops
+    // The prefetch TTL is a duration, so it is measured on the facade's
+    // clock. There is no second door: a core is always handed the
+    // facade, and the facade carries the workspace's clock, so
+    // injecting one here would be a way to disagree with the workspace
+    // about what time it is.
+    this.clock = ops.clock
+    // The mount's own creation stamp, not a deadline. It answers "when
+    // was this mounted", so it reads the real clock even when the ops
+    // facade is running on an injected one.
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
@@ -224,6 +235,15 @@ export class MountCore {
     return entry
   }
 
+  // The prefetch cache keeps its deadlines in milliseconds, so the
+  // monotonic reading is expressed in the same unit. Monotonic, not
+  // wall clock: an NTP step or a manually corrected system clock would
+  // otherwise expire every prefetched file at once, or strand it.
+  // Mirrors python's `PREFETCH_TTL` comparison.
+  private monotonicMs(): number {
+    return this.clock.monotonic() * 1000
+  }
+
   cachedSize(path: string): number | null {
     return this.cachedData(path)?.byteLength ?? null
   }
@@ -234,7 +254,7 @@ export class MountCore {
       if (ctx.key === key && ctx.data !== undefined) return ctx.data
     }
     const entry = this.prefetchCache.get(key)
-    if (entry !== undefined && entry.expires > Date.now()) return entry.data
+    if (entry !== undefined && entry.expires > this.monotonicMs()) return entry.data
     if (entry !== undefined) this.prefetchCache.delete(key)
     return null
   }
@@ -260,7 +280,7 @@ export class MountCore {
           // The file changed while this read was out: what came back is
           // stale, so read again rather than install it.
           if ((this.prefetchGen.get(key) ?? 0) !== gen) continue
-          this.prefetchCache.set(key, { data, expires: Date.now() + PREFETCH_TTL_MS })
+          this.prefetchCache.set(key, { data, expires: this.monotonicMs() + PREFETCH_TTL_MS })
           return data
         }
       } catch {

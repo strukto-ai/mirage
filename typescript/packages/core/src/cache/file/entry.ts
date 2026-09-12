@@ -33,8 +33,13 @@ export class CacheEntry {
     Object.freeze(this)
   }
 
-  get expired(): boolean {
+  /**
+   * Check expiry using the RAMFileCacheStore's clock reading.
+   *
+   * @param now whole seconds since the unix epoch.
+   */
+  isExpired(now: number): boolean {
     if (this.ttl === null) return false
-    return Math.floor(Date.now() / 1000) - this.cachedAt >= this.ttl
+    return now - this.cachedAt >= this.ttl
   }
 }

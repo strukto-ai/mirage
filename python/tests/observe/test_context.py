@@ -14,10 +14,12 @@
 
 import pytest
 
-from mirage.observe.context import (RecordingScope, push_mount_prefix,
-                                    push_revisions, record, record_stream,
-                                    reset_revisions, revision_for, start_op,
-                                    with_mount_prefix, with_revisions)
+from mirage.observe.context import (RecordingScope, finish_record,
+                                    push_mount_prefix, push_revisions, record,
+                                    record_stream, reset_revisions,
+                                    revision_for, start_op, with_mount_prefix,
+                                    with_revisions)
+from mirage.utils.clock import ManualClock, SystemClock
 
 
 class ClosingIterator:
@@ -259,3 +261,34 @@ def test_inactive_scope_joins_enclosing():
     outer.close()
     assert [r.path for r in outer.records] == ["/a"]
     assert joined.records == []
+
+
+def test_op_timer_reads_the_injected_clock():
+    clock = ManualClock()
+    timer = start_op(clock)
+    assert timer.elapsed_ms == 0
+    clock.advance(2.5)
+    assert timer.elapsed_ms == 2500
+
+
+def test_op_timer_defaults_to_the_system_clock():
+    assert isinstance(start_op().clock, SystemClock)
+
+
+def test_finished_record_stamps_from_the_timer_clock():
+    clock = ManualClock(start=1700.0)
+    timer = start_op(clock)
+    clock.advance(3)
+    rec = finish_record("read", "/a", "s3", 4, timer)
+    assert rec.duration_ms == 3000
+    assert rec.timestamp == 1_703_000
+
+
+def test_recorded_op_carries_the_injected_duration():
+    clock = ManualClock(start=0.0)
+    scope = RecordingScope()
+    timer = start_op(clock)
+    clock.advance(1.25)
+    record("read", "/a", "s3", 1, timer)
+    scope.close()
+    assert [r.duration_ms for r in scope.records] == [1250]
