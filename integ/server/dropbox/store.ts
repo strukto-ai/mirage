@@ -85,6 +85,7 @@ export async function addFolder(
   const row = await db.dropboxItem.create({
     data: { tenant, path, isFolder: true, content: null, modified: null, seq: minter.next('item') },
   })
+  await db.dropboxTombstone.deleteMany({ where: { tenant, path } })
   return toItem(row)
 }
 
@@ -99,9 +100,10 @@ export async function putFile(
   await addAncestors(db, tenant, path, minter)
   const row = await db.dropboxItem.upsert({
     where: key(tenant, path),
-    update: { isFolder: false, content, modified },
+    update: { isFolder: false, content, modified, seq: minter.next('item') },
     create: { tenant, path, isFolder: false, content, modified, seq: minter.next('item') },
   })
+  await db.dropboxTombstone.deleteMany({ where: { tenant, path } })
   return toItem(row)
 }
 
@@ -133,13 +135,73 @@ export async function listChildren(
 }
 
 // Removes a file, or a folder plus its subtree (delete_v2 semantics).
-export async function remove(db: C, tenant: string, path: string): Promise<boolean> {
+export async function remove(
+  db: C,
+  tenant: string,
+  path: string,
+  minter: Minter,
+): Promise<boolean> {
   const at = await db.dropboxItem.findUnique({ where: key(tenant, path) })
   if (at === null) return false
+  const doomed = at.isFolder
+    ? [
+        path,
+        ...(
+          await db.dropboxItem.findMany({
+            where: { tenant, path: { startsWith: `${path}/` } },
+            select: { path: true },
+          })
+        ).map((row) => row.path),
+      ]
+    : [path]
   await db.dropboxItem.delete({ where: key(tenant, path) })
-  if (!at.isFolder) return true
-  await db.dropboxItem.deleteMany({ where: { tenant, path: { startsWith: `${path}/` } } })
+  if (at.isFolder) {
+    await db.dropboxItem.deleteMany({ where: { tenant, path: { startsWith: `${path}/` } } })
+  }
+  for (const gone of doomed) {
+    await db.dropboxTombstone.upsert({
+      where: { tenant_path: { tenant, path: gone } },
+      update: { seq: minter.next('item') },
+      create: { tenant, path: gone, seq: minter.next('item') },
+    })
+  }
   return true
+}
+
+function inScope(itemPath: string, root: string, recursive: boolean): boolean {
+  if (root === '') return true
+  if (recursive) return itemPath === root || itemPath.startsWith(`${root}/`)
+  return dirname(itemPath) === root
+}
+
+export async function maxItemSeq(db: C, tenant: string): Promise<number> {
+  const item = await db.dropboxItem.aggregate({ where: where(tenant), _max: { seq: true } })
+  const tomb = await db.dropboxTombstone.aggregate({
+    where: where(tenant),
+    _max: { seq: true },
+  })
+  return Math.max(item._max.seq ?? 0, tomb._max.seq ?? 0)
+}
+
+export async function changesSince(
+  db: C,
+  tenant: string,
+  path: string,
+  recursive: boolean,
+  seq: number,
+): Promise<{ items: Item[]; deleted: string[] }> {
+  const rows = await db.dropboxItem.findMany({
+    where: { tenant, seq: { gt: seq } },
+    orderBy: { seq: 'asc' },
+  })
+  const tombs = await db.dropboxTombstone.findMany({
+    where: { tenant, seq: { gt: seq } },
+    orderBy: { seq: 'asc' },
+  })
+  return {
+    items: rows.filter((row) => inScope(row.path, path, recursive)).map(toItem),
+    deleted: tombs.filter((row) => inScope(row.path, path, recursive)).map((row) => row.path),
+  }
 }
 
 // Copies a file or a folder subtree. The caller has already refused a

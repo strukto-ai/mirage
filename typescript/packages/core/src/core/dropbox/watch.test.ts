@@ -17,14 +17,15 @@ import type * as ApiModule from './api.ts'
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, listFolder: vi.fn() }
+  return { ...actual, listFolder: vi.fn(), listFolderState: vi.fn(), continueFolder: vi.fn() }
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { PathSpec, type WalkEntry } from '../../types.ts'
+import { DropboxApiError } from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
-import { DropboxWalk } from './watch.ts'
+import { DropboxDeltaHook, DropboxWalk } from './watch.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
@@ -77,5 +78,137 @@ describe('DropboxWalk root stripping', () => {
     ])
     const entries = await collect(new DropboxWalk(accessor('/team')), root())
     expect(entries.map((e) => e.virtual)).toEqual(['/m/Notes/Report.TXT'])
+  })
+})
+
+function fileEntry(pathDisplay: string, digest: string, size = 4) {
+  return {
+    '.tag': 'file' as const,
+    name: pathDisplay.slice(pathDisplay.lastIndexOf('/') + 1),
+    path_display: pathDisplay,
+    path_lower: pathDisplay.toLowerCase(),
+    size,
+    content_hash: digest,
+    rev: digest.slice(0, 8),
+  }
+}
+
+describe('DropboxDeltaHook native pull', () => {
+  it('emits nothing on a baseline pull', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const delta = await hook.pull(root(), null)
+    expect(delta.changes).toEqual([])
+    expect(delta.checkpoint).toContain('"_dbx":1')
+  })
+
+  it('classifies continue rows as create, update, and delete', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1'), fileEntry('/team/gone.txt', 'h0')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    vi.mocked(api.continueFolder).mockResolvedValue({
+      entries: [
+        fileEntry('/team/keep.txt', 'h2'),
+        fileEntry('/team/new.txt', 'h3'),
+        {
+          '.tag': 'deleted',
+          name: 'gone.txt',
+          path_display: '/team/gone.txt',
+          path_lower: '/team/gone.txt',
+        },
+      ],
+      cursor: 'c1',
+    })
+    const delta = await hook.pull(root(), base.checkpoint)
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/keep.txt:update')).toBe(true)
+    expect(kinds.has('/m/new.txt:create')).toBe(true)
+    expect(kinds.has('/m/gone.txt:delete')).toBe(true)
+  })
+
+  it('resets through a full listing when the cursor is invalid', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    vi.mocked(api.continueFolder).mockRejectedValue(new DropboxApiError('reset', 409, 'reset/...'))
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1'), fileEntry('/team/extra.txt', 'h9')],
+      cursor: 'c9',
+    })
+    const delta = await hook.pull(root(), base.checkpoint)
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/extra.txt:create')).toBe(true)
+  })
+
+  it('upgrades a listing-era checkpoint to a native cursor', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    const snap = (JSON.parse(base.checkpoint ?? '{}') as { s: Record<string, string> }).s
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1'), fileEntry('/team/extra.txt', 'h9')],
+      cursor: 'c2',
+    })
+    const delta = await hook.pull(root(), JSON.stringify(snap))
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/extra.txt:create')).toBe(true)
+    expect(delta.checkpoint).toContain('"_dbx":1')
+  })
+
+  it('emits nothing when continue is empty', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    vi.mocked(api.continueFolder).mockResolvedValue({ entries: [], cursor: 'c1' })
+    const delta = await hook.pull(root(), base.checkpoint)
+    expect(delta.changes).toEqual([])
+    expect(JSON.parse(delta.checkpoint ?? '{}')).toMatchObject({ c: 'c1' })
+  })
+
+  it('drops descendants when a folder is deleted', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [
+        {
+          '.tag': 'folder',
+          name: 'dir',
+          path_display: '/team/dir',
+          path_lower: '/team/dir',
+        },
+        fileEntry('/team/dir/a.txt', 'h1'),
+      ],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    vi.mocked(api.continueFolder).mockResolvedValue({
+      entries: [
+        {
+          '.tag': 'deleted',
+          name: 'dir',
+          path_display: '/team/dir',
+          path_lower: '/team/dir',
+        },
+      ],
+      cursor: 'c1',
+    })
+    const delta = await hook.pull(root(), base.checkpoint)
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/dir:delete')).toBe(true)
+    expect(kinds.has('/m/dir/a.txt:delete')).toBe(true)
   })
 })

@@ -17,10 +17,12 @@ import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts
 import { LIST_LIMIT, SEARCH_LIMIT, type C } from './config.ts'
 import {
   addFolder,
+  changesSince,
   copyTree,
   fileAt,
   itemAt,
   listChildren,
+  maxItemSeq,
   putFile,
   remove,
   saveCursor,
@@ -32,10 +34,17 @@ import {
   basename,
   entryFor,
   malformed,
+  deletedEntry,
   matchTag,
   searchMatch,
   wholeWordHit,
 } from './wire.ts'
+
+interface ListCursorMeta {
+  path: string
+  recursive: boolean
+  seq: number
+}
 
 const DEC = new TextDecoder()
 
@@ -88,14 +97,22 @@ function page(entries: JsonValue[], cursor: string | null, hasMore: boolean): Js
 // out as a numeric-keyed object and JSON.parse hands back as one, so the
 // continuation then fed a plain object to createHash and answered 500. Search
 // already paginates over rendered matches; list is the one that did not.
-async function listPage(ctx: Ctx<C>, entries: JsonValue[], limit: number): Promise<Reply> {
+async function listPage(
+  ctx: Ctx<C>,
+  entries: JsonValue[],
+  limit: number,
+  meta: ListCursorMeta,
+): Promise<Reply> {
   const head = entries.slice(0, limit)
   const tail = entries.slice(limit)
   // A cursor is always handed out, even for a complete listing, because the
-  // vendor always does: a client that only continues when has_more is set is
-  // the one being tested, and a fake that omitted the field would let a client
-  // that reads cursor unconditionally pass by accident.
-  const cursor = await saveCursor(ctx.db, ctx.tenant, 'list', JSON.stringify(tail), ctx.minter)
+  // vendor always does. Once the page tail is empty the cursor becomes a
+  // delta watermark: later continue calls return writes and deletes since seq.
+  const payload =
+    tail.length > 0
+      ? JSON.stringify({ kind: 'page', entries: tail, ...meta })
+      : JSON.stringify({ kind: 'delta', ...meta })
+  const cursor = await saveCursor(ctx.db, ctx.tenant, 'list', payload, ctx.minter)
   return {
     status: 200,
     body: page(head, cursor, tail.length > 0),
@@ -104,15 +121,47 @@ async function listPage(ctx: Ctx<C>, entries: JsonValue[], limit: number): Promi
 
 async function listFolder(ctx: Ctx<C>): Promise<Reply> {
   const body = obj(ctx.json())
-  const items = await listChildren(ctx.db, ctx.tenant, str(body.path), body.recursive === true)
+  const path = str(body.path)
+  const recursive = body.recursive === true
+  const items = await listChildren(ctx.db, ctx.tenant, path, recursive)
   if (items === null) return apiError('path/not_found/...')
-  return listPage(ctx, items.map(entryFor), num(body.limit, LIST_LIMIT))
+  return listPage(ctx, items.map(entryFor), num(body.limit, LIST_LIMIT), {
+    path,
+    recursive,
+    seq: await maxItemSeq(ctx.db, ctx.tenant),
+  })
 }
 
 async function listContinue(ctx: Ctx<C>): Promise<Reply> {
   const payload = await takeCursor(ctx.db, ctx.tenant, str(obj(ctx.json()).cursor), 'list')
   if (payload === null) return apiError('reset/...')
-  return listPage(ctx, JSON.parse(payload) as JsonValue[], LIST_LIMIT)
+  const parsed = JSON.parse(payload) as {
+    kind?: string
+    entries?: JsonValue[]
+    path?: string
+    recursive?: boolean
+    seq?: number
+  }
+  const meta: ListCursorMeta = {
+    path: str(parsed.path),
+    recursive: parsed.recursive === true,
+    seq: num(parsed.seq, 0),
+  }
+  if (parsed.kind === 'page' && Array.isArray(parsed.entries)) {
+    return listPage(ctx, parsed.entries, LIST_LIMIT, meta)
+  }
+  if (parsed.kind === 'delta') {
+    const changed = await changesSince(ctx.db, ctx.tenant, meta.path, meta.recursive, meta.seq)
+    const entries = [
+      ...changed.items.map(entryFor),
+      ...changed.deleted.map(deletedEntry),
+    ]
+    return listPage(ctx, entries, LIST_LIMIT, {
+      ...meta,
+      seq: await maxItemSeq(ctx.db, ctx.tenant),
+    })
+  }
+  return apiError('reset/...')
 }
 
 async function getMetadata(ctx: Ctx<C>): Promise<Reply> {
@@ -165,7 +214,7 @@ async function deleteItem(ctx: Ctx<C>): Promise<Reply> {
   if (path === '') return malformed()
   const item = await itemAt(ctx.db, ctx.tenant, path)
   if (item === null) return apiError('path_lookup/not_found/...')
-  await remove(ctx.db, ctx.tenant, path)
+  await remove(ctx.db, ctx.tenant, path, ctx.minter)
   return { status: 200, body: { metadata: entryFor(item) } }
 }
 
@@ -184,7 +233,7 @@ function relocate(isMove: boolean) {
       return apiError(dst.isFolder ? 'to/conflict/folder/...' : 'to/conflict/file/...')
     }
     await copyTree(ctx.db, ctx.tenant, from, to, ctx.minter)
-    if (isMove) await remove(ctx.db, ctx.tenant, from)
+    if (isMove) await remove(ctx.db, ctx.tenant, from, ctx.minter)
     const moved = await itemAt(ctx.db, ctx.tenant, to)
     return { status: 200, body: { metadata: moved === null ? null : entryFor(moved) } }
   }

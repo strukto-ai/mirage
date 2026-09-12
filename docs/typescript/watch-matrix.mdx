@@ -19,7 +19,7 @@ Watching has two independent halves:
 | Nextcloud             | ✓ recursive PROPFIND          | WebDAV ETag       | `webhook_listeners` app (Nextcloud 30+)    |
 | S3 / S3-compatible    | ✓ recursive `ListObjectsV2`   | object ETag       | S3 Event Notifications (SQS/EventBridge)   |
 | GitHub                | ✓ recursive git tree          | blob sha          | repository webhooks                        |
-| Dropbox               | ✓ recursive `list_folder`     | `content_hash`    | Dropbox webhooks + cursor delta            |
+| Dropbox               | ✓ `list_folder/continue` (walk is reset) | `content_hash` | Dropbox webhooks + cursor delta            |
 | GridFS                | ✓ `fs.files` prefix query     | revision ObjectId | MongoDB change streams                     |
 | Hugging Face          | ✓ recursive tree listing      | Hub ETag          | —                                          |
 | Disk                  | ✓ recursive directory walk    | mtime\|size       | inotify / FSEvents, `DiskEventHook`        |
@@ -140,8 +140,9 @@ writes neither loop itself:
   parent's readdir populated; a null index makes every path below the root read
   as absent.
 
-Backends with a native cursor API can implement `pull(root, checkpoint)`
-directly. The opaque checkpoint can be a Dropbox cursor, a Microsoft Graph
+Dropbox `pull` already uses `list_folder/continue` and keeps the listing walk
+as the reset path. Other backends with a native cursor can do the same. The
+opaque checkpoint can be a Dropbox cursor, a Microsoft Graph
 delta link, or any other serialized provider state. Keep the walk as the reset
 path, though. A cursor is a promise the server keeps, and when it breaks
 (`path/reset`, `resyncRequired`) a full listing is the only answer.

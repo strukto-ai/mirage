@@ -23,7 +23,7 @@ Watching splits into two halves, and they have different support stories:
 | Nextcloud | ✓ recursive PROPFIND | WebDAV ETag | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
 | S3 / S3-compatible | ✓ recursive `list_objects_v2` | object ETag | S3 Event Notifications (SQS/EventBridge) | — |
 | GitHub | ✓ recursive git tree | blob sha | repository webhooks (push events) | — |
-| Dropbox | ✓ recursive `list_folder` | `content_hash` | Dropbox webhooks + cursor delta | — |
+| Dropbox | ✓ `list_folder/continue` (walk is reset) | `content_hash` | Dropbox webhooks + cursor delta | — |
 | GridFS | ✓ `fs.files` prefix query | revision ObjectId | MongoDB change streams | — |
 | Hugging Face | ✓ recursive tree listing | Hub ETag | — | — |
 | Disk | ✓ recursive directory walk | mtime\|size | inotify / FSEvents / watchdog, mapped by `DiskEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/watch.py) |
@@ -128,9 +128,10 @@ writes neither loop itself:
   parent's readdir populated; a null index makes every path below the root read
   as absent.
 
-Backends with a native cursor API (Dropbox `list_folder/continue`, Graph
-delta) can implement `pull(root, checkpoint)` directly and let the opaque
-checkpoint be the server cursor; consumers cannot tell the difference. Keep the
+Dropbox `pull` already uses `list_folder/continue` and keeps the listing walk
+as the reset path. Other backends with a native cursor (Graph delta, Drive
+`changes.list`) can do the same: the opaque checkpoint is the server cursor,
+and consumers cannot tell the difference. Keep the
 walk as the reset path, though. A cursor is a promise the server keeps, and
 when it breaks (`path/reset`, `resyncRequired`) a full listing is the only
 answer.

@@ -70,3 +70,14 @@ model DropboxCursor {
 
   @@id([tenant, token])
 }
+
+// list_folder/continue after a completed listing returns rows written since
+// the cursor's seq, including deletes. A tombstone keeps the path after the
+// item row is gone so a later continue can emit `.tag=deleted`.
+model DropboxTombstone {
+  tenant String
+  path   String
+  seq    Int
+
+  @@id([tenant, path])
+}

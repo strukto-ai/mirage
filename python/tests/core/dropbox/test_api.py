@@ -17,7 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.dropbox import api
-from mirage.core.dropbox.api import list_folder, search_files
+from mirage.core.dropbox.api import (continue_folder, list_folder,
+                                     list_folder_state, search_files)
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.resource.dropbox.config import DropboxConfig
 
@@ -64,6 +65,60 @@ async def test_list_folder_pages_through_continue():
     continue_call = rpc.await_args_list[1]
     assert continue_call.args[1] == "/files/list_folder/continue"
     assert continue_call.args[2] == {"cursor": "c1"}
+
+
+@pytest.mark.asyncio
+async def test_list_folder_state_keeps_the_last_cursor():
+    pages = [
+        {
+            "entries": [{
+                "name": "a"
+            }],
+            "cursor": "c1",
+            "has_more": True
+        },
+        {
+            "entries": [{
+                "name": "b"
+            }],
+            "cursor": "c2",
+            "has_more": False
+        },
+    ]
+    with patch("mirage.core.dropbox.api.dropbox_rpc",
+               new_callable=AsyncMock,
+               side_effect=pages):
+        out, cursor = await list_folder_state(TM, "/docs")
+    assert [e["name"] for e in out] == ["a", "b"]
+    assert cursor == "c2"
+
+
+@pytest.mark.asyncio
+async def test_continue_folder_pages_through_continue():
+    pages = [
+        {
+            "entries": [{
+                "name": "a"
+            }],
+            "cursor": "c1",
+            "has_more": True
+        },
+        {
+            "entries": [{
+                "name": "b"
+            }],
+            "cursor": "c2",
+            "has_more": False
+        },
+    ]
+    with patch("mirage.core.dropbox.api.dropbox_rpc",
+               new_callable=AsyncMock,
+               side_effect=pages) as rpc:
+        out, cursor = await continue_folder(TM, "c0")
+    assert [e["name"] for e in out] == ["a", "b"]
+    assert cursor == "c2"
+    assert rpc.await_args_list[0].args[1] == "/files/list_folder/continue"
+    assert rpc.await_args_list[0].args[2] == {"cursor": "c0"}
 
 
 def _search_match(tag: str, lower: str, display: str) -> dict:
