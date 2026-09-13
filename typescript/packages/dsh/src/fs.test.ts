@@ -719,6 +719,25 @@ describe('processPathFromHostPath', () => {
     expect(fs.processPathFromHostPath(join(root, '..'))).toBeUndefined()
   })
 
+  it('declines a path a namespace symlink shadows', async () => {
+    // Codex's ordering: the link exists first, then the externally
+    // mutable disk grows a file at the same name. A read of /work/a.txt
+    // follows the link, so the disk file is not what that path returns.
+    const { fs, root, ws } = await makeDiskFs()
+    await ws.fs.symlink('/work/a.txt', '/work/other.txt')
+    await writeFile(join(root, 'a.txt'), 'on disk')
+    expect(fs.processPathFromHostPath(join(root, 'a.txt'))).toBeUndefined()
+    // A sibling the link does not cover still maps.
+    await writeFile(join(root, 'b.txt'), 'on disk')
+    expect(fs.processPathFromHostPath(join(root, 'b.txt'))).toBe('/work/b.txt')
+  })
+
+  it('declines a path whose ancestor is a namespace symlink', async () => {
+    const { fs, root, ws } = await makeDiskFs()
+    await ws.fs.symlink('/work/sub', '/work/real')
+    expect(fs.processPathFromHostPath(join(root, 'sub', 'x.txt'))).toBeUndefined()
+  })
+
   it('declines a host path outside every disk mount', async () => {
     const { fs, root } = await makeDiskFs()
     expect(fs.processPathFromHostPath(resolve(root, '..', 'elsewhere.txt'))).toBeUndefined()

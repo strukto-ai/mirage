@@ -135,6 +135,28 @@ function ownerPrefixOf(virtual: string, mounts: readonly MountEntry[]): string |
 }
 
 /**
+ * Whether a namespace symlink stands between a virtual path and the backend.
+ *
+ * `follow` resolves link components including the final one, so a path it
+ * rewrites is one an ordinary read would send somewhere else. A chain it
+ * refuses to resolve (a cycle) is not mappable either, and is declined
+ * rather than raised: this is a lookup, and the honest answer to "does
+ * this host file have a virtual path" is then no.
+ *
+ * @param links the namespace link table, or null when none is wired.
+ * @param virtual the candidate virtual path.
+ * @returns true when the path must not be offered.
+ */
+function shadowedByLink(links: LinksSeam | null, virtual: string): boolean {
+  if (links === null) return false
+  try {
+    return links.follow(virtual) !== virtual
+  } catch {
+    return true
+  }
+}
+
+/**
  * Mirage-backed implementation of `ctx.fs`. Targets are canonical virtual
  * paths (namespace symlinks followed), every operation walks the workspace
  * op door — session grants, admission policies, cache read-through and
@@ -318,6 +340,11 @@ export class MirageFileSystem extends FileSystem {
       // not what the virtual path reads. Keep looking rather than name a
       // path that answers with another resource's bytes.
       if (ownerPrefixOf(virtual, mounts) !== entry.prefix) continue
+      // A namespace symlink at or above this path is followed before
+      // dispatch, so a read would land on the link's target rather than
+      // the disk file the caller named. Links are namespace state, so the
+      // disk mount cannot see one and only this table can say.
+      if (shadowedByLink(workspace.fs.links, virtual)) continue
       return virtual
     }
     return undefined
