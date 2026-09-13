@@ -27,6 +27,7 @@ import type {
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
 import { DiskResource } from '@struktoai/mirage-node'
+import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -94,6 +95,43 @@ function tooLarge(displayPath: string, maxBytes: number, size?: number): FsError
     `cannot read "${displayPath}": ${found}exceeds the ${String(maxBytes)} byte cap`,
     'FS_TOO_LARGE',
   )
+}
+
+/**
+ * Whether a `relative()` result leaves the directory it was taken from.
+ *
+ * Only a bare `..` or a leading `..` SEGMENT escapes: a name may itself
+ * begin with two dots (`..draft`), and testing the prefix alone reads
+ * that ordinary file as an escape.
+ *
+ * @param rel the result of `relative(root, target)`.
+ * @returns true when the target lies outside the root.
+ */
+function escapesRoot(rel: string): boolean {
+  // An absolute answer means there was no relative route at all, which on
+  // win32 is a different drive.
+  return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)
+}
+
+/**
+ * The prefix of the mount a virtual path actually dispatches to.
+ *
+ * The deepest mount whose prefix covers the path wins, which is the rule
+ * dispatch itself follows; a mount nested inside another's tree owns its
+ * subtree outright.
+ *
+ * @param virtual an absolute virtual path.
+ * @param mounts the workspace's mount table.
+ * @returns the winning mount's prefix, or undefined when none covers it.
+ */
+function ownerPrefixOf(virtual: string, mounts: readonly MountEntry[]): string | undefined {
+  const probe = virtual.endsWith('/') ? virtual : `${virtual}/`
+  let winner: string | undefined
+  for (const mount of mounts) {
+    if (!probe.startsWith(mount.prefix)) continue
+    if (winner === undefined || mount.prefix.length > winner.length) winner = mount.prefix
+  }
+  return winner
 }
 
 /**
@@ -264,18 +302,23 @@ export class MirageFileSystem extends FileSystem {
     const workspace = this.ctx.mirage.workspaceIfReady
     if (workspace === null) return undefined
     const host = resolve(hostPath)
-    for (const entry of workspace.mounts()) {
+    const mounts = workspace.mounts()
+    for (const entry of mounts) {
       const { resource } = entry
       if (!(resource instanceof DiskResource)) continue
       const rel = relative(resource.root, host)
-      // A path outside the root escapes through `..` or answers absolute
-      // (a different drive on win32); neither is under this mount.
-      if (rel.startsWith('..') || isAbsolute(rel)) continue
+      if (escapesRoot(rel)) continue
       // `prefix` always carries a trailing slash, and `rel` is empty for
       // the root itself, so the join is a concatenation and the slash is
       // trimmed back off unless the mount is the workspace root.
-      const virtual = `${entry.prefix}${rel.split(sep).join('/')}`
-      return virtual.length > 1 && virtual.endsWith('/') ? virtual.slice(0, -1) : virtual
+      const joined = `${entry.prefix}${rel.split(sep).join('/')}`
+      const virtual = joined.length > 1 && joined.endsWith('/') ? joined.slice(0, -1) : joined
+      // A mount nested under this one owns its own subtree, and dispatch
+      // routes the path there, so the disk file at this host location is
+      // not what the virtual path reads. Keep looking rather than name a
+      // path that answers with another resource's bytes.
+      if (ownerPrefixOf(virtual, mounts) !== entry.prefix) continue
+      return virtual
     }
     return undefined
   }

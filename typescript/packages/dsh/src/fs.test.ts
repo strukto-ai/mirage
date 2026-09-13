@@ -701,6 +701,24 @@ describe('processPathFromHostPath', () => {
     expect(fs.processPathFromHostPath(join(root, 'sub', '..', 'a.txt'))).toBe('/work/a.txt')
   })
 
+  it('declines a path shadowed by a mount nested under the disk mount', async () => {
+    // Dispatch routes /work/cache to the RAM child, so the disk file at
+    // <root>/cache/x.txt is not what that virtual path reads.
+    const { fs, root, ws } = await makeDiskFs()
+    ws.addMount('/work/cache', new RAMResource(), MountMode.WRITE)
+    expect(fs.processPathFromHostPath(join(root, 'cache', 'x.txt'))).toBeUndefined()
+    // The rest of the disk mount still maps.
+    expect(fs.processPathFromHostPath(join(root, 'kept.txt'))).toBe('/work/kept.txt')
+  })
+
+  it('maps an in-root name that merely begins with two dots', async () => {
+    // `relative()` answers `..draft/a.txt` here, which is an ordinary
+    // file, not an escape.
+    const { fs, root } = await makeDiskFs()
+    expect(fs.processPathFromHostPath(join(root, '..draft', 'a.txt'))).toBe('/work/..draft/a.txt')
+    expect(fs.processPathFromHostPath(join(root, '..'))).toBeUndefined()
+  })
+
   it('declines a host path outside every disk mount', async () => {
     const { fs, root } = await makeDiskFs()
     expect(fs.processPathFromHostPath(resolve(root, '..', 'elsewhere.txt'))).toBeUndefined()
