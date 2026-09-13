@@ -144,14 +144,15 @@ async function readRaw(
   delim: number,
   nchars: number | null,
   exact: number | null,
+  signal?: AbortSignal,
 ): Promise<[string, boolean]> {
   const dec = new TextDecoder()
   if (exact !== null) {
-    const [data, complete] = await buffer.readChars(exact, null)
+    const [data, complete] = await buffer.readChars(exact, null, signal)
     return [dec.decode(data), complete]
   }
   if (nchars !== null) {
-    let [data, complete] = await buffer.readChars(nchars, delim)
+    let [data, complete] = await buffer.readChars(nchars, delim, signal)
     let text = dec.decode(data)
     while (
       !raw &&
@@ -160,12 +161,12 @@ async function readRaw(
       (text.length - text.replace(/\\+$/, '').length) % 2 === 1 &&
       text.length < nchars
     ) {
-      ;[data, complete] = await buffer.readChars(nchars - text.length, delim)
+      ;[data, complete] = await buffer.readChars(nchars - text.length, delim, signal)
       text += dec.decode(data)
     }
     return [text, complete]
   }
-  let [data, complete] = await buffer.readUntil(delim)
+  let [data, complete] = await buffer.readUntil(delim, signal)
   let text = dec.decode(data)
   while (
     !raw &&
@@ -173,7 +174,7 @@ async function readRaw(
     delim === 10 &&
     (text.length - text.replace(/\\+$/, '').length) % 2 === 1
   ) {
-    ;[data, complete] = await buffer.readUntil(delim)
+    ;[data, complete] = await buffer.readUntil(delim, signal)
     text += '\n' + dec.decode(data)
   }
   return [text, complete]
@@ -193,6 +194,7 @@ export async function handleRead(
   session: Session,
   stdin: ByteSource | null,
   state: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
@@ -267,7 +269,7 @@ export async function handleRead(
   let line = ''
   if (buffer !== null) {
     try {
-      ;[line, complete] = await readRaw(buffer, raw, delim, nchars, exact)
+      ;[line, complete] = await readRaw(buffer, raw, delim, nchars, exact, signal)
     } catch (err) {
       if (!isFsError(err) || (err as { code?: string }).code !== 'EBADF') throw err
       // stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
@@ -370,5 +372,6 @@ export async function readBuiltin(call: BuiltinCall): Promise<Result> {
     call.session,
     call.stdin,
     sessionView(call.session, call.registry.policies),
+    call.signal,
   )
 }

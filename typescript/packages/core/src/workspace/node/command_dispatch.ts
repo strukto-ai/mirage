@@ -23,7 +23,7 @@ import {
 } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { mergeSignals } from '../abort.ts'
+import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -631,7 +631,7 @@ async function routeArgv(
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
-  dispatch: DispatchFn,
+  dispatchIn: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
   executeFn: ExecuteFn,
@@ -650,6 +650,12 @@ async function routeArgv(
 ): Promise<Result> {
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
+  // Every handler below reaches the op door through this one function,
+  // so a line whose caller was already released starts no further op
+  // between its operands (`rm l1 l2` with the first unlink held past
+  // the grace). Python needs nothing here: its cancelled task never
+  // reaches the next operand.
+  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, session.abortSignal))
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
@@ -840,6 +846,7 @@ async function routeArgv(
     agentId,
     executeFn,
     handed ?? null,
+    signal,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {

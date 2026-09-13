@@ -17,7 +17,7 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { makeAbortError } from '../abort.ts'
+import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { assignmentStatus, finishStatement, recordStatus } from '../executor/statement.ts'
@@ -352,6 +352,13 @@ export async function executeNode(
   session.diagnostics = []
   try {
     const [stdout, io, execNode] = await executeNodeBody(deps, node, session, stdin, callStack)
+    // A statement that settles after the caller aborted is an orphan: its
+    // status must not reach the shell the caller was already released from.
+    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+      throw makeAbortError(
+        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+      )
+    }
     if (session.diagnostics.length > 0) {
       const err = diagnosticStderr(node, session)
       const existing = await io.materializeStderr()
@@ -437,7 +444,9 @@ async function executeNodeBody(
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
   if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
-    throw makeAbortError()
+    throw makeAbortError(
+      deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+    )
   }
   session.errexitImmune = false
 
@@ -843,6 +852,7 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        mergeSignals(deps.signal, session.abortSignal),
       )
     }
     return handleFor(

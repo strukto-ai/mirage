@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { drain } from '../io/stream.ts'
+import { drain, discardIo, discardStreams } from '../io/stream.ts'
 import type { ByteSource, IOResult } from '../io/types.ts'
 import { materialize } from '../io/types.ts'
 
@@ -30,9 +30,15 @@ export async function applyBarrier(
   policy: BarrierPolicy,
 ): Promise<ByteSource | null> {
   if (policy === BarrierPolicy.STREAM) return stdout
-  if (policy === BarrierPolicy.STATUS) {
-    await drain(stdout)
-    return null
+  try {
+    if (policy === BarrierPolicy.STATUS) {
+      await drain(stdout)
+      return null
+    }
+    return await materialize(stdout)
+  } catch (error) {
+    await discardIo(io)
+    await discardStreams(stdout)
+    throw error
   }
-  return materialize(stdout)
 }

@@ -309,3 +309,26 @@ describe('background job kill', () => {
     }
   }, 60_000)
 })
+
+// CPU work must offer cancellation points even when every read is immediately ready.
+describe('large in-memory commands', () => {
+  it.each(['wc /big', 'grep -c line /big', 'cat /big | wc'])(
+    'honors a caller abort during %s',
+    async (command) => {
+      const ram = new RAMResource()
+      ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
+      const ws = new Workspace({ '/': ram }, { shellParser: parser })
+      const abort = new AbortController()
+      const timer = setTimeout(() => {
+        abort.abort()
+      }, 5)
+      try {
+        await expect(ws.execute(command, { signal: abort.signal })).rejects.toMatchObject({
+          name: 'AbortError',
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+  )
+})

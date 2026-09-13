@@ -636,3 +636,19 @@ async def test_a_followed_tail_streams_to_its_job_console_until_killed():
         assert (await ws.execute("kill %1")).exit_code == 0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_evaluating_a_nested_line_survives_the_line_cancel():
+    # The launching line returned; its caller then set the event. The
+    # job is not the caller's to abort, and neither is a line the job
+    # evaluates on its way.
+    ws = _workspace()
+    cancel = asyncio.Event()
+    await ws.execute("{ sleep 0.1; echo $(echo inner); } &", cancel=cancel)
+    cancel.set()
+    await ws.job_table.wait(1, ws.default_session_id)
+    job = ws.job_table.get(1, ws.default_session_id)
+    assert job is not None
+    assert job.exit_code == 0
+    assert (await job.console.snapshot(Channel.STDOUT)) == b"inner\n"

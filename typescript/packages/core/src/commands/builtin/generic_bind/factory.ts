@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
@@ -25,6 +26,7 @@ import {
   type StatOp,
   resolveGlobOf,
   supports,
+  withAbortGuard,
   withDirGuard,
   withPathGuards,
   withPolicyGuard,
@@ -185,9 +187,12 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // coded preOps deny fires before a warm serve, the dispatcher's
     // own order at the op door; the invocation's mount prefix rides
     // into its wrap-time scope for readers drained after the gate
-    // scopes return.
-    const fn: CommandFn = (accessor, paths, texts, opts) =>
-      b.fn(
+    // scopes return. The abort guard sits outermost: once the
+    // invocation's signal has fired no slot starts, so a handler the
+    // caller was released from begins no further read or write
+    // between its operands.
+    const fn: CommandFn = (accessor, paths, texts, opts) => {
+      const guarded = withAbortGuard(
         withDirGuard(
           withPolicyGuard(
             finish(
@@ -200,11 +205,22 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
             opts.mountPrefix,
           ),
         ),
+        opts.signal,
+      )
+      return b.fn(
+        {
+          ...guarded,
+          readStream: (acc, path, index) => guardInput(guarded.readStream(acc, path, index), opts),
+        },
         accessor,
         paths,
         texts,
-        opts,
+        {
+          ...opts,
+          stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts),
+        },
       )
+    }
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)

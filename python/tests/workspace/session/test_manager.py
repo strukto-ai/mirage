@@ -808,3 +808,85 @@ async def test_session_close_waits_for_profile_persistence(
         await asyncio.gather(updating, return_exceptions=True)
         if closing is not None:
             await closing
+
+
+class _StallableStore(RAMSessionStore):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stall = False
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        if self.stall:
+            await asyncio.Event().wait()
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_cas_set_rolls_back_the_generation():
+    # This cancel lands while the store is still stalled, so the write
+    # really never arrived: the session keeps the generation the store
+    # knows and the next flush goes through instead of conflicting with
+    # a writer that never was. The committed-then-cancelled case below
+    # is the one a cancel cannot tell apart from this.
+    store = _StallableStore()
+    mgr = SessionManager("default", store=store)
+    store.stall = True
+    flushing = asyncio.create_task(mgr.flush())
+    await asyncio.sleep(0.01)
+    flushing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await flushing
+    assert mgr.get("default").generation == 0
+    store.stall = False
+    await mgr.flush()
+    assert mgr.get("default").generation == 1
+
+
+class _CommitThenCancelStore(RAMSessionStore):
+    """A store whose CAS lands and is then cancelled on the way out.
+
+    Not a contrivance: ``DiskRecordClient.cas_put`` releases its
+    lockfile in a ``finally``, and a Redis or S3 response can be
+    cancelled after the server committed. A cancelled flush therefore
+    does not prove the write was refused.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_next = False
+
+    async def cas_set(self, session_id: str, fields, expected_generation):
+        placed = await super().cas_set(session_id, fields, expected_generation)
+        if self.cancel_next:
+            self.cancel_next = False
+            raise asyncio.CancelledError
+        return placed
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_cas_that_committed_is_rewritten_on_the_next_flush():
+    # The rollback puts the generation back to what the store held
+    # before, so a restored session serializes to exactly the baseline
+    # the manager still believes it wrote. Trusting that baseline leaves
+    # the store holding the aborted line's state with nothing dirty to
+    # flush, and another workspace loads it.
+    store = _CommitThenCancelStore()
+    mgr = SessionManager("default", store=store)
+    await mgr.ensure_loaded()
+    session = mgr.get("default")
+
+    session.cwd = "/base"
+    await mgr.flush()
+    assert (await store.load())["default"]["cwd"] == "/base"
+
+    store.cancel_next = True
+    session.cwd = "/mid"
+    with pytest.raises(asyncio.CancelledError):
+        await mgr.flush()
+    assert (await store.load())["default"]["cwd"] == "/mid"
+
+    # What the abort handler does: put the session back as it found it.
+    session.cwd = "/base"
+    await mgr.flush()
+    assert (await store.load())["default"]["cwd"] == "/base"

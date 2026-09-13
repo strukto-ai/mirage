@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { md5Hex } from '../../utils/hash.ts'
+import { md5Hex, md5HexAsync } from '../../utils/hash.ts'
 
 export function parseLimit(limit: string | number): number {
   if (typeof limit === 'number') return limit
@@ -30,6 +30,17 @@ export function parseLimit(limit: string | number): number {
 
 export function defaultFingerprint(data: Uint8Array): string {
   return md5Hex(data)
+}
+
+let fingerprintHasher: (data: Uint8Array) => Promise<string> = md5HexAsync
+
+/** Runtime packages install their native implementation, as with compression codecs. */
+export function registerFingerprintHasher(hasher: (data: Uint8Array) => Promise<string>): void {
+  fingerprintHasher = hasher
+}
+
+export async function defaultFingerprintAsync(data: Uint8Array): Promise<string> {
+  return fingerprintHasher(data)
 }
 
 /**

@@ -87,6 +87,26 @@ export async function closeQuietly(stream: ByteSource | null): Promise<void> {
   }
 }
 
+/** Discard failed reads without changing normal early-consumer close semantics. */
+export async function discardStreams(...streams: (ByteSource | null)[]): Promise<void> {
+  for (const stream of new Set(streams)) {
+    if (stream instanceof CachableAsyncIterator) {
+      await stream.discard()
+    } else {
+      await closeQuietly(stream)
+    }
+  }
+}
+
+export async function discardIo(io: IOResult): Promise<void> {
+  await discardStreams(
+    ...Object.values(io.reads),
+    ...Object.values(io.writes),
+    io.stdout,
+    io.stderr,
+  )
+}
+
 export async function* asyncChain(...streams: (ByteSource | null)[]): AsyncIterable<Uint8Array> {
   for (const stream of streams) {
     if (stream === null) continue

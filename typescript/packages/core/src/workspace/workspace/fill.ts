@@ -38,6 +38,7 @@ import { VarAttr, withValue } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { varHidden } from '../../utils/hidden.ts'
+import { abortable, makeAbortError } from '../abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -632,6 +633,7 @@ export async function fillEnv(
   session: Session,
   names: ReadonlySet<string>,
   sources?: Readonly<Record<string, ResolvedSource>>,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (names.size === 0) return
   const pending = pendingOf(session)
@@ -664,13 +666,18 @@ export async function fillEnv(
     const provider = declared?.source ?? source
     let secret
     try {
-      secret = await fetchSecret(source, ref, sources)
+      // Raced, not joined: a source that stalls must not hold the line,
+      // and a value that arrives after the abort is not written, so the
+      // line that was released cannot fill its session late.
+      secret = await abortable(fetchSecret(source, ref, sources), signal)
     } catch (caught) {
+      if (signal?.aborted === true) throw makeAbortError(signal)
       // Not logged, the rule the whole secrets plane keeps: a log is a
       // copy nobody redacted, and the source's own words ride the
       // `cause` chain.
       throw new SecretsError(`${listed}: cannot fetch from ${source}`, { cause: caught })
     }
+    if (signal?.aborted === true) throw makeAbortError(signal)
     for (const { name, key, record } of members) {
       const value = Object.hasOwn(secret.fields, key) ? secret.fields[key] : undefined
       if (value === undefined) {

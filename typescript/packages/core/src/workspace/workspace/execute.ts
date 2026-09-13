@@ -29,14 +29,25 @@ import {
 } from '../../shell/parse/index.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
-import { makeAbortError, mergeSignals } from '../abort.ts'
+import {
+  hasAborted,
+  lineStatusWriter,
+  makeAbortError,
+  mergeSignals,
+  runWithLineAbort,
+} from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
 import { refusalOf, renderDeny, type Deny, type HandOff } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { recordStatus } from '../executor/statement.ts'
+import {
+  recordStatus,
+  restoreStatus,
+  snapshotStatus,
+  type StatusSnapshot,
+} from '../executor/statement.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -46,8 +57,9 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import type { Session } from '../session/session.ts'
-import type { ExecutionNode } from '../types.ts'
+import { type Session, type StatusWriter, newStatusWriter } from '../session/session.ts'
+import { ExecutionNode } from '../types.ts'
+import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
@@ -136,16 +148,19 @@ async function deniedResult(
   const refusal = refusalOf(deny)
   recordStatus(session, exitCode)
   if (options.record !== false) {
-    await env.observer.logExecution(
-      command,
-      new IOResult({ exitCode, stderr: msg, refusal }),
-      [],
-      options.agentId ?? env.agentId ?? '',
-      session.sessionId,
-      options.cwd ?? session.cwd,
+    await joinOrAbort(
+      env.observer.logExecution(
+        command,
+        new IOResult({ exitCode, stderr: msg, refusal }),
+        [],
+        options.agentId ?? env.agentId ?? '',
+        session.sessionId,
+        options.cwd ?? session.cwd,
+      ),
+      options.signal,
     )
   }
-  await env.sessions.flush()
+  await joinOrAbort(env.sessions.flush(), options.signal)
   return new ExecuteResult(new Uint8Array(), msg, exitCode, refusal)
 }
 
@@ -181,12 +196,46 @@ export async function executeLine(
   command: string,
   options: ExecuteOptions,
 ): Promise<ExecuteResult | ProvisionResult> {
-  const result = await runLine(env, command, options)
-  const sink = options.sink
-  // A provision run answers with a plan, not output, so it has nothing
-  // to stream.
-  if (sink === undefined || !(result instanceof ExecuteResult)) return result
-  return drainToSink(sink, result)
+  const frame: LineFrame = { session: null, statusBefore: null, writer: newStatusWriter() }
+  try {
+    let result = await runLine(env, command, options, frame)
+    // A provision run answers with a plan, not output, so it has nothing
+    // to stream. The drain is the last await of the line, and a stalled
+    // store would hold `execute` open past an abort; it joins under the
+    // same grace as the tree.
+    const sink = options.sink
+    if (sink !== undefined && result instanceof ExecuteResult) {
+      result = await joinOrAbort(drainToSink(sink, result), options.signal)
+    }
+    if (hasAborted(options.signal)) throw makeAbortError(options.signal)
+    return result
+  } catch (error) {
+    // Once the caller aborted, the line's answer is the abort whichever
+    // await it landed on, tree, record, flush or drain, whether that
+    // await settled inside the grace or was left behind, and `$?` is
+    // what the line found. One place, after the last of them, so no
+    // path can forget it.
+    if (!hasAborted(options.signal)) throw error
+    // Only the typed line puts `$?` back; a nested evaluation's signal
+    // may be a bound the statement set (`timeout`), not the caller's.
+    if (options.record !== false && frame.session !== null && frame.statusBefore !== null) {
+      restoreStatus(frame.session, frame.statusBefore, frame.writer)
+    }
+    throw makeAbortError(options.signal)
+  }
+}
+
+/**
+ * What `executeLine` needs from the line to answer an abort: the shell
+ * it ran on and the status that shell had before it, filled as soon as
+ * the line knows them and before anything stamps.
+ */
+interface LineFrame {
+  session: Session | null
+  statusBefore: StatusSnapshot | null
+  // Minted per call, never on the session, so two lines on one session
+  // each keep their own and neither restores over the other.
+  writer: StatusWriter
 }
 
 /**
@@ -200,18 +249,16 @@ async function runLine(
   env: ExecuteEnv,
   command: string,
   options: ExecuteOptions,
+  frame: LineFrame,
 ): Promise<ExecuteResult | ProvisionResult> {
   if (options.signal?.aborted === true) {
-    throw makeAbortError()
+    throw makeAbortError(options.signal)
   }
-  await env.namespace.ensureLoaded()
-  await env.meta.ensure()
-  await env.sessions.ensureLoaded()
-  if (env.drift.pending) {
-    await env.drift.drain(env.registry, (p) => env.statFn(p))
-  }
+  // Loads nothing the shell observes, so a stalled state store loses to
+  // the signal at once rather than holding the caller.
+  await abortable(preflight(env), options.signal)
   const stdin = options.stdin ?? null
-  const parser = await env.parser()
+  const parser = await abortable(env.parser(), options.signal)
   const root = parser.parse(command)
   // tree-sitter accepts an unclosed backtick as a complete command, so
   // the region is scanned separately.
@@ -227,12 +274,15 @@ async function runLine(
     // and agent ride into the walk's admission gate, so a command
     // denied to the actual caller cannot have its backend costs
     // exposed under the default session's identity.
-    return env.provision(command, {
-      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-      ...(options.agentId !== undefined ? { agentId: options.agentId } : {}),
-      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-      ...(options.env !== undefined ? { env: options.env } : {}),
-    })
+    return abortable(
+      env.provision(command, {
+        ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+        ...(options.agentId !== undefined ? { agentId: options.agentId } : {}),
+        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+        ...(options.env !== undefined ? { env: options.env } : {}),
+      }),
+      options.signal,
+    )
   }
   const rootNode = root as unknown as TSNodeLike
   // A re-entrant execute (the evaluator's $(), eval, source, xargs, or
@@ -249,9 +299,14 @@ async function runLine(
     ambient !== null && (options.sessionId === undefined || options.sessionId === ambient.sessionId)
       ? ambient
       : env.sessions.get(options.sessionId ?? env.sessions.defaultId)
+  frame.session = targetSession
+  frame.statusBefore = snapshotStatus(targetSession)
   let routingDecision: RouteDecision | null
   try {
-    routingDecision = await env.router.decide(rootNode, command, options, targetSession)
+    routingDecision = await abortable(
+      env.router.decide(rootNode, command, options, targetSession),
+      options.signal,
+    )
   } catch (caught) {
     if (caught instanceof RouteDeny) {
       return deniedResult(env, command, options, targetSession, caught.reason)
@@ -347,28 +402,49 @@ async function runLine(
   // effective session the same way before it parses.
   const effectiveSession = forkForCall(targetSession, options.cwd, options.env)
   try {
-    return await runWithSession(
-      effectiveSession,
+    // The line's signal, the caller's folded with the session's kill
+    // channel, rides the async context so the status door can refuse an
+    // orphan of this line and no other.
+    return await runWithLineAbort(
+      mergeSignals(options.signal, effectiveSession.abortSignal),
+      [targetSession, effectiveSession],
+      frame.writer,
       () =>
-        runParsedLine(
-          env,
-          command,
-          options,
-          rootNode,
-          deps,
-          targetSession,
+        runWithSession(
           effectiveSession,
-          stdin,
-          (line) => parser.parse(line),
-          nested,
-          handed,
+          () =>
+            runParsedLine(
+              env,
+              command,
+              options,
+              rootNode,
+              deps,
+              targetSession,
+              effectiveSession,
+              stdin,
+              (line) => parser.parse(line),
+              nested,
+              handed,
+            ),
+          env.sessions,
         ),
-      env.sessions,
     )
   } finally {
     // Durable session fields (cwd, env, grants) flush at the end of
-    // every execute, success or failure, mirroring Python's finally.
-    await env.sessions.flush()
+    // every execute, success or failure, mirroring Python's finally. It
+    // joins under the grace like the tree: a stalled store finishes in
+    // the background instead of holding an aborted caller.
+    await joinOrAbort(env.sessions.flush(), options.signal)
+  }
+}
+
+/** The state a line runs against, loaded before it is parsed. */
+async function preflight(env: ExecuteEnv): Promise<void> {
+  await env.namespace.ensureLoaded()
+  await env.meta.ensure()
+  await env.sessions.ensureLoaded()
+  if (env.drift.pending) {
+    await env.drift.drain(env.registry, (p) => env.statFn(p))
   }
 }
 
@@ -461,8 +537,8 @@ async function runParsedLine(
         // unreadable dotenv or a config the source refuses, which is
         // the same treatment an unreachable store gets. Memoized, so
         // the loop's later passes cost one await.
-        const sources = await env.secretSources()
-        await fillEnv(effectiveSession, names, sources)
+        const sources = await abortable(env.secretSources(), killed)
+        await fillEnv(effectiveSession, names, sources, killed)
         names = fillNames(effectiveSession, planNodes, planWhole, planCli, writesGated)
       }
       return null
@@ -473,8 +549,10 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   }
+  const statusBefore = snapshotStatus(targetSession)
   let held = false
   let execResult: [[ByteSource | null, IOResult, ExecutionNode], OpRecord[]]
+  let executionFailure: { error: unknown } | undefined
   try {
     if (lineRuntime?.runLine !== undefined) {
       // A whole line is a command like any other: the same visibility and
@@ -496,17 +574,20 @@ async function runParsedLine(
         held = isPending(refused)
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
-          await env.observer.logExecution(
-            command,
-            new IOResult({
-              exitCode: refused.exitCode,
-              stderr: refused.stderr,
-              refusal: refused.refusal,
-            }),
-            [],
-            callAgentId,
-            targetSession.sessionId,
-            effectiveSession.cwd,
+          await joinOrAbort(
+            env.observer.logExecution(
+              command,
+              new IOResult({
+                exitCode: refused.exitCode,
+                stderr: refused.stderr,
+                refusal: refused.refusal,
+              }),
+              [],
+              callAgentId,
+              targetSession.sessionId,
+              effectiveSession.cwd,
+            ),
+            killed,
           )
         }
         return new ExecuteResult(
@@ -522,14 +603,17 @@ async function runParsedLine(
         const filled = await fillManaged([rootNode], true, new Set(), false)
         if (filled !== null) return filled
       }
-      const result = await runWholeLine(
-        lineRuntime,
-        command,
-        stdin,
-        effectiveSession,
-        env.registry.allMounts(),
-        env.registry.policies,
-        () => env.invalidateAllAfterRemote(),
+      const result = await abortable(
+        runWholeLine(
+          lineRuntime,
+          command,
+          stdin,
+          effectiveSession,
+          env.registry.allMounts(),
+          env.registry.policies,
+          () => env.invalidateAllAfterRemote(),
+          killed,
+        ),
         killed,
       )
       recordStatus(targetSession, result.exitCode)
@@ -540,13 +624,18 @@ async function runParsedLine(
           refusal: result.refusal,
           ...(result.stderr !== null ? { stderr: result.stderr } : {}),
         })
-        await env.observer.logExecution(
-          command,
-          lineIo,
-          [],
-          callAgentId,
-          targetSession.sessionId,
-          effectiveSession.cwd,
+        // Joined like the tree's record: a stalled store releases the
+        // caller, a fast one records before history is read.
+        await joinOrAbort(
+          env.observer.logExecution(
+            command,
+            lineIo,
+            [],
+            callAgentId,
+            targetSession.sessionId,
+            effectiveSession.cwd,
+          ),
+          killed,
         )
       }
       return new ExecuteResult(
@@ -601,8 +690,30 @@ async function runParsedLine(
       )
       if (filled !== null) return filled
     }
-    const runBody = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
-      runCommandTree(deps, rootNode, effectiveSession, stdin)
+    const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+      try {
+        // The one cancellation seam, the twin of Python's run_cancellable:
+        // a responsive tree unwinds at its checkpoints and reports its own
+        // error; a leaf blocked past the grace is left behind and the
+        // caller is released here. Leaf checks below this point exist to
+        // stop side effects and free producers, not to release the caller.
+        const result = await joinOrAbort(
+          runCommandTree(deps, rootNode, effectiveSession, stdin),
+          killed,
+        )
+        if (killed?.aborted === true) throw makeAbortError(killed)
+        return result
+      } catch (error) {
+        // Return through the recording scope so completed op records survive
+        // a throw. Once the caller aborted, the line's answer is the abort,
+        // whatever a leaf threw while unwinding.
+        const aborted = killed?.aborted === true
+        executionFailure = { error: aborted ? makeAbortError(killed) : error }
+        const failed = failureResult(executionFailure.error)
+        if (aborted) failed.exitCode = 130
+        return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
+      }
+    }
     try {
       execResult = isLine ? await runWithRecording(runBody) : [await runBody(), []]
       // A record a nested line earned is the line's to report when its
@@ -632,32 +743,49 @@ async function runParsedLine(
     // next evaluation from the same node and to spend at its own end.
     else if (handed.parent !== null)
       env.registry.decisions.handUp(effectiveSession.sessionId, handed)
-    else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
+    else
+      await joinOrAbort(env.registry.decisions.revoke(effectiveSession.sessionId, handed), killed)
   }
   const [[materialized, io], opRecords] = execResult
+  const callerError =
+    executionFailure !== undefined &&
+    (isControlFlowError(executionFailure.error) || killed?.aborted === true)
   // The program loop stamped each statement; the line as a whole is a
   // wrapper around them, like a group.
-  recordStatus(targetSession, io.exitCode, true)
+  // A rejected invocation records its outcome without changing shell status.
+  if (!callerError) recordStatus(targetSession, io.exitCode, true)
   let stdoutBytes: Uint8Array
   try {
-    await env.dispatcher.applyIo(io, opRecords, cacheable)
-    stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
+    if (executionFailure === undefined) {
+      await abortable(env.dispatcher.applyIo(io, opRecords, cacheable), killed)
+    }
+    stdoutBytes =
+      materialized === null ? new Uint8Array() : await abortable(materialize(materialized), killed)
   } catch (err) {
-    // Lazy reads can fail while draining (e.g. head/tail that open the
-    // stream mid-pipeline, or a backend size guard thrown on the first
-    // pull); surface that as a failed command, not a crash. The command
-    // name is the first token of the pipeline's failing stage; for a bare
-    // command it is simply the command.
-    const strerror = gnuStrerror((err as { code?: string }).code)
-    const cmdName = commandName(command) || command
-    io.exitCode = 1
-    io.stderr = new TextEncoder().encode(
-      strerror !== null
-        ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
-        : `${err instanceof Error ? err.message : String(err)}\n`,
-    )
-    recordStatus(targetSession, 1)
-    stdoutBytes = new Uint8Array()
+    if (killed?.aborted === true) {
+      // The command finished; the abort landed on the cache fill or the drain.
+      // An aborted invocation is the caller's outcome, not the shell's.
+      if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
+      executionFailure = { error: makeAbortError(killed) }
+      io.exitCode = 130
+      stdoutBytes = new Uint8Array()
+    } else {
+      // Lazy reads can fail while draining (e.g. head/tail that open the
+      // stream mid-pipeline, or a backend size guard thrown on the first
+      // pull); surface that as a failed command, not a crash. The command
+      // name is the first token of the pipeline's failing stage; for a bare
+      // command it is simply the command.
+      const strerror = gnuStrerror((err as { code?: string }).code)
+      const cmdName = commandName(command) || command
+      io.exitCode = 1
+      io.stderr = new TextEncoder().encode(
+        strerror !== null
+          ? `${cmdName}: ${errorVirtualPath(err)}: ${strerror}\n`
+          : `${err instanceof Error ? err.message : String(err)}\n`,
+      )
+      recordStatus(targetSession, 1)
+      stdoutBytes = new Uint8Array()
+    }
   }
   const stderrBytes = await materialize(io.stderr)
 
@@ -672,15 +800,38 @@ async function runParsedLine(
   // whitespace-only or comment-only line is kept.
   if (isLine && command.replaceAll('\n', '') !== '') {
     io.stdout = stdoutBytes
-    await env.observer.logExecution(
-      command,
-      io,
-      opRecords,
-      callAgentId,
-      targetSession.sessionId,
-      effectiveSession.cwd,
+    // Joined, not raced: a fast store still records the line before the
+    // caller reads history, and a stalled one releases the caller.
+    await joinOrAbort(
+      env.observer.logExecution(
+        command,
+        io,
+        opRecords,
+        callAgentId,
+        targetSession.sessionId,
+        effectiveSession.cwd,
+      ),
+      killed,
     )
   }
+  // The line finished and the abort landed on the record: the answer is
+  // still the abort, as it is for one that lands on the drain.
+  if (executionFailure === undefined && killed?.aborted === true) {
+    executionFailure = { error: makeAbortError(killed) }
+  }
 
+  if (executionFailure !== undefined && (callerError || killed?.aborted === true)) {
+    // Statements before the abort may have stamped; an aborted
+    // invocation is the caller's outcome, not the shell's. Only the
+    // typed line's, though: a nested evaluation runs under whatever
+    // signal the statement that launched it supplied, and `timeout`
+    // supplies one of its own to stop the inner run at the deadline.
+    // Restoring there would put the shell back to what the *inner*
+    // line found, over the 124 the `timeout` statement just stamped,
+    // which is how `timeout 0.2 sleep 5; echo $?` printed 0.
+    if (isLine && killed?.aborted === true)
+      restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
+    throw executionFailure.error
+  }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)
 }
