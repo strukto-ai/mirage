@@ -159,10 +159,11 @@ export async function remove(
     await db.dropboxItem.deleteMany({ where: { tenant, path: { startsWith: `${path}/` } } })
   }
   for (const gone of doomed) {
+    const seq = minter.next('item')
     await db.dropboxTombstone.upsert({
       where: { tenant_path: { tenant, path: gone } },
-      update: { seq: minter.next('item') },
-      create: { tenant, path: gone, seq: minter.next('item') },
+      update: { seq },
+      create: { tenant, path: gone, seq },
     })
   }
   return true
@@ -183,25 +184,31 @@ export async function maxItemSeq(db: C, tenant: string): Promise<number> {
   return Math.max(item._max.seq ?? 0, tomb._max.seq ?? 0)
 }
 
+export type Change = { kind: 'item'; item: Item } | { kind: 'deleted'; path: string }
+
+// One stream ordered by seq, not every write and then every delete: a name
+// deleted and then moved onto appears in both tables, and writes-first renders
+// that as create-then-delete, so a client applying the page in order ends up
+// disagreeing with list_folder about a file that is there. The vendor reports
+// changes in the order they happened; so does this.
 export async function changesSince(
   db: C,
   tenant: string,
   path: string,
   recursive: boolean,
   seq: number,
-): Promise<{ items: Item[]; deleted: string[] }> {
-  const rows = await db.dropboxItem.findMany({
-    where: { tenant, seq: { gt: seq } },
-    orderBy: { seq: 'asc' },
-  })
-  const tombs = await db.dropboxTombstone.findMany({
-    where: { tenant, seq: { gt: seq } },
-    orderBy: { seq: 'asc' },
-  })
-  return {
-    items: rows.filter((row) => inScope(row.path, path, recursive)).map(toItem),
-    deleted: tombs.filter((row) => inScope(row.path, path, recursive)).map((row) => row.path),
-  }
+): Promise<Change[]> {
+  const rows = await db.dropboxItem.findMany({ where: { tenant, seq: { gt: seq } } })
+  const tombs = await db.dropboxTombstone.findMany({ where: { tenant, seq: { gt: seq } } })
+  const stamped: { seq: number; change: Change }[] = [
+    ...rows
+      .filter((row) => inScope(row.path, path, recursive))
+      .map((row) => ({ seq: row.seq, change: { kind: 'item', item: toItem(row) } as Change })),
+    ...tombs
+      .filter((row) => inScope(row.path, path, recursive))
+      .map((row) => ({ seq: row.seq, change: { kind: 'deleted', path: row.path } as Change })),
+  ]
+  return stamped.sort((a, b) => a.seq - b.seq).map((row) => row.change)
 }
 
 // Copies a file or a folder subtree. The caller has already refused a
@@ -226,22 +233,27 @@ export async function copyTree(
       seq: minter.next('item'),
     },
   })
+  // Same rule as putFile and addFolder: a tombstone never names a live
+  // path, so moving onto a name that was deleted earlier clears it.
+  await db.dropboxTombstone.deleteMany({ where: { tenant, path: to } })
   if (!src.isFolder) return true
   const under = await db.dropboxItem.findMany({
     where: { tenant, path: { startsWith: `${from}/` } },
     orderBy: { seq: 'asc' },
   })
   for (const row of under) {
+    const landed = `${to}${row.path.slice(from.length)}`
     await db.dropboxItem.create({
       data: {
         tenant,
-        path: `${to}${row.path.slice(from.length)}`,
+        path: landed,
         isFolder: row.isFolder,
         content: row.content,
         modified: row.modified,
         seq: minter.next('item'),
       },
     })
+    await db.dropboxTombstone.deleteMany({ where: { tenant, path: landed } })
   }
   return true
 }

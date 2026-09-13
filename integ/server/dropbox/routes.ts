@@ -123,12 +123,18 @@ async function listFolder(ctx: Ctx<C>): Promise<Reply> {
   const body = obj(ctx.json())
   const path = str(body.path)
   const recursive = body.recursive === true
+  // The watermark is read BEFORE the rows, not after. A read does not join
+  // the kit's write queue, so an upload can land between these two awaits;
+  // taking the watermark first re-reports that write on the next continue,
+  // where taking it last would swallow the row the listing had already
+  // passed and leave the file invisible until something else touched it.
+  const seq = await maxItemSeq(ctx.db, ctx.tenant)
   const items = await listChildren(ctx.db, ctx.tenant, path, recursive)
   if (items === null) return apiError('path/not_found/...')
   return listPage(ctx, items.map(entryFor), num(body.limit, LIST_LIMIT), {
     path,
     recursive,
-    seq: await maxItemSeq(ctx.db, ctx.tenant),
+    seq,
   })
 }
 
@@ -151,15 +157,12 @@ async function listContinue(ctx: Ctx<C>): Promise<Reply> {
     return listPage(ctx, parsed.entries, LIST_LIMIT, meta)
   }
   if (parsed.kind === 'delta') {
+    const seq = await maxItemSeq(ctx.db, ctx.tenant)
     const changed = await changesSince(ctx.db, ctx.tenant, meta.path, meta.recursive, meta.seq)
-    const entries = [
-      ...changed.items.map(entryFor),
-      ...changed.deleted.map(deletedEntry),
-    ]
-    return listPage(ctx, entries, LIST_LIMIT, {
-      ...meta,
-      seq: await maxItemSeq(ctx.db, ctx.tenant),
-    })
+    const entries = changed.map((row) =>
+      row.kind === 'item' ? entryFor(row.item) : deletedEntry(row.path),
+    )
+    return listPage(ctx, entries, LIST_LIMIT, { ...meta, seq })
   }
   return apiError('reset/...')
 }
