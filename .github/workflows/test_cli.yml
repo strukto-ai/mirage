@@ -724,11 +724,10 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-cross || true
-          /tmp/mc mb local/mirage-state || true
+          docker run --rm --network container:minio \
+            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-cross local/mirage-state
 
       - name: Run daemon large-stdin and grep round trips (both languages)
         run: ./python/.venv/bin/python integ/execute_stdin.py

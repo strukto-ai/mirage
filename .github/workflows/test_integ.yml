@@ -318,19 +318,10 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          for i in 1 2 3; do
-            if curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc \
-               && chmod +x /tmp/mc && /tmp/mc --version >/dev/null 2>&1; then
-              break
-            fi
-            echo "mc download attempt $i failed; retrying"; sleep 3
-          done
-          /tmp/mc --version
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-integ || true
-          /tmp/mc mb local/mirage-integ-s3 || true
-          /tmp/mc mb local/mirage-integ-gcs || true
-          /tmp/mc mb local/mirage-integ-minio || true
+          docker run --rm --network container:minio \
+            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-integ local/mirage-integ-s3 local/mirage-integ-gcs local/mirage-integ-minio
 
 
       # Snapshot roundtrip and out-of-band-delete GC only: the per-command
@@ -845,10 +836,10 @@ jobs:
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-watch
+          docker run --rm --network container:minio-watch \
+            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-watch
 
       - name: Start MongoDB for the watch battery
         run: |
