@@ -29,7 +29,13 @@ import {
 } from '../../shell/parse/index.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
-import { hasAborted, makeAbortError, mergeSignals, runWithLineAbort } from '../abort.ts'
+import {
+  hasAborted,
+  lineStatusWriter,
+  makeAbortError,
+  mergeSignals,
+  runWithLineAbort,
+} from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { RouteDeny, type RouteDecision } from '../../runtime/routing/index.ts'
@@ -51,7 +57,7 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import type { Session } from '../session/session.ts'
+import { type Session, type StatusWriter, newStatusWriter } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
@@ -190,7 +196,7 @@ export async function executeLine(
   command: string,
   options: ExecuteOptions,
 ): Promise<ExecuteResult | ProvisionResult> {
-  const frame: LineFrame = { session: null, statusBefore: null }
+  const frame: LineFrame = { session: null, statusBefore: null, writer: newStatusWriter() }
   try {
     let result = await runLine(env, command, options, frame)
     // A provision run answers with a plan, not output, so it has nothing
@@ -213,7 +219,7 @@ export async function executeLine(
     // Only the typed line puts `$?` back; a nested evaluation's signal
     // may be a bound the statement set (`timeout`), not the caller's.
     if (options.record !== false && frame.session !== null && frame.statusBefore !== null) {
-      restoreStatus(frame.session, frame.statusBefore)
+      restoreStatus(frame.session, frame.statusBefore, frame.writer)
     }
     throw makeAbortError(options.signal)
   }
@@ -227,6 +233,9 @@ export async function executeLine(
 interface LineFrame {
   session: Session | null
   statusBefore: StatusSnapshot | null
+  // Minted per call, never on the session, so two lines on one session
+  // each keep their own and neither restores over the other.
+  writer: StatusWriter
 }
 
 /**
@@ -399,6 +408,7 @@ async function runLine(
     return await runWithLineAbort(
       mergeSignals(options.signal, effectiveSession.abortSignal),
       [targetSession, effectiveSession],
+      frame.writer,
       () =>
         runWithSession(
           effectiveSession,
@@ -755,7 +765,7 @@ async function runParsedLine(
     if (killed?.aborted === true) {
       // The command finished; the abort landed on the cache fill or the drain.
       // An aborted invocation is the caller's outcome, not the shell's.
-      if (isLine) restoreStatus(targetSession, statusBefore)
+      if (isLine) restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
       executionFailure = { error: makeAbortError(killed) }
       io.exitCode = 130
       stdoutBytes = new Uint8Array()
@@ -819,7 +829,8 @@ async function runParsedLine(
     // Restoring there would put the shell back to what the *inner*
     // line found, over the 124 the `timeout` statement just stamped,
     // which is how `timeout 0.2 sleep 5; echo $?` printed 0.
-    if (isLine && killed?.aborted === true) restoreStatus(targetSession, statusBefore)
+    if (isLine && killed?.aborted === true)
+      restoreStatus(targetSession, statusBefore, lineStatusWriter(targetSession))
     throw executionFailure.error
   }
   return new ExecuteResult(stdoutBytes, stderrBytes, io.exitCode, io.refusal)

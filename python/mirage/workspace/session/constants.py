@@ -84,6 +84,7 @@ TRANSIENT_FIELDS: tuple[str, ...] = (
     "_parse_current",
     "_alias_marks",
     "_alias_stack",
+    "status_writer",
 )
 
 # What a child shell gets its own copy of, and the parent gets back

@@ -22,6 +22,7 @@ from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.utils.errors import format_fs_error
+from mirage.workspace.abort import StatusWriter, line_status_writer
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -50,6 +51,9 @@ def record_status(session: Session,
         transparent (bool): whether the statement is not a pipeline of
             its own.
     """
+    # Whose status this is, so a cancelled line puts back only what it
+    # overwrote and never a concurrent line's finished result.
+    session.status_writer = line_status_writer()
     session.last_exit_code = code
     pending = session._pipe_status_pending
     session._pipe_status_pending = None
@@ -96,17 +100,30 @@ def snapshot_status(session: Session) -> StatusSnapshot:
                           session._pipe_status_pending)
 
 
-def restore_status(session: Session, snapshot: StatusSnapshot) -> None:
+def restore_status(session: Session, snapshot: StatusSnapshot,
+                   writer: StatusWriter | None) -> None:
     """Put back the status a line found, for a line the caller aborted.
 
     Statements inside the line may already have stamped their own
     status before the abort landed, and an aborted invocation is the
     caller's outcome, not the shell's.
 
+    Only what this line overwrote, though. Two ``execute()`` calls can
+    share a session, and a snapshot taken before a concurrent line
+    finished is older than that line's result: putting it back would
+    resurrect a value the shell had already moved past. So the restore
+    happens only while the last stamp is still this line's. When nobody
+    has stamped since the snapshot the status already equals it and
+    declining is the same thing; when someone else did, declining is
+    the point.
+
     Args:
         session (Session): shell session receiving the status.
         snapshot (StatusSnapshot): what ``snapshot_status`` captured.
+        writer (StatusWriter | None): the restoring line's identity.
     """
+    if session.status_writer is not writer:
+        return
     session.last_exit_code = snapshot.last_exit_code
     session.pipe_status = snapshot.pipe_status
     session._pipe_status_pending = snapshot.pipe_status_pending

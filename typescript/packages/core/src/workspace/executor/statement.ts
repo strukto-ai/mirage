@@ -20,8 +20,8 @@ import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { Session } from '../session/session.ts'
-import { abortedLine, makeAbortError } from '../abort.ts'
+import type { Session, StatusWriter } from '../session/session.ts'
+import { abortedLine, lineStatusWriter, makeAbortError } from '../abort.ts'
 
 /**
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`
@@ -43,6 +43,9 @@ export function recordStatus(session: Session, code: number, transparent = false
   // otherwise run the next statement on a shell nobody is waiting on.
   const lineAbort = abortedLine(session)
   if (lineAbort !== undefined) throw makeAbortError(lineAbort)
+  // Whose status this is, so an aborted line puts back only what it
+  // overwrote and never a concurrent line's finished result.
+  session.statusWriter = lineStatusWriter(session)
   session.lastExitCode = code
   const pending = session.pipeStatusPending
   session.pipeStatusPending = null
@@ -86,8 +89,22 @@ export function snapshotStatus(session: Session): StatusSnapshot {
  * Statements inside the line may already have stamped their own status
  * before the abort landed, and an aborted invocation is the caller's
  * outcome, not the shell's.
+ *
+ * Only what this line overwrote, though. Two `execute()` calls can
+ * share a session, and a snapshot taken before a concurrent line
+ * finished is older than that line's result: putting it back would
+ * resurrect a value the shell had already moved past. So the restore
+ * happens only while the last stamp is still this line's. When nobody
+ * has stamped since the snapshot the status already equals it and
+ * declining is the same thing; when someone else did, declining is the
+ * point.
  */
-export function restoreStatus(session: Session, snapshot: StatusSnapshot): void {
+export function restoreStatus(
+  session: Session,
+  snapshot: StatusSnapshot,
+  writer: StatusWriter | null,
+): void {
+  if (session.statusWriter !== writer) return
   session.lastExitCode = snapshot.lastExitCode
   session.pipeStatus = snapshot.pipeStatus
   session.pipeStatusPending = snapshot.pipeStatusPending

@@ -15,7 +15,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -32,7 +32,8 @@ from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
-from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.abort import (MirageAbortError, StatusWriter,
+                                    set_line_writer)
 from mirage.workspace.executor.statement import (StatusSnapshot, record_status,
                                                  snapshot_status)
 from mirage.workspace.node import provision_node, run_command_tree
@@ -195,9 +196,12 @@ class LineFrame:
         session (Session | None): the shell the line stamps on.
         status_before (StatusSnapshot | None): ``$?`` and
             ``${PIPESTATUS[@]}`` as the line found them.
+        writer (StatusWriter): the line's identity, so a restore undoes
+            only the stamps this line made.
     """
     session: Session | None = None
     status_before: StatusSnapshot | None = None
+    writer: StatusWriter = field(default_factory=StatusWriter)
 
 
 async def execute_line(
@@ -286,6 +290,9 @@ async def execute_line(
     if frame is not None:
         frame.session = session
         frame.status_before = snapshot_status(session)
+        # This coroutine is the line's whole task, so every statement
+        # and every nested evaluation under it inherits the identity.
+        set_line_writer(frame.writer)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and

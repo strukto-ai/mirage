@@ -166,6 +166,29 @@ describe('execute({ env }): bash subshell semantics', () => {
   })
 })
 
+describe('execute({ signal }): concurrent lines on one session', () => {
+  // A snapshots `$?` and blocks, B finishes and stamps its own, then A
+  // aborts. A's snapshot is older than B's result, so putting it back
+  // would resurrect a status the shell had already moved past.
+  it('does not restore over a status another line stamped', async () => {
+    const ws = await makeWs()
+    await ws.execute('true')
+
+    const ac = new AbortController()
+    const blocked = ws.execute('sleep 5', { signal: ac.signal })
+    const settled = blocked.catch(() => undefined)
+    // Let the blocked line reach its snapshot before the other runs.
+    await new Promise((r) => setTimeout(r, 50))
+
+    await ws.execute('false')
+
+    ac.abort()
+    await settled
+
+    expect(stdoutStr(await ws.execute('echo $?')).trim()).toBe('1')
+  })
+})
+
 describe('execute({ signal }): mid-flight cancellation', () => {
   it('rejects with AbortError when signal is pre-aborted (regression guard)', async () => {
     const ws = await makeWs()

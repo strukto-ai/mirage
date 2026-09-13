@@ -1295,5 +1295,6 @@ class Workspace:
             # whichever await it landed on. Here, after the last of them,
             # so no path can forget it.
             if frame.session is not None and frame.status_before is not None:
-                restore_status(frame.session, frame.status_before)
+                restore_status(frame.session, frame.status_before,
+                               frame.writer)
             raise

@@ -15,9 +15,46 @@
 import asyncio
 import logging
 from collections.abc import Coroutine
+from contextvars import ContextVar
 from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
+
+
+class StatusWriter:
+    """Opaque per-line identity for status writes.
+
+    Minted once per ``Workspace.execute`` and carried on the line's
+    ``LineFrame``, so ``record_status`` can say whose ``$?`` the session
+    is holding and a cancelled line puts back only what it overwrote.
+    """
+    __slots__ = ()
+
+
+# Set by ``execute_line``, which is the line's whole task, so every
+# statement and every nested evaluation the line spawns inherits it and
+# no other line can see it. TypeScript needs its own frame list here
+# because a promise has no task to hang this on.
+_line_writer: ContextVar[StatusWriter | None] = ContextVar(
+    "mirage_line_status_writer", default=None)
+
+
+def set_line_writer(writer: StatusWriter) -> None:
+    """Mark the running task as this line's.
+
+    Args:
+        writer (StatusWriter): the line's identity.
+    """
+    _line_writer.set(writer)
+
+
+def line_status_writer() -> StatusWriter | None:
+    """The identity of the line running on this task, if any.
+
+    ``None`` outside a line (a background job, a test driving a handler
+    directly): nothing is restoring there.
+    """
+    return _line_writer.get()
 
 
 class MirageAbortError(RuntimeError):

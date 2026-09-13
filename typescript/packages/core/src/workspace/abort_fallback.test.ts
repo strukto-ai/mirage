@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
-import { Session } from './session/session.ts'
+import { Session, newStatusWriter } from './session/session.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -52,12 +52,17 @@ describe('the status door on the fallback storage', () => {
     const [holdA, releaseA] = gate()
     const [holdB, releaseB] = gate()
     let refusedB: unknown = null
-    const lineA = runWithLineAbort(new AbortController().signal, [a], async () => {
-      await holdA
-      recordStatus(a, 3)
-      releaseB()
-    })
-    const lineB = runWithLineAbort(abortB.signal, [b], async () => {
+    const lineA = runWithLineAbort(
+      new AbortController().signal,
+      [a],
+      newStatusWriter(),
+      async () => {
+        await holdA
+        recordStatus(a, 3)
+        releaseB()
+      },
+    )
+    const lineB = runWithLineAbort(abortB.signal, [b], newStatusWriter(), async () => {
       abortB.abort()
       releaseA()
       await holdB

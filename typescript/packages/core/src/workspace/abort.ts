@@ -14,7 +14,7 @@
 
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import type { Session } from './session/session.ts'
+import type { Session, StatusWriter } from './session/session.ts'
 
 /**
  * One running line: its signal and the sessions its statements stamp
@@ -28,6 +28,7 @@ import type { Session } from './session/session.ts'
 interface LineAbortFrame {
   signal: AbortSignal | undefined
   sessions: readonly Session[]
+  writer: StatusWriter
 }
 
 const lineAbortContext = createAsyncContext<LineAbortFrame>()
@@ -41,9 +42,25 @@ const lineAbortContext = createAsyncContext<LineAbortFrame>()
 export function runWithLineAbort<T>(
   signal: AbortSignal | undefined,
   sessions: readonly Session[],
+  writer: StatusWriter,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(lineAbortContext.run({ signal, sessions }, fn))
+  return Promise.resolve(lineAbortContext.run({ signal, sessions, writer }, fn))
+}
+
+/**
+ * The identity of the line stamping on `session`, for `recordStatus` to
+ * record and an aborted line to compare its snapshot against.
+ *
+ * Null when no line is running (a background job, a test driving a
+ * handler directly) and null when more than one line is live on this
+ * session, which is the case the comparison exists to refuse: with two
+ * writers in play nothing can attribute the last stamp, so an aborted
+ * line declines to restore rather than guess.
+ */
+export function lineStatusWriter(session: Session): StatusWriter | null {
+  const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
+  return frames.length === 1 ? (frames[0]?.writer ?? null) : null
 }
 
 /**

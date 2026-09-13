@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.io import IOResult
+from mirage.workspace.abort import StatusWriter
 from mirage.workspace.executor.statement import (assignment_status,
                                                  finish_statement,
                                                  restore_status,
@@ -79,7 +80,30 @@ def test_restore_status_puts_back_the_captured_shell_status():
     session.last_exit_code = 0
     session.pipe_status = (0, )
     session._pipe_status_pending = (1, )
-    restore_status(session, before)
+    restore_status(session, before, None)
     assert session.last_exit_code == 3
     assert session.pipe_status == (0, 3)
     assert session._pipe_status_pending is None
+
+
+def test_restore_status_declines_over_a_status_another_line_stamped():
+    # Two `execute()` calls can share a session, and a snapshot taken
+    # before a concurrent line finished is older than that line's
+    # result. Putting it back would resurrect a value the shell moved
+    # past.
+    session = Session(session_id="t")
+    mine = StatusWriter()
+    theirs = StatusWriter()
+    session.last_exit_code = 1
+    before = snapshot_status(session)
+
+    session.last_exit_code = 0
+    session.pipe_status = (0, )
+    session.status_writer = theirs
+
+    restore_status(session, before, mine)
+    assert session.last_exit_code == 0
+    assert session.pipe_status == (0, )
+
+    restore_status(session, before, theirs)
+    assert session.last_exit_code == 1
