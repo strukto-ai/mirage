@@ -9,17 +9,22 @@ icon: /images/deepseek-logo.svg
 ## Install
 
 ```bash
-npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill
 ```
 
 ## Compose
 
-Three Cordis plugins. `MirageService` owns the workspace; the two providers inject it. Mix any resources, such as Slack and Redis beside a scratch RAM mount:
+Four Cordis plugins. `MirageService` owns the workspace; the providers inject it. Mix any resources, such as Slack and Redis beside a scratch RAM mount:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
 import { buildRuntime, MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
-import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
+import {
+  MirageFileSystem,
+  MirageService,
+  MirageShellExecutor,
+  MirageSpillStore,
+} from '@struktoai/mirage-dsh'
 
 const ws = new Workspace(
   {
@@ -34,7 +39,10 @@ const ctx = new Context()
 await ctx.plugin(MirageService, { workspace: ws }).await()
 await ctx.plugin(MirageFileSystem, {}).await()
 await ctx.plugin(MirageShellExecutor, {}).await()
+await ctx.plugin(MirageSpillStore, {}).await()
 ```
+
+`MirageSpillStore` is what keeps an oversized tool result recoverable. dsh replaces a result over its inline cap with a preview plus a locator and tells the model to read or grep it; without this plugin that locator names a file on the harness's own disk, which nothing in the workspace can open. Registered, the artifact is written through the same op door as every other effect, so the locator is an ordinary workspace path. It defaults to `/tmp/dsh-spill`, so give it a `dir` on a writable mount if `/tmp` is not one.
 
 Mirage mounts are read-only by default; the mode ladder is `READ` < `WRITE` < `EXEC`, so mount with `MountMode.WRITE` where dsh's write tools should work and `MountMode.EXEC` where scripts may run. dsh's bash tool now spans every source in one line (`resolve` fills a request into a spec with the defaults and `run` executes it, the same two calls dsh's own tools make):
 
@@ -80,7 +88,7 @@ const script = await shell.run(
 
 ## Install into a dsh profile
 
-The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem and bash providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
+The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem, bash and spill providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
 
 ```bash
 dsh plugin --profile web add @struktoai/mirage-dsh
