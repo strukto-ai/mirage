@@ -50,6 +50,7 @@ export async function handleMapfile(
   executeFn: ExecuteStringFn,
   state: SessionView | null = null,
   cmd = 'mapfile',
+  signal?: AbortSignal,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.mapfile, args)
   if (parse.invalid !== null) {
@@ -113,7 +114,7 @@ export async function handleMapfile(
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {
-    const [data, found] = await buffer.readUntil(delim)
+    const [data, found] = await buffer.readUntil(delim, signal)
     if (!found && data.byteLength === 0) break
     seen++
     if (seen <= skip) continue
@@ -167,5 +168,6 @@ export async function mapfileBuiltin(call: BuiltinCall): Promise<Result> {
     call.executeFn,
     sessionView(call.session, call.registry.policies),
     call.argv.name,
+    call.signal,
   )
 }

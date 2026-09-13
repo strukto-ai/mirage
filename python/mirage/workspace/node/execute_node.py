@@ -390,8 +390,11 @@ async def _execute_node(
     # after the typed line has ended has to stand under that one.
     # Under the line's, the inner gate could not see the grant the job
     # holds and asked again, and what it claimed went back to a
-    # hand-off nothing revokes any more.
-    execute_fn = partial(execute_fn, handed=handed)
+    # hand-off nothing revokes any more. The event is rebound for the
+    # same reason: a background job runs without the caller's, and so
+    # must the lines it evaluates, or a `$(...)` inside the job would
+    # die of an abort that was never the job's.
+    execute_fn = partial(execute_fn, handed=handed, cancel=cancel)
 
     recurse = partial(execute_node,
                       dispatch,

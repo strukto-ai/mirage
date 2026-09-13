@@ -99,3 +99,46 @@ describe('CachableAsyncIterator', () => {
     expect(ci.bufferedChunks).toHaveLength(0)
   })
 })
+
+describe('discard behind a pull that never settles', () => {
+  async function* stuck(): AsyncGenerator<Uint8Array> {
+    await new Promise<never>(() => undefined)
+    yield new Uint8Array(1)
+  }
+
+  it('does not wait for the return queued behind the pull', async () => {
+    // The consumer raced the pull against its signal and was released;
+    // the cleanup that follows must not be held by the same pull.
+    const iterator = new CachableAsyncIterator(stuck())
+    const pull = iterator.next()
+    void pull.catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const outcome = await Promise.race([
+      iterator.discard().then(() => 'released'),
+      new Promise<string>((resolve) => {
+        setTimeout(() => {
+          resolve('hung')
+        }, 200)
+      }),
+    ])
+    expect(outcome).toBe('released')
+    expect(iterator.discarded).toBe(true)
+  })
+
+  it('still awaits the return when no pull is outstanding', async () => {
+    let closed = false
+    async function* closing(): AsyncGenerator<Uint8Array> {
+      try {
+        await Promise.resolve()
+        yield new Uint8Array(1)
+        yield new Uint8Array(1)
+      } finally {
+        closed = true
+      }
+    }
+    const iterator = new CachableAsyncIterator(closing())
+    await iterator.next()
+    await iterator.discard()
+    expect(closed).toBe(true)
+  })
+})

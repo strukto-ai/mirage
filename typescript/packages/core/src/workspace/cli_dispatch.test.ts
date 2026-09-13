@@ -451,3 +451,24 @@ describe('the session plane reaches a CLI leaf', () => {
     expect((await ws.execute('stash OTHER fine')).exitCode).toBe(0)
   })
 })
+
+describe('CLI dispatch under an aborted invocation', () => {
+  it('releases the caller while the leaf still waits on its service', async () => {
+    const ws = buildWorkspace()
+    const stuck = new CLISpec({
+      name: 'stuck',
+      configModel: tokenConfig,
+      subcommands: [new CLISpec({ name: 'hang', fn: () => new Promise<never>(() => undefined) })],
+    })
+    ws.registerCli('stuck', stuck, { token: 't' })
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 50)
+    const t0 = Date.now()
+    await expect(ws.execute('stuck hang', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+})

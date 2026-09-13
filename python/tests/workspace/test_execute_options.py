@@ -293,3 +293,27 @@ async def test_agent_pattern_one_aborts_while_siblings_complete():
     assert "abort" in str(settled[0]).lower()
     assert not isinstance(settled[1], Exception)
     assert settled[1].stdout.decode().strip() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_an_aborted_line_does_not_erase_a_concurrent_lines_status():
+    # Two `execute()` calls share the default session. A snapshots `$?`
+    # and blocks, B finishes and stamps its own, then A is cancelled.
+    # A's snapshot is older than B's result, so putting it back would
+    # resurrect a status the shell had already moved past.
+    ws = _make_ws()
+    await ws.execute("true")
+
+    cancel = asyncio.Event()
+    blocked = asyncio.create_task(ws.execute("sleep 5", cancel=cancel))
+    # Let the blocked line reach its snapshot before the other one runs.
+    await asyncio.sleep(0.05)
+
+    await ws.execute("false")
+
+    cancel.set()
+    with pytest.raises(Exception):
+        await blocked
+
+    r = await ws.execute("echo $?")
+    assert r.stdout.decode().strip() == "1"

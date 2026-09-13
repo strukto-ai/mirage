@@ -724,8 +724,12 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
           docker run --rm --network container:minio \
-            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
             mb --ignore-existing local/mirage-cross local/mirage-state
 

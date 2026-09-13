@@ -318,10 +318,20 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
+          # MinIO archived the open-source server and client: the Docker Hub
+          # repo is gone and dl.min.io serves 410 for the mc binary. quay.io
+          # still carries both at the tags we pin. mc runs in the server's
+          # network namespace, and MC_HOST_local replaces `mc alias set`,
+          # which would not survive a --rm container.
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
           docker run --rm --network container:minio \
-            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
-            mb --ignore-existing local/mirage-integ local/mirage-integ-s3 local/mirage-integ-gcs local/mirage-integ-minio
+            mb --ignore-existing local/mirage-integ local/mirage-integ-s3 \
+              local/mirage-integ-gcs local/mirage-integ-minio
 
 
       # Snapshot roundtrip and out-of-band-delete GC only: the per-command
@@ -836,8 +846,12 @@ jobs:
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
           docker run --rm --network container:minio-watch \
-            -e MC_HOST_local=http://minio:minio123@localhost:9000 \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
             quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
             mb --ignore-existing local/mirage-watch
 

@@ -12,19 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '../workspace/abort.ts'
+import { CachableAsyncIterator } from './cachable_iterator.ts'
+import { YieldBudget } from './yield_budget.ts'
+import { chunks } from './cooperative.ts'
+
 const NEWLINE = 0x0a
 
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
   private exhausted = false
+  private readonly budget = new YieldBudget()
+  private linesSinceCheck = 0
+  private pulling = false
 
-  constructor(source: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
-    const s = source as AsyncIterable<Uint8Array>
+  constructor(private readonly input: AsyncIterable<Uint8Array> | AsyncIterator<Uint8Array>) {
+    const s = this.input as AsyncIterable<Uint8Array>
     if (typeof s[Symbol.asyncIterator] === 'function') {
-      this.source = s[Symbol.asyncIterator]()
+      this.source = chunks(s)
     } else {
-      this.source = source as AsyncIterator<Uint8Array>
+      this.source = chunks({
+        [Symbol.asyncIterator]: () => this.input as AsyncIterator<Uint8Array>,
+      })
     }
   }
 
@@ -38,27 +48,97 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return { done: false, value: line }
   }
 
-  async readline(): Promise<Uint8Array | null> {
-    while (indexOf(this.buf, NEWLINE) < 0) {
-      if (this.exhausted) {
-        if (this.buf.byteLength > 0) {
-          const remaining = this.buf
-          this.buf = new Uint8Array(0)
-          return remaining
+  async readline(signal?: AbortSignal): Promise<Uint8Array | null> {
+    try {
+      // A buffered line is handed out without a pull, so the signal is
+      // checked here as well, on both sides of the yield.
+      signal?.throwIfAborted()
+      // Amortize clock reads on short-line workloads; chunk pulls also check.
+      if (++this.linesSinceCheck >= 64) {
+        this.linesSinceCheck = 0
+        const pending = this.budget.run()
+        if (pending !== undefined) {
+          await pending
+          signal?.throwIfAborted()
         }
-        return null
       }
-      const result = await this.source.next()
-      if (result.done === true) {
-        this.exhausted = true
-        continue
+      const idx = this.buf.indexOf(NEWLINE)
+      if (idx >= 0) {
+        const line = this.buf.subarray(0, idx)
+        this.buf = this.buf.subarray(idx + 1)
+        return line
       }
-      this.buf = concat2(this.buf, result.value)
+    } catch (error) {
+      await this.close()
+      throw error
     }
-    const idx = indexOf(this.buf, NEWLINE)
-    const line = this.buf.subarray(0, idx)
-    this.buf = this.buf.subarray(idx + 1)
-    return line
+    const [line, found] = await this.readDelimited(NEWLINE, signal)
+    return found || line.byteLength > 0 ? line : null
+  }
+
+  // The stdin buffer survives individual builtins; cancellation belongs to each read.
+  private check(signal?: AbortSignal): Promise<void> | undefined {
+    signal?.throwIfAborted()
+    const pending = this.budget.run()
+    if (pending !== undefined) return pending.then(() => signal?.throwIfAborted())
+  }
+
+  private async close(): Promise<void> {
+    this.exhausted = true
+    this.buf = new Uint8Array(0)
+    // A return queued behind a pull that never settles would hang the
+    // abort itself; that one is not awaited.
+    const closing = this.source.return?.()
+    if (closing !== undefined) {
+      if (this.pulling) void closing.catch(() => undefined)
+      else await closing
+    }
+    // The discard closes the same producer, so behind a stalled pull it
+    // is not awaited either; `discard` never rejects.
+    if (this.input instanceof CachableAsyncIterator) {
+      const discarding = this.input.discard()
+      if (this.pulling) void discarding
+      else await discarding
+    }
+  }
+
+  private async pull(signal?: AbortSignal): Promise<IteratorResult<Uint8Array>> {
+    // Left set when the pull fails: close() reads it to know the source
+    // is still busy with the pull the abort abandoned.
+    this.pulling = true
+    const result = await abortable(this.source.next(), signal)
+    this.pulling = false
+    return result
+  }
+
+  private async readDelimited(
+    delim: number,
+    signal?: AbortSignal,
+  ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    const parts: Uint8Array[] = []
+    try {
+      for (;;) {
+        const pending = this.check(signal)
+        if (pending !== undefined) await pending
+        const idx = this.buf.indexOf(delim)
+        if (idx >= 0) {
+          const tail = this.buf.subarray(0, idx)
+          this.buf = this.buf.subarray(idx + 1)
+          return [parts.length === 0 ? tail : join([...parts, tail]), true]
+        }
+        if (this.buf.byteLength > 0) parts.push(this.buf)
+        this.buf = new Uint8Array(0)
+        if (this.exhausted) return [join(parts), false]
+        // Raced, not just checked between pulls: a stalled stdin must lose
+        // to the read's own signal, or the reader outlives the caller.
+        const result = await this.pull(signal)
+        if (result.done === true) this.exhausted = true
+        else this.buf = copyOf(result.value)
+      }
+    } catch (error) {
+      await this.close()
+      throw error
+    }
   }
 
   /**
@@ -66,24 +146,12 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
    * whether the delimiter was found (false means EOF, which `read`/
    * `mapfile` report as status 1).
    */
-  async readUntil(delim: number): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    while (indexOf(this.buf, delim) < 0) {
-      if (this.exhausted) {
-        const remaining = copyOf(this.buf)
-        this.buf = new Uint8Array(0)
-        return [remaining, false]
-      }
-      const result = await this.source.next()
-      if (result.done === true) {
-        this.exhausted = true
-        continue
-      }
-      this.buf = concat2(this.buf, result.value)
-    }
-    const idx = indexOf(this.buf, delim)
-    const data = copyOf(this.buf.subarray(0, idx))
-    this.buf = this.buf.subarray(idx + 1)
-    return [data, true]
+  async readUntil(
+    delim: number,
+    signal?: AbortSignal,
+  ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
+    const [data, found] = await this.readDelimited(delim, signal)
+    return [copyOf(data), found]
   }
 
   /**
@@ -101,29 +169,37 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   async readChars(
     count: number,
     delim: number | null,
+    signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
-    let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
-    let taken = 0
-    while (taken < count) {
-      // One pull can split a character across chunks, so top the buffer
-      // up to the widest one before reading its first byte as a whole.
-      if (this.buf.byteLength < 4 && !this.exhausted) {
-        const result = await this.source.next()
-        if (result.done === true) this.exhausted = true
-        else this.buf = concat2(this.buf, result.value)
-        continue
+    try {
+      let out: Uint8Array<ArrayBuffer> = new Uint8Array(0)
+      let taken = 0
+      while (taken < count) {
+        const pending = this.check(signal)
+        if (pending !== undefined) await pending
+        // One pull can split a character across chunks, so top the buffer
+        // up to the widest one before reading its first byte as a whole.
+        if (this.buf.byteLength < 4 && !this.exhausted) {
+          const result = await this.pull(signal)
+          if (result.done === true) this.exhausted = true
+          else this.buf = concat2(this.buf, result.value)
+          continue
+        }
+        if (this.buf.byteLength === 0) return [copyOf(out), false]
+        if (delim !== null && this.buf[0] === delim) {
+          this.buf = this.buf.subarray(1)
+          return [copyOf(out), true]
+        }
+        const width = charWidth(this.buf)
+        out = concat2(out, this.buf.subarray(0, width))
+        this.buf = this.buf.subarray(width)
+        taken++
       }
-      if (this.buf.byteLength === 0) return [copyOf(out), false]
-      if (delim !== null && this.buf[0] === delim) {
-        this.buf = this.buf.subarray(1)
-        return [copyOf(out), true]
-      }
-      const width = charWidth(this.buf)
-      out = concat2(out, this.buf.subarray(0, width))
-      this.buf = this.buf.subarray(width)
-      taken++
+      return [copyOf(out), true]
+    } catch (error) {
+      await this.close()
+      throw error
     }
-    return [copyOf(out), true]
   }
 }
 
@@ -149,11 +225,14 @@ export function charWidth(data: Uint8Array): number {
   return limit
 }
 
-function indexOf(buf: Uint8Array, byte: number): number {
-  for (let i = 0; i < buf.byteLength; i++) {
-    if (buf[i] === byte) return i
+function join(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(parts.reduce((size, part) => size + part.byteLength, 0))
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.byteLength
   }
-  return -1
+  return out
 }
 
 function concat2(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {

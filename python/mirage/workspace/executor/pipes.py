@@ -18,7 +18,8 @@ import tree_sitter
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.io import IOResult
-from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
+from mirage.io.stream import (async_chain, close_quietly, discard_io,
+                              discard_streams, merge_stdout_stderr)
 from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
@@ -101,6 +102,11 @@ async def handle_pipe(
                 materialize(last_stdout), session.pipeline_timeout_seconds,
                 "pipeline")
             last_stdout = materialized
+    except BaseException:
+        for io in ios:
+            await discard_io(io)
+        await discard_streams(last_stdout, stdin)
+        raise
     finally:
         # Explicitly close any intermediate generators that may still
         # be holding resource resources (HTTP connections, file
