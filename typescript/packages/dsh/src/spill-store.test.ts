@@ -138,6 +138,41 @@ describe('saveText', () => {
     expect(String(ref.locator)).toMatch(/^\/tmp\/dsh-spill\/session-[0-9a-f]{12}\//)
   })
 
+  it('canonicalizes a non-canonical dir, so the locator addresses the bytes', async () => {
+    // Written literally, a `..` component lands on a key that every
+    // reader normalizes away, so neither spelling can open the file.
+    const { store, ws } = await makeStore({ config: { dir: '/tmp/artifacts/../spill' } })
+    const ref = await store.saveText(request('PAYLOAD'))
+    const locator = String(ref.locator)
+    expect(locator).toMatch(/^\/tmp\/spill\/session-[0-9a-f]{12}\//)
+    expect(locator).not.toContain('..')
+    expect(await ws.fs.readFileText(locator)).toBe('PAYLOAD')
+    // The whole point: a shell reading the locator back finds it.
+    ws.createSession('probe')
+    const read = await ws.execute(`cat ${locator}`, { sessionId: 'probe' })
+    expect(read.exitCode).toBe(0)
+    // `ws.execute` answers in bytes, unlike the dsh shell seam's text.
+    expect(new TextDecoder().decode(read.stdout)).toBe('PAYLOAD')
+  })
+
+  it('collapses a redundant slash and a dot segment', async () => {
+    const { store } = await makeStore({ config: { dir: '/tmp//./spill' } })
+    expect(String((await store.saveText(request('x'))).locator)).toMatch(
+      /^\/tmp\/spill\/session-[0-9a-f]{12}\//,
+    )
+  })
+
+  it('clamps a dir that climbs past the workspace root', async () => {
+    const { store } = await makeStore({ config: { dir: '/../../tmp/spill' } })
+    expect(String((await store.saveText(request('x'))).locator)).toMatch(/^\/tmp\/spill\//)
+  })
+
+  it('refuses a relative dir at construction', async () => {
+    await expect(makeStore({ config: { dir: 'spill' } })).rejects.toThrow(
+      /spill dir must be an absolute workspace path/,
+    )
+  })
+
   it('scopes one session away from another', async () => {
     const { store } = await makeStore()
     const a = await store.saveText(request('a', { sessionId: 'session-a' }))

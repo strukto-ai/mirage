@@ -14,6 +14,7 @@
 
 import { Buffer } from 'node:buffer'
 import { createHash, randomBytes } from 'node:crypto'
+import { posix } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
@@ -33,9 +34,9 @@ const SESSION_DIGEST_CHARS = 12
 export interface MirageSpillConfig {
   /**
    * Workspace directory the artifacts are written under, one
-   * subdirectory per session. Must fall inside a mount this world can
-   * write; the default sits on the `/tmp` ram mount the bundle patch
-   * provides.
+   * subdirectory per session. Absolute, and normalized before use; must
+   * fall inside a mount this world can write, and the default sits on
+   * the `/tmp` ram mount the bundle patch provides.
    */
   dir?: string
 }
@@ -108,16 +109,25 @@ export class MirageSpillStore extends SpillStore {
 
   constructor(ctx: Context, config: MirageSpillConfig = {}) {
     super(ctx)
-    this.dir = config.dir ?? DEFAULT_SPILL_DIR
+    const dir = config.dir ?? DEFAULT_SPILL_DIR
+    if (!posix.isAbsolute(dir)) {
+      throw new Error(`mirage: spill dir must be an absolute workspace path, got ${dir}`)
+    }
+    // Canonical once, here, rather than per save: a `.` or `..` left in
+    // the path is written literally by the op door and normalized away
+    // by everything that reads a locator back, so the artifact lands on
+    // a key neither the shell nor the fs seam can address. That is the
+    // dead locator this store exists to prevent.
+    this.dir = posix.resolve('/', dir)
   }
 
   async saveText(input: SaveTextSpill): Promise<SpillRef> {
     const workspace = await this.ctx.mirage.ready
-    const dir = `${this.dir}/${sessionDirName(input.owner.sessionId)}`
+    const dir = posix.join(this.dir, sessionDirName(input.owner.sessionId))
     // Derived from the suggested name, never equal to it: the random
     // prefix is what keeps two results with one suggested name apart.
     const name = `${randomBytes(NAME_PREFIX_BYTES).toString('hex')}-${encodeSegment(input.suggestedName)}`
-    const path = `${dir}/${name}`
+    const path = posix.join(dir, name)
     try {
       await ensureDirPath(
         { exists: (p) => workspace.fs.exists(p), mkdir: (p) => workspace.fs.mkdir(p) },
