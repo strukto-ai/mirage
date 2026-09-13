@@ -205,3 +205,44 @@ async def test_native_pull_folder_delete_drops_descendants() -> None:
     kinds = {(c.path.virtual, c.kind) for c in delta.changes}
     assert ("/m/dir", FileChangeKind.DELETE) in kinds
     assert ("/m/dir/a.txt", FileChangeKind.DELETE) in kinds
+
+
+@pytest.mark.asyncio
+async def test_a_reset_onto_a_missing_root_keeps_no_cursor() -> None:
+    # A root that 409s hands back no cursor, and list_folder/continue
+    # refuses an empty one, so encoding it would wedge every later pull
+    # on a 400 and the walk would never be reached again.
+    listing = [_file("/team/keep.txt", "h1")]
+    with patch("mirage.core.dropbox.watch.list_folder_state",
+               new_callable=AsyncMock,
+               return_value=(listing, "c0")):
+        hook = DropboxDeltaHook(_accessor("/team"))
+        base = await hook.pull(_root(), None)
+    with patch("mirage.core.dropbox.watch.continue_folder",
+               new_callable=AsyncMock,
+               side_effect=DropboxApiError("reset", 409, "reset/...")), \
+         patch("mirage.core.dropbox.watch.list_folder_state",
+               new_callable=AsyncMock,
+               side_effect=DropboxApiError("gone", 409,
+                                           "path/not_found/...")), \
+         patch("mirage.core.dropbox.watch.list_folder",
+               new_callable=AsyncMock,
+               side_effect=DropboxApiError("gone", 409,
+                                           "path/not_found/...")):
+        delta = await hook.pull(_root(), base.checkpoint)
+    assert ("/m/keep.txt", FileChangeKind.DELETE) in {(c.path.virtual, c.kind)
+                                                      for c in delta.changes}
+    assert json.loads(delta.checkpoint) == {}
+
+
+@pytest.mark.asyncio
+async def test_a_root_that_comes_back_upgrades_to_a_cursor_again() -> None:
+    restored = [_file("/team/keep.txt", "h1")]
+    with patch("mirage.core.dropbox.watch.list_folder_state",
+               new_callable=AsyncMock,
+               return_value=(restored, "c7")):
+        hook = DropboxDeltaHook(_accessor("/team"))
+        delta = await hook.pull(_root(), "{}")
+    assert ("/m/keep.txt", FileChangeKind.CREATE) in {(c.path.virtual, c.kind)
+                                                      for c in delta.changes}
+    assert json.loads(delta.checkpoint)["c"] == "c7"

@@ -211,4 +211,36 @@ describe('DropboxDeltaHook native pull', () => {
     expect(kinds.has('/m/dir:delete')).toBe(true)
     expect(kinds.has('/m/dir/a.txt:delete')).toBe(true)
   })
+
+  it('keeps no cursor when a reset lands on a missing root', async () => {
+    // A root that 409s hands back no cursor, and list_folder/continue
+    // refuses an empty one, so encoding it would wedge every later pull
+    // on a 400 and the walk would never be reached again.
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c0',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const base = await hook.pull(root(), null)
+    vi.mocked(api.continueFolder).mockRejectedValue(new DropboxApiError('reset', 409, 'reset/...'))
+    const gone = new DropboxApiError('gone', 409, 'path/not_found/...')
+    vi.mocked(api.listFolderState).mockRejectedValue(gone)
+    vi.mocked(api.listFolder).mockRejectedValue(gone)
+    const delta = await hook.pull(root(), base.checkpoint)
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/keep.txt:delete')).toBe(true)
+    expect(JSON.parse(delta.checkpoint ?? '')).toEqual({})
+  })
+
+  it('upgrades back to a cursor once the root comes back', async () => {
+    vi.mocked(api.listFolderState).mockResolvedValue({
+      entries: [fileEntry('/team/keep.txt', 'h1')],
+      cursor: 'c7',
+    })
+    const hook = new DropboxDeltaHook(accessor('/team'))
+    const delta = await hook.pull(root(), '{}')
+    const kinds = new Set(delta.changes.map((c) => `${c.path.virtual}:${c.kind}`))
+    expect(kinds.has('/m/keep.txt:create')).toBe(true)
+    expect(JSON.parse(delta.checkpoint ?? '{}')).toMatchObject({ c: 'c7' })
+  })
 })

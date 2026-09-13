@@ -29,7 +29,13 @@ import { DIR_FINGERPRINT } from '../../watch/constants.ts'
 import { ListingDeltaHook, specFor } from '../../watch/delta.ts'
 import { statFingerprint } from '../../watch/fingerprint.ts'
 import { DropboxApiError } from './client.ts'
-import { continueFolder, listFolder, listFolderState, type DropboxEntry } from './api.ts'
+import {
+  continueFolder,
+  listFolder,
+  listFolderState,
+  type DropboxEntry,
+  type ListFolderState,
+} from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 
 const NATIVE = 1
@@ -139,7 +145,11 @@ function decode(checkpoint: string | null): {
   native: boolean
 } {
   if (checkpoint === null) return { cursor: null, snapshot: null, native: false }
-  const data = JSON.parse(checkpoint) as Record<string, unknown>
+  const parsed: unknown = JSON.parse(checkpoint)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { cursor: null, snapshot: null, native: false }
+  }
+  const data = parsed as Record<string, unknown>
   if (
     data._dbx === NATIVE &&
     typeof data.c === 'string' &&
@@ -249,49 +259,62 @@ export class DropboxDeltaHook implements DeltaHook {
     return { snapshot, entries, cursor }
   }
 
+  /**
+   * List `root` afresh and answer with a new native cursor.
+   *
+   * A root Dropbox refuses leaves `snapshot` with no cursor at all, and an
+   * empty one must never be encoded: the cursor `list_folder/continue` takes
+   * is at least one character, so a native checkpoint carrying '' makes every
+   * later pull fail on the refusal and the listing is never reached again,
+   * even once the root is back. The walk answers that case instead, and the
+   * listing checkpoint it hands out is upgraded by the next pull that finds a
+   * cursor.
+   */
+  private async relist(
+    root: PathSpec,
+    previous: Record<string, string> | null,
+    observed: Date,
+  ): Promise<Delta> {
+    const next = await this.snapshot(root)
+    if (next.cursor === '') {
+      return this.listing.pull(root, previous === null ? null : JSON.stringify(previous))
+    }
+    const changes =
+      previous === null ? [] : diffSnapshots(root, previous, next.snapshot, next.entries, observed)
+    return new Delta({ changes, checkpoint: encode(next.cursor, next.snapshot) })
+  }
+
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
     const decoded = decode(checkpoint)
     const observed = new Date()
-    if (!decoded.native) {
-      const next = await this.snapshot(root)
-      if (next.cursor === '') return this.listing.pull(root, checkpoint)
-      const changes =
-        decoded.snapshot === null
-          ? []
-          : diffSnapshots(root, decoded.snapshot, next.snapshot, next.entries, observed)
-      return new Delta({ changes, checkpoint: encode(next.cursor, next.snapshot) })
-    }
+    if (!decoded.native) return this.relist(root, decoded.snapshot, observed)
+    let state: ListFolderState
     try {
-      const state = await continueFolder(this.accessor.tokenManager, decoded.cursor ?? '')
-      let snapshot = { ...(decoded.snapshot ?? {}) }
-      const entries = new Map<string, WalkEntry>()
-      for (const raw of state.entries) {
-        const framed = frame(this.accessor, root, raw)
-        if (framed === null) continue
-        entries.set(framed.virtual, framed.walk)
-        if (raw['.tag'] === 'deleted') {
-          snapshot = dropPrefix(snapshot, framed.virtual)
-          continue
-        }
-        snapshot[framed.virtual] = framed.walk.isDir
-          ? DIR_FINGERPRINT
-          : (framed.walk.fingerprint ?? '')
-      }
-      return new Delta({
-        changes: diffSnapshots(root, decoded.snapshot ?? {}, snapshot, entries, observed),
-        checkpoint: encode(state.cursor, snapshot),
-      })
+      state = await continueFolder(this.accessor.tokenManager, decoded.cursor ?? '')
     } catch (error) {
       if (error instanceof DropboxApiError && isReset(error)) {
-        const next = await this.snapshot(root)
-        const changes =
-          decoded.snapshot === null
-            ? []
-            : diffSnapshots(root, decoded.snapshot, next.snapshot, next.entries, observed)
-        return new Delta({ changes, checkpoint: encode(next.cursor, next.snapshot) })
+        return this.relist(root, decoded.snapshot, observed)
       }
       throw error
     }
+    let snapshot = { ...(decoded.snapshot ?? {}) }
+    const entries = new Map<string, WalkEntry>()
+    for (const raw of state.entries) {
+      const framed = frame(this.accessor, root, raw)
+      if (framed === null) continue
+      entries.set(framed.virtual, framed.walk)
+      if (raw['.tag'] === 'deleted') {
+        snapshot = dropPrefix(snapshot, framed.virtual)
+        continue
+      }
+      snapshot[framed.virtual] = framed.walk.isDir
+        ? DIR_FINGERPRINT
+        : (framed.walk.fingerprint ?? '')
+    }
+    return new Delta({
+      changes: diffSnapshots(root, decoded.snapshot ?? {}, snapshot, entries, observed),
+      checkpoint: encode(state.cursor, snapshot),
+    })
   }
 }
 

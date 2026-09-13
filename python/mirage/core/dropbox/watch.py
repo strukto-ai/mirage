@@ -250,6 +250,34 @@ class DropboxDeltaHook:
                                  if entry.is_dir else entry.fingerprint or "")
         return snapshot, entries, cursor
 
+    async def _relist(self, root: PathSpec, previous: dict[str, str] | None,
+                      observed: datetime) -> Delta:
+        """List ``root`` afresh and answer with a new native cursor.
+
+        A root Dropbox refuses leaves ``_snapshot`` with no cursor at
+        all, and an empty one must never be encoded: the cursor
+        ``list_folder/continue`` takes is at least one character, so a
+        native checkpoint carrying "" makes every later pull fail on the
+        refusal and the listing is never reached again, even once the
+        root is back. The walk answers that case instead, and the
+        listing checkpoint it hands out is upgraded by the next pull
+        that finds a cursor.
+
+        Args:
+            root (PathSpec): Watch root.
+            previous (dict[str, str] | None): Last applied snapshot, or
+                None for a baseline.
+            observed (datetime): Timestamp carried by every event.
+        """
+        snapshot, entries, cursor = await self._snapshot(root)
+        if not cursor:
+            return await self._listing.pull(
+                root, None if previous is None else json.dumps(previous,
+                                                               sort_keys=True))
+        changes = () if previous is None else tuple(
+            _diff_snapshots(root, previous, snapshot, entries, observed))
+        return Delta(changes=changes, checkpoint=_encode(cursor, snapshot))
+
     async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
         """Pull changes under ``root`` since ``checkpoint``.
 
@@ -261,23 +289,13 @@ class DropboxDeltaHook:
         cursor, previous, native = _decode(checkpoint)
         observed = datetime.now(timezone.utc)
         if not native:
-            snapshot, entries, cursor = await self._snapshot(root)
-            if not cursor:
-                return await self._listing.pull(root, checkpoint)
-            changes = () if previous is None else tuple(
-                _diff_snapshots(root, previous, snapshot, entries, observed))
-            return Delta(changes=changes, checkpoint=_encode(cursor, snapshot))
+            return await self._relist(root, previous, observed)
         try:
             found, next_cursor = await continue_folder(
                 self._accessor.token_manager, cursor or "")
         except DropboxApiError as exc:
             if _is_reset(exc):
-                snapshot, entries, cursor = await self._snapshot(root)
-                changes = () if previous is None else tuple(
-                    _diff_snapshots(root, previous, snapshot, entries,
-                                    observed))
-                return Delta(changes=changes,
-                             checkpoint=_encode(cursor, snapshot))
+                return await self._relist(root, previous, observed)
             raise
         snapshot = dict(previous or {})
         applied: dict[str, WalkEntry] = {}
