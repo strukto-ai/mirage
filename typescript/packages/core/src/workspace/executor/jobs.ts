@@ -23,7 +23,7 @@ import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { mergeSignals } from '../abort.ts'
+import { abortable, mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -352,6 +352,7 @@ export async function handleWait(
   parts: string[],
   session: Session | null = null,
   view: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
@@ -432,7 +433,7 @@ export async function handleWait(
         new ExecutionNode({ command: cmdStr, exitCode: 127 }),
       ]
     }
-    const job = await waitFirst(jobTable, candidates)
+    const job = await abortable(waitFirst(jobTable, candidates), signal)
     if (varName !== null && view !== null) await view.set(varName, String(job.id))
     const [stdout, io, node] = await adopt(jobTable, job, cmdStr)
     if (errBytes !== null) {
@@ -448,7 +449,7 @@ export async function handleWait(
     // by job id, because jobs finish concurrently and completion order
     // is not reproducible. Reaped afterwards so a second `wait` does not
     // print the same output twice.
-    await jobTable.waitAll(sid)
+    await abortable(jobTable.waitAll(sid), signal)
     const finished = jobTable.listJobs(sid).sort((a, b) => a.id - b.id)
     const outs: Uint8Array[] = []
     const errs: Uint8Array[] = []
@@ -477,7 +478,7 @@ export async function handleWait(
   let lastCode = 0
   let lastJob: Job | null = null
   for (const job of picked) {
-    const finished = await jobTable.wait(job.id, sid)
+    const finished = await abortable(jobTable.wait(job.id, sid), signal)
     const [stdout, io] = await adopt(jobTable, finished, cmdStr)
     if (stdout instanceof Uint8Array && stdout.byteLength > 0) outs.push(stdout)
     if (io.stderr instanceof Uint8Array && io.stderr.byteLength > 0) errs.push(io.stderr)
@@ -568,6 +569,7 @@ export async function handleFg(
   parts: string[],
   session: Session | null = null,
   _view: SessionView | null = null,
+  signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
@@ -596,7 +598,7 @@ export async function handleFg(
       ]
     }
   }
-  const job = await jobTable.wait(jobId, sid)
+  const job = await abortable(jobTable.wait(jobId, sid), signal)
   const header = new TextEncoder().encode(job.command + '\n')
   const body = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)

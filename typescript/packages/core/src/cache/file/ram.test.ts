@@ -135,3 +135,58 @@ describe('RAMFileCacheStore', () => {
     expect(await c.get('/d/a.txt')).toBeNull()
   })
 })
+
+describe('RAMFileCacheStore: a writer waiting on the lock', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it.each(['set', 'add'] as const)(
+    '%s sees an invalidation that landed while it waited',
+    async (operation) => {
+      // Both writers hold bytes read before the clear; the second only gets
+      // the lock after the clear, so a version read under the lock would
+      // look current and let it install stale content.
+      const cache = new RAMFileCacheStore()
+      const first = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x78))
+      await sleep(2)
+      const second = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x79))
+      await sleep(2)
+      await cache.clear()
+      await Promise.all([first, second])
+      expect(await cache.get('/large')).toBeNull()
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s queued behind a removal of its key is discarded',
+    async (operation) => {
+      // The removal runs between the first writer's fingerprint and the
+      // second writer's turn. The second holds bytes read before the
+      // removal, so it must not repopulate the key that was just dropped.
+      const cache = new RAMFileCacheStore()
+      const first = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x78))
+      await sleep(2)
+      const removal = cache.remove('/large')
+      await sleep(2)
+      const second = cache[operation]('/large', new Uint8Array(4_000_000).fill(0x79))
+      await Promise.all([first, removal, second])
+      expect(await cache.get('/large')).toBeNull()
+    },
+  )
+
+  it.each(['set', 'add'] as const)(
+    '%s of one key survives the removal of another key while it hashes',
+    async (operation) => {
+      const cache = new RAMFileCacheStore()
+      const data = new Uint8Array(4_000_000).fill(0x78)
+      const fill = cache[operation]('/large', data)
+      await sleep(2)
+      await cache.remove('/other')
+      await fill
+      // Compared by length and a byte, not deep equality: a 4 MB deep
+      // compare alone outlives the test budget.
+      const kept = await cache.get('/large')
+      expect(kept?.byteLength).toBe(data.byteLength)
+      expect(kept?.[0]).toBe(0x78)
+    },
+  )
+})

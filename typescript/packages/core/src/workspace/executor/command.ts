@@ -29,6 +29,7 @@ import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../lookup/index.ts
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import type { Session } from '../session/session.ts'
+import { abortable, mergeSignals } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
@@ -80,6 +81,7 @@ const JOB_HANDLERS: Record<
     textParts: string[],
     session: Session | null,
     view: SessionView | null,
+    signal?: AbortSignal,
   ) => JobHandlerResult | Promise<JobHandlerResult>
 > = {
   wait: handleWait,
@@ -111,6 +113,7 @@ async function finishFind(
   namespace: Namespace | null,
   stdin: ByteSource | null,
   starts: readonly PathSpec[],
+  signal: AbortSignal | undefined,
 ): Promise<ByteSource | null> {
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
@@ -128,6 +131,7 @@ async function finishFind(
       namespace,
       stdin,
       starts,
+      ...(signal !== undefined ? { signal } : {}),
     },
   )
   if (actionErr.length > 0) {
@@ -154,6 +158,7 @@ export async function handleCommand(
   agentId: string | null = null,
   executeFn?: ExecuteFn,
   handed: HandOff | null = null,
+  signal?: AbortSignal,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -170,7 +175,13 @@ export async function handleCommand(
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
-      return handler(jobTable, textParts, session, sessionView(session, registry.policies))
+      return handler(
+        jobTable,
+        textParts,
+        session,
+        sessionView(session, registry.policies),
+        mergeSignals(signal, session.abortSignal),
+      )
     }
   }
 
@@ -200,19 +211,24 @@ export async function handleCommand(
   // leaf and a command handler see one plane alike.
   const cliInstall = registry.clis.get(cmdName)
   if (cliInstall !== null) {
-    return handleCli(
-      cliInstall,
-      parts,
-      session,
-      stdin,
-      {
-        entries: registry.runtimeEntries,
-        dispatch,
-        statPath: (path: string) => pathStat(dispatch, path, null),
-        ns: namespaceViewOf(registry, namespace ?? null, dispatch),
-        sessionView: sessionView(session, registry.policies),
-      },
-      () => dropServiceCaches(registry, cliInstall.spec.serves),
+    // A leaf that waits on its service keeps running; the caller's abort
+    // releases the invocation, as it does for `wait`.
+    return abortable(
+      handleCli(
+        cliInstall,
+        parts,
+        session,
+        stdin,
+        {
+          entries: registry.runtimeEntries,
+          dispatch,
+          statPath: (path: string) => pathStat(dispatch, path, null),
+          ns: namespaceViewOf(registry, namespace ?? null, dispatch),
+          sessionView: sessionView(session, registry.policies),
+        },
+        () => dropServiceCaches(registry, cliInstall.spec.serves),
+      ),
+      mergeSignals(signal, session.abortSignal),
     )
   }
 
@@ -348,6 +364,7 @@ export async function handleCommand(
       csScopes = expanded.filter((p): p is PathSpec => typeof p !== 'string')
     }
     const runCtx: RunOnMountCtx = {
+      ...(signal !== undefined ? { signal } : {}),
       registry,
       session,
       dispatch,
@@ -364,7 +381,15 @@ export async function handleCommand(
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
     const csStat: StatPath = (path: string) => pathStat(dispatch, path, null)
-    const runOperand = runWithFanout(runSingle, registry, session.cwd, csNs, ensureOpen, csStat)
+    const runOperand = runWithFanout(
+      runSingle,
+      registry,
+      session.cwd,
+      csNs,
+      ensureOpen,
+      csStat,
+      mergeSignals(signal, session.abortSignal),
+    )
     const [csStdout0, csIo, csExec] = await handleCrossMount(
       cmdName,
       csScopes,
@@ -393,6 +418,7 @@ export async function handleCommand(
         namespace ?? null,
         stdin,
         csScopes,
+        mergeSignals(signal, session.abortSignal),
       )
       csExec.exitCode = csIo.exitCode
       csExec.stderr = await materialize(csIo.stderr)
@@ -522,6 +548,7 @@ export async function handleCommand(
       ensureOpen,
       singleNs,
       singleStat,
+      mergeSignals(signal, session.abortSignal),
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {
@@ -538,6 +565,7 @@ export async function handleCommand(
         namespace ?? null,
         stdin,
         paths,
+        mergeSignals(signal, session.abortSignal),
       )
       fanNode.exitCode = fanIo.exitCode
       fanNode.stderr = await materialize(fanIo.stderr)
@@ -551,6 +579,7 @@ export async function handleCommand(
   }
 
   const runCtx: RunOnMountCtx = {
+    ...(signal !== undefined ? { signal } : {}),
     registry,
     session,
     dispatch,
@@ -580,6 +609,7 @@ export async function handleCommand(
       namespace ?? null,
       stdin,
       paths,
+      mergeSignals(signal, session.abortSignal),
     )
   }
   if (warnBytes !== null) {

@@ -358,6 +358,18 @@ function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
   return out
 }
 
+/**
+ * Opaque per-line identity for status writes, minted once per
+ * `execute()` and carried on the line's abort frame so every statement
+ * it runs stamps the same one.
+ */
+export type StatusWriter = symbol
+
+/** A fresh line identity. */
+export function newStatusWriter(): StatusWriter {
+  return Symbol('line')
+}
+
 export class Session {
   sessionId: string
   cwd: string
@@ -392,6 +404,13 @@ export class Session {
   // A pipeline's per-segment statuses, parked by `handlePipe` for the
   // statement boundary that closes it to claim. Null between them.
   pipeStatusPending: readonly number[] | null = null
+  // Which line stamped the three fields above, so an aborted line only
+  // puts back what it overwrote. Two `execute()` calls can share one
+  // session, and an abort restoring its snapshot over a concurrent
+  // line's finished status would resurrect a value that line already
+  // superseded. Runtime identity, never serialized: a restored snapshot
+  // has no line running on it.
+  statusWriter: StatusWriter | null = null
   // `$RANDOM`'s generator state and the seed word it last consumed
   // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
   // parent gets its own state back (`snapshot` / `restore`).

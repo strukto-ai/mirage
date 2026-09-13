@@ -114,12 +114,17 @@ async def handle_background(
                 # the end. Statements that emit return no stdout, so the
                 # pump below is a no-op for them and still covers
                 # constructs that do not stream.
+                # A job outlives the line that launched it and is not the
+                # caller's to abort, as bash leaves a background job alone
+                # on SIGINT and a TypeScript job runs under its own
+                # controller: it runs without the line's event.
                 stdout, io, exec_node = await execute_node(left,
                                                            bg_session,
                                                            None,
                                                            bg_call_stack,
                                                            sink=console,
-                                                           handed=job_handed)
+                                                           handed=job_handed,
+                                                           cancel=None)
             except CommandTimeoutError as exc:
                 msg = (str(exc) + "\n").encode()
                 stdout = b""

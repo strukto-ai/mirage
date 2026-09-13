@@ -110,6 +110,8 @@ async def apply_io(
         if isinstance(data, bytes):
             await _set_cached(cache, path, data, records, is_cacheable)
         elif isinstance(data, CachableAsyncIterator):
+            if data.discarded:
+                continue
             if data.exhausted:
                 await _set_cached(cache, path, b"".join(data.buffered_chunks),
                                   records, is_cacheable)

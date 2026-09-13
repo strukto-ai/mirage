@@ -711,12 +711,12 @@ jobs:
       - name: Start MinIO
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
+            docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
@@ -724,11 +724,14 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-cross || true
-          /tmp/mc mb local/mirage-state || true
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+          docker run --rm --network container:minio \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-cross local/mirage-state
 
       - name: Run daemon large-stdin and grep round trips (both languages)
         run: ./python/.venv/bin/python integ/execute_stdin.py

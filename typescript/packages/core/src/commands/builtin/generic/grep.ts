@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
 import { fsStrerror, isWalkError } from '../../../utils/errors.ts'
@@ -144,7 +145,8 @@ export async function grepGeneric(
   readdir: Readdir,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  stream = cacheAwareStream(stream)
+  const cachedStream = cacheAwareStream(stream)
+  stream = (path) => guardInput(cachedStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
   if (resolution.error !== null || resolution.pattern === null)
@@ -174,7 +176,10 @@ export async function grepGeneric(
   const first = paths[0]
   if (first === undefined) {
     try {
-      const source = resolveSource(opts.stdin, `${name}: usage: ${name} [flags] pattern [path]`)
+      const source = guardInput(
+        resolveSource(opts.stdin, `${name}: usage: ${name} [flags] pattern [path]`),
+        opts,
+      )
       return [
         grepInput(source, pat, f, '(standard input)', f.withFilename && !f.noFilename, io),
         io,

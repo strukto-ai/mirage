@@ -14,6 +14,7 @@
 
 import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { CachableAsyncIterator } from './cachable_iterator.ts'
+import { chunks } from './cooperative.ts'
 
 export type ByteSource = Uint8Array | AsyncIterable<Uint8Array>
 
@@ -21,9 +22,9 @@ export async function materialize(source: ByteSource | null | undefined): Promis
   if (source === null || source === undefined) return new Uint8Array()
   if (source instanceof Uint8Array) return source
   if (source instanceof CachableAsyncIterator) return source.drain()
-  const chunks: Uint8Array[] = []
-  for await (const chunk of source) chunks.push(chunk)
-  return concat(chunks)
+  const parts: Uint8Array[] = []
+  for await (const chunk of chunks(source)) parts.push(chunk)
+  return concat(parts)
 }
 
 /**

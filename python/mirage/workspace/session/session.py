@@ -31,6 +31,7 @@ from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
                                    with_value)
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
                           ShownPaths)
+from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
                                                 INHERITED_FIELDS)
 
@@ -239,6 +240,13 @@ class Session:
     # Empty in a fresh shell, as bash's is: the first `${PIPESTATUS[*]}`
     # expands to nothing until a statement records one.
     pipe_status: tuple[int, ...] = ()
+    # Which line stamped the two fields above, so a cancelled line puts
+    # back only what it overwrote. Two `execute()` calls can share one
+    # session, and a restore of a snapshot older than a concurrent
+    # line's finished status would resurrect a value the shell moved
+    # past. Runtime identity, never serialized: a restored snapshot has
+    # no line running on it.
+    status_writer: StatusWriter | None = None
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set

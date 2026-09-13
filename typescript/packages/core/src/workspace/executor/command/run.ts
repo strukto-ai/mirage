@@ -44,6 +44,7 @@ import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { formatFsError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
+import { makeAbortError, mergeSignals } from '../../abort.ts'
 import type { Flags } from './types.ts'
 import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -56,6 +57,7 @@ export interface RunOnMountCtx {
   ensureOpen?: (resource: Resource) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
+  signal?: AbortSignal
 }
 
 /**
@@ -294,6 +296,11 @@ export async function runOnMount(
   )
   if (denial !== null) return [null, denial]
 
+  const signal = mergeSignals(ctx.signal, session.abortSignal)
+  // A leaf that resumes here after the caller aborted (ensureOpen took
+  // longer than the grace) must not reach a mount handler: eager write
+  // handlers do not read the signal, and a cancelled `rm` must not run.
+  if (signal?.aborted === true) throw makeAbortError(signal)
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
       stdin: opts.stdin ?? null,
@@ -308,7 +315,7 @@ export async function runOnMount(
       ns,
       statPath,
       readdirPath,
-      ...(session.abortSignal !== null ? { signal: session.abortSignal } : {}),
+      ...(signal !== undefined ? { signal } : {}),
       limitOverride,
     })
     const stdout = initialStdout
@@ -334,7 +341,8 @@ export async function runOnMount(
     }
     // A limit timeout is not a filesystem failure: let it reach the
     // workspace-level handler that answers with exit 124.
-    if (err instanceof CommandTimeoutError) throw err
+    if (err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError'))
+      throw err
     return [
       null,
       new IOResult({

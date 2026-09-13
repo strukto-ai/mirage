@@ -54,8 +54,10 @@ from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.workspace.abort import MirageAbortError, run_cancellable
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -80,7 +82,7 @@ from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.build import (resolve_control_stores,
                                               wire_runtime_world)
 from mirage.workspace.workspace.cache import build_file_cache
-from mirage.workspace.workspace.execute import execute_line
+from mirage.workspace.workspace.execute import LineFrame, execute_line
 from mirage.workspace.workspace.guard import reject_config_script
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
 from mirage.workspace.workspace.lifecycle import (close_async, patch_process,
@@ -1248,9 +1250,12 @@ class Workspace:
                 clone, so `export` inside the command does not leak back
                 to the persistent session.
             cancel: Optional asyncio.Event used to abort execution
-                mid-flight. When set, the executor raises MirageAbortError
-                at the next gate (entry to each node) and races inside
-                blocking sleeps so cancellation is observed promptly.
+                mid-flight. The whole line runs as one task, so setting
+                the event cancels it at whatever await it is in; the task
+                is joined before MirageAbortError is raised, and `$?` is
+                restored to what the line found. The event is the
+                caller's alone: the line never sets it, so a command
+                timeout is exit 124, not an abort.
             record: When False, run without logging a history entry or
                 opening a recording context; ops emitted by the command
                 flow into the caller's recorder. Used by the executor's
@@ -1271,6 +1276,25 @@ class Workspace:
                 inner line spends the grants the outer line's pass
                 claimed for it.
         """
-        return await execute_line(self, command, session_id, stdin, provision,
-                                  agent_id, cwd, env, cancel, record, runtime,
-                                  routing_decision, handed)
+        # The one cancellation seam: the whole line is one task, so a
+        # cancel set while a store is still loading, a secret is still
+        # fetching, the tree is still running or the flush is still
+        # writing lands on that await, and the line is joined before the
+        # abort is raised. The event is the caller's and the line never
+        # sets it.
+        frame = LineFrame()
+        try:
+            return await run_cancellable(
+                execute_line(self, command, session_id, stdin, provision,
+                             agent_id, cwd, env, cancel, record, runtime,
+                             routing_decision, handed, frame), cancel)
+        except (MirageAbortError, asyncio.CancelledError):
+            # An abandoned invocation is the caller's outcome, not the
+            # shell's, whether it arrived on the event or as a cancel
+            # from outside: `$?` goes back to what the line found,
+            # whichever await it landed on. Here, after the last of them,
+            # so no path can forget it.
+            if frame.session is not None and frame.status_before is not None:
+                restore_status(frame.session, frame.status_before,
+                               frame.writer)
+            raise

@@ -11,10 +11,10 @@ from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
-from mirage.utils.stream import ensure_stream
 from mirage.utils.width import advance_column, is_space
 
 _TOTAL_MODES = frozenset({"auto", "always", "only", "never"})
@@ -105,7 +105,17 @@ def _scan_text(
     return words_added, column, max_len, in_word
 
 
-async def wc(src: bytes | AsyncIterator[bytes]) -> WCCounts:
+async def wc(src: bytes | AsyncIterator[bytes],
+             *,
+             flags: WCFlags | None = None) -> WCCounts:
+    if (flags is not None and (flags.lines or flags.bytes_)
+            and not (flags.words or flags.chars or flags.max_line_length)):
+        counts = WCCounts()
+        async for chunk in chunks(src):
+            counts.bytes_ += len(chunk)
+            if flags.lines:
+                counts.lines += chunk.count(b"\n")
+        return counts
     bytes_count = 0
     lines = 0
     words = 0
@@ -115,7 +125,7 @@ async def wc(src: bytes | AsyncIterator[bytes]) -> WCCounts:
     column = 0
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
-    async for chunk in ensure_stream(src):
+    async for chunk in chunks(src):
         bytes_count += len(chunk)
         lines += chunk.count(b"\n")
         text = decoder.decode(chunk)
@@ -276,6 +286,12 @@ async def format_multi(
         tuple[bytes, bytes]: Encoded wc output (``b""`` when nothing prints)
         and concatenated stderr lines for failed operands (``b""`` if none).
     """
+    flags = WCFlags(lines=lines,
+                    words=words,
+                    bytes_=bytes_,
+                    chars=chars,
+                    max_line_length=max_line_length,
+                    total=total)
     read = cache_aware_read(read)
     rows: list[tuple[WCCounts, str | None]] = []
     totals = WCCounts()
@@ -285,18 +301,12 @@ async def format_multi(
             source = read(path)
             if inspect.isawaitable(source):
                 source = await source
-            counts = await wc(source)
+            counts = await wc(source, flags=flags)
         except FS_ERRORS as exc:
             err += fs_error_line("wc", path, exc).encode()
             continue
         rows.append((counts, path.raw_path))
         totals.merge(counts)
-    flags = WCFlags(lines=lines,
-                    words=words,
-                    bytes_=bytes_,
-                    chars=chars,
-                    max_line_length=max_line_length,
-                    total=total)
     return format_count_rows(rows, totals, len(paths), flags), err
 
 
@@ -337,7 +347,7 @@ async def wc_generic(
                                        total=parsed.total)
         return body, operands_io(err)
     source = resolve_source(opts.stdin, "wc: missing operand")
-    counts = await wc(source)
+    counts = await wc(source, flags=parsed)
     return format_stdin(counts, parsed), IOResult()
 
 

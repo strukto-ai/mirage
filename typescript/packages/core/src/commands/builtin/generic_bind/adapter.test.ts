@@ -24,6 +24,7 @@ import {
   makeResolveGlob,
   withDirGuard,
   withHiddenGuard,
+  withAbortGuard,
   withPolicyGuard,
   withRuleGuard,
   type CommandIO,
@@ -690,5 +691,126 @@ describe('withHiddenGuard rmdir under namespace children', () => {
     await runWithSession(sess, async () => {
       await expect(rmdir(accessor, spec)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     })
+  })
+})
+
+describe('withAbortGuard', () => {
+  const spec = (virtual: string): PathSpec =>
+    new PathSpec({
+      virtual,
+      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+      resourcePath: virtual,
+      resolved: true,
+    })
+
+  function recording(calls: string[]): CommandIO {
+    return {
+      readdir: (_a, path) => {
+        calls.push(`readdir ${path.virtual}`)
+        return Promise.resolve([])
+      },
+      readBytes: (_a, path) => {
+        calls.push(`read ${path.virtual}`)
+        return Promise.resolve(new Uint8Array([1]))
+      },
+      readStream: (_a, path) => {
+        calls.push(`stream ${path.virtual}`)
+        return (async function* () {
+          yield await Promise.resolve(new Uint8Array([1]))
+        })()
+      },
+      stat: (_a, path) => {
+        calls.push(`stat ${path.virtual}`)
+        return Promise.resolve(
+          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
+        )
+      },
+      isMounted: () => true,
+      exists: (_a, path) => {
+        calls.push(`exists ${path.virtual}`)
+        return Promise.resolve(true)
+      },
+      find: (_a, path) => {
+        calls.push(`find ${path.virtual}`)
+        return Promise.resolve([])
+      },
+      du: {
+        size: (_a, path) => {
+          calls.push(`du.size ${path.virtual}`)
+          return Promise.resolve(0)
+        },
+        entries: (_a, path) => {
+          calls.push(`du.entries ${path.virtual}`)
+          return Promise.resolve([[], 0] as [[string, number][], number])
+        },
+      },
+      unlink: (_a, path) => {
+        calls.push(`unlink ${path.virtual}`)
+        return Promise.resolve()
+      },
+      write: (_a, path) => {
+        calls.push(`write ${path.virtual}`)
+        return Promise.resolve()
+      },
+    }
+  }
+
+  it('forwards every slot while the signal is quiet', async () => {
+    const calls: string[] = []
+    const guarded = withAbortGuard(recording(calls), new AbortController().signal)
+    await guarded.unlink?.(accessor, spec('/data/a'))
+    await guarded.readBytes(accessor, spec('/data/a'))
+    expect(calls).toEqual(['unlink /data/a', 'read /data/a'])
+  })
+
+  it('refuses to start a slot once the signal fired', async () => {
+    const calls: string[] = []
+    const controller = new AbortController()
+    const guarded = withAbortGuard(recording(calls), controller.signal)
+    controller.abort(new Error('released'))
+    await expect(guarded.unlink?.(accessor, spec('/data/b'))).rejects.toMatchObject({
+      name: 'AbortError',
+      cause: { message: 'released' },
+    })
+    await expect(
+      guarded.write?.(accessor, spec('/data/b'), new Uint8Array()),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(guarded.readdir(accessor, spec('/data'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(calls).toEqual([])
+  })
+
+  // A presence fact costs no write, which is why the policy guard lets
+  // it through, but on an API mount it is still a request. `stat a b`
+  // whose first call outlives the grace would otherwise start the
+  // second after the caller was released.
+  it('refuses the presence facts too', async () => {
+    const calls: string[] = []
+    const controller = new AbortController()
+    const guarded = withAbortGuard(recording(calls), controller.signal)
+    controller.abort(new Error('released'))
+    await expect(guarded.stat(accessor, spec('/data/b'))).rejects.toMatchObject({
+      name: 'AbortError',
+      cause: { message: 'released' },
+    })
+    await expect(guarded.exists?.(accessor, spec('/data/b'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.find?.(accessor, spec('/data'), {})).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.du?.size(accessor, spec('/data'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await expect(guarded.du?.entries(accessor, spec('/data'))).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(calls).toEqual([])
+  })
+
+  it('is the ops themselves without a signal', () => {
+    const ops = recording([])
+    expect(withAbortGuard(ops, undefined)).toBe(ops)
   })
 })

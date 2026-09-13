@@ -12,7 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator
+
+from mirage.io.yield_budget import YieldBudget
+
+logger = logging.getLogger(__name__)
 
 
 class CachableAsyncIterator:
@@ -28,6 +33,12 @@ class CachableAsyncIterator:
         self._source = source
         self._buffer: list[bytes] = []
         self._exhausted = False
+        self._discarded = False
+        self._budget = YieldBudget()
+
+    @property
+    def discarded(self) -> bool:
+        return self._discarded
 
     @property
     def exhausted(self) -> bool:
@@ -59,19 +70,31 @@ class CachableAsyncIterator:
         return self
 
     async def __anext__(self) -> bytes:
+        if self._exhausted:
+            raise StopAsyncIteration
         try:
+            await self._budget.run()
             chunk = await self._source.__anext__()
         except StopAsyncIteration:
             self._exhausted = True
+            raise
+        except BaseException:
+            await self.discard()
             raise
         self._buffer.append(chunk)
         return chunk
 
     async def drain(self) -> bytes:
         """Consume remaining chunks and return all accumulated bytes."""
+        if self._exhausted:
+            return b"".join(self._buffer)
         try:
             async for chunk in self._source:
+                await self._budget.run()
                 self._buffer.append(chunk)
+        except BaseException:
+            await self.discard()
+            raise
         finally:
             self._exhausted = True
         return b"".join(self._buffer)
@@ -83,24 +106,39 @@ class CachableAsyncIterator:
         budget is exceeded, closes the source, releases the partial
         buffer, and returns None.
         """
+        if self._discarded:
+            return None
         total = sum(len(c) for c in self._buffer)
         try:
             if total > max_bytes:
-                await self._close_and_discard()
+                await self.discard()
                 return None
             async for chunk in self._source:
+                await self._budget.run()
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
-                    await self._close_and_discard()
+                    await self.discard()
                     return None
+        except BaseException:
+            await self.discard()
+            raise
         finally:
             self._exhausted = True
         return b"".join(self._buffer)
 
-    async def _close_and_discard(self) -> None:
+    async def discard(self) -> None:
+        """Discard failed content, leaving normal early exits drainable."""
+        if self._discarded:
+            return
+        self._discarded = True
+        self._exhausted = True
         self._buffer.clear()
-        await self._close_source()
+        try:
+            await self._close_source()
+        except Exception as exc:
+            # The consumer's own error is the one to report.
+            logger.debug("discarded source closer failed: %s", exc)
 
     async def _close_source(self) -> None:
         """Close the underlying source iterator if it supports aclose.

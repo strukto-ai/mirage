@@ -15,7 +15,7 @@
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -32,14 +32,16 @@ from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.types import Refusal
-from mirage.workspace.abort import MirageAbortError
-from mirage.workspace.executor.statement import record_status
+from mirage.workspace.abort import (MirageAbortError, StatusWriter,
+                                    set_line_writer)
+from mirage.workspace.executor.statement import (StatusSnapshot, record_status,
+                                                 snapshot_status)
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
 from mirage.workspace.node.occurrence import evaluated_from
-from mirage.workspace.session import (get_current_session_for,
+from mirage.workspace.session import (Session, get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
@@ -90,14 +92,15 @@ class NestedRefusal:
 
 async def recurse(
     ws: "Workspace",
-    cancel: asyncio.Event | None,
-    routing_decision: RouteDecision | None,
-    agent_id: str | None,
-    nested: NestedRefusal,
     cmd: str,
     node: Any = None,
     span: tuple[int, int] | None = None,
     handed: HandOff | None = None,
+    *,
+    cancel: asyncio.Event | None,
+    routing_decision: RouteDecision | None,
+    agent_id: str | None,
+    nested: NestedRefusal,
     **opts: Any,
 ) -> Any:
     """The executor's internal eval ($(), source, eval, xargs, ...).
@@ -118,7 +121,9 @@ async def recurse(
 
     Args:
         ws: the workspace hosting the outer line.
-        cancel (asyncio.Event | None): the outer line's abort event.
+        cancel (asyncio.Event | None): the abort event of the line or
+            job this evaluation runs in; the walker rebinds it at every
+            node, so a background job's evaluations carry none.
         routing_decision (RouteDecision | None): the typed line's
             decision, inherited verbatim.
         agent_id (str | None): the typed line's agent, inherited.
@@ -179,6 +184,26 @@ def session_cwd(
         return None
 
 
+@dataclass(slots=True)
+class LineFrame:
+    """What ``Workspace.execute`` needs from the line to answer an abort:
+    the shell it ran on and the status that shell had before it, filled
+    by ``execute_line`` as soon as it knows them and before anything
+    stamps. Per call, never on the session, so two lines on one session
+    each keep their own.
+
+    Attributes:
+        session (Session | None): the shell the line stamps on.
+        status_before (StatusSnapshot | None): ``$?`` and
+            ``${PIPESTATUS[@]}`` as the line found them.
+        writer (StatusWriter): the line's identity, so a restore undoes
+            only the stamps this line made.
+    """
+    session: Session | None = None
+    status_before: StatusSnapshot | None = None
+    writer: StatusWriter = field(default_factory=StatusWriter)
+
+
 async def execute_line(
     ws: "Workspace",
     command: str,
@@ -193,6 +218,7 @@ async def execute_line(
     runtime: str | None,
     routing_decision: RouteDecision | None,
     handed: HandOff | None = None,
+    frame: LineFrame | None = None,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.execute``; see its docstring for the
     argument contract.
@@ -209,6 +235,9 @@ async def execute_line(
         handed (HandOff | None): the hand-off the line runs on, made by
             ``recurse`` for a nested evaluation; None for a typed line,
             which gets one of its own.
+        frame (LineFrame | None): filled with the session and its
+            status before the line, for ``Workspace.execute`` to restore
+            ``$?`` from when the caller aborts.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -254,6 +283,16 @@ async def execute_line(
 
     session_token = set_current_session(effective_session,
                                         owner=ws._session_mgr)
+    # Taken before any statement stamps, so a cancelled line can put
+    # `$?` back to what it found. Restored at the seam in
+    # ``Workspace.execute``, after the last await of the line, so an
+    # abort that lands on the flush or the record is covered too.
+    if frame is not None:
+        frame.session = session
+        frame.status_before = snapshot_status(session)
+        # This coroutine is the line's whole task, so every statement
+        # and every nested evaluation under it inherits the identity.
+        set_line_writer(frame.writer)
     try:
         ast = parse(command)
         # Syntax gates before policy, mirroring the TS order and
@@ -280,7 +319,15 @@ async def execute_line(
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
-        exec_recursion = partial(recurse, ws, cancel, decision, agent, nested)
+        # Bound by keyword so the walker can rebind it per node: a
+        # background job's nested lines run without the caller's event,
+        # as the job itself does.
+        exec_recursion = partial(recurse,
+                                 ws,
+                                 cancel=cancel,
+                                 routing_decision=decision,
+                                 agent_id=agent,
+                                 nested=nested)
         if provision:
             name = command_name(command)
             guard = resolve_limit(name) if name else None
@@ -423,6 +470,9 @@ async def execute_line(
                         sources = await ws._secret_sources()
                         await fill_env(effective_session, names, sources)
                         names = plan_names(nodes)
+            # No seam of its own: the whole line is one task under
+            # ``Workspace.execute``, and a cancel lands on whichever await
+            # the tree is in.
             io, _ = await run_command_tree(
                 ws.dispatch,
                 ws._registry,
@@ -466,10 +516,11 @@ async def execute_line(
         await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
         return io
     except CommandTimeoutError as exc:
+        # The caller's event is read, never written: a timeout is this
+        # line's answer (exit 124), not an abort of the invocation, and
+        # nothing below is still running once the tree has raised.
         logger.debug("command %r timed out after %ss", exc.command,
                      exc.seconds)
-        if cancel is not None:
-            cancel.set()
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io
@@ -477,9 +528,14 @@ async def execute_line(
         io = failure_result(exc, command)
         record_status(session, io.exit_code)
         return io
-    except (MirageAbortError, ContentDriftError, RouteError):
-        # The caller's problem, not the line's: an abort it requested,
-        # drift it must reconcile, a policy it misconfigured.
+    except (MirageAbortError, asyncio.CancelledError):
+        # An aborted invocation is the caller's outcome, not the shell's;
+        # the record says so, and ``Workspace.execute`` restores `$?`.
+        io = IOResult(exit_code=130, stderr=b"execute aborted\n")
+        raise
+    except (ContentDriftError, RouteError) as exc:
+        io = failure_result(exc, command)
+        # Drift and invalid routing remain the caller's errors.
         raise
     except Exception as exc:
         # The fold is a failed command like any other (a SecretsError

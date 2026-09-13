@@ -13,10 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { RegisteredCommand } from '../commands/config.ts'
+import { CommandSpec, Operand } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
+import { RAMObserverStore } from '../observe/store.ts'
 import { OpsRegistry } from '../ops/registry.ts'
+import type { Action, OpsContext } from '../policy/index.ts'
+import { RAMSessionStore } from './session/ram.ts'
+import type { SessionFields } from './session/store.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
-import { Channel, JobConsole } from '../shell/console/index.ts'
+import { Runtime } from '../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
+import type { RunResult } from '../runtime/types.ts'
+import { MountMode, ResourceName } from '../types.ts'
+import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -153,6 +163,29 @@ describe('execute({ env }): bash subshell semantics', () => {
     expect(stdoutStr(a).trim()).toBe('one')
     expect(stdoutStr(b).trim()).toBe('two')
     await ws.close()
+  })
+})
+
+describe('execute({ signal }): concurrent lines on one session', () => {
+  // A snapshots `$?` and blocks, B finishes and stamps its own, then A
+  // aborts. A's snapshot is older than B's result, so putting it back
+  // would resurrect a status the shell had already moved past.
+  it('does not restore over a status another line stamped', async () => {
+    const ws = await makeWs()
+    await ws.execute('true')
+
+    const ac = new AbortController()
+    const blocked = ws.execute('sleep 5', { signal: ac.signal })
+    const settled = blocked.catch(() => undefined)
+    // Let the blocked line reach its snapshot before the other runs.
+    await new Promise((r) => setTimeout(r, 50))
+
+    await ws.execute('false')
+
+    ac.abort()
+    await settled
+
+    expect(stdoutStr(await ws.execute('echo $?')).trim()).toBe('1')
   })
 })
 
@@ -301,6 +334,309 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       name: 'AbortError',
     })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
+    const events = await ws.observer.commandEvents()
+    expect(events.at(-1)?.exit_code).toBe(130)
+    await ws.close()
+  })
+
+  it('undoes a status stamped by a statement before the abort', async () => {
+    const ws = await makeWs()
+    await ws.execute('false')
+    await expect(
+      ws.execute('true; sleep 5', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('refuses the status of a statement that settles after the release', async () => {
+    // The leaf returns at once with a lazy stream that ignores the signal
+    // and yields past the grace, so the drain settles on a shell the
+    // caller was already released from.
+    const ws = await makeWs()
+    const late = new RegisteredCommand({
+      name: 'latecmd',
+      spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
+      resource: ResourceName.RAM,
+      fn: () => [
+        (async function* () {
+          await new Promise((resolve) => setTimeout(resolve, 450))
+          yield ENC.encode('late\n')
+        })(),
+        new IOResult(),
+      ],
+    })
+    ws.registry.mountForPrefix('/ram').register(late)
+    await ws.execute('false')
+    const session = ws.sessionManager.get(ws.sessionManager.defaultId)
+    await expect(
+      ws.execute('latecmd /ram/x', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(session.lastExitCode).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(session.lastExitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('releases the caller when the session store stalls before the line runs', async () => {
+    class Stalled extends RAMSessionStore {
+      override load(): Promise<Map<string, SessionFields>> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Stalled() },
+    )
+    await expect(ws.execute('echo hi', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    // A line is recorded once it has been parsed; one that never got past
+    // the loading of workspace state leaves no history entry, as in Python.
+    expect(await ws.observer.commandEvents()).toEqual([])
+  })
+
+  it('restores the status when a stalled flush outlives the grace', async () => {
+    // The line stamped its status and then its flush never settles: the
+    // caller is released after the grace, and `$?` is what the line found.
+    class Stalled extends RAMSessionStore {
+      stall = false
+      override casSet(
+        sessionId: string,
+        fields: SessionFields,
+        expectedGeneration: number,
+      ): Promise<boolean> {
+        if (this.stall) return new Promise<never>(() => undefined)
+        return super.casSet(sessionId, fields, expectedGeneration)
+      }
+    }
+    const store = new Stalled()
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },
+    )
+    // The first line persists the fresh session; after it, status is not
+    // a durable field, so only the env write below has a flush to stall.
+    await ws.execute('false')
+    store.stall = true
+    const session = ws.sessionManager.get(ws.sessionManager.defaultId)
+    await expect(
+      ws.execute('export MARK=1', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(session.lastExitCode).toBe(1)
+  })
+
+  it('answers an abort that lands on the session flush with the abort', async () => {
+    // The line finished; the flush of its status is what the abort lands
+    // on, and it settles inside the grace. The answer is still the abort,
+    // and `$?` is what the line found.
+    class Slow extends RAMSessionStore {
+      override async casSet(
+        sessionId: string,
+        fields: SessionFields,
+        expectedGeneration: number,
+      ): Promise<boolean> {
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        return super.casSet(sessionId, fields, expectedGeneration)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, sessionStore: new Slow() },
+    )
+    await ws.execute('false')
+    // An env write is durable, so this line has a flush to land on.
+    await expect(
+      ws.execute('export MARK=1', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
+    await ws.close()
+  })
+
+  it('releases the caller when the history store stalls after a whole-line runtime', async () => {
+    class Answers extends Runtime implements LineExecutor {
+      readonly name = 'answers'
+      readonly [LINE_EXECUTOR] = true as const
+      constructor() {
+        super({ captures: ['anscmd'] })
+      }
+      runLine(): Promise<RunResult> {
+        return Promise.resolve({ stdout: ENC.encode('ok\n'), stderr: null, exitCode: 0 })
+      }
+    }
+    class Stalled extends RAMObserverStore {
+      override append(): Promise<never> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [new Answers(), 'vfs'],
+        observe: new Stalled(),
+      },
+    )
+    // The runtime answered; the record of the line is what stalls.
+    await expect(
+      ws.execute('anscmd now', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('keeps the abort of one line out of another on the same session', async () => {
+    // The status door reads the signal of the line that produced the
+    // statement, so an aborted sibling cannot make this line throw or
+    // stop early.
+    const ws = await makeWs()
+    const kept = ws.execute('sleep 0.4; echo kept')
+    await expect(ws.execute('sleep 5', { signal: AbortSignal.timeout(50) })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    const result = await kept
+    expect(result.exitCode).toBe(0)
+    expect(stdoutStr(result).trim()).toBe('kept')
+    await ws.close()
+  })
+
+  it('starts no further op after the release of a namespace-routed line', async () => {
+    // `rm l1 l2` on two links: the first unlink is held at the op door
+    // past the grace, so the caller is released. The held unlink then
+    // completes and the handler resumes; the second operand must not
+    // reach the door. Python's cancelled task never gets there.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const seen: string[] = []
+    const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
+    const first = new Promise<void>((resolve) => {
+      held.release = resolve
+    })
+    const ws = new Workspace(
+      { '/ram/': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [
+          {
+            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+              if (!held.armed || ctx.op !== 'unlink') return null
+              seen.push(ctx.path.virtual)
+              if (seen.length === 1) await first
+              return null
+            },
+          },
+        ],
+      },
+    )
+    await ws.execute('echo a > /ram/a; echo b > /ram/b; ln -s /ram/a /ram/l1; ln -s /ram/b /ram/l2')
+    held.armed = true
+    const controller = new AbortController()
+    const run = ws.execute('rm /ram/l1 /ram/l2', { signal: controller.signal })
+    while (seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    held.release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(seen).toEqual(['/ram/l1'])
+    expect(stdoutStr(await ws.execute('readlink /ram/l2'))).toBe('/ram/b\n')
+    await ws.close()
+  })
+
+  it('starts no further backend write after the release of a mount command', async () => {
+    // The same shape for a generic-bound command: `rm a b` on two files,
+    // the first unlink held at the slot's policy gate past the grace.
+    // The handler resumes after the release; the second file must keep
+    // its bytes.
+    const parser = await getTestParser()
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    const seen: string[] = []
+    const held: { armed: boolean; release: () => void } = { armed: false, release: () => undefined }
+    const first = new Promise<void>((resolve) => {
+      held.release = resolve
+    })
+    const ws = new Workspace(
+      { '/ram/': ram },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        policies: [
+          {
+            preOps: async (ctx: OpsContext): Promise<Action | null> => {
+              if (!held.armed || ctx.op !== 'unlink') return null
+              seen.push(ctx.path.virtual)
+              if (seen.length === 1) await first
+              return null
+            },
+          },
+        ],
+      },
+    )
+    await ws.execute('echo a > /ram/a; echo b > /ram/b')
+    held.armed = true
+    const controller = new AbortController()
+    const run = ws.execute('rm /ram/a /ram/b', { signal: controller.signal })
+    while (seen.length === 0) await new Promise((resolve) => setTimeout(resolve, 5))
+    controller.abort()
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    held.release()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(seen).toEqual(['/ram/a'])
+    expect(stdoutStr(await ws.execute('cat /ram/b'))).toBe('b\n')
+    await ws.close()
+  })
+
+  it('aborts a whole-line runtime that never answers', async () => {
+    class Hanging extends Runtime implements LineExecutor {
+      readonly name = 'hanging'
+      readonly [LINE_EXECUTOR] = true as const
+      constructor() {
+        super({ captures: ['hangcmd'] })
+      }
+      runLine(): Promise<RunResult> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMResource() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Hanging(), 'vfs'] },
+    )
+    await expect(
+      ws.execute('hangcmd now', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    await ws.close()
+  })
+
+  it('aborts while the file cache is being filled', async () => {
+    const ws = await makeWs()
+    await ws.execute('false')
+    const controller = new AbortController()
+    const dispatcher = (ws as unknown as { dispatcher: { applyIo: () => Promise<void> } })
+      .dispatcher
+    dispatcher.applyIo = async () => {
+      controller.abort()
+      await new Promise<never>(() => undefined)
+    }
+    await expect(ws.execute('echo hi', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    const events = await ws.observer.commandEvents()
+    expect(events.at(-1)?.exit_code).toBe(130)
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })
 })
@@ -392,6 +728,40 @@ describe('execute({ sink }): streaming output to a console', () => {
     expect(stdoutStr(result)).toBe('')
     expect(DEC.decode(result.stderr)).toBe('')
     expect(DEC.decode(await console_.snapshot(Channel.STDERR))).toContain('syntax error')
+    await ws.close()
+  })
+
+  it('releases the caller when the sink store stalls on a buffered result', async () => {
+    class Stalled extends RAMConsoleStore {
+      override append(): Promise<never> {
+        return new Promise<never>(() => undefined)
+      }
+    }
+    const ws = await makeWs()
+    const console_ = new JobConsole(new Stalled())
+    // The syntax gate answers with bytes in hand, so the only await left
+    // after the tree is the drain into the store.
+    await expect(
+      ws.execute('case x', { sink: console_, signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    await ws.close()
+  })
+
+  it('answers an abort that lands on the sink drain with the abort', async () => {
+    class Slow extends RAMConsoleStore {
+      override async append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        return super.append(channel, data)
+      }
+    }
+    const ws = await makeWs()
+    await ws.execute('false')
+    // The syntax gate stamps 2 and answers with bytes in hand; the abort
+    // lands on their drain, which settles inside the grace.
+    await expect(
+      ws.execute('case x', { sink: new JobConsole(new Slow()), signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })
 
