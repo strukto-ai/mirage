@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
@@ -19,6 +22,7 @@ import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import {
+  DiskResource,
   LocalRuntime,
   Workspace,
   parseSessionProfile,
@@ -80,8 +84,33 @@ async function errorCode(promise: Promise<unknown>): Promise<FsErrorCode> {
   throw new Error('expected rejection')
 }
 
+const tempRoots: string[] = []
+
+/**
+ * A workspace with one disk mount, for the host-path mapping.
+ *
+ * @param prefix where the disk resource is mounted.
+ * @returns the filesystem seam and the host directory behind the mount.
+ */
+async function makeDiskFs(
+  prefix = '/work',
+): Promise<{ fs: MirageFileSystem; root: string; ws: Workspace }> {
+  const root = await mkdtemp(join(tmpdir(), 'mirage-dsh-host-'))
+  tempRoots.push(root)
+  const ws = new Workspace({ [prefix]: [new DiskResource({ root }), MountMode.WRITE] })
+  workspaces.push(ws)
+  const ctx = new Context()
+  await ctx.plugin(MirageService, { workspace: ws }).await()
+  await ctx.plugin(MirageFileSystem, {}).await()
+  return { fs: ctx.fs as MirageFileSystem, root, ws }
+}
+
 afterEach(async () => {
   while (workspaces.length > 0) await workspaces.pop()?.close()
+  while (tempRoots.length > 0) {
+    const root = tempRoots.pop()
+    if (root !== undefined) await rm(root, { recursive: true, force: true })
+  }
 })
 
 describe('resolve', () => {
@@ -266,6 +295,66 @@ describe('readBytes', () => {
     const { fs } = await makeFs({ 'sub/a.txt': 'x' })
     const target = await fs.resolve('/data/sub')
     expect(await errorCode(fs.readBytes(target, undefined, 1024))).toBe('FS_NOT_REGULAR_FILE')
+  })
+})
+
+describe('readByteRange', () => {
+  const DEC = new TextDecoder()
+
+  it('reads the window the caller asked for', async () => {
+    const { fs } = await makeFs({ 'a.txt': '0123456789' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(DEC.decode(await fs.readByteRange(target, { offset: 2, length: 3 }))).toBe('234')
+  })
+
+  it('comes back short when the file ends inside the window', async () => {
+    const { fs } = await makeFs({ 'a.txt': '0123456789' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(DEC.decode(await fs.readByteRange(target, { offset: 7, length: 99 }))).toBe('789')
+  })
+
+  it('answers empty at or past the end of the file', async () => {
+    const { fs } = await makeFs({ 'a.txt': '0123456789' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(await fs.readByteRange(target, { offset: 10, length: 4 })).toEqual(new Uint8Array(0))
+    expect(await fs.readByteRange(target, { offset: 99, length: 4 })).toEqual(new Uint8Array(0))
+  })
+
+  it('answers empty for a zero-length window without reading', async () => {
+    const { fs } = await makeFs({ 'a.txt': '0123456789' })
+    const target = await fs.resolve('/data/a.txt')
+    expect(await fs.readByteRange(target, { offset: 2, length: 0 })).toEqual(new Uint8Array(0))
+  })
+
+  it('decodes nothing and rejects nothing: a NUL rides through', async () => {
+    const blob = new Uint8Array([104, 105, 0, 106])
+    const { fs } = await makeFs({ 'blob.bin': blob })
+    const target = await fs.resolve('/data/blob.bin')
+    expect(await fs.readByteRange(target, { offset: 1, length: 3 })).toEqual(blob.slice(1, 4))
+    // The same bytes through the text door are refused, which is the
+    // difference this method exists for.
+    expect(await errorCode(fs.readText(target))).toBe('FS_NOT_TEXT')
+  })
+
+  it('applies no cap of its own: the window is the only bound', async () => {
+    const { fs } = await makeFs({ 'a.txt': 'x'.repeat(4096) })
+    const target = await fs.resolve('/data/a.txt')
+    const bytes = await fs.readByteRange(target, { offset: 0, length: 4096 })
+    expect(bytes.byteLength).toBe(4096)
+  })
+
+  it('reports a missing file as FS_NOT_FOUND', async () => {
+    const { fs } = await makeFs()
+    const target = await fs.resolve('/data/nope')
+    expect(await errorCode(fs.readByteRange(target, { offset: 0, length: 4 }))).toBe('FS_NOT_FOUND')
+  })
+
+  it('refuses a directory as FS_NOT_REGULAR_FILE', async () => {
+    const { fs } = await makeFs({ 'sub/a.txt': 'x' })
+    const target = await fs.resolve('/data/sub')
+    expect(await errorCode(fs.readByteRange(target, { offset: 0, length: 4 }))).toBe(
+      'FS_NOT_REGULAR_FILE',
+    )
   })
 })
 
@@ -586,5 +675,58 @@ describe('a policy refusal at the op door', () => {
     const target = await fs.resolve('/data/a.txt')
     const err = await fs.writeText(target, 'nope').catch((caught: unknown) => caught)
     expect((err as FsError).code).toBe('FS_PERMISSION_DENIED')
+  })
+})
+
+describe('processPathFromHostPath', () => {
+  it('maps a host path under a disk mount onto its workspace path', async () => {
+    const { fs, root } = await makeDiskFs()
+    await writeFile(join(root, 'a.txt'), 'hello')
+    expect(fs.processPathFromHostPath(join(root, 'a.txt'))).toBe('/work/a.txt')
+  })
+
+  it('maps a nested host path, separators and all', async () => {
+    const { fs, root } = await makeDiskFs()
+    const nested = ['sub', 'deeper', 'c.txt'].join(sep)
+    expect(fs.processPathFromHostPath(join(root, nested))).toBe('/work/sub/deeper/c.txt')
+  })
+
+  it('maps the mount root itself without a trailing slash', async () => {
+    const { fs, root } = await makeDiskFs()
+    expect(fs.processPathFromHostPath(root)).toBe('/work')
+  })
+
+  it('normalizes a host path before matching', async () => {
+    const { fs, root } = await makeDiskFs()
+    expect(fs.processPathFromHostPath(join(root, 'sub', '..', 'a.txt'))).toBe('/work/a.txt')
+  })
+
+  it('declines a host path outside every disk mount', async () => {
+    const { fs, root } = await makeDiskFs()
+    expect(fs.processPathFromHostPath(resolve(root, '..', 'elsewhere.txt'))).toBeUndefined()
+  })
+
+  it('declines a relative path, having no host cwd to resolve it against', async () => {
+    const { fs } = await makeDiskFs()
+    expect(fs.processPathFromHostPath('a.txt')).toBeUndefined()
+  })
+
+  it('declines when no mount holds host files at all', async () => {
+    // A ram mount holds the same bytes as nothing on the host, so there
+    // is no path to answer with and inventing one would name a file the
+    // caller cannot open.
+    const { fs } = await makeFs({ 'a.txt': 'hello' })
+    expect(fs.processPathFromHostPath('/data/a.txt')).toBeUndefined()
+  })
+
+  it('answers a path the shell and the fs seam both reach', async () => {
+    const { fs, root, ws } = await makeDiskFs()
+    await writeFile(join(root, 'a.txt'), 'hello')
+    const virtual = fs.processPathFromHostPath(join(root, 'a.txt'))
+    if (virtual === undefined) throw new Error('expected a mapping')
+    // The point of the mapping: what it returns is live in this world,
+    // not merely well-formed.
+    expect(await ws.fs.readFileText(virtual)).toBe('hello')
+    expect(await fs.readText(await fs.resolve(virtual))).toBe('hello')
   })
 })

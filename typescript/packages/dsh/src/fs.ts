@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { posix } from 'node:path'
+import { isAbsolute, posix, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
@@ -26,6 +26,7 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
+import { DiskResource } from '@struktoai/mirage-node'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -243,6 +244,42 @@ export class MirageFileSystem extends FileSystem {
     return String(target.targetKey)
   }
 
+  /**
+   * The workspace path naming the same file as `hostPath`, when a mount
+   * puts one there.
+   *
+   * Most of this world has no host spelling at all: an S3 key, a Slack
+   * message and a Notion row are not files the harness could open, and
+   * claiming otherwise would hand the caller a path that reads as the
+   * wrong bytes. A disk mount is the one place the two worlds hold the
+   * same file, so it is the one place a host path is answerable; every
+   * other mount declines, and so does a workspace still building.
+   *
+   * @param hostPath absolute path in the harness host filesystem.
+   * @returns the virtual path for the same file, or undefined when no
+   *   mount maps it.
+   */
+  override processPathFromHostPath(hostPath: string): string | undefined {
+    if (!isAbsolute(hostPath)) return undefined
+    const workspace = this.ctx.mirage.workspaceIfReady
+    if (workspace === null) return undefined
+    const host = resolve(hostPath)
+    for (const entry of workspace.mounts()) {
+      const { resource } = entry
+      if (!(resource instanceof DiskResource)) continue
+      const rel = relative(resource.root, host)
+      // A path outside the root escapes through `..` or answers absolute
+      // (a different drive on win32); neither is under this mount.
+      if (rel.startsWith('..') || isAbsolute(rel)) continue
+      // `prefix` always carries a trailing slash, and `rel` is empty for
+      // the root itself, so the join is a concatenation and the slash is
+      // trimmed back off unless the mount is the workspace root.
+      const virtual = `${entry.prefix}${rel.split(sep).join('/')}`
+      return virtual.length > 1 && virtual.endsWith('/') ? virtual.slice(0, -1) : virtual
+    }
+    return undefined
+  }
+
   fileUrl(target: FsTarget): string {
     const encoded = String(target.targetKey).split('/').map(encodeURIComponent).join('/')
     return `file://${encoded}`
@@ -329,21 +366,37 @@ export class MirageFileSystem extends FileSystem {
     return singleChunk(text)
   }
 
+  /**
+   * Stat a read target and refuse anything that is not a regular file.
+   *
+   * A backend read of a directory key surfaces as a missing path, which
+   * would report a path that plainly exists as absent.
+   *
+   * @param target the resolved target about to be read.
+   * @param signal aborts the stat.
+   * @returns the stat row, or undefined when the mount reports none.
+   */
+  private async statRegularFile(
+    target: FsTarget,
+    signal: AbortSignal | undefined,
+  ): Promise<FsInfo | undefined> {
+    const info = await this.stat(target, signal)
+    if (info !== undefined && info.type !== 'file') {
+      throw new FsError(
+        `cannot read "${target.displayPath}": not a regular file`,
+        'FS_NOT_REGULAR_FILE',
+      )
+    }
+    return info
+  }
+
   async readBytes(
     target: FsTarget,
     signal: AbortSignal | undefined,
     maxBytes: number,
   ): Promise<Uint8Array> {
     assertNotAborted(signal, 'read')
-    const info = await this.stat(target, signal)
-    if (info !== undefined && info.type !== 'file') {
-      // A backend read of a directory key surfaces as a missing path, which
-      // would report a path that plainly exists as absent.
-      throw new FsError(
-        `cannot read "${target.displayPath}": not a regular file`,
-        'FS_NOT_REGULAR_FILE',
-      )
-    }
+    const info = await this.statRegularFile(target, signal)
     if (info?.size !== undefined && info.size > maxBytes) {
       throw tooLarge(target.displayPath, maxBytes, info.size)
     }
@@ -362,6 +415,29 @@ export class MirageFileSystem extends FileSystem {
       throw tooLarge(target.displayPath, maxBytes)
     }
     return bytes
+  }
+
+  async readByteRange(
+    target: FsTarget,
+    range: { offset: number; length: number },
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    assertNotAborted(signal, 'read')
+    await this.statRegularFile(target, signal)
+    // No store can spell an empty range, so the known answer is given here
+    // rather than sent to a backend that would have to refuse it.
+    if (range.length === 0) return new Uint8Array(0)
+    // The window is the bound, not the file: the op door asks a native range
+    // when the backend has one and slices a rendered read when it does not,
+    // and turns a store's past-EOF refusal into the empty POSIX answer either
+    // way, so every mount answers this the same.
+    try {
+      return await (
+        await this.ops(signal, 'read')
+      ).readFile(String(target.targetKey), { offset: range.offset, size: range.length })
+    } catch (err) {
+      throw mapMirageError(err, 'read', target.displayPath)
+    }
   }
 
   async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {

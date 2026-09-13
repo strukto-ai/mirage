@@ -9,7 +9,7 @@ icon: /images/deepseek-logo.svg
 ## Install
 
 ```bash
-npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill
 ```
 
 ## Compose
@@ -80,7 +80,7 @@ const script = await shell.run(
 
 ## Install into a dsh profile
 
-The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem and bash providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
+The package is also a dsh bundle: its manifest carries a patch layer that swaps dsh's filesystem, bash and spill providers for the mirage ones and disables the host-subprocess surfaces the workspace does not contain (PowerShell, the ripgrep search tool). Stock dsh, including its web app, then runs on mounted data:
 
 ```bash
 dsh plugin --profile web add @struktoai/mirage-dsh
