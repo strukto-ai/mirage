@@ -150,3 +150,60 @@ async def list_folder(
                                  {"cursor": resp["cursor"]})
         out.extend(resp["entries"])
     return out
+
+
+async def list_folder_state(
+    tm: DropboxTokenManager,
+    path: str,
+    recursive: bool = False,
+    page_size: int = 2000,
+) -> tuple[list[dict[str, Any]], str]:
+    """List a folder and keep the cursor the last page handed back.
+
+    Args:
+        tm (DropboxTokenManager): Dropbox token manager.
+        path (str): folder to list; "/" and "" both mean the account root.
+        recursive (bool): list every descendant, not just the children.
+        page_size (int): entries per request.
+
+    Returns:
+        tuple[list[dict], str]: entry metadata and the opaque cursor.
+    """
+    api_path = "" if path in ("/", "") else path
+    out: list[dict[str, Any]] = []
+    resp = await dropbox_rpc(tm, "/files/list_folder", {
+        "path": api_path,
+        "recursive": recursive,
+        "limit": page_size,
+    })
+    out.extend(resp["entries"])
+    while resp.get("has_more"):
+        resp = await dropbox_rpc(tm, "/files/list_folder/continue",
+                                 {"cursor": resp["cursor"]})
+        out.extend(resp["entries"])
+    return out, resp["cursor"]
+
+
+async def continue_folder(
+    tm: DropboxTokenManager,
+    cursor: str,
+) -> tuple[list[dict[str, Any]], str]:
+    """Replay changes since ``cursor``, following every continuation page.
+
+    Args:
+        tm (DropboxTokenManager): Dropbox token manager.
+        cursor (str): opaque cursor from a previous list or continue.
+
+    Returns:
+        tuple[list[dict], str]: changed entries (including deleted) and
+            the next cursor.
+    """
+    out: list[dict[str, Any]] = []
+    resp = await dropbox_rpc(tm, "/files/list_folder/continue",
+                             {"cursor": cursor})
+    out.extend(resp["entries"])
+    while resp.get("has_more"):
+        resp = await dropbox_rpc(tm, "/files/list_folder/continue",
+                                 {"cursor": resp["cursor"]})
+        out.extend(resp["entries"])
+    return out, resp["cursor"]

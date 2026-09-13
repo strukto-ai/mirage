@@ -42,6 +42,15 @@ export function dirname(path: string): string {
   return cut <= 0 ? '' : path.slice(0, cut)
 }
 
+export function deletedEntry(path: string): JsonValue {
+  return {
+    '.tag': 'deleted',
+    name: basename(path),
+    path_lower: path.toLowerCase(),
+    path_display: path,
+  }
+}
+
 // Real Dropbox derives content_hash from a SHA-256 over 4 MiB block digests;
 // the fake hashes the whole content instead, which is opaque to a client that
 // only ever compares it for equality, and keeps the property that matters:
