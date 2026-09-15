@@ -33,6 +33,7 @@ import asyncio
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.types import DriftPolicy
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.keys import StateKey
+from mirage.workspace.snapshot.tar_io import read_tar
 
 SUITE = Path(__file__).with_name("cases.json")
 HOST = "python"
@@ -413,7 +415,6 @@ async def write_arm(run: str, out: Path, only: str | None) -> int:
             failures += 1
             print(f"FAIL {HOST}/write/{cid}: {type(exc).__name__}: {exc}")
             if os.environ.get("SNAP_TRACE"):
-                import traceback
                 traceback.print_exc()
         else:
             print(f"ok {HOST}/write/{cid}")
@@ -455,7 +456,6 @@ def read_manifest(tar: Path) -> dict[str, Any]:
     Args:
         tar (Path): the snapshot.
     """
-    from mirage.workspace.snapshot.tar_io import read_tar
     return read_tar(str(tar))
 
 
@@ -490,7 +490,6 @@ async def read_arm(run: str, src: Path, out: Path, only: str | None) -> int:
             failures += 1
             print(f"FAIL {HOST}/read/{cid}: {type(exc).__name__}: {exc}")
             if os.environ.get("SNAP_TRACE"):
-                import traceback
                 traceback.print_exc()
         else:
             print(f"ok {HOST}/read/{cid}")
