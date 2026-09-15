@@ -261,7 +261,7 @@ class _OsRouter:
         # that.
         self._now = time.time()
         # Windows has no getuid/getgid, and the ids are irrelevant
-        # there; mirrors fuse/core.py.
+        # there; mirrors mount/core.py.
         self._uid = (_real_os.getuid() if hasattr(_real_os, "getuid") else 0)
         self._gid = (_real_os.getgid() if hasattr(_real_os, "getgid") else 0)
 

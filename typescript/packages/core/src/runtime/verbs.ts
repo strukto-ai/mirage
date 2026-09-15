@@ -68,7 +68,7 @@ export const ROUTED_VERBS: Readonly<Record<string, readonly string[]>> = {
 // whose guest has its own cwd (Emscripten does) serves it inside that
 // guest and never reaches this table.
 // The extended-attribute family is refused rather than faked, which is
-// a deliberate divergence from `fuse/core.ts`: a real mountpoint has to
+// a deliberate divergence from `mount/core.ts`: a real mountpoint has to
 // keep Finder and `cp -p` working, so it holds advisory xattrs in memory
 // for the mount's lifetime. There is no op behind that, so nothing above
 // the FUSE adapter can reach it, and ENOTSUP is what a filesystem

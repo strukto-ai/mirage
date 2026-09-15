@@ -347,7 +347,12 @@ describe('MirageFS — size=null resources (API-backed)', () => {
       '/data/api.json',
       fsConstants.O_WRONLY | fsConstants.O_TRUNC,
     )
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', reader)
+    const [code, attr] = await callOp<[number, MountAttrs]>(
+      mfs,
+      'fgetattr',
+      '/data/api.json',
+      reader,
+    )
     expect(code).toBe(0)
     expect(attr.size).toBe(0)
     const [readCode] = await callOp<[number]>(
@@ -431,7 +436,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     await callOp(mfs, 'write', '/data/api.json', writer, j, j.byteLength, 0)
     const [truncCode] = await callOp<[number]>(mfs, 'truncate', '/data/api.json', 5)
     expect(truncCode).toBe(0)
-    const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', reader)
+    const [, attr] = await callOp<[number, MountAttrs]>(mfs, 'fgetattr', '/data/api.json', reader)
     expect(attr.size).toBe(5)
     const out = Buffer.alloc(100)
     const [n] = await callOp<[number]>(mfs, 'read', '/data/api.json', reader, out, 100, 0)
