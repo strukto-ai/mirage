@@ -4,8 +4,10 @@
 # then asserts (1) the two languages produce identical results and (2) the
 # results match the expected values. Covers subshell isolation, sessions,
 # per-session mount modes, asks (list-asks/allow/deny), git-backed
-# versioning, and fuse config wiring. Uses RAM mounts only (no
-# redis/minio/fuse kernel deps), so it runs anywhere both CLIs are built.
+# versioning, and fuse config wiring. Mounts are RAM only (no redis/minio), but
+# the fuse case creates a `backend: fuse` workspace, which is a REAL kernel
+# mount on both hosts -- so this needs libfuse and /dev/fuse, same as
+# fuse/cli_fuse.sh.
 #
 # Usage: parity.sh "<py-cli>" "<ts-cli>"
 set -uo pipefail

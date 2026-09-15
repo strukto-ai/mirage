@@ -6,11 +6,32 @@ permissions:
 "on":
   push:
     branches: [main]
+    # Kept in step with the pull_request filter below: this list had drifted to
+    # cover only one of the eleven batteries, so a push touching solely one of
+    # the other ten landed without this workflow running at all.
     paths:
       - python/**
       - typescript/**
+      - integ/cross.sh
+      - integ/cross.yaml
+      - integ/cross_cache.yaml
+      - integ/state_store.*
+      - integ/index_store.*
+      - integ/parity.sh
       - integ/execute_stdin.py
+      - integ/fuse/cli_fuse.sh
+      - integ/cli_config.sh
+      - integ/cli_env.sh
+      - integ/cli_ref.sh
+      - integ/resource_ref.sh
+      - integ/runtime_ref.sh
+      - integ/fixtures/cli/**
+      - integ/fixtures/resource/**
+      - integ/fixtures/runtime/**
+      - integ/package.json
+      - integ/tsconfig.json
       - .github/workflows/test_cli.yml
+      - .github/actions/cli-battery-setup/action.yml
       - .github/actions/setup-node-pnpm/action.yml
   pull_request:
     branches: [main]
@@ -44,6 +65,9 @@ jobs:
               - 'typescript/**'
               - 'integ/cross.sh'
               - 'integ/cross.yaml'
+              - 'integ/cross_cache.yaml'
+              - 'integ/state_store.*'
+              - 'integ/index_store.*'
               - 'integ/parity.sh'
               - 'integ/execute_stdin.py'
               - 'integ/fuse/cli_fuse.sh'
@@ -55,7 +79,10 @@ jobs:
               - 'integ/fixtures/cli/**'
               - 'integ/fixtures/resource/**'
               - 'integ/fixtures/runtime/**'
+              - 'integ/package.json'
+              - 'integ/tsconfig.json'
               - '.github/workflows/test_cli.yml'
+              - '.github/actions/cli-battery-setup/action.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
 
   typescript-build:
@@ -644,10 +671,39 @@ jobs:
             exit 1
           fi
 
-  cross:
+  # The eleven CLI batteries split four ways. Each runs as its own process and
+  # nearly every one sets its own MIRAGE_HOME, so the only thing the split
+  # changes is which runner they land on. cli_fuse.sh is the exception among the
+  # daemon-driving batteries, which is what the guard on cross-ref-fuse is for.
+  # Grouped by what the runner has to provide, and balanced so parity, which
+  # drives the most CLI invocations of any battery, sits alone on its own leg.
+  cross-parity:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: Cross-language snapshot interop
+    name: CLI feature parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # libfuse: parity.sh's FUSE_YAML carries `backend: fuse`, and creating
+      # that workspace is a real kernel mount on both hosts, not a config-parse
+      # check. The script header's "no fuse kernel deps" predates that case.
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
+        with:
+          libfuse: "true"
+
+      - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
+        run: |
+          bash integ/parity.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+  cross-snapshot:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: Cross-language snapshot and store interop
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -672,41 +728,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install libfuse (mfusepy + @zkochan/fuse-native, for the CLI FUSE e2e)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fuse3 libfuse3-dev libfuse2t64 || \
-            sudo apt-get install -y fuse3 libfuse3-dev libfuse2
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.12.9"
-          enable-cache: true
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras --no-extra camel
-
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: "24"
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
-
-      - name: Download TypeScript build outputs
-        uses: actions/download-artifact@v8
-        with:
-          name: cli-typescript-dist
-          path: typescript/packages
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
 
       - name: Start MinIO
         run: |
@@ -722,7 +745,13 @@ jobs:
             sleep 1
           done
 
-      - name: Create MinIO bucket
+      # BOTH buckets, always. mirage-cross is cross.yaml's /minio mount and
+      # mirage-state is the state_store S3 round. cross.sh compares writer
+      # output against READER output rather than a literal and never checks an
+      # exit code, and S3Resource does no network I/O at construction, so a
+      # missing mirage-cross reads as '' on both sides and the battery passes
+      # having tested nothing.
+      - name: Create MinIO buckets
         run: |
           for i in $(seq 1 5); do
             docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
@@ -742,6 +771,9 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
+      # STORE_S3 gates the whole second round inside the script
+      # (`if [ "${STORE_S3:-0}" == "1" ]`), and without it the battery still
+      # prints OK and exits 0. It has to stay on this step.
       - name: Run cross-language state store interop (both directions)
         run: bash integ/state_store.sh
         env:
@@ -752,11 +784,17 @@ jobs:
       - name: Run cross-language index store interop (both directions)
         run: bash integ/index_store.sh
 
-      - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
-        run: |
-          bash integ/parity.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
+  cross-config:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: CLI config, ref and env batteries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
 
       - name: Run CLI config battery (relocation, validation, resolved view)
         run: |
@@ -770,6 +808,26 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
+      - name: Run CLI env battery (env block presets and managed sources)
+        run: |
+          bash integ/cli_env.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+  cross-ref-fuse:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: Resource/runtime ref and CLI FUSE batteries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
+        with:
+          libfuse: "true"
+
       - name: Run resource ref battery (a backend mounted from a file, snapshotted and reloaded)
         run: |
           bash integ/resource_ref.sh \
@@ -782,14 +840,19 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
-      - name: Run CLI env battery (env block presets and managed sources)
-        run: |
-          bash integ/cli_env.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
-
+      # Closes a latent hazard the split makes likelier rather than one it
+      # invents. cli_fuse.sh is the only daemon-driving battery with no
+      # MIRAGE_HOME of its own, and the only one on 8765 with no freeport
+      # helper. If runtime_ref.sh's final `daemon stop` does not take, its
+      # daemon stays on 8765: /v1/health skips auth, so the CLI adopts the
+      # survivor rather than spawning, and every real request then 401s on a
+      # token minted under a different home -- the battery dies on errors that
+      # look nothing like FUSE. cli_env.sh used to run between the two, on
+      # 9430/9440, so it never cleared 8765 either; what it did do was give a
+      # leftover daemon a chance to reach its 30s idle-grace self-exit.
       - name: Run CLI end-to-end FUSE (two per-mount subtrees, real libfuse)
         run: |
+          lsof -ti:8765 | xargs -r kill -9 || true
           bash integ/fuse/cli_fuse.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
@@ -797,7 +860,7 @@ jobs:
   gate:
     name: cli-gate
     runs-on: ubuntu-latest
-    needs: [changes, typescript-build, python, typescript, cross]
+    needs: [changes, typescript-build, python, typescript, cross-parity, cross-snapshot, cross-config, cross-ref-fuse]
     if: always()
     steps:
       - name: Check required jobs
