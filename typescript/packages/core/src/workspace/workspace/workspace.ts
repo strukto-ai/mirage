@@ -679,9 +679,15 @@ export class Workspace {
    * The named profiles, as the constructor took them: the document a
    * snapshot carries, so a loader without the deployment's config file
    * still has what its sessions were narrowed under.
+   *
+   * A shallow copy, because the document is what every session on this
+   * workspace was narrowed under and a caller holding the live record
+   * could add or drop a name behind the compiler's back. Python keeps
+   * the same record private (`ws._profiles`) and has no public door on
+   * it at all.
    */
   get profiles(): Readonly<Record<string, SessionProfile>> {
-    return this.profilesInternal
+    return { ...this.profilesInternal }
   }
 
   /** The default profile's name, null for the implicit `default` or no default at all. */

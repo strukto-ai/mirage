@@ -676,25 +676,6 @@ function mountToDoc(entry: ProfileMount): Record<string, unknown> {
 }
 
 /**
- * A profile as the document its parser reads back.
- *
- * The shape a snapshot carries a profile in, so a loader without the
- * deployment's config file still has the document its sessions were
- * narrowed under. The parsed object is not that shape: a compiled rule
- * holds fields the document grammar refuses (`mount`, `commands` beside
- * `paths`), so this writes the grammar instead. An unsaid field is
- * omitted and a stated-but-empty block is kept, so
- * `profileFromJSON(profileToJSON(p))` reads as `p` for any profile
- * `parseSessionProfile` produced (deep-equal too, except that a rule
- * written as a one-entry mapping with the default reason comes back as
- * the bare string spells it, with no `paths` key where the mapping form
- * left an empty one; every reader treats the two alike). One known
- * limit: a rule a typed caller built with several commands *and* paths
- * has only the mapping form to travel in, and reads back as one rule
- * per command, which the doors judge the same way. Mirrors the Python
- * `profile_to_dict`.
- */
-/**
  * A show list as the document's mapping, weakest mode per path.
  *
  * The grammar keys a show by path, so two entries for one path have one
@@ -720,6 +701,25 @@ function showToJSON(show: readonly ShowEntry[]): Record<string, MountMode | null
   return doc
 }
 
+/**
+ * A profile as the document its parser reads back.
+ *
+ * The shape a snapshot carries a profile in, so a loader without the
+ * deployment's config file still has the document its sessions were
+ * narrowed under. The parsed object is not that shape: a compiled rule
+ * holds fields the document grammar refuses (`mount`, `commands` beside
+ * `paths`), so this writes the grammar instead. An unsaid field is
+ * omitted and a stated-but-empty block is kept, so
+ * `profileFromJSON(profileToJSON(p))` reads as `p` for any profile
+ * `parseSessionProfile` produced (deep-equal too, except that a rule
+ * written as a one-entry mapping with the default reason comes back as
+ * the bare string spells it, with no `paths` key where the mapping form
+ * left an empty one; every reader treats the two alike). One known
+ * limit: a rule a typed caller built with several commands *and* paths
+ * has only the mapping form to travel in, and reads back as one rule
+ * per command, which the doors judge the same way. Mirrors the Python
+ * `profile_to_dict`.
+ */
 export function profileToJSON(profile: SessionProfile): Record<string, unknown> {
   const doc: Record<string, unknown> = {}
   if (profile.cwd != null) doc.cwd = profile.cwd

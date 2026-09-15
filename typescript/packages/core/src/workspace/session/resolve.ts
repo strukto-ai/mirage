@@ -908,16 +908,17 @@ function held(mode: MountMode, allowed: MountMode | null): MountMode {
 /**
  * One show entry as both sides allow it, or null to drop it.
  *
- * A show does two things, and each side has to have said it. It
- * re-opens what a hide covers, so an entry only one side states
- * survives exactly where the other side hides nothing over it
- * (`hidesShow`) — that side left the path open, so both allow it. It
- * states the mode below its anchor, and a show scores deeper than a
- * per-mount cap, so a mode only one side states is held under the other
- * side's cap there; two stated modes take the weaker; two list-form
- * entries stay list-form, since the merged caps already hold the weaker
- * mode below them. The entry itself is returned when nothing changed,
- * so an identical table leaves the session's objects in place.
+ * A show does two things. It re-opens what a hide covers, so an entry
+ * only one side states survives exactly where the other side grants
+ * that path (`grants`) — which keeps a nested carve-out both sides
+ * reach and drops a broad one only one side reaches. And it states the
+ * mode below its anchor, so a mode only one side states is held under
+ * whatever the other side allows there (`allowance`, a show mode where
+ * there is one and the mount cap otherwise); two stated modes take the
+ * weaker; two list-form entries stay list-form, since the merged caps
+ * already hold the weaker mode below them. The entry itself is returned
+ * when nothing changed, so an identical table leaves the session's
+ * objects in place.
  */
 function mergeShow(
   mine: ShowEntry,
@@ -942,10 +943,6 @@ function mergeShow(
   return mode === mine.mode ? mine : { path: mine.path, mode }
 }
 
-/**
- * Both sides' show entries as both allow them (`mergeShow`), the
- * session's first; the session's own object when nothing changed.
- */
 /**
  * One side's show entries, one per path, at its weakest mode.
  *
@@ -974,6 +971,10 @@ function folded(shown: ShownPaths | null): readonly ShowEntry[] {
   return [...out.values()]
 }
 
+/**
+ * Both sides' show entries as both allow them (`mergeShow`), the
+ * session's first; the session's own object when nothing changed.
+ */
 function mergeShown(base: Side, table: Side): ShownPaths | null {
   if (base.shown === null && table.shown === null) return null
   const baseEntries = folded(base.shown)

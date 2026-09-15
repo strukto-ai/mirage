@@ -1131,6 +1131,52 @@ describe('the document rides the state and the restore never widens', () => {
     await restored.close()
   })
 
+  // The twin of python's `the default session's named profile governs
+  // after a load`: the gate left the default session on whatever
+  // profile it already ran under, so a snapshot whose default session
+  // had been moved to a named profile came back without that profile's
+  // policy program or its rules. Asserted the way the checkout twin
+  // below asserts it — the name, the program's presence, and the
+  // profile's own deny — rather than through a line the guest program
+  // has to answer, since this LOCKED's `preCommand` is a quickjs
+  // function and returns null anyway.
+  it("the default session's named profile governs after a load", async () => {
+    const source = profiled({ locked: LOCKED })
+    expect((await source.execute('echo kept > /data/f.txt')).exitCode).toBe(0)
+    await source.setSessionProfile(source.defaultSessionId, 'locked')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = await Workspace.fromState(state, loadOptions())
+    const restored = target.getSession(target.defaultSessionId)
+    expect(restored.profile).toBe('locked')
+    expect(restored.script).not.toBeNull()
+    expect((await line(target, 'rm /data/f.txt', target.defaultSessionId)).exit).toBe(126)
+    await target.close()
+  })
+
+  // `profile` was both the public default and the loader's
+  // no-override signal on python, so clearing the default profile a
+  // snapshot names could not say so. TypeScript needs no sentinel for
+  // that — its options spread already tells an omitted key from an
+  // explicit null — and this pins both halves of it.
+  it('an explicit null profile clears the recorded default', async () => {
+    const source = profiled({ locked: LOCKED })
+    const state = await toStateDict(source)
+    await source.close()
+    state.profile = 'locked'
+    const profiles = { locked: parseSessionProfile(LOCKED) }
+    const kept = await Workspace.fromState(state, { ...loadOptions(), profiles })
+    expect(kept.defaultProfileName).toBe('locked')
+    await kept.close()
+    const cleared = await Workspace.fromState(state, {
+      ...loadOptions(),
+      profiles,
+      profile: null,
+    })
+    expect(cleared.defaultProfileName).toBeNull()
+    await cleared.close()
+  })
+
   // `governs` means the named profile alone, not unioned with the
   // default one. A loader builds its target before it restores into it,
   // and the constructor stamps the document's default profile onto the

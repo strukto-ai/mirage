@@ -348,13 +348,17 @@ export function buildMountArgs(
   const profiles = Object.fromEntries(
     Object.entries(state.profiles ?? {}).map(([name, doc]) => [name, profileFromJSON(doc)]),
   )
+  // Read for truthiness, the way python's `if saved_consistency else
+  // LAZY` reads it: a JSON `null` that survived a round trip through a
+  // store is an absent key here, not a value, and must fall back rather
+  // than refuse the load.
   const saved = state.consistency
-  if (saved !== undefined && !VALID_CONSISTENCY.includes(saved)) {
+  if (saved && !VALID_CONSISTENCY.includes(saved)) {
     throw new Error(`Workspace.fromState: invalid consistency '${saved}'`)
   }
   return {
     mountArgs,
-    consistency: saved === undefined ? ConsistencyPolicy.LAZY : (saved as ConsistencyPolicy),
+    consistency: saved ? (saved as ConsistencyPolicy) : ConsistencyPolicy.LAZY,
     defaultSessionId: state.default_session_id,
     defaultAgentId: state.default_agent_id,
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),

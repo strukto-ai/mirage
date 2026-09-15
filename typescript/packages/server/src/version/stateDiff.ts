@@ -74,8 +74,13 @@ function sessionDelta(before: AnyDict, after: AnyDict): AnyDict {
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
   for (const key of keys.sort(compareCodePoints)) {
     if (SESSION_DIFF_SKIP.has(key)) continue
-    const was = before[key]
-    const now = after[key]
+    // An absent field and a null one are the same fact, and python
+    // says so by reading both through `dict.get` and comparing None to
+    // None. Comparing the raw values instead made `undefined` and
+    // `null` differ under JSON.stringify, so a table that merely
+    // spelled a missing field as null reported `{from: null, to: null}`.
+    const was = before[key] ?? null
+    const now = after[key] ?? null
     if (JSON.stringify(was) === JSON.stringify(now)) continue
     if (isPlainDict(was) || isPlainDict(now)) {
       const delta = dictDelta(
