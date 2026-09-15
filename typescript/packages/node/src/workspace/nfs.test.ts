@@ -163,6 +163,41 @@ describe('NFSManager', () => {
     expect(rec.mounts[0]?.[2]).toBe('/deep/tree')
   })
 
+  // The export path is the prefix with its leading and trailing slash
+  // runs trimmed and exactly one leading slash put back, and an empty
+  // result is the root export. These pin that answer -- the linear scan
+  // behind it replaced a pair of /\/+/ replaces and has to agree with
+  // them on every shape, the empty and all-slash ones included.
+  it.each([
+    ['/deep/tree', '/deep/tree'],
+    ['deep/tree', '/deep/tree'],
+    ['/deep/tree/', '/deep/tree'],
+    ['///deep/tree///', '/deep/tree'],
+    ['/', '/'],
+    ['///', '/'],
+    ['', '/'],
+    ['/a//b/', '/a//b'],
+  ])('normalises the prefix %j to the export path %j', async (prefix, expected) => {
+    const [manager, rec] = make()
+    await manager.setup(workspace(), prefix, join(tempBase(), 'm'))
+    expect(rec.mounts[0]?.[2]).toBe(expected)
+  })
+
+  // A caller names the prefix, so a long run of slashes is input the
+  // manager does not choose. The two /\/+/ replaces this used to run
+  // rescanned a trailing run from every position: ~8s for 80k slashes,
+  // and quadratic, so it is a denial of service rather than a slow
+  // path. A linear scan is microseconds; the bound is loose on purpose
+  // so a busy runner cannot make it flaky, and still ~1000x under it.
+  it('normalises a pathological run of slashes in linear time', async () => {
+    const [manager, rec] = make()
+    const pathological = '/deep' + '/'.repeat(80_000)
+    const started = performance.now()
+    await manager.setup(workspace(), pathological, join(tempBase(), 'm'))
+    expect(performance.now() - started).toBeLessThan(250)
+    expect(rec.mounts[0]?.[2]).toBe('/deep')
+  })
+
   it('refuses a mountpoint that already serves another prefix', async () => {
     const [manager, rec] = make()
     const ws = workspace()

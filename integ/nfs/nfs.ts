@@ -67,6 +67,16 @@ const MOUNTPOINTS = new Set<string>()
 const BATTERY_TIMEOUT_SECONDS = 300
 const FORCE_UMOUNT_TIMEOUT_SECONDS = 15
 
+// The linear twin of a /\/+$/ replace, which rescans a run of slashes
+// from every position. packages/core's utils/slash is not on integ's
+// import surface, so the scan lives here; core/src/utils/slash.ts is
+// the same four lines.
+function rstripSlash(s: string): string {
+  let end = s.length
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end -= 1
+  return s.slice(0, end)
+}
+
 /**
  * Whether a mountpoint directory is gone, without stat'ing it.
  *
@@ -76,7 +86,7 @@ const FORCE_UMOUNT_TIMEOUT_SECONDS = 15
  * parent names the entry without ever crossing into it.
  */
 function gone(path: string): boolean {
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path)
   if (trimmed === '') return true
   try {
     return !readdirSync(dirname(trimmed)).includes(basename(trimmed))

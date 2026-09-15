@@ -12,12 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { RenameIntoSelfError, StaleHandleError } from './errors.ts'
 
 export const ROOT_PATH = '/'
 
+// rstripSlash rather than a /\/+$/ replace: the same answer, but a
+// linear scan. A path reaches this from a client's RENAME, so a run of
+// slashes is data the adapter does not choose, and the regex rescans
+// such a run from every position (8s for 80k slashes, quadratic).
 function descendantPrefix(path: string): string {
-  return path.replace(/\/+$/, '') + '/'
+  return rstripSlash(path) + '/'
 }
 
 /**

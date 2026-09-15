@@ -107,4 +107,56 @@ describe('IdTable', () => {
     expect(t.resolve(mover)).toBe('/dst.txt')
     expect(() => t.resolve(victim)).toThrow(StaleHandleError)
   })
+
+  // The descendant prefix a rename compares against trims a trailing run
+  // of slashes, so '/dir', '/dir/' and '/dir///' name one subtree. These
+  // pin that answer -- the linear scan behind it replaced a /\/+$/ regex
+  // and has to agree with it on every shape.
+  it.each([
+    ['/dir', '/dir/inner'],
+    ['/dir/', '/dir/inner'],
+    ['/dir///', '/dir/inner'],
+  ])('treats %s as owning its subtree', (source, target) => {
+    const t = new IdTable()
+    t.alloc('/dir')
+    expect(() => {
+      t.guardRename(source, target)
+    }).toThrow(RenameIntoSelfError)
+  })
+
+  it('does not mistake a sibling sharing a name prefix for a descendant', () => {
+    const t = new IdTable()
+    t.alloc('/dir')
+    expect(() => {
+      t.guardRename('/dir', '/dirge')
+    }).not.toThrow()
+    expect(() => {
+      t.guardRename('/dir/', '/dirge')
+    }).not.toThrow()
+  })
+
+  it('carries descendants across a rename whose source ends in slashes', () => {
+    const t = new IdTable()
+    const child = t.alloc('/dir/child.txt')
+    t.rename('/dir//', '/moved')
+    expect(t.resolve(child)).toBe('/moved/child.txt')
+  })
+
+  // A client names the path in a RENAME, so a long run of slashes is
+  // input the adapter does not choose. The /\/+$/ replace this used to
+  // run rescanned such a run from every position: ~8s for 80k slashes,
+  // and quadratic, so it is a denial of service rather than a slow path.
+  // A linear scan is microseconds; the bound is loose on purpose so a
+  // busy runner cannot make it flaky, and still ~1000x under the regex.
+  it('normalises a pathological run of slashes in linear time', () => {
+    const t = new IdTable()
+    t.alloc('/dir')
+    const pathological = '/dir' + '/'.repeat(80_000) + 'x'
+    const started = performance.now()
+    expect(() => {
+      t.guardRename(pathological, '/elsewhere')
+    }).not.toThrow()
+    t.rename(pathological, '/elsewhere')
+    expect(performance.now() - started).toBeLessThan(250)
+  })
 })

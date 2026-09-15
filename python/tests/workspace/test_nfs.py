@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 
 import pytest
 
@@ -223,3 +224,37 @@ def test_the_same_session_reuses_the_server(tmp_path):
         manager.setup(None, "/docs", str(tmp_path / "b"), None, session))
     assert len(rec.starts) == 1
     assert len(manager.mountpoints) == 2
+
+
+# The export path is the prefix with its leading and trailing slash runs
+# trimmed and one leading slash put back, an empty result meaning the
+# root export. TypeScript's twin pins the same shapes; it reached them
+# through a pair of /\/+/ regexes and now uses a linear scan, which is
+# what python's str.strip has always been. The "/a//b/" case is the one
+# that would catch a split/join rewrite: an internal run is preserved.
+@pytest.mark.parametrize("prefix,expected", [
+    ("/deep/tree", "/deep/tree"),
+    ("deep/tree", "/deep/tree"),
+    ("/deep/tree/", "/deep/tree"),
+    ("///deep/tree///", "/deep/tree"),
+    ("/", "/"),
+    ("///", "/"),
+    ("", "/"),
+    ("/a//b/", "/a//b"),
+])
+def test_the_export_path_normalises_the_prefix(tmp_path, prefix, expected):
+    manager, rec = make()
+    asyncio.run(manager.setup(None, prefix, str(tmp_path / "m")))
+    assert rec.mounts[0][2] == expected
+
+
+def test_a_pathological_slash_run_normalises_in_linear_time(tmp_path):
+    # A caller names the prefix, so a long run of slashes is input the
+    # manager does not choose; str.strip is linear where a backtracking
+    # scan of the same run is quadratic.
+    manager, rec = make()
+    pathological = "/deep" + "/" * 80_000
+    started = time.perf_counter()
+    asyncio.run(manager.setup(None, pathological, str(tmp_path / "m")))
+    assert time.perf_counter() - started < 0.25
+    assert rec.mounts[0][2] == "/deep"

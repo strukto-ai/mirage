@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import time
 
 import pytest
 
@@ -147,3 +148,45 @@ def test_ids_survive_concurrent_allocation_on_the_loop():
         return len(set(results))
 
     assert asyncio.run(run()) == 50
+
+
+# The descendant prefix a rename compares against trims a trailing run of
+# slashes, so "/dir", "/dir/" and "/dir///" name one subtree. TypeScript's
+# twin pins the same shapes; it reached them through a /\/+$/ regex, which
+# rescans such a run from every position, and now uses the linear scan
+# python has always had here (str.rstrip is a C scan, never a regex).
+@pytest.mark.parametrize("source", ["/dir", "/dir/", "/dir///"])
+def test_a_trailing_slash_run_still_owns_the_subtree(source):
+    table = IdTable()
+    table.alloc("/dir")
+    with pytest.raises(OSError):
+        table.guard_rename(source, "/dir/inner")
+
+
+@pytest.mark.parametrize("source", ["/dir", "/dir/"])
+def test_a_sibling_sharing_a_name_prefix_is_not_a_descendant(source):
+    table = IdTable()
+    table.alloc("/dir")
+    table.guard_rename(source, "/dirge")
+
+
+def test_rename_from_a_slash_run_carries_descendants():
+    table, [child] = _table_with("/dir/child.txt")
+    table.rename("/dir//", "/moved")
+    assert table.resolve(child) == "/moved/child.txt"
+
+
+def test_a_pathological_slash_run_normalises_in_linear_time():
+    # A client names the path in a RENAME, so a long run of slashes is
+    # input the adapter does not choose. rstrip is linear; the regex the
+    # TypeScript side used to run took ~8s on this input and was
+    # quadratic, so it was a denial of service rather than a slow path.
+    # The bound is loose on purpose so a busy runner cannot make it
+    # flaky, and still far under what a backtracking scan would cost.
+    table = IdTable()
+    table.alloc("/dir")
+    pathological = "/dir" + "/" * 80_000 + "x"
+    started = time.perf_counter()
+    table.guard_rename(pathological, "/elsewhere")
+    table.rename(pathological, "/elsewhere")
+    assert time.perf_counter() - started < 0.25

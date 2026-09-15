@@ -15,6 +15,7 @@
 import { rmdirSync } from 'node:fs'
 
 import type { Session } from '@struktoai/mirage-core/workspace/session/session'
+import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 import { NFSConfig } from '../nfs/config.ts'
@@ -150,7 +151,10 @@ export class NFSManager {
       this.fs = fs
       this.handle = handle
     }
-    const bare = prefix.replace(/^\/+/, '').replace(/\/+$/, '')
+    // stripSlash rather than a pair of /\/+/ replaces: same answer,
+    // linear. `prefix` is caller-supplied, and the trailing-run form
+    // ('a' + '/' * n + 'b') makes the regex quadratic -- 8s at n=80k.
+    const bare = stripSlash(prefix)
     const exportPath = bare === '' ? '/' : `/${bare}`
     try {
       await this.mountFn(resolved, this.handle.port(), exportPath, this.config)
