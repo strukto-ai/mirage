@@ -1,0 +1,4 @@
+# macOS extension modules resolve CPython symbols at import time, from
+# the interpreter that loads them; the linker must leave them undefined.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

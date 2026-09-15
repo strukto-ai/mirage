@@ -8,6 +8,7 @@
     "packages/node": {
       "ignoreDependencies": [
         "@napi-rs/lzma",
+        "@struktoai/mirage-nfs-node",
         "fs-monkey",
         "seek-bzip",
         "tree-sitter-bash",

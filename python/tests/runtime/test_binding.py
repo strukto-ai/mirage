@@ -23,7 +23,7 @@ from mirage import (CodeExecution, MountMode, PathSpec, ProcessExecution,
                     RunResult, Runtime, ShellExecution,
                     UnsupportedExecutionError, Workspace)
 from mirage.context import get_current_session_for
-from mirage.fuse.core import MountCore
+from mirage.mount.core import MountCore
 from mirage.policy import Deny, Policy
 from mirage.resource.ram import RAMResource
 from mirage.runtime.js import QuickJsRuntime
@@ -142,10 +142,10 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         vfs = RuntimeVFS(context.dispatch, asyncio.get_running_loop(),
                          context.resolver)
         mount = MountCore(ws.fs)
-        # Call both sync adapters on a worker to keep their serving loop free.
+        # RuntimeVFS is the sync adapter, so it runs on a worker to keep
+        # its serving loop free. MountCore is async and is awaited here.
         guest = await asyncio.to_thread(vfs.read, "/data/link")
-        native = await asyncio.to_thread(mount.read, "/data/link", 100, 0,
-                                         None)
+        native = await mount.read("/data/link", 100, 0, None)
         assert guest == native == b"shared\n"
         assert (await asyncio.to_thread(vfs.stat,
                                         "/data/a")).mode & 0o777 == 0o600

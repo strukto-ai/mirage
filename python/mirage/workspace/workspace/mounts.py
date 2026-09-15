@@ -21,6 +21,7 @@ from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
+from mirage.nfs.config import NFSConfig
 from mirage.ops import Ops
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX
@@ -87,6 +88,7 @@ def normalize_resources(resources: dict[str, ResourceMount],
                     if value.mode is not None else default_mode,
                     backend=value.backend,
                     mountpoint=value.mountpoint,
+                    nfs_config=value.nfs_config,
                     command_limits=dict(value.command_limits or {}),
                 ))
         elif isinstance(value, tuple):
@@ -109,13 +111,19 @@ def normalize_resources(resources: dict[str, ResourceMount],
 
 
 def kernel_targets(
-        specs: list[MountSpec]) -> list[tuple[str, MountBackend, str | None]]:
+    specs: list[MountSpec]
+) -> list[tuple[str, MountBackend, str | None, "NFSConfig | None"]]:
     """Entries that also want a real mountpoint, in declaration order.
+
+    The nfs config rides along because a declared mount is the only
+    place a user can express it; without it, `backend=nfs` in a spec
+    could not choose a port, an idle window, or a soft mount, and only
+    the explicit ``add_nfs_mount`` could be tuned at all.
 
     Args:
         specs (list[MountSpec]): the normalized mount specs.
     """
-    return [(s.prefix, s.backend, s.mountpoint) for s in specs
+    return [(s.prefix, s.backend, s.mountpoint, s.nfs_config) for s in specs
             if s.backend in KERNEL_BACKENDS]
 
 

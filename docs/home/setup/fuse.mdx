@@ -25,6 +25,14 @@ Per-OS install guides: [macOS](/home/setup/macos), [Linux](/home/setup/linux),
 [Python FUSE setup](/python/setup/fuse),
 [TypeScript FUSE setup](/typescript/setup/fuse).
 
+<Note>
+  [NFS mode](/home/setup/nfs) reaches the same place — a mount as a real OS
+  directory — through the kernel's own NFSv3 client, so nothing has to be
+  installed and macOS has no one-mount-per-process limit. It is the better
+  first stop on macOS; FUSE is the deeper integration where the driver is
+  already there.
+</Note>
+
 ## What the labels mean
 
 - **Supported, CI-gated (Linux).** The FUSE integration battery (both SDKs,
