@@ -23,23 +23,20 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
 
 const resolveGlob = resolveGlobOf(CHROMA_IO)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-function defaultName(
-  flags: Record<string, FlagValue>,
-  texts: readonly string[],
-): Record<string, FlagValue> {
-  if (typeof flags.name === 'string') return flags
+function defaultName(name: string | undefined, texts: readonly string[]): string | undefined {
+  if (name !== undefined) return name
   const first = texts[0]
   if (first !== undefined && !first.startsWith('-') && !['(', ')', '!'].includes(first)) {
-    return { ...flags, name: first }
+    return first
   }
-  return flags
+  return undefined
 }
 
 async function normalizeFindOutput(
@@ -68,7 +65,12 @@ async function findCommand(
   const index = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
   const searchPath = resolved[0]
-  const adjustedOpts: CommandOpts = { ...opts, flags: defaultName(opts.flags, texts) }
+  // Push-down choices: a bare word acts as the -name filter.
+  const fl = new FlagView(opts.flags, specOf('find'))
+  const bag: Record<string, FlagValue> = { ...opts.flags }
+  const name = defaultName(fl.asStr('name'), texts)
+  if (name !== undefined) bag.name = name
+  const adjustedOpts: CommandOpts = { ...opts, flags: bag }
   const result = await findGeneric(resolved, texts, adjustedOpts, (root, options) =>
     chromaFind(accessor, root, options, index),
   )

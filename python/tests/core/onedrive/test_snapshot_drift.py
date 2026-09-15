@@ -44,7 +44,11 @@ def test_no_drift_when_ctag_matches():
                   "cTag": "same-ctag",
                   "file": {}
               })
-        asyncio.run(check_drift(_mount_for(), "/od/a.txt", "same-ctag"))
+        assert asyncio.run(check_drift(_mount_for(), "/od/a.txt",
+                                       "same-ctag")) is None
+        # The matching ctag has to have been compared against a live one:
+        # without the fetch this passes with the drift check removed.
+        assert len(m.requests) == 1
 
 
 def test_drift_raises_when_file_missing():

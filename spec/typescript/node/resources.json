@@ -1506,11 +1506,11 @@
         "smtpPort": {
           "required": false
         },
-        "username": {
-          "required": true
-        },
         "useSsl": {
           "required": false
+        },
+        "username": {
+          "required": true
         }
       },
       "rename": {},

@@ -227,6 +227,41 @@ describe('pushdownOperand', () => {
   })
 })
 
+// The filter dests are read the way python reads them: the repeatable ones
+// through `asList` and the single-valued ones through `asStr`, and the count
+// dests through `asInt`. One flat list tested with `!== undefined` and
+// `typeof === 'string'` answered differently from python for all three
+// shapes below, so the two hosts could disagree about whether a grep/rg
+// push-down was safe (issue #1089 item 11a).
+describe('hasSearchShapingFlags matches the python filter split', () => {
+  it('reads a count dest as a number, not only as a numeric string', () => {
+    // python's `fl.as_int("m")` sees both; `typeof flags.m === 'string'` saw
+    // only the string, so a numeric value let an unsafe push-down through.
+    expect(hasSearchShapingFlags({ m: '3' })).toBe(true)
+    expect(hasSearchShapingFlags({ m: 3 })).toBe(true)
+    expect(hasSearchShapingFlags({ A: 2 })).toBe(true)
+    expect(hasSearchShapingFlags({ B: 2 })).toBe(true)
+    expect(hasSearchShapingFlags({ C: 2 })).toBe(true)
+  })
+
+  it('reads a repeatable filter dest as a list', () => {
+    expect(hasSearchShapingFlags({ include: ['*.py'] })).toBe(true)
+    expect(hasSearchShapingFlags({ exclude: ['*.log'] })).toBe(true)
+    expect(hasSearchShapingFlags({ exclude_dir: ['node_modules'] })).toBe(true)
+    // An empty list is "not supplied", as `fl.as_list` reports it; the flat
+    // `!== undefined` test called it supplied and deferred.
+    expect(hasSearchShapingFlags({ include: [] })).toBe(false)
+  })
+
+  it('reads a single-valued filter dest as a string', () => {
+    expect(hasSearchShapingFlags({ type: 'py' })).toBe(true)
+    expect(hasSearchShapingFlags({ glob: '*.py' })).toBe(true)
+    expect(hasSearchShapingFlags({ binary_files: 'text' })).toBe(true)
+    // A bare boolean is not a value, as `fl.as_str` reports it.
+    expect(hasSearchShapingFlags({ glob: true })).toBe(false)
+  })
+})
+
 describe('hasSearchShapingFlags honored', () => {
   it('exempts only the named dests', () => {
     // gmail/slack/discord: the provider's search is word-based, so -w is what

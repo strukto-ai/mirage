@@ -86,7 +86,7 @@ describe('tr', () => {
   it('-d deletes characters', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n'))
-    const r = await runTr(resource, [PathSpec.fromStrPath('/tmp/f.txt')], ['l'], { d: true })
+    const r = await runTr(resource, [PathSpec.fromStrPath('/tmp/f.txt')], ['l'], { delete: true })
     expect(r.out).toBe('heo\n')
   })
 
@@ -106,7 +106,13 @@ describe('tr', () => {
 
   it('-t truncates set1 to the length of set2', async () => {
     const resource = new RAMResource()
-    const r = await runTr(resource, [], ['abcde', 'xy'], { t: true }, ENC.encode('abcde'))
+    const r = await runTr(
+      resource,
+      [],
+      ['abcde', 'xy'],
+      { truncate_set1: true },
+      ENC.encode('abcde'),
+    )
     expect(r.out).toBe('xycde')
   })
 

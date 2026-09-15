@@ -97,7 +97,7 @@ describe('warm reads serve cache uniformly across shared consumers', () => {
     const manager = await warmManager()
     // Build in scope, drain outside: also pins eager capture in the multi path.
     const result = await runWithCacheManager(manager, () =>
-      headGeneric([spec()], [], opts({ n: '1' }), statOf, reader.stream),
+      headGeneric([spec()], [], opts({ lines: '1' }), statOf, reader.stream),
     )
     expect(await out(result)).toBe('alpha\n')
     expect(reader.calls).toBe(0)

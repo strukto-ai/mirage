@@ -149,6 +149,132 @@
         "stdout_text": "2\n",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "wc_chars_multibyte",
+      "cmd": "wc -mc /data/cjk.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "16 26 /data/cjk.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_chars_combining_marks",
+      "cmd": "wc -mc /data/utf8.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "13 15 /data/utf8.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_chars_astral",
+      "cmd": "wc -mc /data/astral.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": " 6 11 /data/astral.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_max_line_length_cjk",
+      "cmd": "wc -L /data/cjk.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "11 /data/cjk.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_max_line_length_combining",
+      "cmd": "wc -L /data/utf8.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5 /data/utf8.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_max_line_length_astral",
+      "cmd": "wc -L /data/astral.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2 /data/astral.txt\n",
+        "stderr_text": ""
+      }
     }
   ]
 }

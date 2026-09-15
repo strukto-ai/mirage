@@ -55,7 +55,7 @@ describe('head', () => {
   it('-n 3 returns first 3 lines', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '3' })).toBe(
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '3' })).toBe(
       'line1\nline2\nline3\n',
     )
   })
@@ -63,7 +63,7 @@ describe('head', () => {
   it('-n 1 returns first line', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '1' })).toBe(
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '1' })).toBe(
       'line1\n',
     )
   })
@@ -71,7 +71,7 @@ describe('head', () => {
   it('-n larger than file returns all', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '100' })).toBe(
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '100' })).toBe(
       'a\nb\nc',
     )
   })
@@ -79,19 +79,23 @@ describe('head', () => {
   it('-c returns specific byte count', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '5' })).toBe('abcde')
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '5' })).toBe(
+      'abcde',
+    )
   })
 
   it('-c larger than file returns all bytes', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '100' })).toBe('abc')
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '100' })).toBe(
+      'abc',
+    )
   })
 
   it('-c 0 returns empty', async () => {
     const resource = new RAMResource()
     resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '0' })).toBe('')
+    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '0' })).toBe('')
   })
 
   it('empty file', async () => {

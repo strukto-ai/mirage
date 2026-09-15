@@ -16,7 +16,7 @@ import { breToRegExp } from '../../utils/bre.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
-import { type FlagValue } from '../spec/types.ts'
+import { FlagView, type FlagValue } from '../spec/types.ts'
 
 export const NEVER_MATCH = '(?!)'
 
@@ -33,9 +33,11 @@ export function patternArg(
   texts: readonly string[],
   flags: Record<string, FlagValue>,
 ): string | null {
-  const e = flags.e
-  if (Array.isArray(e) && e.length > 0) return e.join('\n')
-  if (typeof e === 'string') return e
+  // Spec-less, as the shared push-down helpers are: `-e` and `-f` are
+  // declared by the grep, rg and zgrep specs alike, and this helper is
+  // reached from all three.
+  const e = new FlagView(flags).asList('e')
+  if (e.length > 0) return e.join('\n')
   if (texts.length > 0 && texts[0] !== undefined) return texts[0]
   return null
 }
@@ -60,13 +62,17 @@ export async function resolvePattern(
 ): Promise<PatternResolution> {
   let pattern = patternArg(texts, flags)
   let neverMatch = false
-  if (Array.isArray(flags.f)) {
+  // `raw` rather than `asList`, mirroring Python's `flags.raw("f")`: an
+  // empty -f list still means "-f was supplied", which is what turns on the
+  // NEVER_MATCH sentinel below.
+  const patternFiles = new FlagView(flags).raw('f')
+  if (Array.isArray(patternFiles)) {
     const first = paths[0]
     const prefix =
       (first === undefined ? undefined : mountPrefixOf(first.virtual, first.resourcePath)) ??
       mountPrefix ??
       ''
-    for (const filePath of flags.f) {
+    for (const filePath of patternFiles) {
       const patternSpec = PathSpec.fromStrPath(filePath, mountKey(filePath, prefix))
       let fileData: Uint8Array
       try {

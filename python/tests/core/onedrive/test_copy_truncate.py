@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.index import NULL_INDEX
@@ -51,6 +52,9 @@ async def test_copy_polls_monitor_until_completed():
         m.get(monitor, payload={"status": "completed"})
         await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
                    PathSpec.from_str_path("/b.txt"))
+        # Without this the test passes when copy returns straight after
+        # the 202 and never fetches the monitor at all.
+        assert ("GET", URL(monitor)) in m.requests
 
 
 @pytest.mark.asyncio
@@ -148,6 +152,10 @@ async def test_copy_file_conflict_deletes_destination_and_retries():
         m.get(retry_monitor, payload={"status": "completed"})
         await copy(_accessor(), PathSpec.from_str_path("/a.txt"),
                    PathSpec.from_str_path("/b.txt"))
+        assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
+        assert len(m.requests[("POST",
+                               URL(_BASE + "/root:/a.txt:/copy"))]) == 2
+        assert ("GET", URL(retry_monitor)) in m.requests
 
 
 @pytest.mark.asyncio
@@ -197,6 +205,12 @@ async def test_copy_dir_conflict_merges_per_child():
         m.get(child_monitor, payload={"status": "completed"})
         await copy(_accessor(), PathSpec.from_str_path("/src"),
                    PathSpec.from_str_path("/dst"))
+        # Merge, not replace: the child is copied one level down and the
+        # existing destination folder is never deleted.
+        assert ("GET", URL(_BASE + "/root:/src:/children")) in m.requests
+        assert ("POST", URL(_BASE + "/root:/src/f.txt:/copy")) in m.requests
+        assert ("GET", URL(child_monitor)) in m.requests
+        assert ("DELETE", URL(_BASE + "/root:/dst")) not in m.requests
 
 
 @pytest.mark.asyncio

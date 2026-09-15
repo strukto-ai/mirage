@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.client import GraphError
@@ -40,6 +41,10 @@ async def test_mkdir_tolerates_existing_item():
                 "message": "x"
             }})
         await mkdir(_accessor(), PathSpec.from_str_path("/parent/new"))
+        # Tolerating the 409 means returning after the one POST, not
+        # retrying it with a different conflict behavior.
+        assert len(m.requests[("POST",
+                               URL(_BASE + "/root:/parent:/children"))]) == 1
 
 
 @pytest.mark.asyncio

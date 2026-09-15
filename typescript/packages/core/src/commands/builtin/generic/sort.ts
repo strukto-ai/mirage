@@ -17,36 +17,31 @@ import { PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { SortKeyError } from '../errors.ts'
-import { buildConfig, compareLines, sortLines, type SortConfig } from '../sort_keys.ts'
+import {
+  buildConfig,
+  compareLines,
+  sortLines,
+  type SortConfig,
+  type SortGlobals,
+} from '../sort_keys.ts'
 import { splitLines } from '../utils/lines.ts'
 import { readStdinAsync } from '../utils/stream.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-interface SortFlags {
-  normalized: Record<string, FlagValue>
+interface SortFlags extends SortGlobals {
   check: boolean
   checkQuiet: boolean
   output: string | null
   zeroTerminated: boolean
 }
 
-function flagStr(flags: Record<string, FlagValue>, name: string): string | null {
-  const value = flags[name]
-  return typeof value === 'string' ? value : null
-}
-
-function flagList(flags: Record<string, FlagValue>, name: string): string[] {
-  const value = flags[name]
-  if (typeof value === 'string') return [value]
-  if (Array.isArray(value)) return [...value]
-  return []
-}
-
 function parseFlags(flags: Record<string, FlagValue>): SortFlags | string {
-  const rawCheck = flags.check
+  const fl = new FlagView(flags, specOf('sort'))
+  const rawCheck = fl.raw('check')
   if (
     rawCheck !== undefined &&
     rawCheck !== true &&
@@ -57,26 +52,24 @@ function parseFlags(flags: Record<string, FlagValue>): SortFlags | string {
     return `sort: invalid argument '${String(rawCheck)}' for '--check'\n`
   }
   return {
-    normalized: {
-      r: flags.reverse === true,
-      n: flags.numeric_sort === true,
-      u: flags.unique === true,
-      f: flags.ignore_case === true,
-      k: flagList(flags, 'key'),
-      t: flagStr(flags, 'field_separator') ?? '',
-      h: flags.human_numeric_sort === true,
-      V: flags.version_sort === true,
-      s: flags.stable === true,
-      M: flags.month_sort === true,
-      b: flags.ignore_leading_blanks === true,
-      d: flags.dictionary_order === true,
-      g: flags.general_numeric_sort === true,
-      i: flags.ignore_nonprinting === true,
-    },
-    check: flags.c === true || rawCheck !== undefined,
+    reverse: fl.asBool('reverse'),
+    numeric: fl.asBool('numeric_sort'),
+    unique: fl.asBool('unique'),
+    foldCase: fl.asBool('ignore_case'),
+    keyDefs: fl.asList('key'),
+    fieldSep: fl.asStr('field_separator') ?? null,
+    humanNumeric: fl.asBool('human_numeric_sort'),
+    versionSort: fl.asBool('version_sort'),
+    monthSort: fl.asBool('month_sort'),
+    ignoreBlanks: fl.asBool('ignore_leading_blanks'),
+    stable: fl.asBool('stable'),
+    generalNumeric: fl.asBool('general_numeric_sort'),
+    dictionary: fl.asBool('dictionary_order'),
+    ignoreNonprinting: fl.asBool('ignore_nonprinting'),
+    check: fl.asBool('c') || rawCheck !== undefined,
     checkQuiet: rawCheck === 'quiet' || rawCheck === 'silent',
-    output: flagStr(flags, 'output'),
-    zeroTerminated: flags.zero_terminated === true,
+    output: fl.asStr('output') ?? null,
+    zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
 
@@ -117,7 +110,7 @@ export async function sortGeneric(
   }
   let cfg: SortConfig
   try {
-    cfg = buildConfig(parsed.normalized)
+    cfg = buildConfig(parsed)
   } catch (error) {
     if (error instanceof SortKeyError) {
       return [
@@ -153,7 +146,7 @@ export async function sortGeneric(
   }
   const records = splitRecords(raw, parsed.zeroTerminated)
   if (parsed.check) {
-    const disorder = checkRecords(records, cfg, parsed.normalized.u === true)
+    const disorder = checkRecords(records, cfg, parsed.unique)
     if (disorder === null) return [new Uint8Array(), new IOResult()]
     if (parsed.checkQuiet) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
     const label = paths[0]?.rawPath ?? '-'

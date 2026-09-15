@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.client import GraphError
@@ -61,6 +62,12 @@ async def test_rename_conflict_deletes_file_destination_and_retries():
         m.patch(_BASE + "/root:/a.txt", status=200, payload={"id": "1"})
         await rename(_accessor(), PathSpec.from_str_path("/a.txt"),
                      PathSpec.from_str_path("/b.txt"))
+        # aioresponses' __exit__ only calls stop(), so registering the
+        # DELETE proves nothing on its own: without these the test passes
+        # when rename swallows the 409 and does neither the delete nor
+        # the retry.
+        assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
+        assert len(m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]) == 2
 
 
 @pytest.mark.asyncio
@@ -80,6 +87,9 @@ async def test_rename_conflict_replaces_empty_dir_destination():
         m.patch(_BASE + "/root:/src", status=200, payload={"id": "1"})
         await rename(_accessor(), PathSpec.from_str_path("/src"),
                      PathSpec.from_str_path("/dst"))
+        assert ("GET", URL(_BASE + "/root:/dst:/children")) in m.requests
+        assert ("DELETE", URL(_BASE + "/root:/dst")) in m.requests
+        assert len(m.requests[("PATCH", URL(_BASE + "/root:/src"))]) == 2
 
 
 @pytest.mark.asyncio

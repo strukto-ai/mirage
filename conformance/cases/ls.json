@@ -18,7 +18,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "a.txt\nb.txt\nbinary.bin\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsk_colon.txt\nsk_fields.txt\nsk_ties.txt\nsub\n",
+        "stdout_text": "a.txt\nastral.txt\nb.txt\nbinary.bin\ncjk.txt\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsk_colon.txt\nsk_fields.txt\nsk_ties.txt\nsub\nutf8.txt\n",
         "stderr_text": ""
       }
     },

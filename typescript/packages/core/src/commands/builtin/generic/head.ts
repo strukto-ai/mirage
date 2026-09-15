@@ -21,7 +21,8 @@ import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,22 +36,18 @@ interface HeadFlags {
   zeroTerminated: boolean
 }
 
-function flagString(flags: Record<string, FlagValue>, short: string, long: string): string | null {
-  const value = typeof flags[short] === 'string' ? flags[short] : flags[long]
-  return typeof value === 'string' ? value : null
-}
-
 function parseFlags(flags: Record<string, FlagValue>): HeadFlags | string {
-  const nRaw = flagString(flags, 'n', 'lines')
-  const cRaw = flagString(flags, 'c', 'bytes')
+  const fl = new FlagView(flags, specOf('head'))
+  const nRaw = fl.asStr('lines') ?? null
+  const cRaw = fl.asStr('bytes') ?? null
   const numErr = numberFlagError('head', nRaw, cRaw)
   if (numErr !== null) return numErr
   return {
     lines: nRaw !== null ? Number.parseInt(nRaw, 10) : 10,
     bytesMode: cRaw !== null ? parseByteCount(cRaw) : null,
-    quiet: flags.quiet === true || flags.silent === true,
-    verbose: flags.verbose === true,
-    zeroTerminated: flags.zero_terminated === true,
+    quiet: fl.asBool('quiet') || fl.asBool('silent'),
+    verbose: fl.asBool('verbose'),
+    zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
 

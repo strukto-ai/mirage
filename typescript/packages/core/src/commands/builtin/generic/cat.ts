@@ -19,7 +19,8 @@ import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
 
@@ -43,15 +44,15 @@ interface CatDisplay {
 }
 
 function parseFlags(flags: Record<string, FlagValue>): CatDisplay {
-  const showAll = flags.show_all === true
+  const fl = new FlagView(flags, specOf('cat'))
+  const showAll = fl.asBool('show_all')
   return {
-    numberLines: flags.number === true,
-    numberNonblank: flags.number_nonblank === true,
-    showEnds: flags.show_ends === true || flags.e === true || showAll,
-    showTabs: flags.show_tabs === true || flags.t === true || showAll,
-    showNonprinting:
-      flags.show_nonprinting === true || flags.e === true || flags.t === true || showAll,
-    squeezeBlank: flags.squeeze_blank === true,
+    numberLines: fl.asBool('number'),
+    numberNonblank: fl.asBool('number_nonblank'),
+    showEnds: fl.asBool('show_ends') || fl.asBool('e') || showAll,
+    showTabs: fl.asBool('show_tabs') || fl.asBool('t') || showAll,
+    showNonprinting: fl.asBool('show_nonprinting') || fl.asBool('e') || fl.asBool('t') || showAll,
+    squeezeBlank: fl.asBool('squeeze_blank'),
   }
 }
 

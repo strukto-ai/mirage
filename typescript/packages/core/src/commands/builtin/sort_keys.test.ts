@@ -36,7 +36,27 @@ function lines(
   text: string,
   flags: Record<string, string | boolean | number | string[]> = {},
 ): string[] {
-  return sortLines(text.split('\n'), buildConfig(flags))
+  const on = (name: string): boolean => flags[name] === true
+  const rawK = flags.k
+  return sortLines(
+    text.split('\n'),
+    buildConfig({
+      keyDefs: Array.isArray(rawK) ? rawK : typeof rawK === 'string' ? [rawK] : [],
+      fieldSep: typeof flags.t === 'string' ? flags.t : null,
+      reverse: on('r'),
+      numeric: on('n'),
+      unique: on('u'),
+      foldCase: on('f'),
+      humanNumeric: on('h'),
+      versionSort: on('V'),
+      monthSort: on('M'),
+      ignoreBlanks: on('b'),
+      stable: on('s'),
+      generalNumeric: on('g'),
+      dictionary: on('d'),
+      ignoreNonprinting: on('i'),
+    }),
+  )
 }
 
 describe('field model', () => {

@@ -18,7 +18,8 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName, type FlagValue } from '../../spec/types.ts'
+import { CommandName, FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -89,16 +90,13 @@ async function* trStream(
   }
 }
 
-function boolFlag(flags: Record<string, FlagValue>, ...names: string[]): boolean {
-  return names.some((n) => flags[n] === true)
-}
-
 function buildOptions(texts: readonly string[], flags: Record<string, FlagValue>): TrOptions {
   if (texts.length === 0) throw new Error('tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]')
-  const complement = boolFlag(flags, 'c', 'C', 'complement')
-  const del = boolFlag(flags, 'd', 'delete')
-  const squeeze = boolFlag(flags, 's', 'squeeze_repeats')
-  const truncateSet1 = boolFlag(flags, 't', 'truncate_set1')
+  const fl = new FlagView(flags, specOf('tr'))
+  const complement = fl.asBool('C') || fl.asBool('complement')
+  const del = fl.asBool('delete')
+  const squeeze = fl.asBool('squeeze_repeats')
+  const truncateSet1 = fl.asBool('truncate_set1')
   let set1 = expandRanges(interpretEscapes(texts[0] ?? ''))
   if (complement) {
     let allChars = ''

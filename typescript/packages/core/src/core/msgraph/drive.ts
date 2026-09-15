@@ -186,17 +186,29 @@ export async function copyTree(
     await invalidateAfterWrite(virtSpec(dst))
     return
   }
-  if (conflict.code !== 'nameAlreadyExists') throw conflict
+  // Status, not just code: `copyOnce` reports a monitor-reported failure
+  // as 500 and a thrown conflict as 409, so re-raising `conflict` as it
+  // arrived made the same refusal carry a different status depending on
+  // which of the two paths produced it. Python's `copy_tree` states the
+  // status outright (500 for a non-conflict code, 409 for the mixed
+  // file/folder refusal), and is the correct side.
+  if (conflict.code !== 'nameAlreadyExists') {
+    throw new GraphError(500, conflict.code, conflict.message)
+  }
   const srcItem = await graphGet(config, src.item())
   const dstItem = await graphGet(config, dst.item())
   if (isFolder(srcItem) && isFolder(dstItem)) {
+    // GNU cp -r merges into an existing directory; Graph never merges
+    // folders, so recurse per child instead.
     for (const child of await graphList(config, src.item('/children'))) {
       const name = asString(child.name) ?? ''
       await copyTree(config, src.child(name), dst.child(name))
     }
     return
   }
-  if (isFolder(srcItem) || isFolder(dstItem)) throw conflict
+  if (isFolder(srcItem) || isFolder(dstItem)) {
+    throw new GraphError(409, conflict.code, conflict.message)
+  }
   await graphDelete(config, dst.item())
   const secondConflict = await copyOnce(config, src, dst)
   if (secondConflict !== null) throw secondConflict

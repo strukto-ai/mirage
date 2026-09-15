@@ -18,7 +18,8 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -119,36 +120,25 @@ function parseNumbering(raw: string): [string, RegExp | null] {
 }
 
 function parseOptions(flags: Record<string, FlagValue>): NlConfig {
-  const bodyValue = flags.body_numbering
-  const footerValue = flags.footer_numbering
-  const headerValue = flags.header_numbering
-  const [bodyNumbering, bodyPattern] = parseNumbering(
-    typeof bodyValue === 'string' ? bodyValue : 't',
-  )
-  const [footerNumbering, footerPattern] = parseNumbering(
-    typeof footerValue === 'string' ? footerValue : 'n',
-  )
-  const [headerNumbering, headerPattern] = parseNumbering(
-    typeof headerValue === 'string' ? headerValue : 'n',
-  )
-  const startValue = flags.starting_line_number
-  const incrementValue = flags.line_increment
-  const widthValue = flags.number_width
-  const separatorValue = flags.number_separator
-  const formatValue = flags.number_format
-  const delimiterValue = flags.section_delimiter
-  const blankValue = flags.l ?? flags.join_blank_lines
+  const fl = new FlagView(flags, specOf('nl'))
+  const [bodyNumbering, bodyPattern] = parseNumbering(fl.asStr('body_numbering') ?? 't')
+  const [footerNumbering, footerPattern] = parseNumbering(fl.asStr('footer_numbering') ?? 'n')
+  const [headerNumbering, headerPattern] = parseNumbering(fl.asStr('header_numbering') ?? 'n')
+  const startValue = fl.asStr('starting_line_number')
+  const incrementValue = fl.asStr('line_increment')
+  const widthValue = fl.asStr('number_width')
+  const blankValue = fl.asStr('join_blank_lines')
   return {
     numbering: { body: bodyNumbering, footer: footerNumbering, header: headerNumbering },
     patterns: { body: bodyPattern, footer: footerPattern, header: headerPattern },
-    start: typeof startValue === 'string' ? Number.parseInt(startValue, 10) : 1,
-    increment: typeof incrementValue === 'string' ? Number.parseInt(incrementValue, 10) : 1,
-    width: typeof widthValue === 'string' ? Number.parseInt(widthValue, 10) : 6,
-    separator: typeof separatorValue === 'string' ? separatorValue : '\t',
-    numberFormat: typeof formatValue === 'string' ? formatValue : 'rn',
-    delimiters: sectionDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\\:'),
-    joinBlankLines: typeof blankValue === 'string' ? Number.parseInt(blankValue, 10) : 1,
-    noRenumber: flags.no_renumber === true,
+    start: startValue !== undefined ? Number.parseInt(startValue, 10) : 1,
+    increment: incrementValue !== undefined ? Number.parseInt(incrementValue, 10) : 1,
+    width: widthValue !== undefined ? Number.parseInt(widthValue, 10) : 6,
+    separator: fl.asStr('number_separator') ?? '\t',
+    numberFormat: fl.asStr('number_format') ?? 'rn',
+    delimiters: sectionDelimiters(fl.asStr('section_delimiter') ?? '\\:'),
+    joinBlankLines: blankValue !== undefined ? Number.parseInt(blankValue, 10) : 1,
+    noRenumber: fl.asBool('no_renumber'),
   }
 }
 

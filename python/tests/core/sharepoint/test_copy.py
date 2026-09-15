@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.client import GraphError
@@ -102,6 +103,10 @@ async def test_copy_file_conflict_deletes_destination_and_retries():
                headers={"Location": retry_monitor})
         m.get(retry_monitor, payload={"status": "completed"})
         await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
+        assert ("DELETE", URL(_DRIVE + "/root:/b.txt")) in m.requests
+        assert len(m.requests[("POST",
+                               URL(_DRIVE + "/root:/a.txt:/copy"))]) == 2
+        assert ("GET", URL(retry_monitor)) in m.requests
 
 
 @pytest.mark.asyncio
@@ -143,3 +148,7 @@ async def test_copy_dir_conflict_merges_per_child():
                headers={"Location": child_monitor})
         m.get(child_monitor, payload={"status": "completed"})
         await copy(_accessor(), _spec("src"), _spec("dst"))
+        assert ("GET", URL(_DRIVE + "/root:/src:/children")) in m.requests
+        assert ("POST", URL(_DRIVE + "/root:/src/f.txt:/copy")) in m.requests
+        assert ("GET", URL(child_monitor)) in m.requests
+        assert ("DELETE", URL(_DRIVE + "/root:/dst")) not in m.requests

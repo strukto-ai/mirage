@@ -86,7 +86,7 @@ describe('gdrive cut', () => {
         }),
       ],
       [],
-      makeOpts({ flags: { d: ',', f: '2' }, index }),
+      makeOpts({ flags: { delimiter: ',', fields: '2' }, index }),
     )
     expect(await outText(result)).toBe('b\n2\n')
   })
@@ -119,7 +119,7 @@ describe('gdrive cut', () => {
         }),
       ],
       [],
-      makeOpts({ flags: { c: '1-3' }, index }),
+      makeOpts({ flags: { characters: '1-3' }, index }),
     )
     expect(await outText(result)).toBe('hel\nwor\n')
   })
@@ -131,7 +131,7 @@ describe('gdrive cut', () => {
       makeAccessor() as never,
       [],
       [],
-      makeOpts({ stdin: ENC.encode('x:y:z\n'), flags: { d: ':', f: '1,3' } }),
+      makeOpts({ stdin: ENC.encode('x:y:z\n'), flags: { delimiter: ':', fields: '1,3' } }),
     )
     expect(await outText(result)).toBe('x:z\n')
   })

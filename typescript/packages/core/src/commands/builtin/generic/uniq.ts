@@ -16,7 +16,8 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName, type FlagValue } from '../../spec/types.ts'
+import { CommandName, FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -45,14 +46,6 @@ function parseCount(value: string | boolean | number | string[] | undefined): nu
   return count
 }
 
-function stringAlias(
-  flags: Record<string, FlagValue>,
-  short: string,
-  long: string,
-): string | boolean | number | string[] | undefined {
-  return flags[short] ?? flags[long]
-}
-
 function optionalMethod(
   value: string | boolean | number | string[] | undefined,
   defaultValue: string,
@@ -68,17 +61,18 @@ function optionalMethod(
 }
 
 function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
-  const count = flags.count === true
-  const duplicatesOnly = flags.repeated === true
-  const uniqueOnly = flags.unique === true
+  const fl = new FlagView(flags, specOf('uniq'))
+  const count = fl.asBool('count')
+  const duplicatesOnly = fl.asBool('repeated')
+  const uniqueOnly = fl.asBool('unique')
   const allRepeated = optionalMethod(
-    flags.D === true ? true : flags.all_repeated,
+    fl.asBool('D') ? true : fl.raw('all_repeated'),
     'none',
     ['none', 'prepend', 'separate'],
     'all-repeated',
   ) as UniqFlags['allRepeated']
   const group = optionalMethod(
-    flags.group,
+    fl.raw('group'),
     'separate',
     ['separate', 'prepend', 'append', 'both'],
     'group',
@@ -93,13 +87,13 @@ function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
     count,
     duplicatesOnly,
     uniqueOnly,
-    skipFields: parseCount(stringAlias(flags, 'f', 'skip_fields')) ?? 0,
-    skipChars: parseCount(stringAlias(flags, 's', 'skip_chars')) ?? 0,
-    checkChars: parseCount(stringAlias(flags, 'w', 'check_chars')),
-    ignoreCase: flags.ignore_case === true,
+    skipFields: parseCount(fl.asStr('skip_fields')) ?? 0,
+    skipChars: parseCount(fl.asStr('skip_chars')) ?? 0,
+    checkChars: parseCount(fl.asStr('check_chars')),
+    ignoreCase: fl.asBool('ignore_case'),
     allRepeated,
     group,
-    zeroTerminated: flags.zero_terminated === true,
+    zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
 

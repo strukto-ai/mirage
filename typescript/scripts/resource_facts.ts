@@ -487,7 +487,7 @@ export function commandIoFacts(
         )
       }
       out[entry.name] = {
-        slots: slots.sort(),
+        slots: slots.sort(compareCodePoints),
         local: values.local === undefined ? true : values.local === true,
         max_glob_matches: numeric(values.maxGlobMatches, defaults.maxGlobMatches),
         max_du_entries: numeric(values.maxDuEntries, defaults.maxDuEntries),
@@ -525,7 +525,10 @@ export interface ConfigFacts {
 const DOOR = 'parseConfigWithSchema'
 const NORMALIZER_RE = /^normalize\w*Config$/
 
-type Bound = { expr: ts.Expression; source: ts.SourceFile }
+interface Bound {
+  expr: ts.Expression
+  source: ts.SourceFile
+}
 type Env = Map<string, Bound>
 
 function moduleFile(fromFile: string, specifier: string, packagesRoot: string): string | undefined {
@@ -973,13 +976,35 @@ function factsOfNormalizer(
  * A name whose factory calls no `normalize*Config` (ram, disk, redis take
  * raw kwargs, as their python twins do) dumps null.
  */
+// Codepoint compare, not `localeCompare` and not the default comparator:
+// python's `sorted` and `json.dumps(sort_keys=True)` order by code point,
+// so `scripts/gen_specs.py` and this generator must use the same rule or
+// the two spec trees a human diffs carry ordering noise on top of real
+// drift. `localeCompare` with no locale argument also reads the runtime's
+// ICU data, which makes pre-commit's Spec drift step machine-dependent.
+// Inlined rather than imported from `@struktoai/mirage-core/utils/sort`
+// because a script runs before any package is built.
+function compareCodePoints(a: string, b: string): number {
+  if (a === b) return 0
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const aPoint = a.codePointAt(i) ?? 0
+    const bPoint = b.codePointAt(j) ?? 0
+    if (aPoint !== bPoint) return aPoint - bPoint
+    i += aPoint > 0xffff ? 2 : 1
+    j += bPoint > 0xffff ? 2 : 1
+  }
+  return a.length - i - (b.length - j)
+}
+
 export function configFacts(
   registryFile: string,
   packagesRoot: string,
 ): Record<string, ConfigFacts | null> {
   const out: Record<string, ConfigFacts | null> = {}
   const entries = registryNormalizers(registryFile, packagesRoot)
-  for (const [resource, normalizer] of [...entries].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [resource, normalizer] of [...entries].sort(([a], [b]) => compareCodePoints(a, b))) {
     out[resource] =
       normalizer === null
         ? null

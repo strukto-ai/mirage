@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.create import create
@@ -58,6 +59,7 @@ async def test_unlink_deletes_item():
     with aioresponses() as m:
         m.delete(_BASE + "/root:/a.txt", status=204)
         await unlink(_accessor(), PathSpec.from_str_path("/a.txt"))
+        assert ("DELETE", URL(_BASE + "/root:/a.txt")) in m.requests
 
 
 @pytest.mark.asyncio
@@ -66,6 +68,9 @@ async def test_rmdir_deletes_folder():
         m.get(_BASE + "/root:/docs:/children" + _PROBE, payload={"value": []})
         m.delete(_BASE + "/root:/docs", status=204)
         await rmdir(_accessor(), PathSpec.from_str_path("/docs"))
+        assert ("DELETE", URL(_BASE + "/root:/docs")) in m.requests
+        # One bounded emptiness probe, not a listing walk.
+        assert len([k for k in m.requests if k[0] == "GET"]) == 1
 
 
 @pytest.mark.asyncio
@@ -73,6 +78,9 @@ async def test_rm_r_deletes_tree():
     with aioresponses() as m:
         m.delete(_BASE + "/root:/docs", status=204)
         await rm_r(_accessor(), PathSpec.from_str_path("/docs"))
+        # Graph deletes a folder recursively, so rm -r is one request and
+        # must not walk the tree first.
+        assert list(m.requests) == [("DELETE", URL(_BASE + "/root:/docs"))]
 
 
 @pytest.mark.asyncio

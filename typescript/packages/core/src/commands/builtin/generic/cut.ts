@@ -19,33 +19,27 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
-import type { FlagValue } from '../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 
-function stringFlag(flags: Record<string, FlagValue>, ...names: string[]): string | null {
-  for (const name of names) {
-    const value = flags[name]
-    if (typeof value === 'string') return value
-  }
-  return null
-}
-
 function parseFlags(flags: Record<string, FlagValue>): CutOptions | string {
-  const bytesRange = stringFlag(flags, 'b', 'bytes')
-  const charsRange = stringFlag(flags, 'c', 'characters')
-  const fieldsRange = stringFlag(flags, 'F', 'f', 'fields')
-  const selected = [bytesRange, charsRange, fieldsRange].filter((value) => value !== null)
+  const fl = new FlagView(flags, specOf('cut'))
+  const bytesRange = fl.asStr('bytes')
+  const charsRange = fl.asStr('characters')
+  const fieldsRange = fl.asStr('F') ?? fl.asStr('fields')
+  const selected = [bytesRange, charsRange, fieldsRange].filter((value) => value !== undefined)
   if (selected.length === 0) {
     return 'cut: you must specify a list of bytes, characters, or fields\n'
   }
   if (selected.length > 1) return 'cut: only one type of list may be specified\n'
   const mode: CutOptions['mode'] =
-    bytesRange !== null ? 'bytes' : charsRange !== null ? 'characters' : 'fields'
+    bytesRange !== undefined ? 'bytes' : charsRange !== undefined ? 'characters' : 'fields'
   const range = bytesRange ?? charsRange ?? fieldsRange ?? ''
-  const rawWhitespace = flags.whitespace_delimited
+  const rawWhitespace = fl.raw('whitespace_delimited')
   let whitespace: CutOptions['whitespace'] = null
-  if (flags.w === true || typeof flags.F === 'string' || rawWhitespace === true) {
+  if (fl.asBool('w') || fl.asStr('F') !== undefined || rawWhitespace === true) {
     whitespace = 'default'
   } else if (typeof rawWhitespace === 'string') {
     if (rawWhitespace !== 'trimmed') {
@@ -56,22 +50,22 @@ function parseFlags(flags: Record<string, FlagValue>): CutOptions | string {
   if (whitespace !== null && mode !== 'fields') {
     return "cut: '-w' is only meaningful with fields\n"
   }
-  let outputDelimiter = stringFlag(flags, 'args_O', 'output_delimiter')
-  if (typeof flags.F === 'string' && outputDelimiter === null) outputDelimiter = ' '
-  const explicitDelimiter = stringFlag(flags, 'd', 'delimiter')
-  if (explicitDelimiter !== null && Array.from(explicitDelimiter).length !== 1) {
+  let outputDelimiter = fl.asStr('args_O') ?? fl.asStr('output_delimiter')
+  if (fl.asStr('F') !== undefined && outputDelimiter === undefined) outputDelimiter = ' '
+  const explicitDelimiter = fl.asStr('delimiter')
+  if (explicitDelimiter !== undefined && Array.from(explicitDelimiter).length !== 1) {
     return 'cut: the delimiter must be a single character\n'
   }
   return {
     ranges: parseRanges(range),
     mode,
     delimiter: explicitDelimiter ?? '\t',
-    complement: flags.complement === true,
-    onlyDelimited: flags.only_delimited === true,
+    complement: fl.asBool('complement'),
+    onlyDelimited: fl.asBool('only_delimited'),
     whitespace,
-    noPartial: flags.no_partial === true,
-    outputDelimiter,
-    zeroTerminated: flags.zero_terminated === true,
+    noPartial: fl.asBool('no_partial'),
+    outputDelimiter: outputDelimiter ?? null,
+    zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
 

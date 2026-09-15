@@ -77,7 +77,7 @@ describe('slack head', () => {
           ),
         }),
       ],
-      { n: '2' },
+      { lines: '2' },
       { index: idx, transport },
     )
     const lines = out.split('\n').filter((s) => s !== '')
@@ -107,7 +107,7 @@ describe('slack head', () => {
           ),
         }),
       ],
-      { c: '5' },
+      { bytes: '5' },
       { index: idx, transport },
     )
     expect(out).toHaveLength(5)
