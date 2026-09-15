@@ -12,14 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import logging
 import os
+import threading
+from collections.abc import Coroutine
 from typing import Any, Callable
 
-from mirage.fuse.core import MountCore
+from mirage.bridge.sync import run_async_from_sync
+from mirage.context import reset_current_session, set_current_session
 from mirage.fuse.darwin import rename_flags_check
-from mirage.fuse.errors import classify_error
+from mirage.mount.core import MountCore
+from mirage.mount.errors import classify_error
 from mirage.ops import Ops
 from mirage.types import JsonValue
 from mirage.workspace.session.session import Session
@@ -48,6 +53,15 @@ class MirageFS:
                  root_prefix: str = "",
                  session: Session | None = None) -> None:
         self.core = MountCore(ops, root_prefix=root_prefix, session=session)
+        # The loop the core's coroutines run on, and the thread serving
+        # it. It lives here rather than in the core because the reason
+        # for it is libfuse's: its callbacks are synchronous, so this
+        # adapter -- and not the shared layer -- has to bridge. The nfs
+        # delegate awaits the same core with no bridge at all.
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._loop.run_forever,
+                                             daemon=True)
+        self._loop_thread.start()
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
         """Run a core call, translating failures into FUSE error codes.
@@ -59,14 +73,43 @@ class MirageFS:
         leaves a trace instead of silently reading as "I/O error".
 
         Args:
+            fn (Callable): the MountCore coroutine function to invoke.
+            *args (Any): arguments to forward to it.
+
+        Returns:
+            Any: whatever the core method returns.
+        """
+        return self._guard(fn, lambda: self._run(fn(*args)))
+
+    def _call_sync(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """Run a core call that reaches no backend, with the same guard.
+
+        The core answers some questions without touching the op facade --
+        a namespace link's target, the statfs shape -- and those stayed
+        synchronous when the rest became coroutines. Bridging one would
+        try to await a plain value.
+
+        Args:
             fn (Callable): the MountCore method to invoke.
             *args (Any): arguments to forward to it.
 
         Returns:
             Any: whatever the core method returns.
         """
+        return self._guard(fn, lambda: fn(*args))
+
+    def _guard(self, fn: Callable[..., Any], call: Callable[[], Any]) -> Any:
+        """Translate any failure into a FUSE error code.
+
+        Args:
+            fn (Callable): the core method, named in the log line.
+            call (Callable): the invocation to guard.
+
+        Returns:
+            Any: whatever the invocation returns.
+        """
         try:
-            return fn(*args)
+            return call()
         except Exception as err:
             code = classify_error(err)
             if code == errno.EIO and not isinstance(err,
@@ -75,11 +118,46 @@ class MirageFS:
                                fn.__name__, err)
             raise OSError(code, os.strerror(code)) from err
 
+    def _run(self, coro: Coroutine[Any, Any, Any]) -> Any:
+        """Drive one core coroutine to completion from a fuse callback.
+
+        Args:
+            coro (Coroutine): the core call to run.
+
+        Returns:
+            Any: whatever the coroutine returns.
+        """
+        if self.core.session is not None:
+            coro = self._bind_session(coro)
+        return run_async_from_sync(coro, self._loop)
+
+    async def _bind_session(self, coro: Coroutine[Any, Any, Any]) -> Any:
+        """Run one op under the bound session's mount grants.
+
+        The context is set inside the coroutine so it lands on the
+        event-loop task that executes the op: a contextvar set on this
+        thread would not travel with the coroutine to the loop's.
+
+        Args:
+            coro (Coroutine): the op coroutine to run under the session.
+
+        Returns:
+            Any: whatever the wrapped coroutine returns.
+        """
+        token = set_current_session(self.core.session)
+        try:
+            return await coro
+        finally:
+            reset_current_session(token)
+
     def drain_ops(self) -> list[dict[str, Any]]:
         return self.core.drain_ops()
 
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:
-        return self._call(self.core.getattr, path, fh)
+        # mfusepy wants libfuse's st_* spelling; the core answers in a
+        # neutral row, so the translation lives here, in the adapter
+        # whose binding needs it.
+        return self._call(self.core.getattr, path, fh).as_stat_dict()
 
     def readdir(self, path: str, fh: int) -> list[Any]:
         return self._call(self.core.readdir, path)
@@ -97,7 +175,7 @@ class MirageFS:
         self._call(self.core.mkdir, path)
 
     def readlink(self, path: str) -> str:
-        return self._call(self.core.readlink, path)
+        return self._call_sync(self.core.readlink, path)
 
     def symlink(self, target: str, source: str) -> None:
         self._call(self.core.symlink, target, source)
@@ -114,7 +192,9 @@ class MirageFS:
         # RENAME op, so without this method mv fails with ENOSYS before
         # reaching userspace.
         try:
-            self.core.getattr(new)
+            # Bridged like every other core call: this one is a probe, so
+            # its answer is discarded and only the raise matters.
+            self._run(self.core.getattr(new))
             new_exists = True
         except (FileNotFoundError, ValueError):
             new_exists = False

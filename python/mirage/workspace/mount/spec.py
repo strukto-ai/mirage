@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass, field
 
+from mirage.nfs.config import NFSConfig
 from mirage.resource.base import BaseResource
 from mirage.types import Limit, MountBackend, MountMode
 
@@ -28,4 +29,9 @@ class Mount:
     # Where to mount, for the kernel backends. None picks a temporary
     # directory appropriate for the backend. Ignored when backend is VFS.
     mountpoint: str | None = None
+    # Server knobs for backend=NFS. One server serves every nfs prefix
+    # of a workspace, so the FIRST declared mount fixes them and a later
+    # one is ignored -- the same rule add_nfs_mount follows. Ignored
+    # entirely for every other backend.
+    nfs_config: NFSConfig | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)

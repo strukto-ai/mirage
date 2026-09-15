@@ -31,6 +31,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "mem0:server": "tsx server/mem0/main.ts",
+    "nfs": "tsx nfs/nfs.ts",
     "notion:server": "tsx server/notion/main.ts",
     "notion:conformance": "tsx ntn_conformance.ts",
     "notion:mcp-parity": "tsx notion_mcp_parity.ts",

@@ -15,17 +15,15 @@
 import errno
 import os
 import stat
-import time
 
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.core import MountCore
-from mirage.observe import OpRecord
+from mirage.mount.core import MountCore
 from mirage.ops.registry import op
 from mirage.resource.ram import RAMResource
-from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
-from mirage.utils.stat_view import mtime_ns
+from mirage.types import MountMode, PathSpec
+from mirage.utils.dates import iso_timestamp
 from mirage.workspace import Workspace
 
 
@@ -38,10 +36,11 @@ async def seeded():
     return MountCore(ws.fs)
 
 
-def test_core_needs_no_fuse_module():
+@pytest.mark.asyncio
+async def test_core_needs_no_fuse_module():
     # The whole point of the split: MountCore imports nothing from mfusepy,
     # so the mount layer is exercisable without the [fuse] extra or a kernel.
-    import mirage.fuse.core as core
+    import mirage.mount.core as core
 
     assert not hasattr(core, "fuse")
     assert "mfusepy" not in str(core.__dict__.keys())
@@ -49,14 +48,14 @@ def test_core_needs_no_fuse_module():
 
 @pytest.mark.asyncio
 async def test_getattr_file(seeded):
-    attrs = seeded.getattr("/a.txt")
-    assert attrs["st_mode"] & stat.S_IFREG
-    assert attrs["st_size"] == len(b"hello world")
+    attrs = await seeded.getattr("/a.txt")
+    assert attrs.mode & stat.S_IFREG
+    assert attrs.size == len(b"hello world")
 
 
 @pytest.mark.asyncio
 async def test_getattr_dir(seeded):
-    assert seeded.getattr("/sub")["st_mode"] & stat.S_IFDIR
+    assert (await seeded.getattr("/sub")).mode & stat.S_IFDIR
 
 
 @pytest.mark.asyncio
@@ -64,12 +63,12 @@ async def test_getattr_missing_raises_native_exception(seeded):
     # Native exception, not FuseOSError: an adapter classifies it, the core
     # does not know what a FUSE error code is.
     with pytest.raises((FileNotFoundError, ValueError)):
-        seeded.getattr("/nope.txt")
+        await seeded.getattr("/nope.txt")
 
 
 @pytest.mark.asyncio
 async def test_readdir_lists_children(seeded):
-    entries = seeded.readdir("/")
+    entries = await seeded.readdir("/")
     assert entries[:2] == [".", ".."]
     assert "a.txt" in entries
     assert "sub" in entries
@@ -77,15 +76,15 @@ async def test_readdir_lists_children(seeded):
 
 @pytest.mark.asyncio
 async def test_read_slices(seeded):
-    assert seeded.read("/a.txt", 5, 0, None) == b"hello"
-    assert seeded.read("/a.txt", 100, 6, None) == b"world"
+    assert await seeded.read("/a.txt", 5, 0, None) == b"hello"
+    assert await seeded.read("/a.txt", 100, 6, None) == b"world"
 
 
 @pytest.mark.asyncio
 async def test_open_release_tracks_handles(seeded):
-    fh = seeded.open("/a.txt")
+    fh = await seeded.open("/a.txt")
     assert fh in seeded.handles
-    seeded.release(fh)
+    await seeded.release(fh)
     assert fh not in seeded.handles
 
 
@@ -94,10 +93,11 @@ async def test_release_flushes_buffered_writes(seeded):
     # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
     # between (the kext always flushes on close); dropping the buffer at
     # release silently lost data written through an fskit mount.
-    fh = seeded.open("/a.txt")
-    seeded.write("/a.txt", b"hello world, appended", 0, fh)
-    seeded.release(fh)
-    assert seeded.read("/a.txt", 100, 0, None) == b"hello world, appended"
+    fh = await seeded.open("/a.txt")
+    await seeded.write("/a.txt", b"hello world, appended", 0, fh)
+    await seeded.release(fh)
+    assert await seeded.read("/a.txt", 100, 0,
+                             None) == b"hello world, appended"
 
 
 @pytest.mark.asyncio
@@ -106,11 +106,11 @@ async def test_open_with_o_trunc_drops_the_old_body(seeded):
     # separate truncate before an O_TRUNC open; the flag on the open has
     # to do it. Ignoring it left `printf BB > f` holding BB plus the tail
     # of the longer body it replaced (#1032).
-    fh = seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
-    assert seeded.getattr("/a.txt", fh)["st_size"] == 0
-    seeded.write("/a.txt", b"BB\n", 0, fh)
-    seeded.release(fh)
-    assert seeded.read("/a.txt", 100, 0, None) == b"BB\n"
+    fh = await seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    assert (await seeded.getattr("/a.txt", fh)).size == 0
+    await seeded.write("/a.txt", b"BB\n", 0, fh)
+    await seeded.release(fh)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"BB\n"
 
 
 @pytest.mark.asyncio
@@ -118,13 +118,13 @@ async def test_o_trunc_open_settles_writes_buffered_on_another_handle(seeded):
     # A write the kernel already acknowledged on handle A precedes the
     # O_TRUNC open on handle B, so it must land before the truncation,
     # not stay queued to overwrite B's body when A is released.
-    first = seeded.open("/a.txt", os.O_WRONLY)
-    seeded.write("/a.txt", b"QUEUED", 0, first)
-    second = seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
-    seeded.write("/a.txt", b"BB\n", 0, second)
-    seeded.release(second)
-    seeded.release(first)
-    assert seeded.read("/a.txt", 100, 0, None) == b"BB\n"
+    first = await seeded.open("/a.txt", os.O_WRONLY)
+    await seeded.write("/a.txt", b"QUEUED", 0, first)
+    second = await seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    await seeded.write("/a.txt", b"BB\n", 0, second)
+    await seeded.release(second)
+    await seeded.release(first)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"BB\n"
 
 
 @pytest.mark.asyncio
@@ -136,13 +136,13 @@ async def test_o_trunc_open_through_a_link_settles_the_targets_handle():
     await ws.execute("tee /a.txt", stdin=b"hello world")
     await ws.execute("ln -s a.txt /lk")
     core = MountCore(ws.fs)
-    first = core.open("/a.txt", os.O_WRONLY)
-    core.write("/a.txt", b"QUEUED", 0, first)
-    second = core.open("/lk", os.O_WRONLY | os.O_TRUNC)
-    core.write("/lk", b"BB\n", 0, second)
-    core.release(second)
-    core.release(first)
-    assert core.read("/a.txt", 100, 0, None) == b"BB\n"
+    first = await core.open("/a.txt", os.O_WRONLY)
+    await core.write("/a.txt", b"QUEUED", 0, first)
+    second = await core.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    await core.write("/lk", b"BB\n", 0, second)
+    await core.release(second)
+    await core.release(first)
+    assert await core.read("/a.txt", 100, 0, None) == b"BB\n"
 
 
 @pytest.mark.asyncio
@@ -154,27 +154,27 @@ async def test_failed_settlement_keeps_the_other_handles_buffer():
     seed = Workspace({"/": res}, mode=MountMode.WRITE)
     await seed.execute("tee /a.txt", stdin=b"seed")
     core = MountCore(Workspace({"/": res}, mode=MountMode.READ).fs)
-    first = core.open("/a.txt", os.O_WRONLY)
-    core.write("/a.txt", b"QUEUED", 0, first)
+    first = await core.open("/a.txt", os.O_WRONLY)
+    await core.write("/a.txt", b"QUEUED", 0, first)
     with pytest.raises(OSError):
-        core.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+        await core.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
     with pytest.raises(OSError):
-        core.flush("/a.txt", first)
+        await core.flush("/a.txt", first)
     assert await seed.fs.read("/a.txt") == b"seed"
 
 
 @pytest.mark.asyncio
 async def test_open_without_o_trunc_keeps_the_body(seeded):
-    fh = seeded.open("/a.txt", os.O_RDWR)
-    seeded.write("/a.txt", b"J", 0, fh)
-    seeded.release(fh)
-    assert seeded.read("/a.txt", 100, 0, None) == b"Jello world"
+    fh = await seeded.open("/a.txt", os.O_RDWR)
+    await seeded.write("/a.txt", b"J", 0, fh)
+    await seeded.release(fh)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"Jello world"
 
 
 @pytest.mark.asyncio
 async def test_write_then_read(seeded):
-    seeded.write("/new.txt", b"written", 0, None)
-    assert seeded.read("/new.txt", 100, 0, None) == b"written"
+    await seeded.write("/new.txt", b"written", 0, None)
+    assert await seeded.read("/new.txt", 100, 0, None) == b"written"
 
 
 @pytest.mark.asyncio
@@ -202,13 +202,10 @@ async def test_getattr_of_a_link_reports_the_nodes_own_row():
                       atime=None,
                       mtime="2020-01-02T03:04:05Z",
                       nofollow=True)
-    attrs = core.getattr("/link")
-    assert attrs["st_mode"] == stat.S_IFLNK | 0o777
-    assert attrs["st_size"] == len("a.txt")
-    assert attrs["st_mtime"] == mtime_ns(
-        FileStat(name="link",
-                 type=FileType.SYMLINK,
-                 modified="2020-01-02T03:04:05Z"))
+    attrs = await core.getattr("/link")
+    assert attrs.mode == stat.S_IFLNK | 0o777
+    assert attrs.size == len("a.txt")
+    assert attrs.mtime == iso_timestamp("2020-01-02T03:04:05Z")
 
 
 @pytest.mark.asyncio
@@ -233,10 +230,10 @@ async def test_scoped_mount_may_not_touch_a_link_on_hidden_turf():
     core = MountCore(ws.fs, session=sess)
 
     with pytest.raises(OSError) as created:
-        core.symlink("/extra/lk2", "/data/greeting.txt")
+        await core.symlink("/extra/lk2", "/data/greeting.txt")
     assert created.value.errno == errno.EACCES
     with pytest.raises(OSError) as removed:
-        core.unlink("/extra/lk")
+        await core.unlink("/extra/lk")
     assert removed.value.errno == errno.ENOENT
     assert ws.namespace.is_link("/extra/lk")
 
@@ -250,26 +247,26 @@ async def test_unlink_removes_a_link_and_keeps_its_target():
     await ws.execute("tee /f.txt", stdin=b"body")
     await ws.execute("ln -s f.txt /lk")
     core = MountCore(ws.fs)
-    core.unlink("/lk")
+    await core.unlink("/lk")
     assert not ws.namespace.is_link("/lk")
     assert (await ws.execute("cat /f.txt")).stdout == b"body"
 
 
 @pytest.mark.asyncio
 async def test_xattrs_round_trip(seeded):
-    seeded.setxattr("/a.txt", "user.tag", b"v1")
-    assert seeded.getxattr("/a.txt", "user.tag") == b"v1"
-    assert "user.tag" in seeded.listxattr("/a.txt")
-    seeded.removexattr("/a.txt", "user.tag")
-    assert seeded.listxattr("/a.txt") == []
+    await seeded.setxattr("/a.txt", "user.tag", b"v1")
+    assert await seeded.getxattr("/a.txt", "user.tag") == b"v1"
+    assert "user.tag" in await seeded.listxattr("/a.txt")
+    await seeded.removexattr("/a.txt", "user.tag")
+    assert await seeded.listxattr("/a.txt") == []
 
 
 @pytest.mark.asyncio
 async def test_getxattr_missing_raises_no_xattr(seeded):
-    from mirage.fuse.errors import NO_XATTR
+    from mirage.mount.errors import NO_XATTR
 
     with pytest.raises(OSError) as exc:
-        seeded.getxattr("/a.txt", "user.absent")
+        await seeded.getxattr("/a.txt", "user.absent")
     assert exc.value.errno == NO_XATTR
 
 
@@ -292,11 +289,11 @@ async def test_rename_across_mounts_reports_exdev():
     },
                    mode=MountMode.WRITE)
     core = MountCore(ws.fs)
-    core.write("/data/x.txt", b"body", 0, None)
+    await core.write("/data/x.txt", b"body", 0, None)
     with pytest.raises(OSError) as exc:
-        core.rename("/data/x.txt", "/other/x.txt")
+        await core.rename("/data/x.txt", "/other/x.txt")
     assert exc.value.errno == errno.EXDEV
-    assert core.read("/data/x.txt", 100, 0, None) == b"body"
+    assert await core.read("/data/x.txt", 100, 0, None) == b"body"
 
 
 @op("read", resource="ram", filetype=".tally")
@@ -326,12 +323,12 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
     ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
     await ws.execute("tee /data/books.tally", stdin=b"0123456789")
     core = MountCore(_Sizeless(ws.fs))
-    fh = core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
-    assert core._run(core._ops.read("/data/books.tally", raw=True)) == b""
+    fh = await core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
+    assert await core._ops.read("/data/books.tally", raw=True) == b""
     rendered = b"RENDERED-AND-MUCH-LONGER"
-    assert core.getattr("/data/books.tally", fh)["st_size"] == len(rendered)
-    assert core.read("/data/books.tally", 100, 0, fh) == rendered
-    core.release(fh)
+    assert (await core.getattr("/data/books.tally", fh)).size == len(rendered)
+    assert await core.read("/data/books.tally", 100, 0, fh) == rendered
+    await core.release(fh)
 
 
 def _tally_core() -> MountCore:
@@ -348,9 +345,9 @@ async def test_partial_write_merges_against_stored_bytes():
     # mount that renders this extension would otherwise have the
     # rendering written over the file on any partial write.
     core = _tally_core()
-    core.write("/data/books.tally", b"0123456789", 0, None)
-    core.write("/data/books.tally", b"XY", 4, None)
-    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    await core.write("/data/books.tally", b"0123456789", 0, None)
+    await core.write("/data/books.tally", b"XY", 4, None)
+    stored = await core._ops.read("/data/books.tally", raw=True)
     assert stored == b"0123XY6789"
 
 
@@ -358,88 +355,40 @@ async def test_partial_write_merges_against_stored_bytes():
 async def test_read_still_renders_after_a_partial_write():
     # The other half of the same rule: only the write path reads raw.
     core = _tally_core()
-    core.write("/data/books.tally", b"0123456789", 0, None)
-    core.write("/data/books.tally", b"XY", 4, None)
-    body = core.read("/data/books.tally", 100, 0, None)
+    await core.write("/data/books.tally", b"0123456789", 0, None)
+    await core.write("/data/books.tally", b"XY", 4, None)
+    body = await core.read("/data/books.tally", 100, 0, None)
     assert body == b"RENDERED-AND-MUCH-LONGER"
 
 
 @pytest.mark.asyncio
 async def test_buffered_write_flush_merges_against_stored_bytes():
     core = _tally_core()
-    core.write("/data/books.tally", b"0123456789", 0, None)
-    fh = core.open("/data/books.tally")
-    core.write("/data/books.tally", b"XY", 4, fh)
-    core.release(fh)
-    stored = core._run(core._ops.read("/data/books.tally", raw=True))
+    await core.write("/data/books.tally", b"0123456789", 0, None)
+    fh = await core.open("/data/books.tally")
+    await core.write("/data/books.tally", b"XY", 4, fh)
+    await core.release(fh)
+    stored = await core._ops.read("/data/books.tally", raw=True)
     assert stored == b"0123XY6789"
 
 
-@pytest.fixture
-def new_york_clock():
-    # Mirrors tests/utils/test_stat_view.py: a non-UTC host zone makes a
-    # local-time parse of an offset-less stamp visibly wrong.
-    if not hasattr(time, "tzset"):
-        pytest.skip("tzset unavailable on this platform")
-    previous = os.environ.get("TZ")
-    os.environ["TZ"] = "America/New_York"
-    time.tzset()
-    yield
-    if previous is None:
-        os.environ.pop("TZ", None)
-    else:
-        os.environ["TZ"] = previous
-    time.tzset()
-
-
 @pytest.mark.asyncio
-async def test_overlay_mtime_reads_offsetless_stamps_as_utc(
-        seeded, new_york_clock):
-    # The R6 acceptance pin: the FUSE translator answers the same epoch
-    # as mirage.utils.stat_view for an offset-less stamp. Only a
-    # backend can produce one (the touch overlay always emits Z), so
-    # this is latent until a backend like nextcloud reports naive
-    # stamps; the pin is what keeps it latent.
-    naive = FileStat(name="f",
-                     type=FileType.FILE,
-                     content=ContentType.TEXT,
-                     modified="2026-01-02T03:04:05")
-    aware = FileStat(name="f",
-                     type=FileType.FILE,
-                     content=ContentType.TEXT,
-                     modified="2026-01-02T03:04:05+00:00")
-    entry = {"st_mode": 0o100644, "st_mtime": 0, "st_ctime": 0}
-    got_naive = seeded._apply_stat_attrs(dict(entry), naive)
-    got_aware = seeded._apply_stat_attrs(dict(entry), aware)
-    assert got_naive["st_mtime"] == got_aware["st_mtime"]
-    assert got_naive["st_mtime"] == mtime_ns(naive)
+async def test_every_mutation_drops_the_prefetched_bytes(seeded):
+    # Size-unknown backends are read through the prefetch cache, and a
+    # mutation that left the entry in place would make the next read
+    # answer pre-write bytes for the rest of the TTL. The TS twin pins
+    # the same four points (it only invalidated on unlink until now).
+    path = "/a.txt"
+    mutations = [
+        ("write", lambda: seeded.write(path, b"x", 0, None)),
+        ("truncate", lambda: seeded.truncate(path, 4)),
+        ("create", lambda: seeded.create(path)),
+        ("rename", lambda: seeded.rename(path, path)),
+    ]
+    for name, mutate in mutations:
+        await seeded.prefetch_read(path)
+        assert seeded.cached_data(path) is not None, f"{name}: nothing cached"
 
+        await mutate()
 
-@pytest.mark.asyncio
-async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
-    # 1970-01-01T00:00:00Z is a real answer, not a missing stamp: the
-    # fold keys on None, so epoch zero overwrites the construction-time
-    # default instead of leaving it in place.
-    epoch = FileStat(name="f",
-                     type=FileType.FILE,
-                     content=ContentType.TEXT,
-                     modified="1970-01-01T00:00:00Z")
-    entry = {"st_mode": 0o100644, "st_mtime": 12345, "st_ctime": 12345}
-    got = seeded._apply_stat_attrs(dict(entry), epoch)
-    assert got["st_mtime"] == 0
-    assert got["st_ctime"] == 0
-
-
-def test_drain_ops_omits_internal_mount_identity():
-    ws = Workspace({"/data": RAMResource()})
-    record = OpRecord(op="read",
-                      path="/data/file",
-                      source="ram",
-                      bytes=3,
-                      timestamp=1,
-                      duration_ms=2,
-                      mount_id="internal-mount")
-    ws.fs.records.append(record)
-    core = MountCore(ws.fs)
-    assert core.drain_ops() == [record.to_dict()]
-    assert core.drain_ops() == []
+        assert seeded.cached_data(path) is None, f"{name} served a stale read"

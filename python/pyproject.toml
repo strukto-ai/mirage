@@ -439,7 +439,6 @@ module = [
     "mirage.core.ssh.rm",
     "mirage.core.ssh.stream",
     "mirage.core.trello.stat",
-    "mirage.fuse.core",
     "mirage.fuse.darwin",
     "mirage.fuse.fs",
     "mirage.fuse.mount",
