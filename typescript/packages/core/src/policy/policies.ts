@@ -230,6 +230,17 @@ export class Policies {
   }
 
   /**
+   * The class name of every registered policy, in order. What a
+   * snapshot records about the coded policies: a policy is code, so a
+   * state can only name it, and a loader compares the names against
+   * what it registered. A policy written as an object literal has no
+   * class and reports as `Object`.
+   */
+  names(): readonly string[] {
+    return this.policies.map((policy) => policy.constructor.name)
+  }
+
+  /**
    * True when any policy defines `hook`. O(1); the op seam gates on it
    * so a workspace with no op policies pays nothing per VFS op.
    */

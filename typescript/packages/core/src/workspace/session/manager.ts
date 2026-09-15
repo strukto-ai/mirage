@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ownRecord, Session, varsFromEntries, varsFromEnv } from './session.ts'
+import { ownRecord, Session, type StoredSession, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMSessionStore } from './ram.ts'
@@ -23,8 +23,6 @@ import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
-
-type StoredSession = Parameters<typeof Session.fromJSON>[0]
 
 /** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: Session): boolean {
@@ -410,6 +408,22 @@ export class SessionManager {
     const s = this.sessions.get(sessionId)
     if (s === undefined) throw new Error(`unknown session: ${sessionId}`)
     return s
+  }
+
+  /**
+   * Forget a session `create` made that never landed.
+   *
+   * A snapshot restore creates a candidate for every table it has yet
+   * to vet and drops the candidates when a table is refused, so the
+   * store never sees a half-made session. `close` is the wrong door for
+   * that: it deletes from the store, which never held the candidate.
+   * The default session is never a candidate and is refused here.
+   */
+  discard(sessionId: string): void {
+    if (sessionId === this.defaultId) throw new Error('Cannot discard the default session')
+    if (!this.sessions.has(sessionId)) throw new Error(`unknown session: ${sessionId}`)
+    this.sessions.delete(sessionId)
+    this.persistLock.discard(sessionId)
   }
 
   list(): Session[] {

@@ -49,21 +49,21 @@ cp = await ws.copy()
 ```
 
 ```typescript TypeScript
-import { DriftPolicy, Workspace } from '@struktoai/mirage-node'
+import { DriftPolicy, Workspace } from "@struktoai/mirage-node";
 
 // capture to a tar file
-await ws.snapshot('run.tar')
+await ws.snapshot("run.tar");
 
 // replay with strict drift detection (default)
-const restored = await Workspace.load('run.tar')
+const restored = await Workspace.load("run.tar");
 
 // or restore the structure while reading current remote content
-const current = await Workspace.load('run.tar', {
+const current = await Workspace.load("run.tar", {
   driftPolicy: DriftPolicy.OFF,
-})
+});
 
 // in-process duplicate
-const copy = await ws.copy()
+const copy = await ws.copy();
 ```
 
 </CodeGroup>
@@ -74,7 +74,7 @@ Both `snapshot` and `copy` are async because they serialize workspace state and 
 
 ## Versioning: commit, checkout, clone
 
-A tar snapshot is a *portable* capture you move between machines. Versioning is the in-place complement: a git-style history kept *with* the workspace, server-side and keyed by workspace id, so you can checkpoint, roll back, branch, and fork without writing a file. It is backed by a real git object store (dulwich) inside the daemon.
+A tar snapshot is a _portable_ capture you move between machines. Versioning is the in-place complement: a git-style history kept _with_ the workspace, server-side and keyed by workspace id, so you can checkpoint, roll back, branch, and fork without writing a file. It is backed by a real git object store (dulwich) inside the daemon.
 
 This is a CLI / REST feature, not an SDK method (there is no `ws.commit()` in-process):
 
@@ -86,29 +86,52 @@ mirage workspace clone demo --at <version>           # fork a past version
 
 See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `branch`, and the full flag set.
 
-| | Tar snapshot | Versioning |
-| --- | --- | --- |
-| Output | a `.tar` you move or archive | history kept with the workspace (server) |
-| API | `ws.snapshot()` / `Workspace.load()` (SDK) | `mirage workspace commit` / `checkout` / `clone` (CLI + REST) |
-| Lineage | none, each tar stands alone | git-style commits, branches, diff |
-| Best for | reproducing a run on another machine | iterating in place with checkpoints to revert to |
+|          | Tar snapshot                               | Versioning                                                    |
+| -------- | ------------------------------------------ | ------------------------------------------------------------- |
+| Output   | a `.tar` you move or archive               | history kept with the workspace (server)                      |
+| API      | `ws.snapshot()` / `Workspace.load()` (SDK) | `mirage workspace commit` / `checkout` / `clone` (CLI + REST) |
+| Lineage  | none, each tar stands alone                | git-style commits, branches, diff                             |
+| Best for | reproducing a run on another machine       | iterating in place with checkpoints to revert to              |
 
 ## What Is And Isn't Captured
 
+A snapshot is the workspace **document** (what the deployment declared: mounts, profiles, the default profile's name, the consistency policy, installed CLIs, the env template) plus the workspace **state** (what happened: sessions, namespace nodes, history, finished jobs, cache, fingerprints). Secrets are redacted from the document wherever a schema declares them; the deployment's wiring (secret stores, cache and index backends, runtimes, coded policies) is the loader's to supply.
+
 <Columns cols={2}>
   <Card title="Captured" icon="check">
-    - Mount configs (creds redacted; restore via `resources=` override)
-    - Sessions, history, finished jobs
-    - Cache bytes for touched paths
-    - One fingerprint per remote read (ETag-equivalent)
-    - Optional per-path `revision` when the backend exposes one
+    - Mount configs (creds redacted; restore via `resources=` override) -
+    Profiles as documents, and which one is the default - The workspace
+    consistency policy - Sessions in full: cwd, variables, per-mount modes,
+    hides and shows, hidden variables, admission rules, pending and answered
+    asks - History, finished jobs, namespace nodes (symlinks, attribute overlay)
+    - Cache bytes for touched paths - One fingerprint per remote read
+    (ETag-equivalent) - Optional per-path `revision` when the backend exposes
+    one - The class names of coded policies (named, not carried)
   </Card>
   <Card title="Not captured" icon="xmark">
-    - Live state of mounts with `SUPPORTS_SNAPSHOT=False` (Gmail, Slack, Linear, Notion, …)
-    - Files the agent never touched
-    - Raw bytes of remote objects (recoverable only via revision pin)
+    - Live state of mounts with `SUPPORTS_SNAPSHOT=False` (Gmail, Slack, Linear,
+    Notion, …) - Files the agent never touched - Raw bytes of remote objects
+    (recoverable only via revision pin) - Coded policies, secret stores,
+    runtimes: code the loader registers - Shell functions, aliases, `shopt` and
+    `set -o` state
   </Card>
 </Columns>
+
+### How a restore lands sessions
+
+A restore replays the document first, then lands the state, and **never widens** what the target's document allows. Every session table is landed under the target's profile of the same name (`profiles` from the snapshot unless the loader passes its own), and what the table carries is joined with what that profile compiles to: restrictions union, grants intersect, the policy program is the target's. So a session created with `profile="restricted"` comes back restricted, an inline `permissions` document survives, and a pending ask is still pending.
+
+The profile goes on before the table does, and before the session gate runs, so the program the document declares is what judges the restored variables. A session the restore creates is narrowed under it outright; one that is already there — the default session, and every live session on a `checkout` — has it joined on instead, keeping every restriction of its own and keeping a policy program the host installed with `set_session_profile`.
+
+Five rules follow, in both languages:
+
+- **An unknown profile name refuses the load** with the same `PolicyError` `create_session` raises, before any mount or session state has moved. A table naming no profile, or `default` on a target without a profile of that name, lands under the target's default.
+- **A restored session is never wider** than the target's document or than the live session it lands on. On a running workspace a `checkout` can add a version's restrictions to a live session, never lift the live ones; `set_session_profile` is the host's reset. A loader that supplies a _stricter_ version of a profile a table names governs the restored session under it. Rule lists compose rather than concatenate: where one side asks and the other denies, the answer is the deny, because two rule sets read together are read by anchor depth and a deeper ask would otherwise answer a refusal with a prompt. The deny is restated at the ask's depth in the scope the two share, so a top-level ask meeting a deny written under one mount is refused inside that mount and still asked elsewhere, and an all-command ask meeting a `cat` deny is refused for `cat` alone; a deny that side's own deeper ask already outranks is left as it was, so a document's carve-outs survive a join with itself.
+- **A show survives only where the other side grants its path.** A show exists to re-open what a hide covers, so the question is asked of the other side, not of the merged hide set: a table that never mentioned a hidden subtree does not take that subtree's carve-out away with it. The other side grants a path when nothing it hides covers it, or when something it _shows_ covers it more deeply, so two nested carve-outs intersect to the narrower one rather than cancelling. A show only one side reaches is dropped, mode and all. Two show _patterns_ that merely overlap are the one case with no answer: `*` crosses separators, so their common ground is a family of paths and not a subtree the grammar can name, and both are dropped rather than guessed at.
+- **Every restored variable clears the session gate** (`pre_session`), tables and env template alike, before anything lands; a refusal aborts the load with the workspace as it was.
+- **Coded policies are named, not restored.** `load` warns about a recorded class no registered policy answers to; pass them as `policies=`. A profile whose policy names a runtime the target lacks fails closed on every line under it, as it does live; `profiles=` on the loader is the escape hatch.
+
+Profile `env` literals travel verbatim, like the workspace `env:` block does: a credential in this model is a managed pointer (`from:`), and a snapshot carries the pointer, never a value.
 
 ## Drift Detection
 
@@ -125,10 +148,10 @@ Paths that carry a revision pin are skipped — the pinned read serves the exact
 
 ## Drift Policies
 
-| Policy | Behavior on mismatch | Use when |
-| --- | --- | --- |
-| `STRICT` *(default)* | Raise `ContentDriftError` on first mismatch. | Reproducing an agent run; you want to know the world moved. |
-| `OFF` | Skip drift checks entirely. Evict snapshot cache for fingerprinted paths so reads serve current. | You only wanted the workspace skeleton, not the bytes. |
+| Policy               | Behavior on mismatch                                                                             | Use when                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `STRICT` _(default)_ | Raise `ContentDriftError` on first mismatch.                                                     | Reproducing an agent run; you want to know the world moved. |
+| `OFF`                | Skip drift checks entirely. Evict snapshot cache for fingerprinted paths so reads serve current. | You only wanted the workspace skeleton, not the bytes.      |
 
 Pass via `await Workspace.load(..., drift_policy=DriftPolicy.OFF)`.
 
@@ -136,10 +159,10 @@ Pass via `await Workspace.load(..., drift_policy=DriftPolicy.OFF)`.
 
 Snapshots interact with two existing caches:
 
-| Cache | Holds | Snapshotted? |
-| --- | --- | --- |
-| **File cache** (`Workspace._cache`) | raw bytes per virtual path | ✅ bytes for touched paths are serialized into the tar |
-| **Index cache** (`Resource._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load |
+| Cache                               | Holds                           | Snapshotted?                                           |
+| ----------------------------------- | ------------------------------- | ------------------------------------------------------ |
+| **File cache** (`Workspace._cache`) | raw bytes per virtual path      | ✅ bytes for touched paths are serialized into the tar |
+| **Index cache** (`Resource._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load                           |
 
 **Only files the agent actually read are fingerprinted.** Capture walks `ws._ops.records` for `op == "read"` and dedups by path. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
 
@@ -151,13 +174,13 @@ At load time, three pieces of restored state cooperate per read:
 
 The same three states under each policy:
 
-| Scenario | Cache | Pin | Drift check | Net effect |
-| --- | --- | --- | --- | --- |
-| STRICT, fingerprint matches, cache warm | served | n/a | passes | Original bytes from cache (~0 ms) |
-| STRICT, fingerprint matches, cache cold | miss | n/a | passes | Live GET, current bytes (= original) |
-| STRICT, no pin, fingerprint differs | (n/a) | (n/a) | raises `ContentDriftError` | Caller informed before reading |
-| STRICT + pin (versioned backend) | served (matches recorded) | installed | skipped for pinned paths | Original bytes from cache or pinned GET |
-| OFF, any state | evicted for fingerprinted paths | not installed | skipped | Live GET, current bytes |
+| Scenario                                | Cache                           | Pin           | Drift check                | Net effect                              |
+| --------------------------------------- | ------------------------------- | ------------- | -------------------------- | --------------------------------------- |
+| STRICT, fingerprint matches, cache warm | served                          | n/a           | passes                     | Original bytes from cache (~0 ms)       |
+| STRICT, fingerprint matches, cache cold | miss                            | n/a           | passes                     | Live GET, current bytes (= original)    |
+| STRICT, no pin, fingerprint differs     | (n/a)                           | (n/a)         | raises `ContentDriftError` | Caller informed before reading          |
+| STRICT + pin (versioned backend)        | served (matches recorded)       | installed     | skipped for pinned paths   | Original bytes from cache or pinned GET |
+| OFF, any state                          | evicted for fingerprinted paths | not installed | skipped                    | Live GET, current bytes                 |
 
 The cache is the optimization, the fingerprint is the verifier, and the pin is the recovery — three independent guarantees that "what you replay equals what you captured."
 
@@ -169,15 +192,15 @@ Legend: ✅ = implemented · 🟡 = resource opts in, but recorded reads do not 
 
 ### Remote Resources
 
-| Resource family | Python | TS Node | TS Browser | Revision pin | Notes |
-| --- | :---: | :---: | :---: | :---: | --- |
-| S3 and S3-compatible object stores | ✅ | ✅ | ✅ | When `VersionId` is available | Uses `ETag`; compatible providers without object versions still get drift detection. |
-| OneDrive | ✅ | — | — | ✅ | Uses Microsoft Graph `cTag` plus the current version id. |
-| SharePoint | ✅ | — | — | ✅ | Same Microsoft Graph version flow as OneDrive. |
-| Hugging Face resources | 🟡 | 🟡 | — | ❌ | Resources opt in, but read records do not yet include the stat fingerprint. |
-| Nextcloud | 🟡 | — | — | ❌ | The resource opts in, but read records do not yet include the WebDAV ETag. |
-| GitHub and Google Drive | ❌ | ❌ | ❌ | ❌ | Current reads are live-only; revision-aware replay is not wired yet. |
-| Other remote resources | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
+| Resource family                    | Python | TS Node | TS Browser |         Revision pin          | Notes                                                                                |
+| ---------------------------------- | :----: | :-----: | :--------: | :---------------------------: | ------------------------------------------------------------------------------------ |
+| S3 and S3-compatible object stores |   ✅   |   ✅    |     ✅     | When `VersionId` is available | Uses `ETag`; compatible providers without object versions still get drift detection. |
+| OneDrive                           |   ✅   |    —    |     —      |              ✅               | Uses Microsoft Graph `cTag` plus the current version id.                             |
+| SharePoint                         |   ✅   |    —    |     —      |              ✅               | Same Microsoft Graph version flow as OneDrive.                                       |
+| Hugging Face resources             |   🟡   |   🟡    |     —      |              ❌               | Resources opt in, but read records do not yet include the stat fingerprint.          |
+| Nextcloud                          |   🟡   |    —    |     —      |              ❌               | The resource opts in, but read records do not yet include the WebDAV ETag.           |
+| GitHub and Google Drive            |   ❌   |   ❌    |     ❌     |              ❌               | Current reads are live-only; revision-aware replay is not wired yet.                 |
+| Other remote resources             |   ❌   |   ❌    |     ❌     |              ❌               | Snapshot restores their config/state, then reads current remote content.             |
 
 ### Local State
 
@@ -205,7 +228,7 @@ class MyResource(BaseResource):
 ```
 
 And in your read function, look up the active pin and pass both the
-fingerprint and the revision through to ``record`` so the snapshot
+fingerprint and the revision through to `record` so the snapshot
 captures whatever the backend served:
 
 ```python
@@ -221,7 +244,7 @@ async def read_bytes(accessor, virtual_path, ...):
 ```
 
 At load time the workspace writes each manifest entry straight into
-``mount.revisions`` — no per-resource hook required. If your backend
+`mount.revisions` — no per-resource hook required. If your backend
 has no stable revision, skip steps 3 and 6; drift detection still
 works on the fingerprint alone.
 

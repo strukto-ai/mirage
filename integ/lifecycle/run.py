@@ -102,6 +102,8 @@ async def action(ws: Workspace, step: dict[str, Any],
             so far, by id.
         held (dict[str, Any]): what earlier steps put aside for later
             ones; ``snapshot`` stores the state dict ``checkout`` applies.
+            ``session`` takes a profile name or an inline document, as
+            ``set_profile`` does; ``close_session`` closes one by id.
     """
     op = step["op"]
     if op == "cached":
@@ -129,8 +131,10 @@ async def action(ws: Workspace, step: dict[str, Any],
     elif op == "set_mode":
         ws.set_mount_mode(step["path"], MountMode(step["mode"]))
     elif op == "session":
-        ws.create_session(step["id"],
-                          profile=profile_document(step.get("profile", {})))
+        raw = step.get("profile", {})
+        ws.create_session(
+            step["id"],
+            profile=profile_document(raw) if isinstance(raw, dict) else raw)
     elif op == "close_session":
         await ws.close_session(step["id"])
     elif op == "set_profile":

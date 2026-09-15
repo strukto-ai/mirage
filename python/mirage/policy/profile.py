@@ -12,18 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
+from mirage.policy.constants import (DEFAULT_ASK_REASON, DEFAULT_DENY_REASON,
+                                     WILDCARD)
 from mirage.policy.types import (AdmissionRules, CommandRule, HideReason,
                                  ProfileScript)
 from mirage.runtime.types import ScriptSource
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
-                          ShownPaths, parse_mount_mode)
+                          ShownPaths, parse_mount_mode, weaker_mode)
 from mirage.utils.hidden import is_glob
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
@@ -684,3 +685,191 @@ class CompiledProfile:
     shown_paths: ShownPaths | None = None
     hide_reasons: tuple[HideReason, ...] = ()
     profile: str | None = None
+
+
+def _rule_to_doc(rule: CommandRule,
+                 default_reason: str) -> str | dict[str, Any]:
+    """One rule in the document grammar ``_rule`` reads back.
+
+    A rule naming one command over the whole line with the verb's
+    default reason is the bare string the document spells it as. The
+    rest take a mapping, one shape per pairing: commands alone as a
+    list, paths alone as a list, both as the mapping of each command to
+    its paths, the only spelling the grammar has for that pairing. A
+    rule stating neither means every command and is written as the
+    wildcard pattern, the grammar's one spelling of it. A rule inside a
+    document block carries no ``mount``: only the resolver stamps one,
+    on compiled rules, so a stamped rule here is a caller's error, not
+    state.
+
+    Args:
+        rule (CommandRule): a rule of a ``commands`` block.
+        default_reason (str): the verb's reason for a rule stating
+            none, which the bare-string form carries implicitly.
+
+    Raises:
+        ValueError: the rule carries a mount stamp.
+    """
+    if rule.mount:
+        raise ValueError(f"a document rule carries no mount: {rule!r}")
+    if (len(rule.commands) == 1 and not rule.paths
+            and rule.reason == default_reason):
+        return rule.commands[0]
+    doc: dict[str, Any] = {"reason": rule.reason}
+    if rule.commands and rule.paths:
+        doc["commands"] = {cmd: list(rule.paths) for cmd in rule.commands}
+    elif rule.paths:
+        doc["paths"] = list(rule.paths)
+    else:
+        doc["commands"] = list(rule.commands) or [WILDCARD]
+    return doc
+
+
+def _verbs_to_doc(ask: tuple[CommandRule, ...],
+                  deny: tuple[CommandRule, ...]) -> dict[str, Any]:
+    """The ``ask`` and ``deny`` lists of a commands block, empty ones
+    omitted.
+
+    Args:
+        ask (tuple[CommandRule, ...]): the block's ask rules.
+        deny (tuple[CommandRule, ...]): the block's deny rules.
+    """
+    doc: dict[str, Any] = {}
+    if ask:
+        doc["ask"] = [_rule_to_doc(rule, DEFAULT_ASK_REASON) for rule in ask]
+    if deny:
+        doc["deny"] = [
+            _rule_to_doc(rule, DEFAULT_DENY_REASON) for rule in deny
+        ]
+    return doc
+
+
+def _paths_to_doc(block: PathsBlock) -> dict[str, Any]:
+    """A ``paths`` block as a document: the flat hide list, the show
+    entries as the mapping of path to mode (None for a list-form
+    entry, which both parsers accept) and the reason groups.
+
+    Args:
+        block (PathsBlock): the block.
+    """
+    doc: dict[str, Any] = {}
+    if block.hide:
+        doc["hide"] = list(block.hide)
+    if block.show:
+        doc["show"] = _show_to_doc(block.show)
+    if block.reasons:
+        doc["reasons"] = [{
+            "patterns": list(group.patterns),
+            "reason": group.reason
+        } for group in block.reasons]
+    return doc
+
+
+def _show_to_doc(entries: Sequence[ShowEntry]) -> dict[str, str | None]:
+    """A show list as the document's mapping, weakest mode per path.
+
+    The grammar keys a show by path, so two entries for one path have
+    one slot -- and the last one written is not the one that governs:
+    :func:`shown_mode` takes the weaker of two entries at a depth,
+    failing toward refusal, so keeping the last could serialize a
+    ``rwx`` over the ``r`` that was actually in force and hand the
+    subtree back executable after a reload. A list-form entry (no mode)
+    states visibility only and never answers a mode question, so a
+    stated mode beside it wins the slot rather than being erased by it.
+
+    Args:
+        entries (Sequence[ShowEntry]): the compiled show entries.
+    """
+    doc: dict[str, str | None] = {}
+    for entry in entries:
+        if entry.path not in doc:
+            doc[entry.path] = (entry.mode.value
+                               if entry.mode is not None else None)
+            continue
+        if entry.mode is None:
+            continue
+        held = doc[entry.path]
+        doc[entry.path] = (entry.mode.value if held is None else weaker_mode(
+            MountMode(held), entry.mode).value)
+    return doc
+
+
+def _mount_to_doc(entry: ProfileMount) -> dict[str, Any]:
+    """One mount section as a document.
+
+    Args:
+        entry (ProfileMount): the section.
+    """
+    doc: dict[str, Any] = {}
+    if entry.mode is not None:
+        doc["mode"] = entry.mode.value
+    if entry.commands is not None:
+        doc["commands"] = _verbs_to_doc(entry.commands.ask,
+                                        entry.commands.deny)
+    if entry.paths is not None:
+        doc["paths"] = _paths_to_doc(entry.paths)
+    return doc
+
+
+def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
+    """A profile as the document its validators read back.
+
+    The shape a snapshot carries a profile in, so a loader without the
+    deployment's config file still has the document its sessions were
+    narrowed under. ``model_dump`` is not that shape: a compiled rule
+    holds fields the document grammar refuses (``mount``, ``commands``
+    beside ``paths``), so this writes the grammar instead. An unsaid
+    field is omitted and a stated-but-empty block is kept, so
+    ``profile_from_dict(profile_to_dict(p)) == p`` for any profile a
+    document produced. One known limit: a rule a typed caller built
+    with several commands *and* paths has only the mapping form to
+    travel in, and reads back as one rule per command, which the doors
+    judge the same way.
+
+    Args:
+        profile (SessionProfile): the profile.
+    """
+    doc: dict[str, Any] = {}
+    if profile.cwd is not None:
+        doc["cwd"] = profile.cwd
+    if profile.env is not None:
+        doc["env"] = dict(profile.env)
+    if profile.mounts is not None:
+        doc["mounts"] = {
+            prefix: _mount_to_doc(entry)
+            for prefix, entry in profile.mounts.items()
+        }
+    if profile.paths is not None:
+        doc["paths"] = _paths_to_doc(profile.paths)
+    if profile.vars is not None:
+        doc["vars"] = {"hide": list(profile.vars.hide)}
+    if profile.commands is not None:
+        block = _verbs_to_doc(profile.commands.ask, profile.commands.deny)
+        if profile.commands.allow is not None:
+            block["allow"] = list(profile.commands.allow)
+        doc["commands"] = block
+    if profile.policy is not None:
+        script = profile.policy.script
+        doc["policy"] = {
+            "script": ({
+                "source": script.source,
+                "language": script.language,
+                "module": script.module,
+            } if isinstance(script, ScriptSource) else script),
+            "runtime":
+            profile.policy.runtime,
+        }
+    return doc
+
+
+def profile_from_dict(doc: Mapping[str, Any]) -> SessionProfile:
+    """The profile a :func:`profile_to_dict` document names.
+
+    The validators do the reading, a policy script block included
+    (pydantic builds the ``ScriptSource`` from its three fields), so a
+    document from a snapshot passes the same door a config file does.
+
+    Args:
+        doc (Mapping[str, Any]): the document.
+    """
+    return SessionProfile.model_validate(doc)

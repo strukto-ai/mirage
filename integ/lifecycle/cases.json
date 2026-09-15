@@ -2489,6 +2489,306 @@
           }
         }
       ]
+    },
+    {
+      "id": "checkout_recreates_a_closed_session_under_its_profile",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "config": {}
+          }
+        },
+        "profiles": {
+          "restricted": {
+            "env": {
+              "SLACK_TOKEN": "xoxb-secret"
+            },
+            "vars": {
+              "hide": ["SLACK_TOKEN"]
+            },
+            "commands": {
+              "deny": ["rm"]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "/data/keep",
+          "data": "kept"
+        },
+        {
+          "op": "session",
+          "id": "agent",
+          "profile": "restricted"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /data/keep",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "close_session",
+          "id": "agent"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo gone",
+          "expect": {
+            "error_contains": "agent"
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "export SLACK_TOKEN=evil",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr_contains": "permission denied"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /data/keep",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "read",
+          "path": "/data/keep",
+          "expect": {
+            "value": "kept"
+          }
+        }
+      ]
+    },
+    {
+      "id": "checkout_never_widens_a_live_session",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "resource": "ram",
+            "config": {}
+          }
+        },
+        "profiles": {
+          "restricted": {
+            "env": {
+              "SLACK_TOKEN": "xoxb-secret"
+            },
+            "vars": {
+              "hide": ["SLACK_TOKEN"]
+            },
+            "commands": {
+              "deny": ["rm"]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "/data/keep",
+          "data": "kept"
+        },
+        {
+          "op": "exec",
+          "command": "export SLACK_TOKEN=xoxb-secret; echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[xoxb-secret]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "set_profile",
+          "profile": "restricted"
+        },
+        {
+          "op": "exec",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rm /data/keep",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rm /data/keep",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": {}
+        },
+        {
+          "op": "exec",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[xoxb-secret]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": "restricted"
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "set_profile",
+          "profile": {}
+        },
+        {
+          "op": "exec",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[xoxb-secret]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "echo \"[$SLACK_TOKEN]\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "[]\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rm /data/keep",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "read",
+          "path": "/data/keep",
+          "expect": {
+            "value": "kept"
+          }
+        }
+      ]
     }
   ]
 }

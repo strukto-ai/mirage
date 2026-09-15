@@ -45,6 +45,14 @@ export interface VersionMeta {
   fingerprints: unknown[]
   liveOnlyMounts: string[]
   defaultSessionId?: string | undefined
+  // The workspace document (profiles, the default profile's name, the
+  // policy names, the consistency knob), or a checkout or clone at this
+  // version would land its sessions under no profile. Optional: a meta
+  // committed before the keys existed reads as a snapshot without them.
+  profiles?: Record<string, unknown>
+  profile?: string | null
+  policies?: string[]
+  consistency?: string
 }
 
 export interface TreeInputs {
@@ -156,6 +164,10 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
     fingerprints: (state.fingerprints as unknown[] | undefined) ?? [],
     liveOnlyMounts: state.live_only_mounts ?? [],
     defaultSessionId: state.default_session_id,
+    profiles: state.profiles ?? {},
+    profile: state.profile ?? null,
+    policies: state.policies ?? [],
+    ...(state.consistency !== undefined ? { consistency: state.consistency } : {}),
   }
   return { entries, meta }
 }
@@ -203,5 +215,9 @@ export function toState(
     fingerprints: meta.fingerprints,
     live_only_mounts: meta.liveOnlyMounts,
     default_session_id: meta.defaultSessionId,
+    profiles: meta.profiles ?? {},
+    profile: meta.profile ?? null,
+    policies: meta.policies ?? [],
+    ...(meta.consistency !== undefined ? { consistency: meta.consistency } : {}),
   } as unknown as WorkspaceStateDict
 }

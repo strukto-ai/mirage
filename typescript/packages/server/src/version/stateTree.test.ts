@@ -121,3 +121,44 @@ describe('stateTree', () => {
     expect(back.mounts[0]?.resource_ref).toBeNull()
   })
 })
+
+describe('the document keys in the version meta', () => {
+  // A checkout or clone at a version lands its sessions under the
+  // version's document, so the profiles, the default profile's name, the
+  // policy names and the consistency knob travel in the meta.
+  it('ride the meta and read back', () => {
+    const state = {
+      ...makeState(),
+      profiles: {
+        default: {},
+        restricted: { commands: { deny: [{ reason: 'no', commands: ['rm'] }] } },
+      },
+      profile: 'restricted',
+      policies: ['RulePolicy'],
+      consistency: 'always',
+    } as unknown as WorkspaceStateDict
+    const { entries, meta } = treeInputsFromState(state)
+    expect(meta.profile).toBe('restricted')
+    expect(Object.keys(meta.profiles ?? {}).sort()).toEqual(['default', 'restricted'])
+    expect(meta.policies).toEqual(['RulePolicy'])
+    expect(meta.consistency).toBe('always')
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.profiles).toEqual(state.profiles)
+    expect(back.profile).toBe('restricted')
+    expect(back.policies).toEqual(['RulePolicy'])
+    expect(back.consistency).toBe('always')
+  })
+
+  it('a meta committed before the keys existed reads as a snapshot without them', () => {
+    const { entries, meta } = treeInputsFromState(makeState())
+    delete meta.profiles
+    delete meta.profile
+    delete meta.policies
+    delete meta.consistency
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.profiles).toEqual({})
+    expect(back.profile).toBeNull()
+    expect(back.policies).toEqual([])
+    expect(back.consistency).toBeUndefined()
+  })
+})
