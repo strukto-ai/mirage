@@ -1005,7 +1005,22 @@ jobs:
           ONEDRIVE_URL: http://127.0.0.1:5089
           HF_URL: http://127.0.0.1:5099
           GITHUB_URL: http://127.0.0.1:5087
+          WATCH_RESULTS_FILE: /tmp/watch-battery-results.txt
         run: ./python/.venv/bin/python integ/watch/run.py
+
+      # The battery names the failing case on stdout, and that lands only in
+      # the raw step log, which an org egress policy can put out of reach.
+      # A step summary renders for a human but is not served by the API; an
+      # artifact is, so the transcript is uploaded here. `always()` is the
+      # whole point: the run worth reading is the one that just failed.
+      - name: Upload watch battery results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watch-battery-results
+          path: /tmp/watch-battery-results.txt
+          if-no-files-found: error
+          retention-days: 1
 
   integ-fuse:
     needs: [changes, typescript-build]

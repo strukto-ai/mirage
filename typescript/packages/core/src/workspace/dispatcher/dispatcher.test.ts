@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
@@ -460,4 +460,64 @@ describe('a rename moves what the node table holds', () => {
       await ws.close()
     }
   })
+})
+
+describe('a failed backend open is not evidence of absence', () => {
+  it('symlink refuses a name whose backend could not be opened', async () => {
+    const parser = await getTestParser()
+    const broken = new RAMResource()
+    vi.spyOn(broken, 'open').mockRejectedValue(new Error('401 bad credentials'))
+    const ws = new Workspace(
+      { '/r': new RAMResource(), '/data': broken },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      // The door probes the name before linking over it. A backend that
+      // cannot open has not reported the name free, so the link must not
+      // be created on the strength of that failure.
+      await expect(
+        ws.dispatch('symlink', '/data/notes.txt', [], { target: '/r/t' }),
+      ).rejects.toThrow('401 bad credentials')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
+  it('a failing parent listing propagates out of the parent-listing probe', async () => {
+    const parser = await getTestParser()
+    const listing = new RAMResource()
+    // The store's key iteration is reached only by the parent readdir, not
+    // by the stat probe ahead of it, so this fails exactly the one channel.
+    vi.spyOn(listing.store.files, 'keys').mockImplementation(() => {
+      throw new Error('backend listing failed')
+    })
+    const ws = new Workspace(
+      { '/r': new RAMResource(), '/data': listing },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      // The stat probe misses on a name RAM does not hold, which is the
+      // one route into the parent-listing probe. The parent's readdir is
+      // the channel that fails there, and a channel that could not answer
+      // is not a name reported free.
+      await expect(
+        ws.dispatch('symlink', '/data/notes.txt', [], { target: '/r/t' }),
+      ).rejects.toThrow('backend listing failed')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
+  it('readlink still answers ENOENT where no mount serves the path', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/r': new RAMResource() },
+      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await expect(ws.dispatch('readlink', '/nowhere/x')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
 })

@@ -16,7 +16,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { getFolderInfo, type BoxItem } from './api.ts'
+import { absentOn404, getFolderInfo, type BoxItem } from './api.ts'
 import { readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
 import { pathParts, resolveItem } from './resolve.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -62,7 +62,9 @@ export async function stat(
     // The mount root has no parent listing to inherit an mtime from; fetch
     // the folder's own metadata so find -mtime and ls -ld see a real
     // timestamp (mirrors the onedrive Graph-root stat).
-    const info = await getFolderInfo(accessor.tokenManager, accessor.rootFolderId)
+    const info = await absentOn404(path.virtual, () =>
+      getFolderInfo(accessor.tokenManager, accessor.rootFolderId),
+    )
     return new FileStat({
       name: '/',
       type: FileType.DIRECTORY,
@@ -74,7 +76,7 @@ export async function stat(
   if (index === undefined) {
     // The write-family builders and provision estimation call stat without a
     // threaded index; resolve the id directly rather than ENOENT.
-    const item = await resolveItem(accessor, pathParts(path))
+    const item = await absentOn404(path.virtual, () => resolveItem(accessor, pathParts(path)))
     // Weblinks are hidden from listings; a direct lookup must not
     // resurface a sizeless, unreadable entry.
     if (item === null || item.type === 'web_link') throw enoent(path.virtual)
@@ -102,7 +104,7 @@ export async function stat(
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
-      const item = await resolveItem(accessor, pathParts(path))
+      const item = await absentOn404(path.virtual, () => resolveItem(accessor, pathParts(path)))
       if (item === null || item.type === 'web_link') throw enoent(path.virtual)
       return statFromItem(item)
     }

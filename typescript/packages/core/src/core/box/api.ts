@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BoxApiError,
   boxDelete,
   boxGet,
   boxGetBytes,
@@ -22,7 +23,22 @@ import {
   boxUploadMultipart,
 } from './client.ts'
 import type { BoxTokenManager } from './client.ts'
+import { enoent } from '../../utils/errors.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
+
+// Box answers a folder id that has been deleted, or was never reachable,
+// with 404, and BoxApiError carries only an HTTP status. Stamping that one
+// status as ENOENT here keeps a single definition of absence: stat, readdir
+// and du's walk all read the POSIX code instead of sniffing a status, so a
+// 401/429/5xx stays a failure rather than reading back as a missing path.
+export async function absentOn404<T>(virtual: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (err) {
+    if (err instanceof BoxApiError && err.status === 404) throw enoent(virtual)
+    throw err
+  }
+}
 
 type BoxItemType = 'file' | 'folder' | 'web_link'
 

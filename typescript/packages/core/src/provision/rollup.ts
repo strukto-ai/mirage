@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { combineAlternative, combineSum } from './combine.ts'
 import type { ProvisionResult } from './types.ts'
-import { combineAlternative, combineSum, Precision } from './types.ts'
+import { Precision } from './types.ts'
 
 /**
  * Aggregate plan results for a pipe (all stages run). A stage downstream of

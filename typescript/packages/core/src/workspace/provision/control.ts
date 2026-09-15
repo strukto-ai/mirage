@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { scaled } from '../../provision/combine.ts'
 import { rollupList } from '../../provision/rollup.ts'
 import { Precision, ProvisionResult } from '../../provision/types.ts'
 import type { Session } from '../session/session.ts'
@@ -93,7 +94,7 @@ export async function handleForProvision(
   session: Session,
 ): Promise<ProvisionResult> {
   const result = await planBody(provisionNode, body, session)
-  return result.scaled(n, 'for')
+  return scaled(result, n, 'for')
 }
 
 export async function handleWhileProvision(

@@ -21,11 +21,12 @@ async def test_walk_yields_files_and_dirs(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_walk_detector_prefers_etag(make_acc):
+async def test_walk_detector_carries_the_etag_in_the_composite(make_acc):
     acc = make_acc({"data/a.txt": b"x"})
     walk = NextcloudWalk(acc)
     entries = {e.virtual: e async for e in walk(_root())}
-    assert entries["/data/a.txt"].fingerprint == "etag-data/a.txt"
+    assert entries["/data/a.txt"].fingerprint == (
+        "etag-data/a.txt|2026-01-01T00:00:00+00:00|1")
 
 
 @pytest.mark.asyncio

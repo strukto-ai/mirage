@@ -16,9 +16,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.core.box.api import (SEARCH_FIELDS, list_folder_items,
-                                 search_content)
-from mirage.core.box.client import BoxTokenManager
+from mirage.core.box.api import (SEARCH_FIELDS, absent_on_404,
+                                 list_folder_items, search_content)
+from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.config import BoxConfig
 
 
@@ -122,3 +122,26 @@ async def test_search_content_flags_truncation_at_ceiling(tm):
         items, truncated = await search_content(tm, "q", "0")
     assert truncated is True
     assert len(items) >= 10_000
+
+
+@pytest.mark.asyncio
+async def test_absent_on_404_returns_the_value_when_the_call_succeeds():
+    assert await absent_on_404("/docs", AsyncMock(return_value=7)) == 7
+
+
+@pytest.mark.asyncio
+async def test_absent_on_404_stamps_a_404_as_enoent():
+    call = AsyncMock(
+        side_effect=BoxApiError("Box GET /folders/101 -> 404 not_found", 404))
+    with pytest.raises(FileNotFoundError) as caught:
+        await absent_on_404("/docs/inner", call)
+    assert "/docs/inner" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_absent_on_404_leaves_every_other_status_a_failure():
+    for status in (401, 429, 500):
+        call = AsyncMock(side_effect=BoxApiError(f"-> {status}", status))
+        with pytest.raises(BoxApiError) as caught:
+            await absent_on_404("/docs", call)
+        assert caught.value.status == status

@@ -23,7 +23,10 @@ NextcloudWalk = OpendalWalk
 def build_delta_hook(accessor: NextcloudAccessor) -> DeltaHook:
     """Build the Nextcloud delta hook.
 
-    One recursive PROPFIND per pull, fingerprinted on the WebDAV ETag.
+    One recursive PROPFIND per pull. The WebDAV ETag leads the
+    fingerprint but does not stand alone: Nextcloud has served an
+    unchanged one for content it reported the new size of, so mtime and
+    size ride along (see ``stat_fingerprint``).
 
     Args:
         accessor (NextcloudAccessor): Backend handle.

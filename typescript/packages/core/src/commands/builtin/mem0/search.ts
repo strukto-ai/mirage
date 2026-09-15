@@ -39,7 +39,13 @@ async function searchCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const query = texts[0] ?? ''
+  const query = texts[0]
+  if (query === undefined || query === '') {
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: ENCODER.encode('search: query is required\n') }),
+    ]
+  }
   const fl = new FlagView(opts.flags, specOf('search'))
   const method = fl.asStr('method') ?? 'semantic'
   if (method !== 'semantic') {

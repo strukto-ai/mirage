@@ -48,7 +48,7 @@ def test_walk_carries_size_and_mtime(tmp_path):
     entry = next(e for e in entries if not e.is_dir)
     assert entry.size == 5
     assert entry.modified is not None
-    assert entry.fingerprint == f"{entry.modified}|5"
+    assert entry.fingerprint == f"|{entry.modified}|5"
 
 
 def test_missing_root_walks_empty(tmp_path):

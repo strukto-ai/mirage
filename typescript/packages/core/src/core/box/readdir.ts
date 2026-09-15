@@ -17,7 +17,7 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { listFolderItems, type BoxItem } from './api.ts'
+import { absentOn404, listFolderItems, type BoxItem } from './api.ts'
 import { enotdir } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -72,7 +72,9 @@ export async function readdir(
     folderId = result.entry.id
   }
 
-  const items = await listFolderItems(accessor.tokenManager, folderId)
+  const items = await absentOn404(path.virtual, () =>
+    listFolderItems(accessor.tokenManager, folderId),
+  )
   const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
   for (const it of items) {
     if (it.type === 'web_link') {

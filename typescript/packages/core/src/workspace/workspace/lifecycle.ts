@@ -60,46 +60,62 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // one of those writes fail with "Workspace is closed", so a python program
   // killed by its timeout silently lost its last mutations. Python has always
   // ordered it this way (`close_async` closes line runtimes before resources).
+  // Collected rather than thrown here: the rest of teardown still has to
+  // run, but a failed replay is the data-loss signal above going quiet
+  // again, so it is raised once everything is released. The rest runs
+  // inside a catch for the same reason -- a later stage that rejects
+  // would otherwise carry this loss back out of sight.
+  const failures: unknown[] = []
   for (const fn of deps.closers.splice(0)) {
     try {
       await fn()
-    } catch {
-      // keep tearing down; swallow subsystem-cleanup failures
+    } catch (err) {
+      failures.push(err)
     }
   }
-  const retirements = await Promise.allSettled([...deps.registry.retiringResources.values()])
-  for (const result of retirements) {
-    if (result.status === 'rejected') throw result.reason as Error
-  }
-  const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
-  for (const task of drainTasks) {
-    await task
-  }
-  // Per-plane stores from the provider close through it below; a
-  // caller-passed provider (or direct store override) may be shared
-  // with sibling workspaces, so only its owner closes it.
-  if (deps.ownsStateStore) {
-    await deps.stateStore.close()
-  }
   try {
-    await deps.cache.clear()
-  } finally {
-    // The workspace builds its own cache, so it always closes it: a
-    // `cache: {type: redis}` config leaves it holding a client that
-    // nothing else would release, and clear() above connects to it.
-    // Mirrors the try/finally pairing in Python's `close_async`.
-    await deps.cache.close()
+    const retirements = await Promise.allSettled([...deps.registry.retiringResources.values()])
+    for (const result of retirements) {
+      if (result.status === 'rejected') throw result.reason as Error
+    }
+    const drainTasks = [...(deps.cache.drainTasks?.values() ?? [])]
+    for (const task of drainTasks) {
+      await task
+    }
+    // Per-plane stores from the provider close through it below; a
+    // caller-passed provider (or direct store override) may be shared
+    // with sibling workspaces, so only its owner closes it.
+    if (deps.ownsStateStore) {
+      await deps.stateStore.close()
+    }
+    try {
+      await deps.cache.clear()
+    } finally {
+      // The workspace builds its own cache, so it always closes it: a
+      // `cache: {type: redis}` config leaves it holding a client that
+      // nothing else would release, and clear() above connects to it.
+      // Mirrors the try/finally pairing in Python's `close_async`.
+      await deps.cache.close()
+    }
+    const toClose = new Set<Resource>(deps.openOrder)
+    for (const mount of deps.registry.allMounts()) {
+      toClose.add(mount.resource)
+    }
+    for (const r of toClose) {
+      // Resources reused from another live workspace (copy() / load
+      // resource overrides) stay open here; their origin closes them.
+      if (deps.sharedResources.has(r)) continue
+      await r.close()
+    }
+    deps.opened.clear()
+    deps.openOrder.length = 0
+  } catch (err) {
+    failures.push(err)
   }
-  const toClose = new Set<Resource>(deps.openOrder)
-  for (const mount of deps.registry.allMounts()) {
-    toClose.add(mount.resource)
-  }
-  for (const r of toClose) {
-    // Resources reused from another live workspace (copy() / load
-    // resource overrides) stay open here; their origin closes them.
-    if (deps.sharedResources.has(r)) continue
-    await r.close()
-  }
-  deps.opened.clear()
-  deps.openOrder.length = 0
+  if (failures.length > 0) throw teardownFailure(failures)
+}
+
+function teardownFailure(failures: unknown[]): Error {
+  if (failures.length === 1) return failures[0] as Error
+  return new AggregateError(failures, 'workspace teardown failed')
 }

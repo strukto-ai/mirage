@@ -16,7 +16,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.core.box.api import list_folder_items
+from mirage.core.box.api import absent_on_404, list_folder_items
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
@@ -66,7 +66,8 @@ async def readdir(
             raise NotADirectoryError(virtual)
         folder_id = result.entry.id
 
-    items = await list_folder_items(accessor.token_manager, folder_id)
+    items = await absent_on_404(
+        virtual, lambda: list_folder_items(accessor.token_manager, folder_id))
     entries: list[tuple[str, IndexEntry, bool]] = []
     for it in items:
         if it.get("type") == "web_link":

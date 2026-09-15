@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
+from mirage.core.box.client import BoxApiError
 from mirage.core.box.read import read
 from mirage.core.box.readdir import readdir
 from mirage.core.box.stat import stat
@@ -229,3 +230,31 @@ async def test_stat_direct_resolve_hides_weblinks(accessor, index):
                 PathSpec(resource_path="homepage",
                          virtual="/homepage",
                          directory="/"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_root_reads_a_404_as_absence(accessor, index):
+    with patch(
+            "mirage.core.box.stat.get_folder_info",
+            new_callable=AsyncMock,
+            side_effect=BoxApiError("Box GET /folders/0 -> 404 not_found",
+                                    404),
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(accessor,
+                       PathSpec(resource_path="", virtual="/", directory="/"),
+                       index)
+
+
+@pytest.mark.asyncio
+async def test_stat_root_keeps_a_server_error_a_failure(accessor, index):
+    with patch(
+            "mirage.core.box.stat.get_folder_info",
+            new_callable=AsyncMock,
+            side_effect=BoxApiError("Box GET /folders/0 -> 500 internal", 500),
+    ):
+        with pytest.raises(BoxApiError) as caught:
+            await stat(accessor,
+                       PathSpec(resource_path="", virtual="/", directory="/"),
+                       index)
+    assert caught.value.status == 500

@@ -12,11 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+/**
+ * Mirage's default content fingerprint from listing metadata.
+ *
+ * Composite of all three inputs, so a change in any one of them moves the
+ * fingerprint. The backend's native version (ETag/rev, the same value
+ * backends put in `FileStat.fingerprint`) is not a sufficient validator on
+ * its own: a backend can report current content under an unchanged ETag.
+ * Measured on Nextcloud, twice and with no local memcache configured -- a
+ * file overwritten from 4 bytes to 11 was listed with size=11 and an ETag
+ * byte-identical to the one before the write, and the listing matched a
+ * direct backend stat exactly, so it was not stale. Returning the ETag alone
+ * therefore lost the update outright; folding `modified` and `size` in
+ * alongside it means a lazy validator costs nothing rather than hiding a
+ * write.
+ *
+ * Note that the checkpoint format changes with this composite, so the first
+ * pull against a persisted checkpoint written by an earlier version reports
+ * every file as an UPDATE once.
+ *
+ * Distinct from `cache/file/utils`'s `defaultFingerprintAsync`, which hashes
+ * the content bytes themselves. `None` stands in for an absent size so the
+ * string matches python's `stat_fingerprint` byte for byte.
+ */
 export function statFingerprint(
   etag: string | null,
   modified: string | null,
   size: number | null,
 ): string {
-  if (etag !== null && etag !== '') return etag
-  return `${modified ?? ''}|${size === null ? 'None' : String(size)}`
+  return `${etag ?? ''}|${modified ?? ''}|${size === null ? 'None' : String(size)}`
 }

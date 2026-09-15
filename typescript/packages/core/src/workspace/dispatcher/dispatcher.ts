@@ -867,16 +867,11 @@ export class Dispatcher {
     if (namespaceStat(this.namespace.mountPrefixes(), this.namespace, path.virtual) !== null) {
       return true
     }
-    let resolved: [Resource, PathSpec, MountMode]
-    try {
-      resolved = await this.namespace.resolve(path.virtual, false)
-    } catch {
-      // No mount serves the path and the namespace knows no structure
-      // there, which is exactly the absence being probed for.
-      return false
-    }
     const mount = this.namespace.tryMountFor(path.virtual)
-    if (mount !== null && normDir(mount.prefix) === normDir(path.virtual)) return true
+    // Only "no mount serves this path" is the absence being probed for.
+    if (mount === null) return false
+    const resolved = await this.namespace.resolve(path.virtual, false)
+    if (normDir(mount.prefix) === normDir(path.virtual)) return true
     try {
       const row = (await this.probeOp('stat', resolved, issuer)) as FileStat | null
       if (row !== null && row.type !== FileType.DIRECTORY) return true
@@ -905,12 +900,9 @@ export class Dispatcher {
     const cut = trimmed.lastIndexOf('/')
     const name = trimmed.slice(cut + 1)
     if (cut < 0 || name === '') return false
-    let resolved: [Resource, PathSpec, MountMode]
-    try {
-      resolved = await this.namespace.resolve(trimmed.slice(0, cut) || '/', false)
-    } catch {
-      return false
-    }
+    const parent = trimmed.slice(0, cut) || '/'
+    if (this.namespace.tryMountFor(parent) === null) return false
+    const resolved = await this.namespace.resolve(parent, false)
     const entries = await this.probeOp('readdir', resolved, issuer)
     if (!Array.isArray(entries)) return false
     return entries.some((entry) => {

@@ -24,7 +24,7 @@ vi.mock('./api.ts', async () => {
 import { BoxAccessor } from '../../accessor/box.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
-import type { BoxTokenManager } from './client.ts'
+import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { readdir } from './readdir.ts'
 
@@ -131,5 +131,34 @@ describe('box readdir', () => {
     const entry = (await index.get('/empty.txt')).entry
     expect(entry?.size).toBe(0)
     expect((await index.get('/homepage')).entry ?? null).toBeNull()
+  })
+
+  it('reads a 404 from the folder listing as absence, not as a failure', async () => {
+    // BoxApiError carries only an HTTP status, so a folder deleted after its
+    // entry was cached must be stamped ENOENT here; du's walk counts a
+    // stamped ENOENT as zero and propagates everything else.
+    vi.mocked(api.listFolderItems).mockRejectedValue(
+      new BoxApiError('Box GET /folders/111/items -> 404 not_found', 404),
+    )
+    await expect(
+      readdir(
+        makeAccessor(),
+        new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('lets a throttled folder listing stay a failure', async () => {
+    vi.mocked(api.listFolderItems).mockRejectedValue(
+      new BoxApiError('Box GET /folders/111/items -> 429 rate_limit', 429),
+    )
+    await expect(
+      readdir(
+        makeAccessor(),
+        new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+        new RAMIndexCacheStore(),
+      ),
+    ).rejects.toMatchObject({ status: 429 })
   })
 })

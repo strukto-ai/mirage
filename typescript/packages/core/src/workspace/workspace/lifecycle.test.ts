@@ -423,3 +423,106 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
     await ws.close()
   }
 })
+
+describe('closeWorkspace surfaces closer failures', () => {
+  function wsWithFailingClosers(failures: string[]): {
+    ws: Workspace
+    order: string[]
+    ready: Promise<void>
+  } {
+    const resource = new RAMResource()
+    const ws = new Workspace(
+      { '/m': [resource, MountMode.WRITE] },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const order: string[] = []
+    const closeResource = resource.close.bind(resource)
+    vi.spyOn(resource, 'close').mockImplementation(async () => {
+      order.push('resource')
+      await closeResource()
+    })
+    const ready = ws.dispatch('stat', '/m').then(() => {
+      const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
+      for (const message of failures) {
+        closers.push(() => {
+          order.push(message)
+          return Promise.reject(new Error(message))
+        })
+      }
+      closers.push(() => {
+        order.push('later closer')
+        return Promise.resolve()
+      })
+    })
+    return { ws, order, ready }
+  }
+
+  it('raises a single closer failure once teardown has finished', async () => {
+    const { ws, order, ready } = wsWithFailingClosers(['journal replay failed'])
+    await ready
+    await expect(ws.close()).rejects.toThrow('journal replay failed')
+    // The point of the old catch: teardown still completes. The closers
+    // after the failure ran, and the resource still closed.
+    expect(order).toEqual(['journal replay failed', 'later closer', 'resource'])
+  }, 30_000)
+
+  it('leaves the workspace closed when a closer fails, so nothing resumes onto it', async () => {
+    const resource = new RAMResource()
+    const ws = new Workspace(
+      { '/m': [resource, MountMode.WRITE] },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    await ws.dispatch('stat', '/m')
+    const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
+    closers.push(() => Promise.reject(new Error('journal replay failed')))
+    await expect(ws.close()).rejects.toThrow('journal replay failed')
+    // The resources are already released here, and `closing` is memoized, so
+    // the terminal flag has to be set or the guards that read only `closed`
+    // would let a settled runner resolve and reopen one.
+    expect((ws as unknown as { closed: boolean }).closed).toBe(true)
+    await expect(ws.execute('echo hi')).rejects.toThrow('Workspace is closed')
+    await expect(ws.dispatch('stat', '/m')).rejects.toThrow('Workspace is closed')
+    // Teardown ran once and is not retried, so a second caller has to be told
+    // why it failed rather than reading the memoized attempt as success.
+    await expect(ws.close()).rejects.toThrow('journal replay failed')
+  }, 30_000)
+
+  it('keeps the closer failure when a later teardown stage fails too', async () => {
+    const resource = new RAMResource()
+    const ws = new Workspace(
+      { '/m': [resource, MountMode.WRITE] },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    await ws.dispatch('stat', '/m')
+    vi.spyOn(resource, 'close').mockRejectedValue(new Error('resource close failed'))
+    const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
+    closers.push(() => Promise.reject(new Error('journal replay failed')))
+    const err = await ws.close().then(
+      () => null,
+      (raised: unknown) => raised,
+    )
+    // The later rejection must not carry the replay failure back out of sight.
+    expect(err).toBeInstanceOf(AggregateError)
+    expect((err as AggregateError).errors.map((e: Error) => e.message)).toEqual([
+      'journal replay failed',
+      'resource close failed',
+    ])
+    expect((ws as unknown as { closed: boolean }).closed).toBe(true)
+  }, 30_000)
+
+  it('aggregates when more than one closer fails', async () => {
+    const { ws, order, ready } = wsWithFailingClosers(['first gone', 'second gone'])
+    await ready
+    const err = await ws.close().then(
+      () => null,
+      (raised: unknown) => raised,
+    )
+    expect(err).toBeInstanceOf(AggregateError)
+    expect((err as AggregateError).errors.map((e: Error) => e.message)).toEqual([
+      'first gone',
+      'second gone',
+    ])
+    expect(order).toContain('later closer')
+    expect(order).toContain('resource')
+  }, 30_000)
+})

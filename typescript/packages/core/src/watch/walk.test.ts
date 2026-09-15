@@ -59,7 +59,7 @@ describe('entryOf', () => {
     expect(entry).toEqual({ virtual: '/m/d', isDir: true, fingerprint: null })
   })
 
-  it('prefers the backend fingerprint over the composite', () => {
+  it('folds the backend fingerprint into the composite', () => {
     const entry = entryOf(
       '/m/f.txt',
       new FileStat({
@@ -70,15 +70,15 @@ describe('entryOf', () => {
         fingerprint: 'etag-1',
       }),
     )
-    expect(entry.fingerprint).toBe('etag-1')
+    expect(entry.fingerprint).toBe('etag-1|T|3')
   })
 
-  it('falls back to mtime|size when the backend has no version', () => {
+  it('composites mtime and size when the backend has no version', () => {
     const entry = entryOf(
       '/m/f.txt',
       new FileStat({ name: 'f.txt', type: FileType.FILE, size: 3, modified: 'T' }),
     )
-    expect(entry.fingerprint).toBe('T|3')
+    expect(entry.fingerprint).toBe('|T|3')
   })
 })
 

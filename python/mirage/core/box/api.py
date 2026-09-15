@@ -12,14 +12,43 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, TypeVar
 
-from mirage.core.box.client import (BoxTokenManager, box_delete, box_get,
-                                    box_get_bytes, box_get_stream,
+from mirage.core.box.client import (BoxApiError, BoxTokenManager, box_delete,
+                                    box_get, box_get_bytes, box_get_stream,
                                     box_post_json, box_put_json,
                                     box_upload_multipart)
+from mirage.utils.errors import enoent
 from mirage.utils.ranges import ByteWindow
+
+T = TypeVar("T")
+
+
+async def absent_on_404(virtual: str, call: Callable[[], Awaitable[T]]) -> T:
+    """Read Box's 404 as absence, leaving every other status a failure.
+
+    Box answers a folder id that has been deleted, or was never
+    reachable, with 404, and ``BoxApiError`` carries only an HTTP
+    status. Stamping that one status as ENOENT here keeps a single
+    definition of absence: stat, readdir and du's walk all read the
+    POSIX error instead of sniffing a status, so a 401/429/5xx stays a
+    failure rather than reading back as a missing path.
+
+    Args:
+        virtual (str): virtual path to name in the ENOENT.
+        call (Callable[[], Awaitable[T]]): the Box call to run.
+
+    Returns:
+        T: whatever the call returned.
+    """
+    try:
+        return await call()
+    except BoxApiError as exc:
+        if exc.status == 404:
+            raise enoent(virtual) from exc
+        raise
+
 
 LIST_FIELDS = "id,name,type,size,modified_at,etag,sha1,parent"
 SEARCH_FIELDS = "id,name,type,path_collection"

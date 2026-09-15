@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.box.api import get_folder_info
+from mirage.core.box.api import absent_on_404, get_folder_info
 from mirage.core.box.readdir import ROOT_FOLDER_ID
 from mirage.core.box.readdir import readdir as _readdir
 from mirage.core.box.readdir import resource_type_for
@@ -76,7 +76,8 @@ async def stat(
         # fetch the folder's own metadata so find -mtime and ls -ld see a
         # real timestamp (mirrors the onedrive Graph-root stat).
         root_id = accessor.config.root_folder_id or ROOT_FOLDER_ID
-        info = await get_folder_info(accessor.token_manager, root_id)
+        info = await absent_on_404(
+            virtual, lambda: get_folder_info(accessor.token_manager, root_id))
         return FileStat(
             name="/",
             type=FileType.DIRECTORY,
@@ -102,7 +103,8 @@ async def stat(
             # The write-family builders (rm/mv/cp) call stat without a
             # threaded index, so the readdir above populates a NULL store
             # that can't be read back. Resolve the id directly instead.
-            item = await resolve_item(accessor, path_parts(path))
+            item = await absent_on_404(
+                virtual, lambda: resolve_item(accessor, path_parts(path)))
             if item is None or resource_type_for(item) == "box/weblink":
                 # Weblinks are hidden from listings; a direct lookup must
                 # not resurface a sizeless, unreadable entry.

@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.provision import Precision, ProvisionResult
+from mirage.provision import Precision, ProvisionResult, scaled
 from mirage.provision.rollup import rollup_list
 from mirage.workspace.session import Session
 
@@ -96,7 +96,7 @@ async def handle_for_provision(
 ) -> ProvisionResult:
     """Plan a for loop: body cost x iteration count."""
     result = await _plan_body(provision_node_fn, body, session)
-    return result.scaled(n, command="for")
+    return scaled(result, n, command="for")
 
 
 async def handle_while_provision(

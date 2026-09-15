@@ -17,18 +17,28 @@ def stat_fingerprint(etag: str | None, modified: str | None,
                      size: int | None) -> str:
     """Mirage's default content fingerprint from listing metadata.
 
-    Prefers the backend's native version (ETag/rev), the same value
-    backends put in ``FileStat.fingerprint``; falls back to a
-    ``mtime|size`` composite, which every listing carries and which
-    still flips on a content write. Distinct from
-    ``mirage.cache.file.utils.default_fingerprint``, which hashes the
-    content bytes themselves.
+    Composite of all three inputs, so a change in any one of them moves
+    the fingerprint. The backend's native version (ETag/rev, the same
+    value backends put in ``FileStat.fingerprint``) is not a sufficient
+    validator on its own: a backend can report current content under an
+    unchanged ETag. Measured on Nextcloud, twice and with no local
+    memcache configured -- a file overwritten from 4 bytes to 11 was
+    listed with size=11 and an ETag byte-identical to the one before the
+    write, and the listing matched a direct backend stat exactly, so it
+    was not stale. Returning the ETag alone therefore lost the update
+    outright; folding ``modified`` and ``size`` in alongside it means a
+    lazy validator costs nothing rather than hiding a write.
+
+    Note that the checkpoint format changes with this composite, so the
+    first pull against a persisted checkpoint written by an earlier
+    version reports every file as an UPDATE once.
+
+    Distinct from ``mirage.cache.file.utils.default_fingerprint``, which
+    hashes the content bytes themselves.
 
     Args:
         etag (str | None): Native version identifier, if any.
         modified (str | None): Last-modified stamp.
         size (int | None): Content size in bytes.
     """
-    if etag:
-        return etag
-    return f"{modified or ''}|{size}"
+    return f"{etag or ''}|{modified or ''}|{size}"

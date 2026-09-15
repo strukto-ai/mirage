@@ -51,18 +51,18 @@ def test_entry_of_reports_a_directory_without_a_fingerprint():
     assert entry.fingerprint is None
 
 
-def test_entry_of_prefers_the_backend_fingerprint():
+def test_entry_of_folds_the_backend_fingerprint_into_the_composite():
     stat = FileStat(type=FileType.FILE,
                     name="f.txt",
                     size=3,
                     modified="T",
                     fingerprint="etag-1")
-    assert entry_of("/m/f.txt", stat).fingerprint == "etag-1"
+    assert entry_of("/m/f.txt", stat).fingerprint == "etag-1|T|3"
 
 
-def test_entry_of_falls_back_to_the_composite():
+def test_entry_of_composites_without_a_backend_fingerprint():
     stat = FileStat(type=FileType.FILE, name="f.txt", size=3, modified="T")
-    assert entry_of("/m/f.txt", stat).fingerprint == "T|3"
+    assert entry_of("/m/f.txt", stat).fingerprint == "|T|3"
 
 
 def _backend(tree: dict[str, dict]) -> ReaddirWalk:

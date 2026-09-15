@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.provision.types import (COMBINE_FIELDS, Precision, ProvisionResult,
-                                    combine_alternative, combine_sum,
-                                    combined_cost, combined_precision)
+from mirage.provision.combine import (COMBINE_FIELDS, combine_alternative,
+                                      combine_sum, combined_cost,
+                                      combined_precision, scaled)
+from mirage.provision.types import Precision, ProvisionResult
 
 __all__ = [
     "COMBINE_FIELDS",
@@ -24,4 +25,5 @@ __all__ = [
     "combine_sum",
     "combined_cost",
     "combined_precision",
+    "scaled",
 ]

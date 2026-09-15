@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.index.config import IndexEntry
+from mirage.core.box.client import BoxApiError
 from mirage.core.box.readdir import readdir
 from mirage.types import PathSpec
 
@@ -173,3 +174,34 @@ async def test_readdir_serves_cached_listing_without_api_call(accessor, index):
             index)
     assert any("cached.txt" in r for r in result)
     mock_list.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_readdir_reads_a_404_listing_as_absence(accessor, index):
+    with patch(
+            "mirage.core.box.readdir.list_folder_items",
+            new_callable=AsyncMock,
+            side_effect=BoxApiError(
+                "Box GET /folders/0/items -> 404 not_found", 404),
+    ):
+        with pytest.raises(FileNotFoundError):
+            await readdir(
+                accessor, PathSpec(resource_path="",
+                                   virtual="/",
+                                   directory="/"), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_keeps_a_throttled_listing_a_failure(accessor, index):
+    with patch(
+            "mirage.core.box.readdir.list_folder_items",
+            new_callable=AsyncMock,
+            side_effect=BoxApiError(
+                "Box GET /folders/0/items -> 429 rate_limit", 429),
+    ):
+        with pytest.raises(BoxApiError) as caught:
+            await readdir(
+                accessor, PathSpec(resource_path="",
+                                   virtual="/",
+                                   directory="/"), index)
+    assert caught.value.status == 429

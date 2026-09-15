@@ -12,27 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.provision import Precision, ProvisionResult
+from mirage.provision import ProvisionResult, scaled
 
 
-def test_plan_result_defaults():
-    r = ProvisionResult()
-    assert r.network_read_low == 0
-    assert r.precision == Precision.EXACT
-    assert r.estimated_cost_usd is None
-
-
-def test_plan_result_network_read_range():
-    r = ProvisionResult(network_read_low=100, network_read_high=200)
-    assert r.network_read == "100-200"
-
-
-def test_plan_result_network_read_exact():
-    r = ProvisionResult(network_read_low=100, network_read_high=100)
-    assert r.network_read == "100"
-
-
-def test_precision_values():
-    assert Precision.EXACT == "exact"
-    assert Precision.RANGE == "range"
-    assert Precision.UNKNOWN == "unknown"
+def test_scaled_multiplies_cost():
+    result = ProvisionResult(network_read_low=10,
+                             network_read_high=10,
+                             read_ops=1,
+                             estimated_cost_usd=0.5)
+    tripled = scaled(result, 3)
+    assert tripled.network_read_low == 30
+    assert tripled.estimated_cost_usd == 1.5
+    free = ProvisionResult(network_read_low=10, network_read_high=10)
+    assert scaled(free, 3).estimated_cost_usd is None
