@@ -465,14 +465,19 @@ export async function withRebuiltResources(
  * the state has nothing to drop. It sits behind the gate because the
  * callers used to clear before calling, and a refused checkout then
  * still sent every cached read back to an origin that may have moved.
+ * `builtForState` says this workspace was constructed for this state
+ * and handed to nobody yet, so the restore owns its sessions outright
+ * and stamps each table's profile rather than joining it onto the
+ * narrowing the constructor put there (`gateRestoredState`); a checkout
+ * onto a running workspace leaves it unset and keeps the ratchet.
  * Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
   ws: Workspace,
   state: WorkspaceStateDict,
-  options: { replaceCache?: boolean } = {},
+  options: { replaceCache?: boolean; builtForState?: boolean } = {},
 ): Promise<void> {
-  const [sessions, seed] = await gateRestoredState(ws, state)
+  const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
   if (options.replaceCache === true) await ws.cache.clear()
   for (const m of state.mounts) {
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
@@ -573,6 +578,15 @@ function targetProfile(ws: Workspace, name: string | null): CompiledProfile {
  * (`narrow`) — which also matters for the gate, because
  * `ScriptPolicy.preSession` reads `scriptOf(sessionId)` off the manager
  * and answers the default profile for an id it does not know. A session
+ * `builtForState` is the one exception, and it is what tells a freshly
+ * built target from a checkout: a workspace the loader just constructed
+ * has one session nobody has run yet, carrying only the constructor's
+ * stamp of the document's default profile, so the table's named profile
+ * is stamped on rather than joined and that profile alone governs. A
+ * live checkout keeps the join, where the existing narrowing is a
+ * running session's own and lifting it is what the ratchet forbids.
+ *
+ * Otherwise, a session
  * already here is joined instead of stamped over (`narrowProfile`): it
  * keeps every restriction of its own, so a checkout still cannot widen
  * a live session, and it keeps a program the host installed with
@@ -603,6 +617,7 @@ function targetProfile(ws: Workspace, name: string | null): CompiledProfile {
 async function gateRestoredState(
   ws: Workspace,
   state: WorkspaceStateDict,
+  builtForState = false,
 ): Promise<[Session[], Record<string, ShellVar> | null]> {
   const tables = state.sessions.map((s) => Session.fromJSON(s))
   const defaultSid = state.default_session_id ?? null
@@ -637,11 +652,17 @@ async function gateRestoredState(
       // default session until `adoptDefault` re-keys it. The join runs
       // before the gate so a policy program the profile carries is in
       // force while the table is vetted, and is rolled back with the
-      // created sessions below.
+      // created sessions below. A target built for this state is the
+      // exception: its one session has never run and the only narrowing
+      // on it is the constructor's stamp of the document's *default*
+      // profile, so joining the table's named profile onto that unions
+      // two unrelated profiles and reports the named one. It stamps
+      // instead, the way a created session is stamped.
       const landing = live.has(sid) ? sid : ws.sessionManager.defaultId
       const session = ws.sessionManager.get(landing)
       if (!joined.has(landing)) joined.set(landing, [session, narrowingOf(session)])
-      narrowProfile(session, profile)
+      if (builtForState) narrow(session, profile)
+      else narrowProfile(session, profile)
       landings.push([landing, fields.vars])
     }
     for (const [landing, tableVars] of landings) {

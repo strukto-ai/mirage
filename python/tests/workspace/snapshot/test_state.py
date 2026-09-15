@@ -977,6 +977,85 @@ async def test_the_default_sessions_named_profile_governs_after_a_load():
         await target.close()
 
 
+# `governs` means the named profile alone, not unioned with the default
+# one. A loader builds its target before it restores into it, and the
+# constructor stamps the document's default profile onto the default
+# session; joining the table's `locked` onto that stamp left the
+# restored session hiding `/a` as well as `/b` while reporting
+# `locked` — tighter than `set_session_profile` leaves it on the source,
+# and tighter again on every save/restore cycle.
+@pytest.mark.asyncio
+async def test_a_named_profile_replaces_the_default_stamp_on_a_load():
+    source = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       profiles={
+                           "default": {
+                               "paths": {
+                                   "hide": ["/a"]
+                               }
+                           },
+                           "locked": {
+                               "paths": {
+                                   "hide": ["/b"]
+                               }
+                           },
+                       },
+                       profile="default")
+    try:
+        await source.set_session_profile(source.default_session_id, "locked")
+        live = source.get_session(source.default_session_id)
+        assert live.hidden_paths.paths == ("/b", )
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = await Workspace.from_state(state)
+    try:
+        restored = target.get_session(target.default_session_id)
+        assert restored.profile == "locked"
+        assert restored.hidden_paths.paths == ("/b", )
+    finally:
+        await target.close()
+
+
+# The other half: a checkout onto a running workspace still joins, so
+# the live session keeps the narrowing it is running under. Same two
+# profiles, so the only difference is which door the state comes
+# through.
+@pytest.mark.asyncio
+async def test_a_checkout_still_joins_the_tables_profile_onto_a_live_session():
+    profiles = {
+        "default": {
+            "paths": {
+                "hide": ["/a"]
+            }
+        },
+        "locked": {
+            "paths": {
+                "hide": ["/b"]
+            }
+        },
+    }
+    source = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       profiles=profiles,
+                       profile="default")
+    try:
+        await source.set_session_profile(source.default_session_id, "locked")
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace({"/": RAMResource()},
+                       mode=MountMode.WRITE,
+                       profiles=profiles,
+                       profile="default")
+    try:
+        await apply_state_dict(target, state, replace_cache=True)
+        live = target.get_session(target.default_session_id)
+        assert live.hidden_paths.paths == ("/a", "/b")
+    finally:
+        await target.close()
+
+
 # The same rule with no policy program in sight: a loader that supplies
 # a stricter version of the profile a table names governs the restored
 # session, where before only the table's own restrictions landed.

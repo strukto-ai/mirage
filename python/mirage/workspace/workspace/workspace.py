@@ -1052,7 +1052,10 @@ class Workspace:
                  runtimes=runtimes)
         if resources:
             ws._shared_resources = {id(r) for r in resources.values()}
-        await apply_state_dict(ws, state)
+        # This workspace was built for this state and handed to nobody,
+        # so each table's named profile governs the session it lands on
+        # outright; only a checkout onto a running workspace joins.
+        await apply_state_dict(ws, state, built_for_state=True)
         return ws
 
     def __deepcopy__(self, memo) -> "Workspace":

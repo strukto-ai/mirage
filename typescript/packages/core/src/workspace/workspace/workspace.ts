@@ -1376,7 +1376,10 @@ export class Workspace {
     for (const resource of Object.values(overrides)) {
       ws.sharedResources.add(resource)
     }
-    await applyStateDict(ws, state)
+    // Built for this state and handed to nobody, so each table's named
+    // profile governs the session it lands on outright; only a checkout
+    // onto a running workspace joins.
+    await applyStateDict(ws, state, { builtForState: true })
     return ws
   }
 

@@ -372,7 +372,8 @@ def build_mount_args(state: dict[str, Any],
 async def apply_state_dict(ws,
                            state: dict[str, Any],
                            *,
-                           replace_cache: bool = False) -> None:
+                           replace_cache: bool = False,
+                           built_for_state: bool = False) -> None:
     """Restore post-construction state into an already-built Workspace.
 
     Restores: resource load_state (content, fresh disk root, etc.),
@@ -403,8 +404,15 @@ async def apply_state_dict(ws,
             callers used to clear before calling, and a refused
             checkout then still sent every cached read back to an
             origin that may have moved.
+        built_for_state (bool): this workspace was constructed for this
+            state and handed to nobody yet, so the restore owns its
+            sessions outright and stamps each table's profile rather
+            than joining onto a narrowing the constructor put there
+            (``_gate_restored_state``). A checkout onto a running
+            workspace leaves this False and keeps the ratchet.
     """
-    sessions, seed_vars = await _gate_restored_state(ws, state)
+    sessions, seed_vars = await _gate_restored_state(
+        ws, state, built_for_state=built_for_state)
     if replace_cache:
         await ws._cache.clear()
     # load_state runs for ALL mounts (overridden too), so disk content
@@ -476,7 +484,10 @@ def _target_profile(ws, name: str | None) -> CompiledProfile:
     return ws.compiled_profile(name)
 
 
-async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
+async def _gate_restored_state(ws,
+                               state: dict[str, Any],
+                               *,
+                               built_for_state: bool = False) -> RestoredEnv:
     """Vet every session table and the env template before any of it lands.
 
     Three steps, and nothing durable lands in any of them. Each
@@ -500,6 +511,21 @@ async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
     ``adopt_default`` re-keys that session onto it later and creating
     one under that id would have it deleted instead.
 
+    ``built_for_state`` is the one exception, and it is what tells a
+    freshly built target from a checkout. A workspace the loader just
+    constructed for this state has one session nobody has run yet, and
+    the only narrowing on it is the stamp the constructor took from the
+    document's *default* profile. Joining a table's named profile onto
+    that stamp unions two unrelated profiles: a session the host had
+    moved to ``locked`` came back hiding the default profile's paths as
+    well as ``locked``'s while reporting ``locked``, tighter than
+    ``set_session_profile`` leaves it and tighter again every cycle. So
+    a target built for the state ``narrow``s instead, the way a session
+    the restore creates is stamped, and the named profile alone
+    governs. A live checkout keeps the join, because there the existing
+    narrowing is a running session's own and lifting it is exactly what
+    the ratchet forbids.
+
     Then every table and the template fire the ``pre_session`` gate
     (``gate_restored_vars``): a refusal that arrived once an earlier
     session had already been overwritten left the workspace in a state
@@ -521,6 +547,9 @@ async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
     Args:
         ws (Workspace): the target workspace.
         state (dict[str, Any]): the snapshot state.
+        built_for_state (bool): the target was constructed for this
+            state, so a table's profile is stamped onto the session it
+            lands on rather than joined onto it.
 
     Returns:
         The parsed session tables, and the env template or None when
@@ -564,7 +593,10 @@ async def _gate_restored_state(ws, state: dict[str, Any]) -> RestoredEnv:
             session = ws._session_mgr.get(landing)
             if landing not in joined:
                 joined[landing] = (session, narrowing_of(session))
-            narrow_profile(session, profile)
+            if built_for_state:
+                narrow(session, profile)
+            else:
+                narrow_profile(session, profile)
             landings.append((landing, fields.vars))
         for landing, table_vars in landings:
             await gate_restored_vars(ws.policies, landing, table_vars)

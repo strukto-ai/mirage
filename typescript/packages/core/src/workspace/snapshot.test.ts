@@ -1131,6 +1131,56 @@ describe('the document rides the state and the restore never widens', () => {
     await restored.close()
   })
 
+  // `governs` means the named profile alone, not unioned with the
+  // default one. A loader builds its target before it restores into it,
+  // and the constructor stamps the document's default profile onto the
+  // default session; joining the table's `locked` onto that stamp left
+  // the restored session hiding `/data/a` as well as `/data/b` while
+  // reporting `locked` — tighter than setSessionProfile leaves it on the
+  // source, and tighter again on every save/restore cycle.
+  it('a named profile replaces the default stamp on a load', async () => {
+    const docs = {
+      default: { paths: { hide: ['/data/a'] } },
+      locked: { paths: { hide: ['/data/b'] } },
+    }
+    const source = profiled(docs, { profile: 'default' })
+    await source.setSessionProfile(source.defaultSessionId, 'locked')
+    expect(source.getSession(source.defaultSessionId).hiddenPaths?.paths).toEqual(['/data/b'])
+    const state = await toStateDict(source)
+    await source.close()
+    const target = await Workspace.fromState(state, {
+      ...loadOptions(),
+      profiles: Object.fromEntries(
+        Object.entries(docs).map(([name, doc]) => [name, parseSessionProfile(doc)]),
+      ),
+      profile: 'default',
+    })
+    const restored = target.getSession(target.defaultSessionId)
+    expect(restored.profile).toBe('locked')
+    expect(restored.hiddenPaths?.paths).toEqual(['/data/b'])
+    await target.close()
+  })
+
+  // The other half: a checkout onto a running workspace still joins, so
+  // the live session keeps the narrowing it is running under. Same two
+  // profiles, so the only difference is which door the state comes
+  // through.
+  it("a checkout still joins the table's profile onto a live session", async () => {
+    const docs = {
+      default: { paths: { hide: ['/data/a'] } },
+      locked: { paths: { hide: ['/data/b'] } },
+    }
+    const source = profiled(docs, { profile: 'default' })
+    await source.setSessionProfile(source.defaultSessionId, 'locked')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = profiled(docs, { profile: 'default' })
+    await applyStateDict(target, state, { replaceCache: true })
+    const live = target.getSession(target.defaultSessionId)
+    expect(live.hiddenPaths?.paths).toEqual(['/data/a', '/data/b'])
+    await target.close()
+  })
+
   // The gate created and narrowed the sessions it had to make, but left
   // the default session and every live one on whatever profile they
   // already ran under, so the target's document of the name a table

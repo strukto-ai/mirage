@@ -668,7 +668,13 @@ Invoke the venv's `pre-commit` binary directly (not via `uv --directory python r
   profile is put on the session **before** the gate runs, so the program it
   carries judges the table, and it is put on by `narrow` for a session the
   restore creates and by `narrow_profile` for one already there, which joins
-  rather than stamps. Then the table itself joins through `narrow_restored`.
+  rather than stamps. A target the loader just built for this state
+  (`built_for_state` / `builtForState`, set only by `from_state` / `fromState`)
+  is the exception and stamps there too: its one session has never run and
+  carries only the constructor's stamp of the document's **default** profile,
+  so joining a table's named profile onto that unions two unrelated profiles
+  and ratchets tighter every cycle. Then the table itself joins through
+  `narrow_restored`.
   Neither join widens: restrictions union, grants intersect, and the program
   is the profile's only when the session runs none, so a checkout can only add
   restrictions to a live session and `set_session_profile` is the host's reset.
