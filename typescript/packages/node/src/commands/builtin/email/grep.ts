@@ -19,6 +19,7 @@ import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_b
 import { compilePattern, patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
 import {
   pushdownOperand,
+  searchQuery,
   textSearchResults,
 } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
@@ -86,19 +87,35 @@ async function grepCommand(
   // scope that names no folder falls through to the generic scan rather than
   // answering, which is what the mount root does.
   const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
-  if (pattern !== null && operand !== null && (fl.asBool('r') || fl.asBool('R'))) {
+  // IMAP TEXT is a case-insensitive substring search, not a regex engine,
+  // so the server is asked for the literal every match must contain and
+  // the real pattern runs over each candidate. A pattern with no such
+  // literal (an alternation, a class with nothing required around it)
+  // takes the generic scan rather than a search for the regex's spelling.
+  // grep reads a basic expression unless -E says otherwise, and the
+  // literal has to be read off the same dialect the matcher will use.
+  const basic = !fl.asBool('E')
+  const query = pattern !== null ? searchQuery(pattern, fl.asBool('F'), basic) : null
+  if (
+    pattern !== null &&
+    query !== null &&
+    operand !== null &&
+    (fl.asBool('r') || fl.asBool('R'))
+  ) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
       const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
       const pairs = await searchAndFormat(
         accessor,
         match.slots.folder ?? '',
-        pattern,
+        query,
         filePrefix,
         accessor.config.maxMessages,
       )
       if (textSearchResults(pairs.map(([, text]) => text))) {
-        const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'))
+        // The same dialect the literal was read off: a basic expression
+        // compiled as an extended one matches a different language.
+        const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'), basic)
         const lineOpts: GrepLinesOptions = {
           invert: false,
           lineNumbers: fl.asBool('n'),

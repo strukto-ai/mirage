@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FetchedMessage } from '../../../../core/email/client.ts'
+import { quoteString, type FetchedMessage } from '../../../../core/email/client.ts'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 // himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
@@ -109,10 +109,6 @@ function tokenize(source: string): Token[] {
 function keyword(token: Token | undefined): string | null {
   if (token === undefined || token.quoted) return null
   return token.text.toLowerCase()
-}
-
-function quote(value: string): string {
-  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 
 function imapDate(text: string): Date {
@@ -224,7 +220,7 @@ class Parser {
       }
       return key
     }
-    return `${word.toUpperCase()} ${quote(value)}`
+    return `${word.toUpperCase()} ${quoteString(value)}`
   }
 
   parseSorters(): Sorter[] {

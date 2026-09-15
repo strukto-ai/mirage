@@ -15,7 +15,11 @@
 from collections.abc import Iterator, Sequence
 
 from mirage.policy.match import head_visible, node_visible
-from mirage.workspace.lookup.constants import NAMESPACE_COMMANDS, SHELL_NAMES
+from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.routing.types import RouteDecision
+from mirage.workspace.lookup.constants import (INTERPRETER_NAMES,
+                                               NAMESPACE_COMMANDS, SHELL_NAMES)
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -93,8 +97,23 @@ def verb_visible(head: str, path: Sequence[str], session: Session) -> bool:
     return node_visible((head, *path), session.commands)
 
 
-def _layers(name: str, session: Session,
-            registry: MountRegistry) -> Iterator[Consumer]:
+def runtime_refused(name: str,
+                    session: Session,
+                    registry: MountRegistry,
+                    routing: RouteDecision | None = None) -> bool:
+    """Whether routing explicitly refused the external runtime for ``name``."""
+    if routing is None:
+        return False
+    bindings = routing.bindings
+    key = name if name in bindings else EXTERNAL_COMMANDS
+    return (key in bindings and bindings[key] is None
+            and lookup(name, session, registry) is Consumer.EXTERNAL)
+
+
+def _layers(name: str,
+            session: Session,
+            registry: MountRegistry,
+            routing: RouteDecision | None = None) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
 
     The one place precedence is written down: ``lookup`` reads the first
@@ -113,19 +132,46 @@ def _layers(name: str, session: Session,
         registry (MountRegistry): mount registry (command registration).
     """
     installed = listed(name, session)
+    found = False
+    bindings = (routing.bindings
+                if routing is not None else registry.runtime_bindings)
+    bound = (bindings[name]
+             if name in bindings else registry.runtime_bindings.get(name))
+    native = isinstance(bound, (LineExecutorMixin, ProcessExecutorMixin))
+    refused = runtime_refused(name, session, registry, routing)
     if name in SHELL_NAMES and installed:
-        yield Consumer.SESSION
+        found = True
+        yield (Consumer.EXTERNAL if (native or refused)
+               and name in INTERPRETER_NAMES else Consumer.SESSION)
     if installed and name in NAMESPACE_COMMANDS:
+        found = True
         yield Consumer.NAMESPACE
     if name in session.functions and (installed or name not in SHELL_NAMES):
+        found = True
         yield Consumer.FUNCTION
     if installed and registry.clis.get(name) is not None:
+        found = True
         yield Consumer.CLI
+    if installed and (native or refused) and name not in SHELL_NAMES:
+        found = True
+        yield Consumer.EXTERNAL
     if installed and registry.mount_for_command(name) is not None:
+        found = True
         yield Consumer.MOUNT
+    fallback = (bindings[EXTERNAL_COMMANDS] if EXTERNAL_COMMANDS in bindings
+                else registry.runtime_bindings.get(EXTERNAL_COMMANDS))
+    fallback_native = isinstance(fallback,
+                                 (LineExecutorMixin, ProcessExecutorMixin))
+    if (installed and not found and name not in bindings
+            and name not in registry.runtime_unavailable
+            and (fallback_native or refused)):
+        yield Consumer.EXTERNAL
 
 
-def lookup(name: str, session: Session, registry: MountRegistry) -> Consumer:
+def lookup(name: str,
+           session: Session,
+           registry: MountRegistry,
+           routing: RouteDecision | None = None) -> Consumer:
     """Route a command name to the layer that consumes it.
 
     Order mirrors dispatch precedence: shell builtins shadow functions,
@@ -147,8 +193,8 @@ def lookup(name: str, session: Session, registry: MountRegistry) -> Consumer:
         MOUNT      grep, cat, du        operand paths        pushdown
         UNKNOWN    bogus                nobody               untouched, 127
 
-    Runtimes are orthogonal, not a seventh row: a capture decides where
-    a command executes (docker vs vfs), never whether the name exists.
+    Named process captures select EXTERNAL before mount commands. The
+    EXTERNAL_COMMANDS capture handles names no preceding layer owns.
 
     This is the winner only. A name can sit in more than one layer at
     once (a function shadowing an installed CLI); ``lookup_all`` reports
@@ -162,7 +208,7 @@ def lookup(name: str, session: Session, registry: MountRegistry) -> Consumer:
         session (Session): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
-    return next(_layers(name, session, registry), Consumer.UNKNOWN)
+    return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
 
 
 def lookup_all(name: str, session: Session,

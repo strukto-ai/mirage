@@ -15,6 +15,7 @@
 import { expandTilde } from '../utils/path.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
+import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
 import type { TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
 
@@ -358,6 +359,15 @@ function parseFileRedirect(child: TSNodeLike, claimed: number | null = null): Re
     }
   }
 
+  if (child.heredoc !== undefined) {
+    return new Redirect({
+      fd: fd ?? 0,
+      target: child.heredoc.body,
+      targetNode,
+      kind: RedirectKind.HEREDOC,
+      expandVars: !child.heredoc.quoted,
+    })
+  }
   // `>&word` with a word rather than a number is bash's other spelling
   // of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
   // too, pinned on bash 5.2). On any other explicit descriptor bash
@@ -450,13 +460,7 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
 
     if (child.type === NT.HEREDOC_REDIRECT) {
       const [body, , quoted] = getHeredocMeta(child)
-      let pipeNode: TSNodeLike | null = null
-      for (const hc of child.namedChildren) {
-        if (hc.type === NT.PIPELINE || hc.type === NT.COMMAND) {
-          pipeNode = hc
-          break
-        }
-      }
+      const [pipeNode, continuation] = heredocTail(child)
       redirects.push(
         new Redirect({
           fd: 0,
@@ -465,6 +469,7 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
           kind: RedirectKind.HEREDOC,
           pipeline: pipeNode,
           expandVars: !quoted,
+          continuation,
         }),
       )
       // A file redirect written before the heredoc body starts
@@ -499,6 +504,94 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
   }
 
   return [command, redirects]
+}
+
+/**
+ * The leftmost operand of a `&&`/`||` list and the steps after it.
+ *
+ * tree-sitter nests a list to the left (`a || b && c` is
+ * `list(list(a || b) && c)`), which is bash's own associativity, so
+ * walking the left spine yields the first operand and then each operator
+ * with its right operand in the order bash applies them.
+ */
+export function listSpine(node: TSNodeLike): [TSNodeLike, [string, TSNodeLike][]] {
+  const steps: [string, TSNodeLike][] = []
+  let current = node
+  while (current.type === NT.LIST) {
+    const [left, op, right] = getListParts(current)
+    steps.push([op ?? '&&', right])
+    current = left
+  }
+  steps.reverse()
+  return [current, steps]
+}
+
+/**
+ * What the operator line carries past a heredoc's delimiter word.
+ *
+ * Bash reads the body at the newline and then goes on with the line, so
+ * `cat <<EOF | tr a-z A-Z && echo done` is the pipeline `cat | tr` and
+ * then `&& echo done`. tree-sitter-bash parses that tail inside the
+ * heredoc_redirect node instead: a `pipeline` child holding the stage the
+ * command feeds, and an `&&` or `||` token followed by its right operand.
+ * The stage or operand it hands over can itself be a `list`, wrapping
+ * what bash would have bound to the left (`false <<EOF || echo a && echo
+ * b` is `(false || echo a) && echo b`, not `false || (echo a && echo b)`),
+ * so a list is unwound along its left spine: its first operand takes the
+ * stage or operand slot, and the rest become further steps.
+ *
+ * Returns the node the command's stdout pipes into, or null, and the
+ * `[operator, right]` steps applied to the statement after that, in order.
+ */
+export function heredocTail(redirectNode: TSNodeLike): [TSNodeLike | null, [string, TSNodeLike][]] {
+  let pipeNode: TSNodeLike | null = null
+  const steps: [string, TSNodeLike][] = []
+  const children = redirectNode.children
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index]
+    if (child === undefined) continue
+    if (child.type === NT.PIPELINE && pipeNode === null && steps.length === 0) {
+      const stages = child.namedChildren
+      const only = stages[0]
+      if (stages.length === 1 && only?.type === NT.LIST) {
+        const [leaf, spine] = listSpine(only)
+        pipeNode = leaf
+        steps.push(...spine)
+      } else {
+        pipeNode = child
+      }
+      continue
+    }
+    const next = children[index + 1]
+    if ((child.type === NT.AND || child.type === NT.OR) && next?.isNamed === true) {
+      const [right, spine] = listSpine(next)
+      steps.push([child.type, right], ...spine)
+      index += 1
+    }
+  }
+  return [pipeNode, steps]
+}
+
+/**
+ * Detach the `&&`/`||` steps a heredoc's operator line carried.
+ *
+ * The steps apply to the whole redirected statement, so the executor
+ * takes them off the redirects before running it and folds them in
+ * around the result, the way a `list` node wraps its left operand.
+ */
+export function takeContinuation(redirects: readonly Redirect[]): [string, TSNodeLike][] {
+  const steps: [string, TSNodeLike][] = []
+  for (const r of redirects) {
+    if (r.continuation.length > 0) {
+      steps.push(
+        ...(r.continuation as readonly (readonly [string, TSNodeLike])[]).map(
+          ([op, right]) => [op, right] as [string, TSNodeLike],
+        ),
+      )
+      r.continuation = []
+    }
+  }
+  return steps
 }
 
 export function getListParts(node: TSNodeLike): [TSNodeLike, string | null, TSNodeLike] {
@@ -677,6 +770,8 @@ export function getNegatedCommand(node: TSNodeLike): TSNodeLike {
   return first
 }
 
+// The body opens with the empty lines tree-sitter dropped before its
+// heredoc_body node (see bodyPrefix); bash keeps them.
 function getHeredocParts(redirectNode: TSNodeLike): [string, string] {
   let delimiter = ''
   let body = ''
@@ -684,14 +779,12 @@ function getHeredocParts(redirectNode: TSNodeLike): [string, string] {
     if (c.type === NT.HEREDOC_START) delimiter = getText(c)
     else if (c.type === NT.HEREDOC_BODY) body = getText(c)
   }
-  return [delimiter, body]
+  return [delimiter, bodyPrefix(redirectNode) + body]
 }
 
 function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
   const [delimiter, rawBody] = getHeredocParts(redirectNode)
-  // Any quoting anywhere in the delimiter (even partial, `EN'D'`)
-  // disables expansion, matching bash.
-  const quoted = delimiter.includes("'") || delimiter.includes('"') || delimiter.includes('\\')
+  const quoted = delimiterQuoted(delimiter)
   let dash = false
   for (const c of redirectNode.children) {
     if (c.type === '<<-') {
@@ -717,8 +810,8 @@ function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
  * loses its final newline to heredoc_end. Bash strips quoting from
  * the delimiter before matching and bodies always end with a newline.
  */
-function normalizeHeredocBody(body: string, delimiter: string): string {
-  const clean = delimiter.replaceAll("'", '').replaceAll('"', '')
+export function normalizeHeredocBody(body: string, delimiter: string): string {
+  const clean = cleanDelimiter(delimiter)
   const suffix = clean + '\n'
   let out = body
   if (out.endsWith(suffix)) {

@@ -215,7 +215,11 @@ async def _run_with_namespace_globs(ops: CommandIO,
         opts (CommandOpts): the per-invocation option bag.
     """
     children = opts.ns.child_mounts if opts.ns is not None else None
-    stamped = replace(ops, glob_children=children)
+    links = opts.ns.links if opts.ns is not None else None
+    stamped = replace(
+        ops,
+        glob_children=children,
+        glob_target_stat=(links.target_stat if links is not None else None))
     # The policy guard sits outside the cache wraps (`finish`) so a
     # coded pre_ops deny fires before a warm serve, the dispatcher's
     # own order at the op door.

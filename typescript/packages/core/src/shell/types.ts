@@ -24,6 +24,8 @@
  * assignments included, so `i=2, a[i]` reads the new `i`; `read` answers
  * the element's stored text, null when unset.
  */
+import type { Heredoc } from './parse/heredoc/types.ts'
+
 export interface ElementOps {
   resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string
   read(name: string, key: string): string | null
@@ -216,6 +218,10 @@ export interface RedirectInit {
   pipeline?: unknown
   // Whether the target undergoes expansion.
   expandVars?: boolean
+  // The `&&`/`||` steps a heredoc's operator line carries past the
+  // delimiter word (`false <<EOF || echo x`), each an operator and its
+  // right operand, in the order bash applies them to the statement.
+  continuation?: readonly (readonly [string, unknown])[]
 }
 
 export class Redirect {
@@ -225,8 +231,16 @@ export class Redirect {
   readonly kind: RedirectKind
   readonly append: boolean
   readonly clobber: boolean
+  // The node a heredoc's operator line pipes the command into
+  // (`cat <<EOF | tr`), run on the command's stdout.
   pipeline: unknown
   readonly expandVars: boolean
+  // The `&&`/`||` steps a heredoc's operator line carries past the
+  // delimiter word (`false <<EOF || echo x`), in the order bash applies
+  // them. tree-sitter parses that tail inside the heredoc_redirect node,
+  // so it is detached here and applied by the executor around the whole
+  // statement.
+  continuation: readonly (readonly [string, unknown])[]
 
   constructor(init: RedirectInit) {
     this.fd = init.fd
@@ -237,6 +251,7 @@ export class Redirect {
     this.clobber = init.clobber ?? false
     this.pipeline = init.pipeline ?? null
     this.expandVars = init.expandVars ?? true
+    this.continuation = init.continuation ?? []
   }
 }
 
@@ -388,6 +403,10 @@ export type BuiltinGroup = (typeof BuiltinGroup)[keyof typeof BuiltinGroup]
  * Python side reading nodes through shell.types.
  */
 export interface TSNodeLike {
+  readonly heredoc?: Heredoc | undefined
+  readonly warnings?: string
+  readonly sourceText?: string
+  readonly hasError?: boolean
   type: string
   text: string
   children: TSNodeLike[]
@@ -395,6 +414,8 @@ export interface TSNodeLike {
   parent?: TSNodeLike | null
   /** The token after this node in its parent, as web-tree-sitter spells it. */
   nextSibling?: TSNodeLike | null
+  /** The token before this node in its parent, as web-tree-sitter spells it. */
+  previousSibling?: TSNodeLike | null
   isNamed?: boolean
   isMissing?: boolean
   startIndex?: number
@@ -424,4 +445,13 @@ export interface BacktickSegment {
   readonly command: boolean
   readonly start: number
   readonly end: number
+}
+
+export interface ShellNode extends TSNodeLike {
+  readonly hasError: boolean
+  readonly childCount: number
+  readonly children: ShellNode[]
+  readonly namedChildren: ShellNode[]
+  child(index: number): ShellNode | null
+  childForFieldName(name: string): ShellNode | null
 }

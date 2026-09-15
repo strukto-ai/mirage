@@ -29,7 +29,7 @@ import {
 import { decorations, parseFlags, refCommits, select, type LogFlags } from './history.ts'
 import { commitFacts, opened, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
-import { checkOperands, fatal, revisionArg } from './util.ts'
+import { checkOperands, escaped, fatal, revisionArg } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
@@ -90,7 +90,7 @@ export async function log(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(texts)
+    checkOperands(texts, undefined, escaped(inv.argv))
     const parsed = parseFlags(fl)
     const repo = await opened(fl, doors)
     const starts = await startingPoints(repo, revisionArg(texts), parsed)

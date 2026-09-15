@@ -29,7 +29,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import VFSRuntime
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, PathSpec, ResourceName
+from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.builtins.links import (link_target_stat,
                                                       path_exists,
@@ -281,16 +281,20 @@ def namespace_view_of(registry: MountRegistry, namespace: Namespace | None,
         user=namespace.user if namespace is not None else None)
 
 
-async def drop_service_caches(registry: MountRegistry,
-                              serves: tuple[ResourceName, ...]) -> None:
-    """Drop cached listings and bodies for the mounts a CLI's service backs.
+async def drop_mount_caches(registry: MountRegistry) -> None:
+    """Drop every mount's cached listings and bodies after an account
+    CLI write.
 
     An account CLI mutates its service by id, so no vfs path can be
     derived from the call and per-path invalidation has nothing to aim
     at: after `gws sheets spreadsheets create` the new file has no cache
-    entry to expire, which is exactly the case that matters. What is
-    known is the service, so the mounts it backs drop their caches and
-    the next read refetches.
+    entry to expire, which is exactly the case that matters. Which
+    mounts that service backs is not the CLI's business either (a CLI
+    and a resource are separate tiers, and a user's own CLI knows
+    nothing about a user's own resource), so the executor says the one
+    thing it knows: a write happened, and every mount may be stale. A
+    write verb is rare next to reads, and the cost is one cold listing
+    on a mount's next read, never a wrong answer.
 
     Both caches go, because the two hide different writes. A stale
     listing hides a create or a delete; a stale body hides an edit, and
@@ -298,20 +302,10 @@ async def drop_service_caches(registry: MountRegistry,
     batchUpdate` would otherwise keep serving the pre-edit content
     without ever reaching Google.
 
-    Scoped by the spec's declared ``serves`` rather than a blanket
-    reset, so a Slack or S3 mount alongside keeps its cache.
-
     Args:
         registry (MountRegistry): registry holding the mount table.
-        serves (tuple[ResourceName, ...]): resources the CLI's service
-            backs; empty drops nothing.
     """
-    if not serves:
-        return
-    wanted = set(serves)
     for mount in registry.mounts():
-        if mount.resource.name not in wanted:
-            continue
         # Invalidate rather than clear: a cleared index reads exactly like
         # one that was never filled, so a backend whose index *is* its
         # listing (github seeds the whole tree once) cannot tell the drop

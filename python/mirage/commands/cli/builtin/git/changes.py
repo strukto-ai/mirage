@@ -23,7 +23,7 @@ from dulwich.objects import Blob, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
 
-from mirage.commands.cli.builtin.git.constants import HEAD_REF
+from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD_REF
 from mirage.commands.cli.builtin.git.index import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.types import (IndexState, RepoLocation,
@@ -89,26 +89,30 @@ def head_entries(repo: BaseRepo) -> dict[bytes, tuple[int, bytes]] | None:
     }
 
 
-def _exact_renames(adds: list[str], deletes: list[str],
-                   shas: dict[str, bytes]) -> list[tuple[str, str]]:
+def _exact_renames(adds: list[str], deletes: list[str], shas: dict[str, bytes],
+                   kinds: dict[str, int]) -> list[tuple[str, str]]:
     """Pair an add with a delete holding byte-identical content.
 
     Costs a dictionary rather than a read, so it runs first and takes
-    every pair it can before anything is fetched.
+    every pair it can before anything is fetched. Keyed by kind as well
+    as content, because a symlink and a regular file that happen to
+    share bytes are not a rename of each other, while a moved symlink
+    is exactly one.
 
     Args:
         adds (list[str]): paths the index has and HEAD does not.
         deletes (list[str]): paths HEAD has and the index does not.
         shas (dict[str, bytes]): blob id of each, on whichever side it
             exists.
+        kinds (dict[str, int]): the file-type bits of each.
     """
-    sources: dict[bytes, str] = {}
+    sources: dict[tuple[int, bytes], str] = {}
     for path in deletes:
-        sources.setdefault(shas[path], path)
+        sources.setdefault((kinds[path], shas[path]), path)
     taken: set[str] = set()
     pairs = []
     for path in adds:
-        origin = sources.get(shas[path])
+        origin = sources.get((kinds[path], shas[path]))
         if origin is not None and origin not in taken:
             taken.add(origin)
             pairs.append((path, origin))
@@ -165,31 +169,33 @@ def _content_renames(store: BaseObjectStore, adds: list[str],
 
 def _pair_renames(store: BaseObjectStore, staged: dict[str, str],
                   shas: dict[str, bytes],
-                  regular: set[str]) -> dict[str, tuple[str, str | None]]:
+                  kinds: dict[str, int]) -> dict[str, tuple[str, str | None]]:
     """Fold an add and a delete of the same file into one rename.
 
     Two passes, git's own order: identical content first, then what is
-    merely similar enough. Only regular files are candidates, because a
-    symlink and a file that happen to share bytes are not a rename of
-    each other.
+    merely similar enough. Both pair within one kind, and only the
+    second is limited to regular files: a moved symlink is a rename git
+    reports as one, but scoring a link against a file would pair two
+    unrelated things by the bytes of a path.
 
     Args:
         store (BaseObjectStore): the object database, read for blobs.
         staged (dict[str, str]): path to its one-letter staged status.
         shas (dict[str, bytes]): blob id on whichever side exists, for
             the added and deleted paths only.
-        regular (set[str]): of those, the ones that are regular files.
+        kinds (dict[str, int]): the file-type bits of each.
     """
     adds = sorted(path for path, letter in staged.items()
-                  if letter == ADDED and path in regular)
+                  if letter == ADDED and path in kinds)
     deletes = sorted(path for path, letter in staged.items()
-                     if letter == DELETED and path in regular)
-    pairs = _exact_renames(adds, deletes, shas)
+                     if letter == DELETED and path in kinds)
+    pairs = _exact_renames(adds, deletes, shas, kinds)
     matched_new = {new for new, _old in pairs}
     matched_old = {old for _new, old in pairs}
-    pairs.extend(
-        _content_renames(store, [p for p in adds if p not in matched_new],
-                         [p for p in deletes if p not in matched_old], shas))
+    scored = [[p for p in side if kinds[p] == S_IFREG]
+              for side in ([p for p in adds if p not in matched_new],
+                           [p for p in deletes if p not in matched_old])]
+    pairs.extend(_content_renames(store, scored[0], scored[1], shas))
     paired = {new: (RENAMED, old) for new, old in pairs}
     consumed = {old for _new, old in pairs}
     return {
@@ -219,15 +225,14 @@ def stage_changes(store: BaseObjectStore,
     tree = head or {}
     staged: dict[str, str] = {}
     shas: dict[str, bytes] = {}
-    regular: set[str] = set()
+    kinds: dict[str, int] = {}
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
         recorded = tree.get(path)
         if recorded is None:
             staged[name] = ADDED
             shas[name] = entry.sha
-            if S_IFMT(entry.mode) == S_IFREG:
-                regular.add(name)
+            kinds[name] = S_IFMT(entry.mode)
         elif recorded[1] != entry.sha or recorded[0] != entry.mode:
             staged[name] = MODIFIED
     for path, (mode, sha) in tree.items():
@@ -235,9 +240,8 @@ def stage_changes(store: BaseObjectStore,
             name = path.decode("utf-8", errors="replace")
             staged[name] = DELETED
             shas[name] = sha
-            if S_IFMT(mode) == S_IFREG:
-                regular.add(name)
-    return _pair_renames(store, staged, shas, regular)
+            kinds[name] = S_IFMT(mode)
+    return _pair_renames(store, staged, shas, kinds)
 
 
 def staged_state(
@@ -347,6 +351,16 @@ async def work_changes(dispatch: DispatchFn, worktree: str,
     changes: dict[str, str] = {}
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
+        # A 160000 entry records another repository's HEAD, and what
+        # stands at the name is a directory, so the walk never finds a
+        # file there and every submodule read as deleted. git compares
+        # the submodule's own HEAD, which is unreadable from here, and
+        # says nothing at all when there is none; saying nothing is both
+        # the closest this can get and what keeps a branch switch away
+        # from a submodule from being refused over a file that was never
+        # missing.
+        if entry.mode == GITLINK:
+            continue
         if name not in found.files:
             changes[name] = DELETED
         elif await _differs(dispatch, worktree, name, entry,

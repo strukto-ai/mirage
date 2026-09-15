@@ -16,9 +16,12 @@ import { describe, expect, it } from 'vitest'
 import type { Policy } from '../../../../policy/base.ts'
 import type { Action, OpsContext } from '../../../../policy/types.ts'
 import { RAMResource } from '../../../../resource/ram/ram.ts'
-import { MountMode } from '../../../../types.ts'
+import { MountMode, PathSpec } from '../../../../types.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { prepareMv } from './links.ts'
+import { IOResult } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -38,6 +41,13 @@ class SealReads implements Policy {
     }
     return null
   }
+}
+
+function dispatchOf(ws: Workspace): DispatchFn {
+  return async (op, path, args = [], kwargs = {}) => [
+    await ws.dispatch(op, path.virtual, args, kwargs),
+    new IOResult(),
+  ]
 }
 
 async function makeWs(policies: Policy[] = []): Promise<Workspace> {
@@ -277,6 +287,78 @@ describe('rm and unlink reach a link through the op door', () => {
       }
       expect(ws.namespace.isLink('/data/l1')).toBe(true)
       expect(ws.namespace.isLink('/data/l2')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('mv re-anchors what the node table holds', () => {
+  it('hands back the pair whatever the table holds at the source', async () => {
+    // Gated on the source carrying overlay attrs, the pair was withheld
+    // for a directory whose own node is empty, and every link below it
+    // stayed at the emptied name: readable nowhere, since no backend
+    // holds an entry for a link at all.
+    const ws = await makeWs()
+    try {
+      await ws.execute('mkdir -p /data/d; printf t > /data/t')
+      await ws.execute('ln -s /data/t /data/d/link')
+      const prepared = await prepareMv(
+        ws.namespace,
+        dispatchOf(ws),
+        [PathSpec.fromStrPath('/data/d'), PathSpec.fromStrPath('/data/moved')],
+        ['/data/d', '/data/moved'],
+        '/',
+      )
+      expect(prepared.early).toBeNull()
+      expect(prepared.postUnlink).toBe('/data/moved')
+      expect(prepared.postRename).toEqual(['/data/d', '/data/moved'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads the destination off the parsed line', async () => {
+    // -T names the destination outright, so no basename is appended to
+    // it, and -t makes every positional a source, which is the shape a
+    // two-operand pair cannot describe at all.
+    const ws = await makeWs()
+    try {
+      await ws.execute('mkdir -p /data/dst; printf a > /data/a')
+      const pair = [PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/dst')]
+      const dispatch = dispatchOf(ws)
+      const into = await prepareMv(ws.namespace, dispatch, pair, ['/data/a', '/data/dst'], '/')
+      expect(into.postRename).toEqual(['/data/a', '/data/dst/a'])
+      const onto = await prepareMv(
+        ws.namespace,
+        dispatch,
+        pair,
+        ['-T', '/data/a', '/data/dst'],
+        '/',
+      )
+      expect(onto.postRename).toEqual(['/data/a', '/data/dst'])
+      const many = await prepareMv(
+        ws.namespace,
+        dispatch,
+        pair,
+        ['-t', '/data/dst', '/data/a'],
+        '/',
+      )
+      expect(many.postRename).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('moves a link below a renamed directory with it', async () => {
+    const ws = await makeWs()
+    try {
+      await ws.execute('mkdir -p /data/d; printf t > /data/t')
+      await ws.execute('ln -s /data/t /data/d/link')
+      expect((await ws.execute('mv /data/d /data/moved')).exitCode).toBe(0)
+      const told = await ws.execute('readlink /data/moved/link')
+      expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, '/data/t\n'])
+      expect((await ws.execute('readlink /data/d/link')).exitCode).not.toBe(0)
     } finally {
       await ws.close()
     }

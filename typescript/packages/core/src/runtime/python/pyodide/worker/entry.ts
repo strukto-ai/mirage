@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../../binding.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
@@ -58,7 +59,7 @@ async function execute(request: ExecuteRequest): Promise<void> {
       interrupt =
         request.interruptBuffer === undefined ? undefined : new Int32Array(request.interruptBuffer)
       runtime = new PyodideRuntime({ config: request.config }, sync, request.interruptBuffer)
-      runtime.attach(dispatch, new PrefixResolver(() => prefixes))
+      runtime.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes)))
     }
     const value =
       request.method === 'run' && request.args !== undefined

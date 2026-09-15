@@ -15,6 +15,7 @@
 import math
 import time
 from dataclasses import dataclass, field
+from datetime import timezone
 
 from mirage.commands.builtin import constants
 from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
@@ -201,7 +202,7 @@ def parse_newermt(value: str) -> float:
         value (str): a GNU date expression, with naive times read as UTC.
     """
     try:
-        ts = parse_date_expr(value, utc=True)
+        ts = parse_date_expr(value, tz=timezone.utc)
     except (ValueError, OverflowError, OSError):
         ts = None
     if ts is None:

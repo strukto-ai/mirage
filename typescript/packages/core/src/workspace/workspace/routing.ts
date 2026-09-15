@@ -25,6 +25,7 @@ import type { MountResolver } from '../../runtime/resolver.ts'
 import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { Consumer, lookup } from '../lookup/index.ts'
 import type { Session } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import type { ExecuteOptions } from './types.ts'
@@ -86,7 +87,19 @@ export class Router {
     }
     const hasScripts = this.runtimes.entries.some((entry) => entry.script !== undefined)
     if (this.routePolicy === null && !hasScripts) return null
-    const commands = parsedCommands(root, this.registry.clis.names())
+    const commands = parsedCommands(root, this.registry.clis.names(), (words) =>
+      this.registry.matchCommandPrefix(words),
+    )
+    const externalCommands = commands
+      .filter((parsed) => {
+        const name = parsed.command
+        return (
+          !name.includes('/') &&
+          !Object.hasOwn(this.runtimes.bindings, name) &&
+          lookup(name, session, this.registry) === Consumer.EXTERNAL
+        )
+      })
+      .map((parsed) => parsed.command)
     const ctx: RouteContext = {
       line: command,
       commands,
@@ -98,6 +111,12 @@ export class Router {
       agentId: options.agentId ?? this.agentId ?? '',
       mounts: this.resolver.prefixes(),
     }
-    return decideLine(this.runtimes.entries, this.routePolicy, ctx, this.runtimes.bindings)
+    return decideLine(
+      this.runtimes.entries,
+      this.routePolicy,
+      ctx,
+      this.runtimes.bindings,
+      externalCommands,
+    )
   }
 }

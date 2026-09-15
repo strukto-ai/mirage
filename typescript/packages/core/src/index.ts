@@ -70,14 +70,21 @@ export { QdrantResource } from './resource/qdrant/qdrant.ts'
 export { RAMResource } from './resource/ram/ram.ts'
 export { secretStr, z } from './resource/secrets.ts'
 export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
+export { EXTERNAL_COMMANDS } from './runtime/constants.ts'
 export { Runtime } from './runtime/base.ts'
 export type { RuntimeEntry } from './runtime/base.ts'
 export { EvalError } from './runtime/errors.ts'
-export { EVALUATOR, LINE_EXECUTOR } from './runtime/mixin.ts'
-export type { Evaluator, LineExecutor } from './runtime/mixin.ts'
+export { EVALUATOR, LINE_EXECUTOR, PROCESS_EXECUTOR } from './runtime/mixin.ts'
+export type { Evaluator, LineExecutor, ProcessExecutor } from './runtime/mixin.ts'
 export { ScriptSource } from './runtime/routing/index.ts'
 export { buildRuntime } from './runtime/table.ts'
-export type { EvalResult, EvalValue, RunResult } from './runtime/types.ts'
+export type {
+  EvalResult,
+  EvalValue,
+  RunResult,
+  FilesystemOperation,
+  ProcessExecution,
+} from './runtime/types.ts'
 export { JobConsole } from './shell/console/index.ts'
 export type { ConsoleFactory } from './shell/job_table/index.ts'
 export {

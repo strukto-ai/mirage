@@ -23,7 +23,7 @@ import {
 } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { mergeSignals } from '../abort.ts'
+import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -44,6 +44,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { runExternal } from '../executor/command/external.ts'
 import { handleCommand } from '../executor/command.ts'
 import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
@@ -71,7 +72,14 @@ import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS, followsLastComponent } from '../lookup/index.ts'
+import {
+  Consumer,
+  lookup,
+  runtimeRefused,
+  SLASH_KEEPS_LAST,
+  UNSUPPORTED_BUILTINS,
+  followsLastComponent,
+} from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
 import type { Session } from '../session/session.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
@@ -135,7 +143,7 @@ export async function executeCommand(
     if (rewritten !== null) {
       const line = source.slice(0, (headNode.startIndex ?? 0) - base) + rewritten
       const ast = reparse(line)
-      const offending = findSyntaxError(ast as Parameters<typeof findSyntaxError>[0])
+      const offending = findSyntaxError(ast, reparse)
       if (offending !== null) {
         const snippet = offending.trim()
         const errBytes = new TextEncoder().encode(
@@ -395,11 +403,16 @@ async function runCommandBody(
     registry,
     namespace,
     sessionView(session, registry.policies),
+    routingDecision,
   )
 
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
-  const resolved = argv.name !== '' ? resolveLimit(argv.name) : null
+  // External execution owns its mount-resolved deadline and cancellation.
+  const external =
+    !argv.name.includes('/') &&
+    lookup(argv.name, session, registry, routingDecision) === Consumer.EXTERNAL
+  const resolved = argv.name !== '' && !external ? resolveLimit(argv.name) : null
   const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands).
@@ -503,7 +516,10 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const boundary = await expandBoundaryGlobs(argv.operands, registry, namespace)
+  const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
+  const boundary = refusedExternal
+    ? [...argv.operands]
+    : await expandBoundaryGlobs(argv.operands, registry, namespace)
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -514,7 +530,7 @@ async function runArgv(
     expandedWords.length !== typedWords.length ||
     expandedWords.some((w, i) => w !== typedWords[i])
   ) {
-    argv = new Argv(argv.name, expandedWords, boundary)
+    argv = new Argv(argv.name, expandedWords, boundary, argv.prefix)
   }
 
   // Visibility and admission. The one chokepoint every command class
@@ -615,7 +631,7 @@ async function routeArgv(
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
-  dispatch: DispatchFn,
+  dispatchIn: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
   executeFn: ExecuteFn,
@@ -634,6 +650,12 @@ async function routeArgv(
 ): Promise<Result> {
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.
+  // Every handler below reaches the op door through this one function,
+  // so a line whose caller was already released starts no further op
+  // between its operands (`rm l1 l2` with the first unlink held past
+  // the grace). Python needs nothing here: its cancelled task never
+  // reaches the next operand.
+  const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, session.abortSignal))
   const name = argv.name
   const args = [...argv.args]
   let operands = [...argv.operands]
@@ -656,6 +678,11 @@ async function routeArgv(
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: name, exitCode: 2, stderr: err }),
     ]
+  }
+
+  const consumer = lookup(name, session, registry, routingDecision)
+  if (consumer === Consumer.EXTERNAL) {
+    return runExternal(argv, stdin, session, registry, routingDecision, signal)
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to
@@ -780,7 +807,7 @@ async function routeArgv(
           ]
         }
       } else if (name === 'mv') {
-        const prepared = await prepareMv(namespace, dispatch, operands)
+        const prepared = await prepareMv(namespace, dispatch, operands, argv.args, session.cwd)
         operands = prepared.items
         postUnlink = prepared.postUnlink
         postRename = prepared.postRename
@@ -819,6 +846,7 @@ async function routeArgv(
     agentId,
     executeFn,
     handed ?? null,
+    signal,
   )
 
   if (io.exitCode === 0 && namespace.nodes.size > 0) {
@@ -845,8 +873,18 @@ async function routeArgv(
         }
       }
     }
-    if (postUnlink !== null) await namespace.unlink(postUnlink)
-    if (postRename !== null) await namespace.rename(postRename[0], postRename[1])
+    if (postUnlink !== null) {
+      // The landing is replaced the way rename(2) replaces it, node and
+      // subtree alike, and then the source's own node and subtree land on it.
+      // The same four steps the dispatcher takes for a rename it forwards
+      // itself.
+      await namespace.unlink(postUnlink)
+      await namespace.purgeUnder(postUnlink)
+    }
+    if (postRename !== null) {
+      await namespace.rename(postRename[0], postRename[1])
+      await namespace.renameUnder(postRename[0], postRename[1])
+    }
   }
   if (linkErrors.length > 0) {
     // A refused link operand fails the line the way a refused backend

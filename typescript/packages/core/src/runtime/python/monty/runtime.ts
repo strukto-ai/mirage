@@ -22,8 +22,6 @@ import type {
   RuntimeOptions,
   RuntimeContext,
 } from '../../types.ts'
-import type { MountResolver } from '../../resolver.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import { MontyVFS } from './vfs.ts'
@@ -57,24 +55,16 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   // file I/O can only travel the VFS bridge, so every effect passes
   // the workspace gate (mount modes, policy, recording).
   override readonly reach = 'vfs'
+  override readonly filesystem = ['read', 'write', 'list'] as const
   // No import system to resolve a module with, so `-m` has nothing to
   // run; the refusal names this runtime rather than inventing a
   // "No module named" that would imply a search happened.
   override readonly runsModules = false
   readonly [EVALUATOR] = true as const
-  private workspaceBridge: BridgeDispatchFn | null = null
-  private vfs: MontyVFS | null = null
   private readonly execution = new MontyExecution()
 
   constructor(options: RuntimeOptions = {}) {
     super(options)
-  }
-
-  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
-    if (this.workspaceBridge === null) {
-      this.workspaceBridge = dispatch
-      this.vfs = new MontyVFS(new RuntimeVFS(dispatch, resolver))
-    }
   }
 
   /**
@@ -114,18 +104,9 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     return this.execution.close()
   }
 
-  /**
-   * The mount view for one command, with its negative cache cleared.
-   *
-   * python builds a fresh `MirageOSAccess` per run, so its absence
-   * cache never outlives a command; this view is attached once, so it
-   * has to be told. Without the reset a path a shell command created
-   * between two monty commands would stay invisible to the second.
-   */
   private perRunVfs(context?: RuntimeContext): MontyVFS | null {
-    if (context !== undefined)
-      return new MontyVFS(new RuntimeVFS(context.dispatch, context.resolver))
-    this.vfs?.reset()
-    return this.vfs
+    return context === undefined
+      ? null
+      : new MontyVFS(new RuntimeVFS(context.dispatch, context.resolver))
   }
 }

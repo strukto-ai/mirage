@@ -731,6 +731,7 @@
         "create",
         "du",
         "exists",
+        "find",
         "is_mounted",
         "mkdir",
         "read_bytes",

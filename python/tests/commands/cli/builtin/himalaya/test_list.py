@@ -30,6 +30,9 @@ def envelope(uid: str, day: int) -> dict:
         "subject": f"s{uid}",
         "date": f"Mon, {day:02d} Feb 2026 10:00:00 +0000",
         "internal_date": f"{day:02d}-Feb-2026 10:00:00 +0000",
+        "body_text": f"body {uid}",
+        "body_html": f"<p>body {uid}</p>",
+        "snippet": f"body {uid}",
     }
 
 
@@ -117,3 +120,19 @@ async def test_the_account_window_caps_the_fetch(patched):
             "page_size": 25
         }))
     assert patched["budget"] == CONFIG.max_messages
+
+
+@pytest.mark.asyncio
+async def test_a_listing_is_header_only(patched):
+    # Listing fetches every full source, because attachment metadata lives
+    # in the MIME structure, but the listing is the envelope: a page of 25
+    # messages must not carry 25 HTML bodies. `message read` and the mounted
+    # .email.json keep them (#1067).
+    out, _ = await list_envelopes(CLIInvocation(CONFIG))
+    data = json.loads(await materialize(out))
+    assert data
+    for row in data:
+        assert "body_text" not in row
+        assert "body_html" not in row
+        assert "snippet" not in row
+        assert row["subject"] == f"s{row['uid']}"

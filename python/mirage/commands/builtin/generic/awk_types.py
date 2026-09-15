@@ -25,6 +25,8 @@ class AwkCmpOp(StrEnum):
     LT = "<"
     GE = ">="
     LE = "<="
+    MATCH = "~"
+    NOT_MATCH = "!~"
 
 
 class AwkBoolOp(StrEnum):
@@ -46,7 +48,7 @@ class AwkBuiltin(StrEnum):
 FIELD_PREFIX = "$"
 PRINT_STMT = "print"
 
-CMP_OP_PATTERN = r"==|!=|>=|<=|>|<"
+CMP_OP_PATTERN = r"==|!=|>=|<=|!~|~|>|<"
 
 USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 

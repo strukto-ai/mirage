@@ -224,10 +224,7 @@ describe('MontyVFS negative cache', () => {
     expect(await vfs.entryFor('/ram/a')).toMatchObject({ isDir: false })
   })
 
-  it('forgets across commands, so another writer between runs is seen', async () => {
-    // python builds a fresh MirageOSAccess per run; this view is
-    // attached once, so the runtime resets it at the top of each
-    // command. Without that a shell command's file stays invisible.
+  it('can clear cached absences when explicitly reusing a view', async () => {
     let created = false
     const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
       if (op === 'readdir') return Promise.resolve(created ? ['/ram/late.txt'] : [])

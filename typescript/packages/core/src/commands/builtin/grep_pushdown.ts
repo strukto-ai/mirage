@@ -15,6 +15,7 @@
 import type { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/operands.ts'
+import { breToRegExp } from '../../utils/bre.ts'
 import { type FlagValue } from '../spec/types.ts'
 
 // Classify a grep pattern for API push-down decisions.
@@ -28,16 +29,36 @@ export function classifyPattern(pattern: string, fixedString: boolean): PatternT
 const REGEX_BREAKERS: ReadonlySet<string> = new Set('.^$*+?()|{}')
 const MIN_SEARCH_LITERAL = 3
 
+// Fewest repeats the quantifier starting at `pattern[i]` allows: 0 for `?`,
+// `*` and an interval whose lower bound is 0 or missing, 1 for `+`, the lower
+// bound of any other interval, or null when no quantifier starts there.
+function quantifierMin(pattern: string, i: number): number | null {
+  if (i >= pattern.length) return null
+  const ch = pattern.charAt(i)
+  if (ch === '?' || ch === '*') return 0
+  if (ch === '+') return 1
+  if (ch === '{') {
+    const end = pattern.indexOf('}', i)
+    const low = (end === -1 ? '' : pattern.slice(i + 1, end)).split(',', 1)[0] ?? ''
+    return /^\d+$/.test(low) ? Number(low) : 0
+  }
+  return null
+}
+
 // Longest substring every match of a regex must contain. Returns a literal
 // any matching line is guaranteed to contain, suitable for narrowing via a
 // literal search API before the real regex is scanned locally. Conservative:
 // returns null whenever a required literal cannot be proven (top-level
-// alternation, character classes, escapes, runs shorter than
-// MIN_SEARCH_LITERAL), so the caller falls back to a full scan.
+// alternation, character classes, escapes, a `(?` group, runs shorter than
+// MIN_SEARCH_LITERAL), so the caller falls back to a full scan. A run inside
+// a group that `?`, `*` or a zero-floored interval makes optional is not
+// required either: `(foo)?bar` matches `bar` alone, so only `bar` may be
+// searched for.
 export function extractRequiredLiteral(pattern: string): string | null {
   if (pattern.includes('|')) return null
   const runs: string[] = []
   let current: string[] = []
+  const groups: number[] = []
   let i = 0
   const n = pattern.length
   while (i < n) {
@@ -53,6 +74,22 @@ export function extractRequiredLiteral(pattern: string): string | null {
       current = []
       i += 1
       while (i < n && pattern[i] !== ']') i += pattern[i] === '\\' ? 2 : 1
+      i += 1
+      continue
+    }
+    if (ch === '(') {
+      if (pattern.startsWith('(?', i)) return null
+      runs.push(current.join(''))
+      current = []
+      groups.push(runs.length)
+      i += 1
+      continue
+    }
+    if (ch === ')') {
+      runs.push(current.join(''))
+      current = []
+      const opened = groups.pop()
+      if (opened !== undefined && quantifierMin(pattern, i + 1) === 0) runs.length = opened
       i += 1
       continue
     }
@@ -75,12 +112,21 @@ export function extractRequiredLiteral(pattern: string): string | null {
   return best.length >= MIN_SEARCH_LITERAL ? best : null
 }
 
-// Literal to push down to a code-search API for a grep/rg pattern: the
-// pattern itself when literal, a required literal extracted from a regex, or
-// null when no literal can be searched.
-export function searchQuery(pattern: string, fixedString: boolean): string | null {
-  if (classifyPattern(pattern, fixedString) !== PatternType.REGEX) return pattern
-  return extractRequiredLiteral(pattern)
+// Literal to push down to a substring or code-search API for a grep/rg
+// pattern: the pattern itself when literal, the longest literal every match
+// of a regex must contain, or null when no literal can be searched (a
+// newline-joined pattern list is a set of alternatives no one literal is
+// required by). A SIMPLE pattern holding a dot is a regex here, not a
+// literal: `worker.3` matches `worker-3`, which a substring search for
+// `worker.3` never returns, so only the run before the dot is required.
+// `isLiteralPattern` already draws that line for the whole-word case. A
+// basic expression is translated before a literal is extracted, since its
+// operators are the escaped spellings: `\(bar\)\?` is an optional group
+// there and `(bar)?` three literal characters plus a literal question mark.
+export function searchQuery(pattern: string, fixedString: boolean, basic = false): string | null {
+  if (pattern.includes('\n')) return null
+  if (isLiteralPattern(pattern, fixedString)) return pattern
+  return extractRequiredLiteral(basic ? breToRegExp(pattern) : pattern)
 }
 
 // Whether the pattern is searched verbatim, with no regex extraction.

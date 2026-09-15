@@ -67,8 +67,6 @@ def _spied_runtime() -> QuickJsRuntime:
     # everywhere; the @live tests below need the build.
     rt = object.__new__(QuickJsRuntime)
     rt._binding = None
-    rt._dispatch = None
-    rt._resolver = None
     rt._runtime = _ArgvSpy()
     return rt
 

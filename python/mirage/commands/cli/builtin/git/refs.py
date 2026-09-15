@@ -29,6 +29,7 @@ PACKED_REFS = "packed-refs"
 REFS_DIR = "refs"
 SYMREF_PREFIX = "ref: "
 BRANCH_PREFIX = "refs/heads/"
+TAG_PREFIX = "refs/tags/"
 
 
 async def read_head(dispatch: DispatchFn, gitdir: str) -> HeadRef:
@@ -104,13 +105,47 @@ async def write_ref(dispatch: DispatchFn, commondir: str, ref: str,
     await write_file(dispatch, posixpath.join(commondir, ref), sha + b"\n")
 
 
-async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
-    """Remove a loose ref file.
+def without_packed(data: bytes, ref: str) -> bytes | None:
+    """``packed-refs`` with one ref's lines removed, None if it held none.
 
-    Only the loose copy is removed. A ref that also sits in
-    ``packed-refs`` would come back, which is a real gap rather than a
-    silent one: ``branch -d`` refuses below unless the loose file is
-    what actually holds the branch.
+    A packed ref is two lines rather than one when it is an annotated
+    tag: the tag object's own id, then a ``^`` line holding the commit
+    it peels to. The peeled line belongs to the ref above it, so
+    dropping a ref drops the ``^`` line that follows it and nothing
+    else.
+
+    Args:
+        data (bytes): the file as it stands.
+        ref (str): full ref name to drop.
+    """
+    wanted = ref.encode()
+    kept: list[bytes] = []
+    dropped = False
+    found = False
+    for line in data.split(b"\n"):
+        if line.startswith(b"^"):
+            if not dropped:
+                kept.append(line)
+            continue
+        dropped = False
+        if line and not line.startswith(b"#"):
+            space = line.find(b" ")
+            if space != -1 and line[space + 1:].strip() == wanted:
+                dropped = True
+                found = True
+                continue
+        kept.append(line)
+    return b"\n".join(kept) if found else None
+
+
+async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
+    """Remove a ref, loose copy and packed copy alike.
+
+    Both are removed because either alone can be what holds the ref,
+    and removing only the loose one would report a deletion the next
+    read undoes: after ``git pack-refs`` a ref exists nowhere else, and
+    a force-updated one exists in both, where dropping the loose file
+    would resurrect the older packed value.
 
     Args:
         dispatch (DispatchFn): workspace op dispatcher.
@@ -119,6 +154,13 @@ async def delete_ref(dispatch: DispatchFn, commondir: str, ref: str) -> None:
         ref (str): full ref name.
     """
     await remove_file(dispatch, posixpath.join(commondir, ref))
+    path = posixpath.join(commondir, PACKED_REFS)
+    data = await read_optional(dispatch, path)
+    if data is None:
+        return
+    rewritten = without_packed(data, ref)
+    if rewritten is not None:
+        await write_file(dispatch, path, rewritten)
 
 
 async def set_head(dispatch: DispatchFn, gitdir: str, ref: str) -> None:
@@ -196,3 +238,70 @@ async def load_refs(dispatch: DispatchFn,
     elif head.commit is not None:
         refs[HEAD_REF] = head.commit.encode()
     return DictRefsContainer(refs)
+
+
+# Every byte git forbids anywhere in a ref name, on top of the control
+# characters: the shell metacharacters that would make a name unusable
+# as a revision, and the backslash.
+FORBIDDEN_IN_REF = frozenset(" ~^:?*[\\")
+LOCK_SUFFIX = ".lock"
+
+
+def blocking_ref(known: set[Ref], ref: str) -> str | None:
+    """The existing ref that stops a new one from being written.
+
+    A ref is a path, so two of them cannot coexist when one spells a
+    directory the other spells a file: with ``refs/tags/foo`` already
+    there, ``refs/tags/foo/bar`` has no directory to live in, and with
+    ``refs/tags/foo/bar`` there, ``refs/tags/foo`` has a directory
+    standing on its name. git refuses both and names the ref already
+    written; a repository can only ever hold one of the two shapes, so
+    the two searches cannot both answer.
+
+    Nothing below git's own storage can be relied on to say so. A disk
+    mount raises whatever its host filesystem raises, which reaches the
+    user as neither git's wording nor git's exit code, and a prefix
+    store takes both keys happily and leaves a ref the loose-ref walk
+    cannot find.
+
+    Args:
+        known (set[Ref]): every ref the repository holds.
+        ref (str): the full ref name about to be written.
+
+    Returns:
+        str | None: the ref standing in the way, None when none does.
+    """
+    parts = ref.split("/")
+    for depth in range(1, len(parts)):
+        above = "/".join(parts[:depth])
+        if Ref(above.encode()) in known:
+            return above
+    below = f"{ref}/".encode()
+    found = sorted(name for name in known if name.startswith(below))
+    return found[0].decode() if found else None
+
+
+def valid_ref_name(name: str) -> bool:
+    """Whether a name passes git's ref rules (``git check-ref-format``).
+
+    The rules, in git's own order: no component may start with ``.`` or
+    end with ``.lock``; ``..`` may not appear; no control character,
+    space or shell metacharacter; no leading, trailing or doubled ``/``;
+    no trailing ``.``; and no ``@{``. Empty is refused too. A bare ``@``
+    is refused only as a whole ref, and a name here always sits below
+    ``refs/``, so it passes. Pinned against git 2.50.1.
+
+    Args:
+        name (str): the name below ``refs/heads/`` or ``refs/tags/``.
+    """
+    if not name or name.startswith("/") or name.endswith("/"):
+        return False
+    if "//" in name or ".." in name or "@{" in name or name.endswith("."):
+        return False
+    for ch in name:
+        if ord(ch) < 0x20 or ord(ch) == 0x7F or ch in FORBIDDEN_IN_REF:
+            return False
+    for part in name.split("/"):
+        if part.startswith(".") or part.endswith(LOCK_SUFFIX):
+            return False
+    return True

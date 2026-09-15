@@ -28,8 +28,8 @@ from mirage.commands.cli.builtin.git.history import (LogFlags, decorations,
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  revision_arg)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, revision_arg)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -119,7 +119,7 @@ async def log(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts)
+        check_operands(texts, marked=escaped(inv.argv))
         parsed = parse_flags(fl)
         repo, _location = await opened(fl, doors)
         commits, decor = await asyncio.to_thread(

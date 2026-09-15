@@ -20,6 +20,7 @@ import {
   type LsTimeKind,
 } from '../../../types.ts'
 import { strftime } from './strftime.ts'
+import { UTC_ZONE } from '../../../utils/timezone.ts'
 import {
   DEFAULT_MODES,
   EPOCH_LS_TIME,
@@ -234,14 +235,14 @@ function lsTimeString(modified: string | null | undefined, findRule = false): st
 export function styledTime(modified: string | null | undefined, style: string): string {
   if (style === 'locale') return lsTimeString(modified)
   const dt = parseWhen(modified) ?? EPOCH
-  if (style === 'full-iso') return strftime(dt, '%Y-%m-%d %H:%M:%S.%N %z', true)
-  if (style === 'long-iso') return strftime(dt, '%Y-%m-%d %H:%M', true)
+  if (style === 'full-iso') return strftime(dt, '%Y-%m-%d %H:%M:%S.%N %z', UTC_ZONE)
+  if (style === 'long-iso') return strftime(dt, '%Y-%m-%d %H:%M', UTC_ZONE)
   const recent = isRecent(dt.getTime() / 1000, false)
-  if (style === 'iso') return strftime(dt, recent ? '%m-%d %H:%M' : '%Y-%m-%d ', true)
+  if (style === 'iso') return strftime(dt, recent ? '%m-%d %H:%M' : '%Y-%m-%d ', UTC_ZONE)
   const fmt = style.slice(1)
   const cut = fmt.indexOf('\n')
-  if (cut === -1) return strftime(dt, fmt, true)
-  return strftime(dt, recent ? fmt.slice(cut + 1) : fmt.slice(0, cut), true)
+  if (cut === -1) return strftime(dt, fmt, UTC_ZONE)
+  return strftime(dt, recent ? fmt.slice(cut + 1) : fmt.slice(0, cut), UTC_ZONE)
 }
 
 // The timestamp an ls column shows for one row. A backend reports one

@@ -10,12 +10,13 @@ from mirage.policy.script import (_POLICY_READ, HOOKS, ScriptPolicy,
                                   session_script_context)
 from mirage.policy.types import (Ask, CommandContext, Deny, DenyScope,
                                  OpsContext, ProfileScript, SessionContext)
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import EvalError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.types import (EvalResult, EvalValue, RunArgs, RunResult,
-                                  ScriptSource)
+from mirage.runtime.resolver import MountResolver, PrefixResolver
+from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
+                                  RunResult, ScriptSource)
 from mirage.types import PathSpec
 
 DENY_ANSWER = {"deny": "sealed"}
@@ -79,10 +80,11 @@ class FakeLanguageEngine(LanguageRuntime, EvaluatorMixin):
 
     def __init__(self) -> None:
         super().__init__()
-        self.attached: tuple[object, object] | None = None
+        self.attached: tuple[DispatchFn, MountResolver] | None = None
 
-    def attach(self, dispatch, resolver) -> None:
-        self.attached = (dispatch, resolver)
+    def bind(self, binding: WorkspaceBinding) -> None:
+        super().bind(binding)
+        self.attached = (binding.dispatch, binding.resolver)
 
     async def run(self, args: RunArgs) -> RunResult:
         raise NotImplementedError

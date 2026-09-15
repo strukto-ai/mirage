@@ -17,8 +17,6 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-import tree_sitter
-
 from mirage.commands.errors import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -30,6 +28,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
+from mirage.shell.types import TSNodeLike
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (Session, reset_current_session,
@@ -64,8 +63,8 @@ async def pump(console: JobConsole, channel: Channel,
 
 async def handle_background(
     execute_node,
-    left: tree_sitter.Node,
-    right: tree_sitter.Node | None,
+    left: TSNodeLike,
+    right: TSNodeLike | None,
     session: Session,
     job_table: JobTable,
     agent_id: str | None,
@@ -114,12 +113,17 @@ async def handle_background(
                 # the end. Statements that emit return no stdout, so the
                 # pump below is a no-op for them and still covers
                 # constructs that do not stream.
+                # A job outlives the line that launched it and is not the
+                # caller's to abort, as bash leaves a background job alone
+                # on SIGINT and a TypeScript job runs under its own
+                # controller: it runs without the line's event.
                 stdout, io, exec_node = await execute_node(left,
                                                            bg_session,
                                                            None,
                                                            bg_call_stack,
                                                            sink=console,
-                                                           handed=job_handed)
+                                                           handed=job_handed,
+                                                           cancel=None)
             except CommandTimeoutError as exc:
                 msg = (str(exc) + "\n").encode()
                 stdout = b""
@@ -194,7 +198,7 @@ async def handle_background(
 
 async def run_statement(
     execute_node: Callable[..., Any],
-    node: tree_sitter.Node,
+    node: TSNodeLike,
     session: Session,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -214,7 +218,7 @@ async def run_statement(
 
     Args:
         execute_node (Callable): the executor's statement runner.
-        node (tree_sitter.Node): the statement.
+        node (TSNodeLike): the statement.
         session (Session): shell session.
         stdin (ByteSource | None): the statement's input; a job gets
             none, like a background process reading /dev/null.

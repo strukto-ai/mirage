@@ -22,6 +22,62 @@
           }
         }
       ]
+    },
+    {
+      "id": "closed_output_and_reuse",
+      "world": {
+        "runtimes": [
+          "local",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('out'); sys.stderr.write('err'); sys.stdout.close(); sys.stderr.close(); assert sys.stdout.closed and sys.stderr.closed\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "out\n",
+            "stderr": "err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('next'); sys.stderr.write('next err')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": "next err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdout.buffer.write(b'binary'); sys.stdout.buffer.close()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "binary",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('before exit'); sys.stdout.close(); sys.stderr.close(); sys.exit(7)\"",
+          "expect": {
+            "exit": 7,
+            "stdout": "before exit\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('after exit')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after exit\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

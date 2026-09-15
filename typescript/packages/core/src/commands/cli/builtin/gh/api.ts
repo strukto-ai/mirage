@@ -25,7 +25,6 @@ import { resolvePath } from '../../../../utils/path.ts'
 import { ghTransport, jsonOut, textOut } from './accessor.ts'
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
-const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const EMPTY_ARRAY = Symbol('empty-array')
 
 function typed(value: string): Json {
@@ -230,7 +229,6 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
   const upper = method.toUpperCase()
   const expanded = expand(endpoint, inv.config as GhConfig)
   const path = expanded.startsWith('/') ? expanded : `/${expanded}`
-  const mutated = !READ_METHODS.has(upper)
 
   let body: unknown
   let params: Record<string, string> | undefined
@@ -281,7 +279,7 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
       : undefined
   }
 
-  if (fl.asBool('silent')) return textOut('', mutated)
+  if (fl.asBool('silent')) return textOut('')
   const slurp = fl.asBool('slurp')
   const program = fl.asStr('jq')
   if (program !== undefined && program !== '') {
@@ -290,16 +288,15 @@ export async function api(inv: CLIInvocation): Promise<CommandFnResult> {
     for (const item of inputs) {
       for (const value of await jqEval(item, program)) output.push(`${jqLine(value)}\n`)
     }
-    return textOut(output.join(''), mutated)
+    return textOut(output.join(''))
   }
-  if (slurp) return jsonOut(pages, mutated)
+  if (slurp) return jsonOut(pages)
   if (pages.length === 1) {
-    return typeof pages[0] === 'string' ? textOut(pages[0], mutated) : jsonOut(pages[0], mutated)
+    return typeof pages[0] === 'string' ? textOut(pages[0]) : jsonOut(pages[0])
   }
   return textOut(
     pages
       .map((page) => (typeof page === 'string' ? page : `${JSON.stringify(page, null, 2)}\n`))
       .join(''),
-    mutated,
   )
 }

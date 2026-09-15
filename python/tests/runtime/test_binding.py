@@ -30,6 +30,7 @@ from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python.monty import MontyRuntime
+from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.vfs import RuntimeVFS
 
 
@@ -81,6 +82,8 @@ async def test_execute_capabilities_and_refusals():
     assert language.capabilities.reach == "vfs"
     assert not language.capabilities.shell
     assert native.capabilities.shell and not native.capabilities.process
+    assert language.capabilities.filesystem == ()
+    assert native.capabilities.filesystem == ()
     assert (await language.execute(code)).stdout == b"hello"
     assert (await native.execute(shell)).stdout == b"echo hello:/work!"
     for runtime, request in ((language, shell), (native, code),
@@ -183,7 +186,7 @@ async def test_command_execution_supplies_its_active_workspace_context():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["monty", "quickjs"])
+@pytest.mark.parametrize("name", ["monty", "quickjs", "wasi"])
 async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
         name):
     if name == "quickjs":
@@ -191,9 +194,17 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
                 "qjs-wasi.wasm").is_file():
             pytest.skip("MIRAGE_QUICKJS_HOME does not contain qjs-wasi.wasm")
         runtime = QuickJsRuntime()
+    elif name == "wasi":
+        if not (Path(os.environ.get("MIRAGE_WASI_HOME", "")) /
+                "python.wasm").is_file():
+            pytest.skip("MIRAGE_WASI_HOME does not contain python.wasm")
+        runtime = WasiRuntime()
     else:
         pytest.importorskip("pydantic_monty")
         runtime = MontyRuntime()
+    expected = ("read", "write", "list", "stat")
+    assert runtime.capabilities.filesystem == ((*expected, "glob")
+                                               if name == "wasi" else expected)
     with Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[runtime, "vfs"]) as ws:

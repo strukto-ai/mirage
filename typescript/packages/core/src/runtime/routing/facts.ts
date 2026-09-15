@@ -49,25 +49,29 @@ export function commandNodes(root: TSNodeLike): TSNodeLike[] {
 /**
  * Distill a parsed line into one ParsedCommand per command. `clis`
  * holds the installed CLI head words; a command whose name is one of
- * them carries it as `cli`.
+ * them carries it as `cli`. The workspace supplies its command-prefix
+ * matcher; without it, names consist of the first word.
  */
 export function parsedCommands(
   root: TSNodeLike,
   clis: ReadonlySet<string> = new Set(),
+  matchCommandPrefix?: (words: string[]) => number,
 ): ParsedCommand[] {
   const commands: ParsedCommand[] = []
   for (const node of commandNodes(root)) {
     const words = node.children.filter((c) => WORD_TYPES.has(c.type)).map((c) => c.text)
-    const [command] = words
-    if (command !== undefined) {
+    const [head] = words
+    if (head !== undefined) {
+      const consumed = matchCommandPrefix?.(words) ?? 1
+      const command = words.slice(0, consumed).join(' ')
       commands.push({
         command,
         words,
         // hasOwn, not `in`: a command named after an Object.prototype
         // key (`toString`) must not report as a builtin.
         builtin: Object.hasOwn(SPECS, command),
-        paths: words.slice(1).filter((w) => w.startsWith('/')),
-        cli: clis.has(command) ? command : null,
+        paths: words.slice(consumed).filter((w) => w.startsWith('/')),
+        cli: clis.has(head) ? head : null,
       })
     }
   }

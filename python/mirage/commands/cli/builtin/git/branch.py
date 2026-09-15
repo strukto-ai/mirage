@@ -22,16 +22,18 @@ from dulwich.walk import Walker
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
     BranchExistsError, BranchNameRequiredError, CheckedOutBranchError,
-    GitError, NoBranchError, NoWorkspaceError, UnknownSwitchError,
-    UnmergedBranchError)
+    GitError, InvalidBranchNameError, NoBranchError, NoWorkspaceError,
+    RefLockError, UnknownSwitchError, UnmergedBranchError)
 from mirage.commands.cli.builtin.git.format import short
 from mirage.commands.cli.builtin.git.objects import abbrev_for
-from mirage.commands.cli.builtin.git.refs import (delete_ref, read_head,
+from mirage.commands.cli.builtin.git.refs import (blocking_ref, delete_ref,
+                                                  read_head, valid_ref_name,
                                                   write_ref)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
-from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, switches)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -77,14 +79,25 @@ async def _create(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         name (str): the branch name.
         start (str | None): the revision to start it at, HEAD when None.
     """
+    # Before the start point resolves, which is git's order here and
+    # the opposite of switch's. A ref is a path below .git, so an
+    # unchecked name reaches write_ref as one.
+    if not valid_ref_name(name):
+        raise InvalidBranchNameError(name)
     ref = f"{HEADS_PREFIX.decode()}{name}"
     if Ref(ref.encode()) in repo.refs.allkeys():
         raise BranchExistsError(name)
     commit = resolve_commit(repo, start or HEAD)
+    # Last, as it is for git: a ref whose path another ref already
+    # holds fails when the lock is taken, so a bad start point is
+    # reported first.
+    held = blocking_ref(repo.refs.allkeys(), ref)
+    if held is not None:
+        raise RefLockError(ref, held)
     await write_ref(dispatch, location.commondir, ref, commit.id)
 
 
-def _head_commit(repo: BaseRepo, head: HeadRef) -> bytes | None:
+def head_commit(repo: BaseRepo, head: HeadRef) -> bytes | None:
     """The commit HEAD resolves to, None on an unborn branch.
 
     HEAD carries an object id only when detached; attached it names a
@@ -156,7 +169,7 @@ async def _delete(dispatch: DispatchFn, repo: BaseRepo, location: RepoLocation,
         raise CheckedOutBranchError(name, location.worktree)
     sha = repo.refs[ref]
     if not force and not await asyncio.to_thread(_merged, repo, sha,
-                                                 _head_commit(repo, head)):
+                                                 head_commit(repo, head)):
         raise UnmergedBranchError(name)
     await delete_ref(dispatch, location.commondir, ref.decode())
     return (f"Deleted branch {name} "
@@ -191,7 +204,8 @@ async def branch(
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv),
+                       switches(inv))
         repo, location = await opened(fl, doors)
         head = await read_head(dispatch, location.gitdir)
         force = fl.as_bool("D")

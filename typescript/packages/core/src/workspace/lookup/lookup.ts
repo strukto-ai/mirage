@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
+import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
+import type { RouteDecision } from '../../runtime/routing/types.ts'
 import { headVisible, nodeVisible } from '../../policy/match/allow.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
+import { INTERPRETER_NAMES, NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
 import { Consumer } from './types.ts'
 
 /**
@@ -71,6 +74,22 @@ export function verbVisible(head: string, path: readonly string[], session: Sess
   return nodeVisible([head, ...path], session.commands)
 }
 
+/** Whether routing explicitly refused the external runtime for `name`. */
+export function runtimeRefused(
+  name: string,
+  session: Session,
+  registry: MountRegistry,
+  routing?: RouteDecision,
+): boolean {
+  if (routing === undefined) return false
+  const key = Object.hasOwn(routing.bindings, name) ? name : EXTERNAL_COMMANDS
+  return (
+    Object.hasOwn(routing.bindings, key) &&
+    routing.bindings[key] === null &&
+    lookup(name, session, registry) === Consumer.EXTERNAL
+  )
+}
+
 /**
  * Yield every layer holding the name, most-preferred first.
  *
@@ -83,15 +102,62 @@ export function verbVisible(head: string, path: readonly string[], session: Sess
  * builtins included (only functions are not subjects, and a function
  * named after a hidden builtin is as unreachable as the builtin).
  */
-function* layers(name: string, session: Session, registry: MountRegistry): Generator<Consumer> {
+function* layers(
+  name: string,
+  session: Session,
+  registry: MountRegistry,
+  routing?: RouteDecision,
+): Generator<Consumer> {
   const installed = listed(name, session)
+  let found = false
+  const declared = registry.runtimeEntries.find((entry) => entry.captures.includes(name))
+  const bound =
+    routing !== undefined && Object.hasOwn(routing.bindings, name)
+      ? routing.bindings[name]
+      : declared
+  const native = bound != null && (isLineExecutor(bound) || isProcessExecutor(bound))
+  const refused = runtimeRefused(name, session, registry, routing)
   if (SHELL_NAMES.has(name) && installed) {
-    yield Consumer.SESSION
+    found = true
+    yield (native || refused) && INTERPRETER_NAMES.has(name) ? Consumer.EXTERNAL : Consumer.SESSION
   }
-  if (installed && NAMESPACE_COMMANDS.has(name)) yield Consumer.NAMESPACE
-  if (name in session.functions && (installed || !SHELL_NAMES.has(name))) yield Consumer.FUNCTION
-  if (installed && registry.clis.get(name) !== null) yield Consumer.CLI
-  if (installed && registry.mountForCommand(name) !== null) yield Consumer.MOUNT
+  if (installed && NAMESPACE_COMMANDS.has(name)) {
+    found = true
+    yield Consumer.NAMESPACE
+  }
+  if (Object.hasOwn(session.functions, name) && (installed || !SHELL_NAMES.has(name))) {
+    found = true
+    yield Consumer.FUNCTION
+  }
+  if (installed && registry.clis.get(name) !== null) {
+    found = true
+    yield Consumer.CLI
+  }
+  if (installed && (native || refused) && !SHELL_NAMES.has(name)) {
+    found = true
+    yield Consumer.EXTERNAL
+  }
+  if (installed && registry.mountForCommand(name) !== null) {
+    found = true
+    yield Consumer.MOUNT
+  }
+  const fallback =
+    routing !== undefined && Object.hasOwn(routing.bindings, EXTERNAL_COMMANDS)
+      ? routing.bindings[EXTERNAL_COMMANDS]
+      : registry.runtimeEntries.find((entry) => entry.captures.includes(EXTERNAL_COMMANDS))
+  const fallbackNative =
+    fallback !== null &&
+    fallback !== undefined &&
+    (isLineExecutor(fallback) || isProcessExecutor(fallback))
+  if (
+    installed &&
+    !found &&
+    declared === undefined &&
+    (routing === undefined || !Object.hasOwn(routing.bindings, name)) &&
+    (fallbackNative || refused)
+  ) {
+    yield Consumer.EXTERNAL
+  }
 }
 
 /**
@@ -116,8 +182,8 @@ function* layers(name: string, session: Session, registry: MountRegistry): Gener
  *     MOUNT      grep, cat, du        operand paths        pushdown
  *     UNKNOWN    bogus                nobody               untouched, 127
  *
- * Runtimes are orthogonal, not a seventh row: a capture decides where a
- * command executes (docker vs vfs), never whether the name exists.
+ * Named process captures select EXTERNAL before mount commands.
+ * EXTERNAL_COMMANDS handles names no preceding layer owns.
  *
  * This is the winner only. A name can sit in more than one layer at once
  * (a function shadowing an installed CLI); `lookupAll` reports them all,
@@ -126,8 +192,13 @@ function* layers(name: string, session: Session, registry: MountRegistry): Gener
  * so dispatch pays exactly what it did when this was a chain of `if`
  * arms.
  */
-export function lookup(name: string, session: Session, registry: MountRegistry): Consumer {
-  for (const consumer of layers(name, session, registry)) return consumer
+export function lookup(
+  name: string,
+  session: Session,
+  registry: MountRegistry,
+  routing?: RouteDecision,
+): Consumer {
+  for (const consumer of layers(name, session, registry, routing)) return consumer
   return Consumer.UNKNOWN
 }
 

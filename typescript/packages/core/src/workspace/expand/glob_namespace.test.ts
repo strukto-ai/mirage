@@ -195,3 +195,129 @@ describe('glob expansion follows a symlinked directory', () => {
     expect((await out(ws, 'echo /base/m*/g1')).trim()).toBe('/base/mlink/g1')
   })
 })
+
+// Trailing-slash pathname expansion, pinned against bash 5.2.37
+// (debian:stable-slim) and bash 3.2.57: a word ending in a slash matches
+// directories only (a symlink to a directory counts, a broken link and a
+// regular file do not), and every match keeps exactly one trailing slash
+// (#1065).
+async function makeDirsWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const root = new RAMResource()
+  const inner = new RAMResource()
+  const registry = new OpsRegistry()
+  registry.registerResource(root)
+  registry.registerResource(inner)
+  const ws = new Workspace(
+    { '/': root, '/data/records/inner': inner },
+    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+  )
+  ws.createSession('s')
+  await ws.execute('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
+  await ws.execute('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
+  await ws.execute('echo plain > /data/records/plain.txt', { sessionId: 's' })
+  await ws.execute('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
+  await ws.execute('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
+  return ws
+}
+
+// One mount and no boundary under the globbed directory, so a mount
+// command's pattern travels to the command tier instead of being resolved
+// by the shell tier on the way (which is what a nested mount forces).
+async function makeFlatWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const registry = new OpsRegistry()
+  const data = new RAMResource()
+  registry.registerResource(data)
+  const ws = new Workspace(
+    { '/data': data },
+    { mode: MountMode.WRITE, ops: registry, shellParser: parser },
+  )
+  ws.createSession('s')
+  await ws.execute('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
+  await ws.execute('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
+  await ws.execute('echo plain > /data/records/plain.txt', { sessionId: 's' })
+  await ws.execute('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
+  await ws.execute('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
+  return ws
+}
+
+describe('trailing-slash globs', () => {
+  it('keeps the slash and matches directories only', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "cd /data/records && printf '<%s>\\n' */")).toBe(
+      '<2026-09-10/>\n<2026-09-11/>\n<inner/>\n<lnk/>\n',
+    )
+  })
+
+  it('spells an absolute word', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "printf '<%s>\\n' /data/records/2026*/")).toBe(
+      '</data/records/2026-09-10/>\n</data/records/2026-09-11/>\n',
+    )
+  })
+
+  it('spells a relative head', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "cd /data && printf '<%s>\\n' records/2026*/")).toBe(
+      '<records/2026-09-10/>\n<records/2026-09-11/>\n',
+    )
+  })
+
+  it('walks a mid-path pattern', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "cd /data && printf '<%s>\\n' */2026*/")).toBe(
+      '<records/2026-09-10/>\n<records/2026-09-11/>\n',
+    )
+  })
+
+  it('keeps a zero-match word literal', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "cd /data/records && printf '<%s>\\n' nomatch*/")).toBe('<nomatch*/>\n')
+  })
+
+  // A mount command's pattern reaches the command tier, which resolves it
+  // with the namespace in view: the nested mount root and the link to a
+  // directory are kept, the file and the dangling link are dropped.
+  it('reaches a command operand with the namespace in view', async () => {
+    const ws = await makeFlatWs()
+    expect(await out(ws, 'cd /data/records && ls -d */')).toBe('2026-09-10/\n2026-09-11/\nlnk/\n')
+  })
+
+  it('keeps each spelling of one directory on its own row', async () => {
+    const ws = await makeFlatWs()
+    expect(await out(ws, 'cd /data/records && ls -d 2026-09-10/ lnk/')).toBe('2026-09-10/\nlnk/\n')
+  })
+
+  // The builders that walked without resolving leaned on the dispatcher's
+  // expansion; they resolve for themselves now, like their python twins.
+  it('expands a pattern for cp, mv, readlink and realpath', async () => {
+    const ws = await makeFlatWs()
+    expect(await out(ws, 'cd /data/records && mkdir out && cp 2026-*/*.txt out && ls out')).toBe(
+      'sample.txt\n',
+    )
+    expect(await out(ws, 'cd /data/records && mv out/samp* moved.txt && ls moved.txt')).toBe(
+      'moved.txt\n',
+    )
+    expect(await out(ws, 'cd /data/records && readlink ln*')).toBe('/data/records/2026-09-10\n')
+    expect(await out(ws, 'cd /data/records && realpath 2026*')).toBe(
+      '/data/records/2026-09-10\n/data/records/2026-09-11\n',
+    )
+  })
+
+  it('keeps one slash for a doubled one', async () => {
+    const ws = await makeDirsWs()
+    expect(await out(ws, "cd /data/records && printf '<%s>\\n' 2026*//")).toBe(
+      '<2026-09-10/>\n<2026-09-11/>\n',
+    )
+  })
+
+  it('drives the traversal loop from the issue', async () => {
+    // `"$d"*.txt` concatenates the spelled directory, so a missing slash
+    // made every file invisible.
+    const ws = await makeDirsWs()
+    const line =
+      'cd /data/records && for d in */; do for f in "$d"*.txt; do [ -f "$f" ] || continue; cat "$f"; done; done'
+    expect(await out(ws, line)).toBe('sample\nsample\n')
+  })
+})

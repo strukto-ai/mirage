@@ -945,6 +945,11 @@
     },
     {
       "id": "fs_list",
+      "filesystem": {
+        "pyodide": {
+          "list": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",
@@ -976,6 +981,11 @@
     },
     {
       "id": "fs_stat",
+      "filesystem": {
+        "pyodide": {
+          "stat": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",
@@ -1007,6 +1017,11 @@
     },
     {
       "id": "fs_glob",
+      "filesystem": {
+        "pyodide": {
+          "glob": true
+        }
+      },
       "world": {
         "runtimes": [
           "pyodide",
@@ -1032,6 +1047,163 @@
           "expect": {
             "exit": 0,
             "stdout": "seed.txt\nsub/inner.txt\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "closed_output_and_reuse",
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import sys; print('out'); sys.stderr.write('err'); sys.stdout.close(); sys.stderr.close(); assert sys.stdout.closed and sys.stderr.closed\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "out\n",
+            "stderr": "err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('next'); sys.stderr.write('next err')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": "next err"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdout.buffer.write(b'binary'); sys.stdout.detach().close()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "binary",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('before exit'); sys.stdout.close(); sys.stderr.close(); sys.exit(7)\"",
+          "expect": {
+            "exit": 7,
+            "stdout": "before exit\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('after exit')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after exit\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "typescript"
+      ]
+    },
+    {
+      "id": "json_tool_closes_output",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "input.json": "{\"value\":1}"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -m json.tool /ram/input.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/input.json | python3 -m json.tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -m json.tool /ram/input.json > /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/formatted.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n    \"value\": 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; sys.stdin.close(); print('still works')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "still works\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo reused | python3 -c \"import sys; print(sys.stdin.read(), end='')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "reused\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "command_environment_isolation",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "MIRAGE_ENV_LEAK_PROBE=guest python3 -c \"import os; print(os.environ['MIRAGE_ENV_LEAK_PROBE'])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "guest\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; print(os.environ.get('MIRAGE_ENV_LEAK_PROBE', '<unset>'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "<unset>\n"
           }
         }
       ]

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parsedCommands, type RouteDecision } from '../../runtime/routing/index.ts'
+import { type RouteDecision } from '../../runtime/routing/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import { rejectConfigScript } from './guard.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
@@ -25,7 +25,6 @@ import {
   VFSRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 export interface RuntimesInit {
@@ -109,22 +108,15 @@ export class Runtimes {
    * The runtime taking this whole line, null for the executor.
    *
    * A runtime carrying LineExecutor takes the raw line when the line's
-   * resolved bindings place one of its commands (or "*") on it;
+   * resolved bindings explicitly place "*" on it;
    * everything else walks the executor's tree. The common world has no
    * such runtime, so this is a cheap scan.
    */
-  wholeLineFor(
-    rootNode: TSNodeLike,
-    decision: RouteDecision | null,
-  ): (Runtime & LineExecutor) | null {
+  wholeLineFor(decision: RouteDecision | null): (Runtime & LineExecutor) | null {
     const candidates = this.entries.some((entry) => isLineExecutor(entry))
     if (!candidates) return null
     const bindings: Record<string, Runtime | null> =
       decision !== null ? decision.bindings : this.bindings
-    const commands = parsedCommands(rootNode, this.registry.clis.names())
-    return wholeLineRuntime(
-      bindings,
-      commands.map((parsed) => parsed.command),
-    )
+    return wholeLineRuntime(bindings)
   }
 }

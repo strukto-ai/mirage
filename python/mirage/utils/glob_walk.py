@@ -21,8 +21,9 @@ from typing import Any, Protocol
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import dotglob_active, path_allowed
-from mirage.ops.types import ChildMounts
-from mirage.types import PathSpec
+from mirage.ops.types import ChildMounts, LinkTargetStat
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 
@@ -430,8 +431,12 @@ async def expand_pattern(
             except (FileNotFoundError, NotADirectoryError):
                 entries = []
             pattern = glob_pattern(seg)
-            next_level.extend(e for e in entries if glob_name_matches(
-                e.rstrip("/").rsplit("/", 1)[-1], pattern))
+            # A cold listing marks a folder with a trailing slash (box,
+            # gdrive, dropbox); the marker is not part of the name.
+            for e in entries:
+                entry = e.rstrip("/")
+                if glob_name_matches(entry.rsplit("/", 1)[-1], pattern):
+                    next_level.append(entry)
             if children is not None:
                 # A nested mount root or a link is a real child of this
                 # parent whether or not the backend could list it.
@@ -483,6 +488,8 @@ def make_resolve_glob(
     readdir: Callable[..., Any],
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
     children: ChildMounts | None = None,
+    stat: Callable[..., Any] | None = None,
+    target_stat: LinkTargetStat | None = None,
 ) -> ResolveGlobFn:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -492,6 +499,11 @@ def make_resolve_glob(
             truncation.
         children (ChildMounts | None): child names the namespace owes a
             directory, so an expansion sees nested mount roots and links.
+        stat (Callable | None): backend stat ``(accessor, path, index)``,
+            which is what lets a trailing slash keep directories only.
+        target_stat (LinkTargetStat | None): the namespace's stat of what
+            an owed name points at, resolved through the workspace, so a
+            trailing slash can follow a link the way bash does.
     """
 
     async def resolve_glob(
@@ -501,9 +513,51 @@ def make_resolve_glob(
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec]:
         return await resolve_glob_with(readdir, accessor, paths, index,
-                                       max_glob_matches, children)
+                                       max_glob_matches, children, stat,
+                                       target_stat)
 
     return resolve_glob
+
+
+async def _is_directory(stat: Callable[..., Any] | None, accessor: Accessor,
+                        match: PathSpec, index: IndexCacheStore,
+                        children: ChildMounts | None,
+                        target_stat: LinkTargetStat | None) -> bool:
+    """Whether a match is a directory, the way a trailing slash asks.
+
+    A name the namespace owes the directory (a nested mount root or a
+    link) is no backend's to stat: the namespace answers for it through
+    ``target_stat``, which follows a link and stats what it reaches, so
+    a link to a directory is kept and a link to a file or to nothing is
+    dropped, bash's own rule for ``*/``. Without that door the owed name
+    is kept, and without a stat door every match is kept, since nothing
+    can tell them apart. Otherwise one stat per match, served from the
+    index the readdir just filled.
+
+    Args:
+        stat (Callable | None): backend stat ``(accessor, path, index)``.
+        accessor (Accessor): backend handle passed through to stat.
+        match (PathSpec): one match.
+        index (IndexCacheStore): the per-call cache index.
+        children (ChildMounts | None): child names the namespace owes a
+            directory.
+        target_stat (LinkTargetStat | None): the namespace's stat of
+            what an owed name points at, None when it dangles.
+    """
+    if stat is None:
+        return True
+    parent = match.virtual.rstrip("/").rsplit("/", 1)[0] + "/"
+    name = match.virtual.rstrip("/").rsplit("/", 1)[-1]
+    if children is not None and name in children(parent):
+        if target_stat is None:
+            return True
+        row = await target_stat(match.virtual.rstrip("/"))
+        return row is not None and row.type == FileType.DIRECTORY
+    try:
+        row = await stat(accessor, match, index=index)
+    except WALK_ERRORS:
+        return False
+    return isinstance(row, FileStat) and row.type == FileType.DIRECTORY
 
 
 async def resolve_glob_with(
@@ -513,6 +567,8 @@ async def resolve_glob_with(
     index: IndexCacheStore,
     cap: int | None = None,
     children: ChildMounts | None = None,
+    stat: Callable[..., Any] | None = None,
+    target_stat: LinkTargetStat | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
 
@@ -540,12 +596,26 @@ async def resolve_glob_with(
         cap (int | None): cap on matches per pattern before truncation.
         children (ChildMounts | None): child names the namespace owes a
             directory, so an expansion sees nested mount roots and links.
+        stat (Callable | None): backend stat ``(accessor, path, index)``;
+            without it a trailing slash cannot drop the files it matched.
+        target_stat (LinkTargetStat | None): the namespace's stat of what
+            an owed name (a link, a nested mount root) points at; without
+            it a trailing slash keeps every owed name.
     """
     result: list[PathSpec] = []
     for p in paths:
         if p.resolved:
             result.append(p)
         elif p.pattern:
+            # A trailing slash asks for directories only, and every match
+            # keeps one (`*/` -> `sub/`), the same rule the shell tier
+            # applies in workspace/expand/globs.py. The slash is not part
+            # of the spelling to rebuild, so it comes off the word here
+            # and goes back on each match; the literal answer to a
+            # zero-match glob is still the word as typed (#1065).
+            dirs_only = p.raw_path.endswith("/") and p.raw_path != p.virtual
+            word = (dataclasses.replace(p, raw_path=p.raw_path.rstrip("/"))
+                    if dirs_only else p)
             # The hidden filter sits here, in the one loop every backend's
             # resolve_glob runs through, because per-backend glob modules
             # bind raw readdirs that never pass the command-door guard. It
@@ -553,10 +623,18 @@ async def resolve_glob_with(
             # reads as no matches and falls back to the literal word,
             # exactly what bash prints when nothing matched.
             matched = [
-                m for m in await expand_pattern(readdir, accessor, p, index,
+                m for m in await expand_pattern(readdir, accessor, word, index,
                                                 children)
                 if path_allowed(m.virtual)
             ]
+            if dirs_only:
+                kept: list[PathSpec] = []
+                for m in matched:
+                    if await _is_directory(stat, accessor, m, index, children,
+                                           target_stat):
+                        kept.append(
+                            dataclasses.replace(m, raw_path=m.raw_path + "/"))
+                matched = kept
             if not matched and is_word_shaped(p):
                 # bash with nullglob off: an unmatched glob word stays
                 # the literal; the command then errors on it like GNU

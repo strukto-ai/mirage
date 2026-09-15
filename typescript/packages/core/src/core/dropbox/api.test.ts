@@ -24,7 +24,13 @@ vi.mock('./client.ts', async () => {
 
 import * as client from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
-import { MAX_SEARCH_MATCHES, SEARCH_PAGE, searchFiles } from './api.ts'
+import {
+  MAX_SEARCH_MATCHES,
+  SEARCH_PAGE,
+  continueFolder,
+  listFolderState,
+  searchFiles,
+} from './api.ts'
 
 const TM = {} as DropboxTokenManager
 const rpc = vi.mocked(client.dropboxRpc)
@@ -92,5 +98,45 @@ describe('searchFiles', () => {
     expect(out.paths).toHaveLength(MAX_SEARCH_MATCHES)
     expect(out.truncated).toBe(true)
     expect(rpc).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('listFolderState', () => {
+  it('keeps the last page cursor', async () => {
+    rpc
+      .mockResolvedValueOnce({
+        entries: [{ '.tag': 'file', name: 'a' }],
+        cursor: 'c1',
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        entries: [{ '.tag': 'file', name: 'b' }],
+        cursor: 'c2',
+        has_more: false,
+      })
+    const out = await listFolderState(TM, '/docs')
+    expect(out.entries.map((e) => e.name)).toEqual(['a', 'b'])
+    expect(out.cursor).toBe('c2')
+  })
+})
+
+describe('continueFolder', () => {
+  it('pages through continue', async () => {
+    rpc
+      .mockResolvedValueOnce({
+        entries: [{ '.tag': 'file', name: 'a' }],
+        cursor: 'c1',
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        entries: [{ '.tag': 'file', name: 'b' }],
+        cursor: 'c2',
+        has_more: false,
+      })
+    const out = await continueFolder(TM, 'c0')
+    expect(out.entries.map((e) => e.name)).toEqual(['a', 'b'])
+    expect(out.cursor).toBe('c2')
+    expect(rpc.mock.calls[0]?.[1]).toBe('/files/list_folder/continue')
+    expect(rpc.mock.calls[0]?.[2]).toEqual({ cursor: 'c0' })
   })
 })

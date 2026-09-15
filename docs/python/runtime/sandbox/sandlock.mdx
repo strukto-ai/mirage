@@ -1,27 +1,13 @@
 ---
 title: Sandlock
-description: Run the host Python interpreter under Linux Landlock and seccomp confinement.
+description: Run native commands under Linux Landlock and seccomp confinement.
 icon: /images/sandlock-logo.svg
 ---
 
-`sandlock` is the [`local`](/python/runtime/python#local) Python runtime with a
-fence around it: the same host CPython, native wheels, and exact `sys.flags`,
-but spawned through [Sandlock](https://github.com/multikernel/sandlock). A
-Landlock ruleset and seccomp filter bound where its I/O can land.
-
-<Note>
-  **Sandlock is Python-only in Mirage today.** This is not a fundamental
-  Sandlock restriction. The current adapter was implemented against Mirage's
-  Python interpreter runtime; a TypeScript adapter around the same Sandlock CLI
-  has not landed yet. Sandlock appears under **Sandbox** for discoverability,
-  but it confines `python3` rather than capturing arbitrary command lines like
-  Docker, smolvm, Daytona, and E2B.
-</Note>
-
-## Configure
-
-Nothing is granted except the interpreter's own tree, the system paths CPython
-needs to start, and the paths you list:
+[Sandlock](https://github.com/multikernel/sandlock) runs native commands,
+including Python and Node.js. Mirage supports it in the Python SDK and
+`@struktoai/mirage-node`. Install the Sandlock CLI on `PATH`; its full ruleset
+requires Linux 6.12+ (Landlock ABI v6).
 
 ```yaml
 runtimes:
@@ -30,41 +16,28 @@ runtimes:
       fs_readable: ["/opt/data"]
       fs_writable: ["/mnt/workspace"]
       max_memory: "512M"
+      env:
+        PATH: /usr/local/bin:/usr/bin:/bin
   - vfs
 ```
 
-It needs the `sandlock` CLI on `PATH`; there is no Mirage extra to install
-because the CLI is the transport. Sandlock is **Linux only**, and its full
-ruleset wants Landlock ABI v6 (Linux 6.12+). Sandlock's degrade options cover
-older kernels with weaker protection.
+Sandlock defaults to `captures: ["@external"]`, delegating unresolved program
+names while Mirage keeps its commands, pipes and redirects. Use
+`captures: ["python3", "node", "@external"]` to select native interpreters too. Direct `runtime.execute(ProcessExecution(...))` calls take
+an argv array without shell interpretation. Choose the interpreter in argv;
+there is no Python-specific `home` setting.
 
-The optional `home` config chooses a different Python interpreter. It accepts
-an executable path or command name, then falls back to
-`MIRAGE_SANDLOCK_HOME` and the interpreter running Mirage.
+The adapter grants read access to common system paths (`/usr`, `/lib`,
+`/lib64`, `/bin`, `/etc`, `/proc`, `/dev`, where present) plus your configured paths.
+Interpreters installed elsewhere need an explicit `fs_readable` grant.
+Config `env` and execution `env` are passed to the confined child; execution
+values override config values. Host credentials are not inherited.
 
 ## Workspace access
 
-Sandlock has `process` reach, the same as `local`. Confinement narrows which
-host paths the code can touch, but the workspace gate never sees that I/O, so
-mount modes, policy, and accounting do not apply to it.
-
-Point `fs_writable` at a [FUSE-mounted](/python/setup/fuse) workspace path to
-let confined code work on your mounts while reaching nothing else on the host.
-Without FUSE, Sandlock code does not see Mirage's virtual workspace mounts.
-
-## Environment
-
-The runtime deliberately does not inherit the Mirage process environment.
-Only the config `env` and the run's own environment are set, so confined code
-is not handed the backend credentials Mirage is holding. Name every variable
-the interpreter needs:
-
-```yaml
-runtimes:
-  - name: sandlock
-    config:
-      env:
-        HOME: /tmp
-        TZ: UTC
-  - vfs
-```
+Sandlock has `process` reach. Its native filesystem calls require a real
+mount to access Mirage's virtual files. Grant an existing
+[FUSE mount](/python/setup/fuse) through `fs_readable` or `fs_writable`.
+The runtime does not create that mount or automatically bind it to the
+execution's Mirage session. Paths outside Mirage mounts use the host
+filesystem and do not pass through Mirage's policy or observation pipeline.

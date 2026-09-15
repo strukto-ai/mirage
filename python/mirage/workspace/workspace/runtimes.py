@@ -13,12 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping
-from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.routing import RouteDecision, parsed_commands
+from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VFSRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
@@ -120,17 +119,16 @@ class Runtimes:
         self._registry.runtime_entries = candidate
         return entry
 
-    def whole_line(self, ast: Any,
+    def whole_line(self,
                    decision: RouteDecision | None) -> LineExecutorMixin | None:
         """The entry taking this whole line, None for the executor.
 
         An entry inheriting LineExecutorMixin takes the raw line when
-        the line's resolved bindings place one of its commands (or
-        "*") on it; everything else walks the executor's tree. The
+        the line's resolved bindings explicitly place "*" on it; everything
+        else walks the executor's tree. The
         common set has no such entry, so this is a cheap scan.
 
         Args:
-            ast: the parsed tree-sitter root node.
             decision (RouteDecision | None): the line's decision,
                 None when only static bindings apply.
         """
@@ -141,5 +139,4 @@ class Runtimes:
         bindings: Mapping[str, Runtime
                           | None] = (decision.bindings if decision is not None
                                      else self._registry.runtime_bindings)
-        commands = parsed_commands(ast, self._registry.clis.names())
-        return whole_line_runtime(bindings, [c.command for c in commands])
+        return whole_line_runtime(bindings)

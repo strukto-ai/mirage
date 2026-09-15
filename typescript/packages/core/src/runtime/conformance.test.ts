@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from './binding.ts'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
@@ -666,7 +667,7 @@ describe('append ships only the deltas', () => {
   it('monty', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new MontyRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_PY))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -676,7 +677,7 @@ describe('append ships only the deltas', () => {
   it('pyodide', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new PyodideRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_PY))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -688,7 +689,7 @@ describe('append ships only the deltas', () => {
   it('quickjs', async () => {
     const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
     const rt = new QuickJsRuntime()
-    rt.attach(counting.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(counting.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(APPEND_LOOP_JS))
     await rt.close()
     expect(result.exitCode).toBe(0)

@@ -19,13 +19,14 @@ from mirage import MountMode, RAMResource, Workspace
 from mirage.config import _build_runtime_entries
 from mirage.io.types import materialize
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.routing import DenyResult, RouteResult
 from mirage.runtime.table import VFSRuntime
-from mirage.runtime.types import DispatchFn, RunArgs, RunResult, ScriptSource
+from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 
 
 @pytest_asyncio.fixture
@@ -480,16 +481,20 @@ class LineBox(Runtime, LineExecutorMixin):
 
 
 @pytest.mark.asyncio
-async def test_whole_line_goes_to_the_capturing_runtime():
+async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
     box = LineBox()
     ws = Workspace({"/ram": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])
-    io = await ws.execute("nvidia-smi -L | grep GPU > /out.txt")
-    assert await materialize(io.stdout
-                             ) == b"box:nvidia-smi -L | grep GPU > /out.txt"
-    assert box.lines[0][0] == "nvidia-smi -L | grep GPU > /out.txt"
-    await ws.close()
+    try:
+        io = await ws.execute("nvidia-smi -L | grep box > /ram/out.txt")
+        assert io.exit_code == 0
+        assert await materialize(io.stdout) == b""
+        assert box.lines[0][0] == "nvidia-smi -L"
+        saved = await ws.execute("cat /ram/out.txt")
+        assert await materialize(saved.stdout) == b"box:nvidia-smi -L\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -559,15 +564,16 @@ class ResolverProbe(PythonRuntime):
     captures = ("probe-run", )
     resolver: MountResolver | None = None
 
-    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
-        self.resolver = resolver
+    def bind(self, binding: WorkspaceBinding) -> None:
+        super().bind(binding)
+        self.resolver = binding.resolver
 
     async def run(self, args: RunArgs) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
 @pytest.mark.asyncio
-async def test_attach_withholds_the_history_view_from_runtimes():
+async def test_binding_withholds_the_history_view_from_runtimes():
     # The history view is a shell surface, not a place to put files;
     # announcing it would make a WASI guest preopen /.bash_history.
     probe = ResolverProbe()
@@ -582,7 +588,7 @@ async def test_attach_withholds_the_history_view_from_runtimes():
 
 
 @pytest.mark.asyncio
-async def test_attach_withholds_the_synthetic_root_anchor():
+async def test_binding_withholds_the_synthetic_root_anchor():
     # Nobody mounted the anchor; forwarding it would make every
     # runtime claim a resource the embedder never asked for.
     probe = ResolverProbe()
@@ -595,7 +601,7 @@ async def test_attach_withholds_the_synthetic_root_anchor():
 
 
 @pytest.mark.asyncio
-async def test_attach_forwards_an_explicit_root_mount():
+async def test_binding_forwards_an_explicit_root_mount():
     # Withheld for being synthetic, never for being `/`: a runtime
     # that cannot serve the root refuses on its own (pyodide does).
     probe = ResolverProbe()

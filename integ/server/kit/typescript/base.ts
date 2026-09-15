@@ -22,7 +22,7 @@ import type { KitRoute } from './route.ts'
 import type { JsonValue, MintSharing, Reply, ResetResponse } from './types.ts'
 
 // What a service implements. Everything else in the kit is machinery around
-// these five members: there is no base class to extend and no lifecycle to
+// these members: there is no base class to extend and no lifecycle to
 // override, because a fake that can only declare things cannot drift from the
 // others in how it resets, tenants, seeds or serializes.
 export interface Fake<C extends MinimalClient> {
@@ -53,6 +53,14 @@ export interface Fake<C extends MinimalClient> {
     fixtureRoot: string,
     epoch: string | undefined,
   ) => Promise<void>
+  // What a fake has to FORGET when a /reset has replaced a tenant's rows
+  // underneath it -- today gws and its cached tenant world. A KIT hook because
+  // there is no other door: /reset is answered in `answer()` before the router
+  // matches, so no route can see one. It is handed the run's CLIENT because
+  // that is what such a cache is keyed by, and fires for every reset that
+  // reached one, successful or not: a reset that threw has already cleared
+  // rows, so a view built before it is stale either way.
+  afterReset?: (db: C, tenants: readonly string[]) => void
   defaultTenants?: string[]
   // How this fake refuses a tenant it was never seeded with, and by being
   // present, THAT it refuses one at all. Declaring it is opt-in for the same

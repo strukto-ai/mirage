@@ -53,17 +53,13 @@ def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
     return parse_repo(named)
 
 
-def json_out(
-        value: JsonValue,
-        mutated: bool | None = None) -> tuple[ByteSource | None, IOResult]:
+def json_out(value: JsonValue) -> tuple[ByteSource | None, IOResult]:
     text = "" if value is None else f"{json.dumps(value, indent=2)}\n"
-    return yield_bytes(text.encode()), IOResult(mutated=mutated)
+    return yield_bytes(text.encode()), IOResult()
 
 
-def text_out(
-        text: str,
-        mutated: bool | None = None) -> tuple[ByteSource | None, IOResult]:
-    return yield_bytes(text.encode()), IOResult(mutated=mutated)
+def text_out(text: str) -> tuple[ByteSource | None, IOResult]:
+    return yield_bytes(text.encode()), IOResult()
 
 
 def repo_for(inv: CLIInvocation[GhConfig], fl: FlagView) -> RepoRef:

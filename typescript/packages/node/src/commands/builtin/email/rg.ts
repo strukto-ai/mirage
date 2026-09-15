@@ -16,7 +16,7 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { rgGeneric } from '@struktoai/mirage-core/commands/builtin/generic/rg'
 import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { compilePattern, patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
-import { pushdownOperand } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
+import { pushdownOperand, searchQuery } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import type { GrepLinesOptions } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import { command } from '@struktoai/mirage-core/commands/config'
@@ -76,14 +76,17 @@ async function rgCommand(
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
   const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
-  if (operand !== null) {
+  // The server is asked for the literal every match must contain, never
+  // the regex's own spelling: IMAP TEXT is a substring search.
+  const query = searchQuery(pattern, fl.asBool('F'))
+  if (operand !== null && query !== null) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
       const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
       const pairs = await searchAndFormat(
         accessor,
         match.slots.folder ?? '',
-        pattern,
+        query,
         filePrefix,
         accessor.config.maxMessages,
       )

@@ -26,7 +26,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_if_branches, get_list_parts, get_negated_command, get_parts,
     get_pipeline_commands, get_process_sub_body, get_redirects,
     get_subshell_body, get_text, get_while_parts, is_backgrounded,
-    literal_word, split_env_prefix)
+    literal_word, normalize_heredoc_body, split_env_prefix, take_continuation)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -777,6 +777,24 @@ def test_get_heredoc_meta_backslash_quoted_delimiter():
     assert body == "x=$v\n"
 
 
+def test_get_heredoc_meta_continued_delimiter_is_not_quoted():
+    # A backslash before a newline is the reader's line continuation, so
+    # `EO\<newline>F` names EOF and its body still expands.
+    node = _first("cat <<EO\\\nF\nx=$v\nEOF\n")
+    heredoc = node.named_children[1]
+    body, dash, quoted = get_heredoc_meta(heredoc)
+    assert quoted is False
+    assert dash is False
+    assert body == "x=$v\n"
+
+
+def test_get_heredoc_meta_continuation_with_an_escape_is_quoted():
+    node = _first("cat <<EO\\\nF\\G\nx=$v\nEOFG\n")
+    heredoc = node.named_children[1]
+    _, _, quoted = get_heredoc_meta(heredoc)
+    assert quoted is True
+
+
 def test_get_heredoc_meta_body_gets_trailing_newline():
     # tree-sitter drops the final newline for concatenated delimiters.
     node = _first("cat <<EN'D'\nline\nEND\n")
@@ -862,3 +880,96 @@ def test_byte_offset_counts_the_bytes_before_an_index():
     assert byte_offset("cat é x", 5) == 6
     assert byte_offset("cat é x", 7) == 8
     assert byte_offset("", 0) == 0
+
+
+def _heredoc_redirect(cmd: str):
+    return next(c for c in _first(cmd).named_children
+                if c.type == NT.HEREDOC_REDIRECT)
+
+
+def test_get_heredoc_parts_keeps_leading_empty_lines():
+    _, body = get_heredoc_parts(_heredoc_redirect("cat <<EOF\n\nfoo\nEOF"))
+    assert body == "\nfoo\n"
+
+
+def test_get_heredoc_meta_keeps_leading_empty_lines_under_dash():
+    body, dash, _ = get_heredoc_meta(
+        _heredoc_redirect("cat <<-EOF\n\n\tfoo\nEOF"))
+    assert dash is True
+    assert body == "\nfoo\n"
+
+
+def test_normalize_heredoc_body_strips_a_swallowed_escaped_delimiter_line():
+    assert normalize_heredoc_body("body\nEOF\n", "\\EOF") == "body\n"
+
+
+# ── heredoc operator-line tail ───────────────────
+
+
+def _heredoc_stmt(cmd: str):
+    stmt = _first(cmd)
+    assert stmt.type == NT.REDIRECTED_STATEMENT
+    return stmt
+
+
+def test_heredoc_tail_list_step_is_a_continuation_not_a_pipe():
+    # tree-sitter parses `|| echo recovered` inside the heredoc_redirect;
+    # a bare command there used to be taken for a pipeline stage.
+    _, redirects = get_redirects(
+        _heredoc_stmt("false <<'EOF' || echo recovered\nignored\nEOF"))
+    assert len(redirects) == 1
+    assert redirects[0].pipeline is None
+    assert [(op, get_text(right)) for op, right in redirects[0].continuation
+            ] == [("||", "echo recovered")]
+
+
+def test_heredoc_tail_unwinds_a_list_along_its_left_spine():
+    # `false <<EOF || echo a && echo b` is `(false || echo a) && echo b`.
+    _, redirects = get_redirects(
+        _heredoc_stmt("false <<EOF || echo a && echo b\nx\nEOF"))
+    assert [(op, get_text(right))
+            for op, right in redirects[0].continuation] == [("||", "echo a"),
+                                                            ("&&", "echo b")]
+
+
+def test_heredoc_tail_pipe_then_list():
+    # `cat <<EOF | tr a-z A-Z && echo done`: the pipe feeds `tr`, and
+    # `&& echo done` applies to the pipeline.
+    _, redirects = get_redirects(
+        _heredoc_stmt("cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF"))
+    assert get_text(redirects[0].pipeline) == "tr a-z A-Z"
+    assert [(op, get_text(right)) for op, right in redirects[0].continuation
+            ] == [("&&", "echo done")]
+
+
+def test_heredoc_tail_plain_pipe_keeps_the_pipeline_node():
+    _, redirects = get_redirects(
+        _heredoc_stmt("cat <<EOF | tr a-z A-Z\nabc\nEOF"))
+    assert redirects[0].pipeline.type == NT.PIPELINE
+    assert redirects[0].continuation == ()
+
+
+def test_heredoc_tail_after_a_hoisted_file_redirect():
+    _, redirects = get_redirects(
+        _heredoc_stmt("cat <<EOF > /o && cat /o\ninner\nEOF"))
+    assert [r.kind
+            for r in redirects] == [RedirectKind.HEREDOC, RedirectKind.STDOUT]
+    assert [(op, get_text(right))
+            for op, right in redirects[0].continuation] == [("&&", "cat /o")]
+
+
+def test_heredoc_tail_right_operand_may_be_compound():
+    _, redirects = get_redirects(
+        _heredoc_stmt("false <<EOF || { echo a; echo b; }\nx\nEOF"))
+    (op, right), = redirects[0].continuation
+    assert op == "||"
+    assert right.type == NT.COMPOUND_STATEMENT
+
+
+def test_take_continuation_detaches_the_steps():
+    _, redirects = get_redirects(
+        _heredoc_stmt("false <<EOF || echo a && echo b\nx\nEOF"))
+    steps = take_continuation(redirects)
+    assert [op for op, _ in steps] == ["||", "&&"]
+    assert redirects[0].continuation == ()
+    assert take_continuation(redirects) == ()

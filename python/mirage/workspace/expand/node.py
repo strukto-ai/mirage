@@ -16,8 +16,6 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-import tree_sitter
-
 from mirage.io import IOResult
 from mirage.ops.types import SessionView
 from mirage.shell.arith import evaluate_arith
@@ -29,6 +27,7 @@ from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
 from mirage.shell.helpers import byte_offset, get_text
 from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
@@ -39,7 +38,7 @@ from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import random_reader, session_elements
 
 
-def _folded_whitespace(node: tree_sitter.Node) -> str:
+def _folded_whitespace(node: TSNodeLike) -> str:
     """Whitespace tree-sitter folds into an expansion's opening token.
 
     Inside a double-quoted string, a run of whitespace between two
@@ -50,7 +49,7 @@ def _folded_whitespace(node: tree_sitter.Node) -> str:
     fold, so the prefix is empty there and this stays a no-op.
 
     Args:
-        node (tree_sitter.Node): the expansion node being expanded.
+        node (TSNodeLike): the expansion node being expanded.
     """
     raw = get_text(node)
     return raw[:len(raw) - len(raw.lstrip())]
@@ -60,7 +59,7 @@ async def _expand_backtick_region(
     raw: str,
     session: Session,
     execute_fn: Callable[..., Any],
-    node: tree_sitter.Node,
+    node: TSNodeLike,
     offset: int,
 ) -> str:
     """Expand a backtick region, one nested line per pair.
@@ -69,7 +68,7 @@ async def _expand_backtick_region(
         raw (str): the region's text, the folded prefix stripped.
         session (Session): the session expanding it.
         execute_fn (Callable[..., Any]): the nested-line door.
-        node (tree_sitter.Node): the region's node.
+        node (TSNodeLike): the region's node.
         offset (int): where ``raw`` starts in the node's text, in the
             parser's offsets.
     """
@@ -138,7 +137,7 @@ def unescape_heredoc(text: str) -> str:
     return text.replace("\x00", "\\")
 
 
-def _find_first(node: tree_sitter.Node, ntype: str) -> tree_sitter.Node | None:
+def _find_first(node: TSNodeLike, ntype: str) -> TSNodeLike | None:
     if node.type == ntype:
         return node
     for child in node.named_children:
@@ -171,7 +170,7 @@ def arith_exit(expr: str, exc: ArithError) -> ExitSignal:
 
 
 async def expand_arith(
-    ts_node: tree_sitter.Node,
+    ts_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
@@ -228,7 +227,7 @@ async def expand_arith(
 
 
 async def _arith_subscript(
-    sub_node: tree_sitter.Node,
+    sub_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
@@ -244,14 +243,14 @@ async def _arith_subscript(
     still gets the arithmetic spelling.
 
     Args:
-        sub_node (tree_sitter.Node): the ``subscript`` node.
+        sub_node (TSNodeLike): the ``subscript`` node.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
     """
     name = ""
-    inner: list[tree_sitter.Node] = []
+    inner: list[TSNodeLike] = []
     for sc in sub_node.named_children:
         if sc.type == NT.VARIABLE_NAME and not name:
             name = get_text(sc)
@@ -277,7 +276,7 @@ async def _arith_subscript(
 
 
 async def expand_node(
-    ts_node: tree_sitter.Node,
+    ts_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
@@ -286,7 +285,7 @@ async def expand_node(
     """Expand a tree-sitter node to the string it stands for.
 
     Args:
-        ts_node (tree_sitter.Node): the node to expand.
+        ts_node (TSNodeLike): the node to expand.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
@@ -301,7 +300,7 @@ async def expand_node(
 
 
 async def expand_node_marked(
-    ts_node: tree_sitter.Node,
+    ts_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
@@ -315,7 +314,7 @@ async def expand_node_marked(
     reads while every other caller takes the unmarked wrapper above.
 
     Args:
-        ts_node (tree_sitter.Node): the node to expand.
+        ts_node (TSNodeLike): the node to expand.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
@@ -365,7 +364,8 @@ async def expand_node_marked(
 
     if ntype == NT.COMMAND_SUBSTITUTION:
         prefix = _folded_whitespace(ts_node)
-        raw = get_text(ts_node)[len(prefix):]
+        source = getattr(ts_node, "source_text", ts_node.text) or b""
+        raw = source.decode()[len(prefix):]
         if raw.startswith("`") and raw.endswith("`"):
             # Backtick regions are re-lexed here rather than trusted from
             # the grammar, which merges adjacent pairs (see

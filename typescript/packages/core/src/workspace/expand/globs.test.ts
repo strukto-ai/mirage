@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { NamespaceLinks } from '../../ops/config.ts'
 import { BaseResource, type Resource } from '../../resource/base.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { resolveGlobs, type ResourceWithGlob } from './globs.ts'
 
@@ -41,6 +43,36 @@ class EchoGlobResource extends BaseResource implements ResourceWithGlob {
   }
   glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
     return Promise.resolve([...paths])
+  }
+}
+
+// A resource whose stat answers only once its mount was readied, the way a
+// mount nothing has touched yet behaves.
+class LazyDirResource extends BaseResource implements Resource {
+  readonly kind = 'lazy'
+  ready = false
+  open(): Promise<void> {
+    return Promise.resolve()
+  }
+  override close(): Promise<void> {
+    return Promise.resolve()
+  }
+  stat(path: PathSpec): Promise<FileStat> {
+    if (!this.ready) return Promise.reject(enoent(path))
+    return Promise.resolve(
+      new FileStat({ name: path.virtual.split('/').pop() ?? '', type: FileType.DIRECTORY }),
+    )
+  }
+}
+
+// One link, from the globbed directory into a second mount.
+function linkTo(target: string): NamespaceLinks {
+  return {
+    follow: (p) => (p === '/ram/lnk' ? target : p),
+    isLink: (p) => p === '/ram/lnk',
+    readlink: (p) => (p === '/ram/lnk' ? target : null),
+    linkStatAt: () => null,
+    symlinkTargets: () => new Map([['/ram/lnk', target]]),
   }
 }
 
@@ -86,6 +118,31 @@ describe('resolveGlobs', () => {
     const out = await resolveGlobs([p], reg)
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(p)
+  })
+
+  // A trailing slash keeps a link to a directory, and the directory can live
+  // in a mount nothing has touched yet: the owner is readied before it is
+  // asked, as it is before a listing.
+  it('readies the mount a trailing-slash match links into before statting it', async () => {
+    const other = new LazyDirResource()
+    const reg = new MountRegistry(
+      { '/ram': new GlobResource([]), '/other': other },
+      MountMode.WRITE,
+    )
+    reg.mountFor('/other/dir').beforeUse = () => {
+      other.ready = true
+      return Promise.resolve()
+    }
+    const p = new PathSpec({
+      resourcePath: 'ram/*',
+      virtual: '/ram/*',
+      directory: '/ram/',
+      pattern: '*',
+      resolved: false,
+      rawPath: '*/',
+    })
+    const out = await resolveGlobs([p], reg, false, linkTo('/other/dir'))
+    expect(out.map((x) => (x as PathSpec).rawPath)).toEqual(['lnk/'])
   })
 
   it('expands glob PathSpecs through resource.glob', async () => {

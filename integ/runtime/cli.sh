@@ -277,6 +277,9 @@ run_host() {
       fi
       continue
     fi
+    # The per-host logs print only after both hosts finish, so a suite's
+    # cost is not otherwise recoverable from the run.
+    local suite_t0=$SECONDS
     local case_json
     while IFS= read -r case_json; do
       if ! jq -e --arg h "$host" \
@@ -297,6 +300,7 @@ run_host() {
         fail=$((fail + 1))
       fi
     done < <(jq -c '.cases[]' <<<"$suite_json")
+    echo "suite $host/$suite $((SECONDS - suite_t0))s"
   done
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true

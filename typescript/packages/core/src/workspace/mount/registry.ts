@@ -102,6 +102,15 @@ export class MountRegistry {
   // already reaches every dispatch site, same as the runtime fields.
   readonly clis = new CLIRegistry()
 
+  /** Refetch cached data after native code may have changed the workspace. */
+  async invalidateAfterExternal(): Promise<void> {
+    await this.cacheStore?.clear()
+    for (const mount of this.allMounts()) {
+      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.resource.index)
+      else await mount.use(() => mount.resource.index?.clear() ?? Promise.resolve())
+    }
+  }
+
   setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler
   }

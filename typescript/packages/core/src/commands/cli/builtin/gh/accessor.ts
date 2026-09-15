@@ -46,15 +46,15 @@ export function ghRepo(config: unknown, spec: string | undefined): RepoRef {
   return parseRepo(named)
 }
 
-export function jsonOut(value: unknown, mutated?: boolean): CommandFnResult {
+export function jsonOut(value: unknown): CommandFnResult {
   const text = value === null ? '' : `${JSON.stringify(value, null, 2)}\n`
   const out: ByteSource = ENC.encode(text)
-  return [out, new IOResult(mutated === undefined ? {} : { mutated })]
+  return [out, new IOResult()]
 }
 
-export function textOut(text: string, mutated?: boolean): CommandFnResult {
+export function textOut(text: string): CommandFnResult {
   const out: ByteSource = ENC.encode(text)
-  return [out, new IOResult(mutated === undefined ? {} : { mutated })]
+  return [out, new IOResult()]
 }
 
 export function repoFor(inv: CLIInvocation, fl: FlagView): RepoRef {

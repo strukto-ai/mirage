@@ -1,0 +1,117 @@
+name: Nextcloud CI tuning
+description: >-
+  Wait for the Nextcloud service container to finish installing, then tune it
+  for a sequential CI battery. Both jobs that declare the service use this so
+  the wait loop and the occ knobs stay defined once.
+inputs:
+  container-id:
+    description: The service container's id, i.e. job.services.nextcloud.id.
+    required: true
+  admin-password:
+    description: >-
+      The service's NEXTCLOUD_ADMIN_PASSWORD. Passed, never defaulted: the
+      reset below makes this value authoritative rather than a mirror, so a
+      default here would quietly become the container's password the first
+      time the two drifted.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Wait for Nextcloud install
+      shell: bash
+      env:
+        NC: ${{ inputs.container-id }}
+      run: |
+        # The 60x5s bound covers the sleeps, so the polls need one of their
+        # own: a server that completes the handshake and then stalls pins a
+        # single iteration, and with no job timeout-minutes the fallback is
+        # GitHub's 360-minute default.
+        for i in $(seq 1 60); do
+          if curl -sf --connect-timeout 5 --max-time 10 \
+              http://localhost:8080/status.php | grep -q '"installed":true'; then
+            echo "Nextcloud is installed"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "Nextcloud did not finish installing in time" >&2
+        # status.php is empty or a 503 page precisely when the install failed,
+        # so it is the least informative thing to print on its own; the
+        # entrypoint is what says why.
+        curl -s --max-time 10 http://localhost:8080/status.php || true
+        docker logs --tail 50 "$NC" 2>&1 || true
+        exit 1
+
+    # WebDAV is stateless, so every one of the ~9,400 requests the battery
+    # issues re-verifies the Basic credentials, and Nextcloud 30 hashes with
+    # Argon2id at 64 MiB / 4 passes: 177 ms per request, measured inside this
+    # image. That one number is ~90% of the cost of an authenticated request
+    # and it taxes reads as hard as writes, so it dwarfs every storage-side
+    # knob below. An authenticated PROPFIND goes from 197 ms to 23 ms.
+    #
+    # The three hashing knobs are CI-container-only and MUST NOT be copied
+    # into a deployment config: they make a stolen hash cheap to crack. They
+    # are safe here because the container is ephemeral, sits on a hosted
+    # runner with no inbound route, and its password is already a literal in
+    # this workflow -- all three of which stop holding on a self-hosted one.
+    - name: Tune Nextcloud for a sequential CI battery
+      shell: bash
+      env:
+        NC: ${{ inputs.container-id }}
+        OC_PASS: ${{ inputs.admin-password }}
+      run: |
+        set -euo pipefail
+
+        # The whole step hangs off one context lookup, so say so plainly when
+        # it comes back empty instead of failing later as an opaque `docker
+        # exec ""`. A services: container gets an auto-generated name, so the
+        # job context is the only handle on it. Note for anyone reproducing
+        # locally: act starts the service container but does not implement
+        # that context, so this guard is what it trips on.
+        if [ -z "${NC:-}" ]; then
+          echo "container-id is empty: job.services.<id>.id did not resolve." >&2
+          echo "Check that this job's services: block names the service 'nextcloud'." >&2
+          exit 1
+        fi
+
+        # OC_PASS rides the function rather than one hand-spelled call: it is
+        # inert for every verb that does not read it, and spelling `docker
+        # exec` twice is how the handle and the --user drift apart.
+        occ() { docker exec --user www-data -e OC_PASS "$NC" php occ "$@"; }
+
+        occ config:system:set hashingMemoryCost --value=8192 --type=integer
+        occ config:system:set hashingTimeCost   --value=1    --type=integer
+        occ config:system:set hashingThreads    --value=1    --type=integer
+
+        # The runner drives one target at a time against its own container, so
+        # the DB-backed lock that guards concurrent writers guards nothing
+        # here. APCu is compiled into this image with apc.enable_cli=1, so occ
+        # itself keeps working once it is the local memcache.
+        occ config:system:set filelocking.enabled --value=false --type=boolean
+        occ config:system:set memcache.local --value='\OC\Memcache\APCu'
+        occ config:system:set auth.bruteforce.protection.enabled \
+          --value=false --type=boolean
+
+        # None of these is reachable through WebDAV, and each adds work to
+        # every write: files_versions copies the old content on overwrite,
+        # files_trashbin turns DELETE into MOVE, activity writes a row per
+        # change. password_policy is disabled only so the resetpassword below
+        # is not refused as a weak password.
+        #
+        # app:disable exits 0 for an app that is absent or already disabled
+        # (core/Command/App/Disable.php prints "No such app enabled"), which
+        # is what keeps an image bump from turning this red -- but it also
+        # means the exit code verifies nothing: a typo here is swallowed and
+        # shows up only as the battery running slowly.
+        occ app:disable password_policy
+        occ app:disable files_versions
+        occ app:disable files_trashbin
+        occ app:disable activity
+
+        # The admin hash was written at install time under the expensive
+        # parameters, and password_verify reads its cost from the stored hash
+        # rather than from config. Nextcloud rehashes on the next successful
+        # login anyway; forcing it here keeps the step deterministic. Must run
+        # AFTER password_policy is disabled -- and cannot silently misorder,
+        # since the policy refuses this password with exit 1.
+        occ user:resetpassword --password-from-env admin

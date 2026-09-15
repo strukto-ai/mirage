@@ -17,6 +17,8 @@ from typing import Any
 from mirage.core.email.client import INTERNAL_DATE_KEY
 from mirage.core.render.json import compact_json_bytes, compact_json_text
 
+BODY_KEYS = frozenset({"body_text", "body_html", "snippet"})
+
 
 def _message_document(message: dict[str, Any]) -> dict[str, Any]:
     """Project a fetched message onto the document mirage serves.
@@ -59,10 +61,31 @@ def message_json_bytes(message: dict[str, Any]) -> bytes:
     return message_json_text(message).encode()
 
 
-def messages_json_bytes(messages: list[dict[str, Any]]) -> bytes:
-    """Render a list of fetched messages as one JSON array.
+def _envelope_document(message: dict[str, Any]) -> dict[str, Any]:
+    """Project a fetched message onto its envelope.
+
+    The envelope is the message without its body: identifiers, headers,
+    flags and attachment metadata stay; ``body_text``, ``body_html`` and
+    the body-derived ``snippet`` go, along with INTERNALDATE. Listing a
+    mailbox fetches every full source because attachment names live in
+    the MIME structure, but a page of envelopes must not carry a page of
+    HTML bodies. Those are ``message read``'s and the mounted
+    .email.json's, which render through ``_message_document``.
+
+    Args:
+        message (dict): a fetched message from ``fetch_headers``.
+    """
+    return {
+        k: v
+        for k, v in message.items()
+        if k != INTERNAL_DATE_KEY and k not in BODY_KEYS
+    }
+
+
+def envelopes_json_bytes(messages: list[dict[str, Any]]) -> bytes:
+    """Render fetched messages as one JSON array of envelopes.
 
     Args:
         messages (list[dict]): fetched messages, in output order.
     """
-    return compact_json_bytes([_message_document(m) for m in messages])
+    return compact_json_bytes([_envelope_document(m) for m in messages])

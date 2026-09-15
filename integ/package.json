@@ -52,7 +52,7 @@
     "@lancedb/lancedb": "^0.30.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@prisma/client": "^6.19.3",
-    "@pydantic/monty": "0.0.21",
+    "@pydantic/monty": "0.0.23",
     "@qdrant/js-client-rest": "^1.18.0",
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",

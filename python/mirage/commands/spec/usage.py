@@ -147,6 +147,20 @@ def python_option_error(cmd_name: str, line: str) -> tuple[bytes, int]:
         usage_exit_code(cmd_name)
 
 
+def curl_option_error(line: str) -> tuple[bytes, int]:
+    """curl's option refusal: one message line, then its own help hint.
+
+    Pinned on curl 8.14.1 (debian:stable-slim). One divergence: curl names
+    a whole cluster with a bad letter (`option -sW: is unknown`) where the
+    parser reports the letter, so mirage says `option -W`.
+
+    Args:
+        line (str): the message line, newline included.
+    """
+    hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+    return (line + hint).encode(), usage_exit_code("curl")
+
+
 def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     """GNU-shaped error for an option the spec does not declare.
 
@@ -161,6 +175,9 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): offending token ('--bogus') or cluster char ('Y').
     """
+    if cmd_name == "curl":
+        dashed = token if token.startswith("-") else f"-{token}"
+        return curl_option_error(f"curl: option {dashed}: is unknown\n")
     if cmd_name == CommandName.FIND:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
@@ -234,6 +251,9 @@ def invalid_float_error(cmd_name: str, option: str,
         option (str): canonical dashed spelling ('--timeout').
         value (str): the rejected value.
     """
+    if cmd_name == "curl":
+        return curl_option_error(
+            f"curl: option {option}: expected a proper numerical parameter\n")
     line = f"{cmd_name}: invalid float value: '{value}' for '{option}'\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
@@ -250,6 +270,10 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         dashed = token if token.startswith("-") else f"-{token}"
         return python_option_error(
             cmd_name, f"Argument expected for the {dashed} option\n")
+    if cmd_name == "curl":
+        dashed = token if token.startswith("-") else f"-{token}"
+        return curl_option_error(
+            f"curl: option {dashed}: requires parameter\n")
     if token.startswith("--"):
         line = f"{cmd_name}: option '{token}' requires an argument\n"
     else:

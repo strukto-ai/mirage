@@ -30,6 +30,29 @@ INTERNAL_DATE_RE = re.compile(r'INTERNALDATE "([^"]*)"')
 FETCH_ITEMS = "(UID FLAGS INTERNALDATE BODY.PEEK[])"
 
 
+def quote_string(value: str) -> str:
+    """Spell a value as an RFC 3501 quoted string.
+
+    The two quoted-specials, ``"`` and ``\\``, are escaped with a
+    backslash and nothing else is touched. A CR or LF has no spelling
+    inside a quoted string, so a value holding one is refused here
+    rather than sent, where it would end the command line early.
+
+    Args:
+        value (str): the text as the caller means it.
+
+    Returns:
+        str: the value wrapped in quotes with its specials escaped.
+
+    Raises:
+        ValueError: the value holds a line break.
+    """
+    if "\r" in value or "\n" in value:
+        raise ValueError("an IMAP quoted string cannot hold a line break")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def quote_mailbox(folder: str) -> str:
     """Spell a mailbox name as an IMAP quoted string.
 
@@ -46,8 +69,7 @@ def quote_mailbox(folder: str) -> str:
         str: the name wrapped in quotes, with quotes and backslashes
             escaped per RFC 3501's quoted-string rules.
     """
-    escaped = folder.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return quote_string(folder)
 
 
 def read_quoted(text: str) -> tuple[str, str]:

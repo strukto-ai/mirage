@@ -23,6 +23,7 @@ import { gmailRoutes } from './gmail/routes.ts'
 import { sheetsRoutes } from './sheets/routes.ts'
 import { slidesRoutes } from './slides/routes.ts'
 import { applyExtras } from './seed.ts'
+import { dropTenants } from './store/cache.ts'
 import { PrismaClient } from './store/client.ts'
 import type { C } from './store/client.ts'
 import { loadState } from './store/load.ts'
@@ -164,4 +165,8 @@ export const gwsFake: Fake<C> = {
     applyExtras(st, extras)
     await saveState(db, gwsFake.dmmf, tenant, st)
   },
+  // The one thing that changes a tenant's rows with no route involved. It
+  // runs BESIDE `afterSeed`, which reaches the rows directly and so keeps the
+  // seed reading the file it just wrote rather than the world this drops.
+  afterReset: dropTenants,
 }

@@ -20,7 +20,7 @@ from mirage.commands.cli.types import CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.core.email.client import fetch_headers, list_message_uids
 from mirage.core.email.config import EmailConfig
-from mirage.core.email.render import messages_json_bytes
+from mirage.core.email.render import envelopes_json_bytes
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
@@ -41,5 +41,5 @@ async def list_envelopes(
     finally:
         await accessor.close()
     page_of = page_slice(sort_headers(headers, ()), page, page_size)
-    out = messages_json_bytes(page_of)
+    out = envelopes_json_bytes(page_of)
     return yield_bytes(out), IOResult()

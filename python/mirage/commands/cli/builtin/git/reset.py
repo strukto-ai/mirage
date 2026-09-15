@@ -26,8 +26,8 @@ from mirage.commands.cli.builtin.git.index import read_index, write_index
 from mirage.commands.cli.builtin.git.pathspec import matched, repo_relative
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  links_of, start_point)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, links_of, start_point, switches)
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
@@ -108,7 +108,8 @@ async def reset(
     try:
         if dispatch is None or stat_path is None:
             raise NoWorkspaceError()
-        check_operands(texts, UnknownSwitchError)
+        check_operands(texts, UnknownSwitchError, escaped(inv.argv),
+                       switches(inv))
         repo, location = await opened(fl, doors)
         state = await read_index(dispatch, location.gitdir)
         tree = await asyncio.to_thread(head_entries, repo) or {}

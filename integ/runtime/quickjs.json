@@ -540,6 +540,11 @@
     },
     {
       "id": "fs_list",
+      "filesystem": {
+        "quickjs": {
+          "list": true
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",
@@ -568,6 +573,11 @@
     },
     {
       "id": "fs_stat",
+      "filesystem": {
+        "quickjs": {
+          "stat": true
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",
@@ -596,6 +606,11 @@
     },
     {
       "id": "fs_glob",
+      "filesystem": {
+        "quickjs": {
+          "glob": false
+        }
+      },
       "world": {
         "runtimes": [
           "quickjs",
@@ -618,6 +633,33 @@
           "expect": {
             "exit": 0,
             "stdout": "unsupported\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "output_survives_failure_and_reuse",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "js -e \"console.log('before failure'); throw new Error('original failure')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "before failure\n",
+            "stderr_contains": "original failure"
+          }
+        },
+        {
+          "command": "js -e \"console.log('next')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "next\n",
+            "stderr": ""
           }
         }
       ]

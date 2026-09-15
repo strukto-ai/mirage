@@ -18,7 +18,11 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
+import { resolveGlobOf } from '../generic_bind/index.ts'
 import { metadataProvision } from './_provision.ts'
+import { GITHUB_IO } from './io.ts'
+
+const resolveGlob = resolveGlobOf(GITHUB_IO)
 
 async function findCommand(
   accessor: GitHubAccessor,
@@ -26,7 +30,10 @@ async function findCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  return findGeneric(paths, texts, opts, (root, options) => githubFind(accessor, root, options))
+  // The dispatcher hands a pattern over whole; the wrapper resolves it,
+  // as python's does, before the walk names anything.
+  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+  return findGeneric(resolved, texts, opts, (root, options) => githubFind(accessor, root, options))
 }
 
 export const GITHUB_FIND = command({

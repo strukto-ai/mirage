@@ -23,7 +23,7 @@ import { GitError, InvalidOptionError } from './errors.ts'
 import { treeDiff } from './patch.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
-import { checkOperands, fatal } from './util.ts'
+import { checkOperands, escaped, fatal } from './util.ts'
 
 const ENC = new TextEncoder()
 
@@ -47,7 +47,7 @@ export async function diff(inv: CLIInvocation): Promise<CommandFnResult> {
   const first = texts[0]
   if (first === undefined) return [null, new IOResult()]
   try {
-    checkOperands(texts, InvalidOptionError)
+    checkOperands(texts, InvalidOptionError, escaped(inv.argv))
     const repo = await opened(fl, doors)
     const body = await treeDiff(
       repo,

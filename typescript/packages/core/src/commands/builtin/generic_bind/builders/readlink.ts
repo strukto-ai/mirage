@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readlinkGeneric } from '../../generic/readlink.ts'
-import type { Builder } from '../adapter.ts'
+import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const READLINK_BUILDER: Builder = {
   name: 'readlink',
-  fn: (_ops, _accessor, paths, texts, opts) => readlinkGeneric(paths, texts, opts),
+  fn: async (ops, accessor, paths, texts, opts) =>
+    readlinkGeneric(
+      await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined),
+      texts,
+      opts,
+    ),
 }

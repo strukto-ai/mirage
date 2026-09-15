@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { OpsRegistry } from '../../ops/registry.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
+import { MountMode } from '../../types.ts'
+import { Workspace } from '../workspace/workspace.ts'
+import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
 
 describe('heredoc body expansion', () => {
@@ -306,6 +312,60 @@ describe('later unbraced var in a redirect target', () => {
     const { ws } = await makeIntegrationWS()
     try {
       expect(await run(ws, 'c=aa; id=1; p=/api/$c/$id.json; echo $p')).toBe('/api/aa/1.json\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+const readerCases = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/bash/heredoc/reader.json', import.meta.url),
+    'utf8',
+  ),
+) as {
+  cases: { id: string; command: string; expect: { exit: number; stdout: string; stderr: string } }[]
+}
+
+describe('heredoc reader integration (Bash 5.2 goldens)', () => {
+  it.each(readerCases.cases)('$id', async (testCase) => {
+    const { ws } = await makeIntegrationWS()
+    try {
+      expect(await runResult(ws, testCase.command)).toEqual([
+        testCase.expect.exit,
+        testCase.expect.stdout,
+        testCase.expect.stderr,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+const nestedReaderCases = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/crossmount/nested/heredoc.json', import.meta.url),
+    'utf8',
+  ),
+) as typeof readerCases
+
+describe('heredocs across nested mounts', () => {
+  it.each(nestedReaderCases.cases)('$id', async (testCase) => {
+    const parent = new RAMResource()
+    const child = new RAMResource()
+    const ghost = new RAMResource()
+    const ops = new OpsRegistry()
+    for (const resource of [parent, child, ghost]) ops.registerResource(resource)
+    const ws = new Workspace(
+      { '/data': parent, '/data/inner': child, '/ghost/deep': ghost },
+      { mode: MountMode.WRITE, ops, shellParser: await getTestParser() },
+    )
+    try {
+      const [exit, stdout, stderr] = await runResult(ws, testCase.command)
+      expect({ exit, stdout, stderr }).toEqual(testCase.expect)
+      // Reading back a misplaced write can hide a routing error. Verify ownership.
+      expect([...parent.store.files.keys()].some((key) => key.startsWith('/inner/'))).toBe(false)
+      expect(child.store.files.size + ghost.store.files.size).toBeGreaterThan(0)
     } finally {
       await ws.close()
     }

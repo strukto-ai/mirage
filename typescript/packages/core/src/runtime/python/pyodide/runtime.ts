@@ -33,8 +33,6 @@ import {
   type PyodideInterrupter,
 } from './interrupt.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
-import { PrefixResolver, type MountResolver } from '../../resolver.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { applyMutation, createJournal, type MutationJournal } from './vfs/journal.ts'
 import { preloadInto } from './vfs/preload.ts'
@@ -139,16 +137,6 @@ function maximalPrefixes(prefixes: readonly string[]): string[] {
   return out
 }
 
-function runtimeEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-  if (proc?.env === undefined) return env
-  for (const [k, v] of Object.entries(proc.env)) {
-    if (typeof v === 'string') env[k] = v
-  }
-  return env
-}
-
 /**
  * Rewrite top-level imports of denied packages so Pyodide's
  * `loadPackagesFromImports` skips fetching them. The rewritten code is only
@@ -240,6 +228,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   // js.process or js.fetch either. Both doors closed is what makes this
   // 'vfs'; jsglobals.test.ts pins the seal.
   override readonly reach = 'vfs'
+  override readonly filesystem = ['read', 'write', 'list', 'stat', 'glob'] as const
   readonly [EVALUATOR] = true as const
   private pyodide: PyodideInterface | null = null
   private guest: PyodideExecution | null = null
@@ -248,9 +237,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private queue: Promise<unknown> = Promise.resolve()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
-  private workspaceBridge: BridgeDispatchFn | null = null
   private readonly denyPackages: ReadonlySet<string>
-  private resolver: MountResolver = new PrefixResolver(() => [])
   private readonly home: string | null
   private readonly sysPath: readonly string[]
   private readonly packages: readonly string[]
@@ -303,13 +290,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
   }
 
-  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
-    if (this.workspaceBridge === null) {
-      this.workspaceBridge = dispatch
-      this.resolver = resolver
-    }
-  }
-
   protected override executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
     return this.run(args, context)
   }
@@ -317,7 +297,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
-    const task = (): Promise<RunResult> => scope.run(() => this.runOne(args, scope, context))
+    const task = (): Promise<RunResult> => scope.run(() => this.runOne(args, context))
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
@@ -338,8 +318,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const context = this.captureContext()
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
-    const task = (): Promise<EvalResult> =>
-      scope.run(() => this.evalOne(code, opts, scope, context))
+    const task = (): Promise<EvalResult> => scope.run(() => this.evalOne(code, opts, context))
     const next = this.queue.then(task, task)
     this.queue = next.catch(() => undefined)
     return next
@@ -348,23 +327,20 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async evalOne(
     code: string,
     opts: { inputs?: Record<string, EvalValue>; session?: string },
-    scope: ContextScope,
     context?: RuntimeContext,
   ): Promise<EvalResult> {
     this.vfs = context !== undefined ? new RuntimeVFS(context.dispatch, context.resolver) : null
-    const worker = await this.ensureWorker()
-    if (worker !== null) {
+    const worker = await this.ensureWorker(context)
+    if (worker !== null && context !== undefined) {
       return (await worker.execute(
         {
           kind: 'execute',
           method: 'eval',
           config: this.config as PyodideConfig,
-          prefixes: context?.resolver.prefixes() ?? scope.call(() => this.resolver.prefixes()),
+          prefixes: context.resolver.prefixes(),
           code,
           ...opts,
         },
-        scope,
-        undefined,
         context,
       )) as EvalResult
     }
@@ -438,7 +414,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private async ensureLoaded(): Promise<PyodideInterface> {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
-      this.wireBridgeIfNeeded()
       await this.syncMounts(this.pyodide)
       await this.wireInterruptIfNeeded(this.pyodide)
       return this.pyodide
@@ -465,23 +440,14 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       })()
       await this.bootstrapPromise
     }
-    this.wireBridgeIfNeeded()
     await this.syncMounts(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
     return this.pyodide
   }
 
-  private wireBridgeIfNeeded(): void {
-    if (this.workspaceBridge === null || this.vfs !== null) return
-    this.vfs = new RuntimeVFS(this.workspaceBridge, this.resolver)
-  }
-
-  private async ensureWorker(): Promise<PyodideWorkerClient | null> {
-    if (this.sync !== undefined || this.workspaceBridge === null || this.pyodide !== null)
-      return null
-    this.wireBridgeIfNeeded()
-    if (this.vfs === null) return null
-    this.worker ??= PyodideWorkerClient.create(this.vfs, this.workspaceBridge)
+  private async ensureWorker(context?: RuntimeContext): Promise<PyodideWorkerClient | null> {
+    if (this.sync !== undefined || context === undefined || this.pyodide !== null) return null
+    this.worker ??= PyodideWorkerClient.create()
     return this.worker
   }
 
@@ -649,26 +615,21 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
   }
 
-  private async runOne(
-    args: RunArgs,
-    scope: ContextScope,
-    context?: RuntimeContext,
-  ): Promise<RunResult> {
+  private async runOne(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
     this.vfs = context !== undefined ? new RuntimeVFS(context.dispatch, context.resolver) : null
-    const worker = await this.ensureWorker()
-    if (worker !== null) {
+    const worker = await this.ensureWorker(context)
+    if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args
       return (await worker.execute(
         {
           kind: 'execute',
           method: 'run',
           config: this.config as PyodideConfig,
-          prefixes: context?.resolver.prefixes() ?? scope.call(() => this.resolver.prefixes()),
+          prefixes: context.resolver.prefixes(),
           args: { ...rest, ...(cwd !== undefined ? { cwd: cwd.virtual } : {}) },
         },
-        scope,
-        signal,
         context,
+        signal,
       )) as RunResult
     }
     const pyodide = await this.ensureLoaded()
@@ -682,7 +643,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       ),
     ]
     await this.loadImports(pyodide, args.code)
-    const mergedEnv = { ...runtimeEnv(), ...args.env }
     // sys.argv[0] is the program's own name when the caller has one (a
     // CLI install's head word), else CPython's own -c spelling.
     const argv = [args.prog ?? '-c', ...args.args]
@@ -691,7 +651,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     const request = {
       code: args.code,
       argv,
-      env: mergedEnv,
+      env: { ...args.env },
       stdin: args.stdin,
       flags: args.flags ?? {},
       script_cli: args.scriptCli ?? false,

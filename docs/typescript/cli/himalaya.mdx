@@ -88,6 +88,14 @@ himalaya envelope list -m INBOX --page 2 --page-size 10
 | `-p, --page`      | no       | Page number, starting from 1  |
 | `-s, --page-size` | no       | Max envelopes per page (25)   |
 
+An envelope carries the message's identifiers (`uid`, `message_id`,
+`in_reply_to`, `references`), its headers (`from`, `reply_to`, `to`, `cc`,
+`subject`, `date`), its `flags`, and its attachment metadata
+(`has_attachments`, `attachments`). The body is not part of it:
+`body_text`, `body_html` and `snippet` belong to `message read` and to
+the mounted `.email.json`, so a page of envelopes stays small however
+large the mail behind it.
+
 Only the newest `page * page_size` messages are fetched, so listing the
 first page costs one page of header fetches rather than a scan of the
 whole mailbox. The account's `max_messages` (default 200) bounds how far

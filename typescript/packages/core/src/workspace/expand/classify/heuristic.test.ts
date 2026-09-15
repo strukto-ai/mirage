@@ -102,8 +102,26 @@ describe('classifyWord — relative paths', () => {
     expect(r.virtual).toBe('/ram/sub/file.txt')
   })
 
-  it('leaves bare glob (like *) as text — could be a command arg', () => {
+  // bash expands every unquoted glob word, a bare `*` included (`echo *`
+  // lists the directory); a quoted one arrives without glob marks and is
+  // text, which is how `expr 4 '*' 3` keeps its operator.
+  it('a bare glob is a pattern under cwd', () => {
     const reg = setup()
-    expect(classifyWord('*', reg, '/ram')).toBe('*')
+    const r = classifyWord('*', reg, '/ram')
+    if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
+    expect(r.pattern).toBe('*')
+    expect(r.directory).toBe('/ram/')
+  })
+
+  it('a glob with no name character still globs', () => {
+    const reg = setup()
+    const r = classifyWord('*-*', reg, '/ram')
+    if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
+    expect(r.pattern).toBe('*-*')
+  })
+
+  it('a glob beside shell syntax stays text', () => {
+    const reg = setup()
+    expect(classifyWord('x=*', reg, '/ram')).toBe('x=*')
   })
 })

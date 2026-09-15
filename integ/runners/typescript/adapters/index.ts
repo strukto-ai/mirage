@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -175,8 +175,19 @@ const S3_SECRET = process.env.AWS_SECRET_ACCESS_KEY ?? 'testing'
 const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL
 const NEXTCLOUD_USERNAME = process.env.NEXTCLOUD_USERNAME ?? 'admin'
 const NEXTCLOUD_PASSWORD = process.env.NEXTCLOUD_PASSWORD ?? 'admin123'
-function runId(): string {
-  return `${String(process.pid)}-${String(Date.now())}`
+/**
+ * A namespace no other target in this process can be handed.
+ *
+ * Random, not `${pid}-${Date.now()}`: the serial loop opened targets more
+ * than a millisecond apart so a clock reading was unique by accident, but
+ * the pool starts them in consecutive microtasks and five of them minted
+ * one id. Every backend builds its world out of this -- a `/_run/<id>`
+ * path on gws, an s3 key prefix, a gridfs database, a dropbox account --
+ * so a shared id is two targets seeding and resetting each other. Same
+ * shape as python's `uuid4().hex[:8]` and as the kit's own `runId`.
+ */
+export function runId(): string {
+  return randomUUID().replace(/-/g, '').slice(0, 8)
 }
 
 /**

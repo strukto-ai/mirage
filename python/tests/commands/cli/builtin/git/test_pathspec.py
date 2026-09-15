@@ -84,3 +84,8 @@ def test_a_directory_selects_its_whole_subtree():
 def test_the_root_selects_everything():
     paths = {"a.txt", "docs/b.md"}
     assert matched(paths, "") == paths
+
+
+def test_a_name_that_is_both_a_file_and_a_directory_selects_both():
+    paths = {"slot", "slot/child", "other"}
+    assert matched(paths, "slot") == {"slot", "slot/child"}

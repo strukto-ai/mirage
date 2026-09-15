@@ -32,21 +32,6 @@
       }
     },
     {
-      "id": "ts_rejects_sandlock",
-      "hosts": [
-        "typescript"
-      ],
-      "world": {
-        "runtimes": [
-          "sandlock",
-          "vfs"
-        ]
-      },
-      "build_error": {
-        "contains": "Python-only"
-      }
-    },
-    {
       "id": "unknown_name",
       "world": {
         "runtimes": [

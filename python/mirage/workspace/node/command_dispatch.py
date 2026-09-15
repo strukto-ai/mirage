@@ -37,11 +37,13 @@ from mirage.workspace.executor.builtins.alias import alias_command_text
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
+from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
-                                     follows_last_component)
+                                     Consumer, follows_last_component, lookup,
+                                     runtime_refused)
 from mirage.workspace.node.admission import Admitted, Refused, admit
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
@@ -297,11 +299,15 @@ async def _dispatch_command_body(
                              call_stack,
                              registry,
                              namespace,
-                             view=session_view(session, registry.policies))
+                             view=session_view(session, registry.policies),
+                             routing=routing_decision)
 
     # Limits resolve against the expanded name, so `$CMD`-style
     # invocations get their real command's policy.
-    resolved = resolve_limit(argv.name) if argv.name else None
+    # External execution owns its mount-resolved deadline and cancellation.
+    external = ("/" not in argv.name and lookup(
+        argv.name, session, registry, routing_decision) is Consumer.EXTERNAL)
+    resolved = resolve_limit(argv.name) if argv.name and not external else None
     timeout = (resolved.timeout_seconds if resolved is not None else None)
     body = _run_argv(recurse,
                      dispatch,
@@ -379,8 +385,11 @@ async def _run_argv(
     # and `MountRootPolicy` cannot recognize a mount root inside one, so
     # `tar -cf out.tar /base/*` would archive a whole backend the same
     # operand typed by hand is refused for.
-    boundary = await expand_boundary_globs(list(argv.operands), registry,
-                                           namespace)
+    refused_external = runtime_refused(name, session, registry,
+                                       routing_decision)
+    boundary = (list(argv.operands)
+                if refused_external else await expand_boundary_globs(
+                    list(argv.operands), registry, namespace))
     expanded = [word_text(w) for w in boundary]
     # Compared as words, not as a count: a glob that matches exactly one
     # name (`du /base/i*` where only the mount root matches) is still an
@@ -520,6 +529,11 @@ async def _route_argv(
                                                          exit_code=2,
                                                          stderr=err)
 
+    consumer = lookup(name, session, registry, routing_decision)
+    if consumer is Consumer.EXTERNAL:
+        return await run_external(argv, stdin, session, registry,
+                                  routing_decision)
+
     # ── shell builtins ──────────────────────────
     # One lookup: every executor-run builtin word maps to a handler that
     # takes the whole invocation, so the arms live beside their workers
@@ -615,7 +629,7 @@ async def _route_argv(
                                                                 stderr=err)
             elif name == "mv":
                 operands, post_unlink, post_rename, early = await prepare_mv(
-                    namespace, dispatch, operands)
+                    namespace, dispatch, operands, argv.args, session.cwd)
                 if early is not None:
                     return early
         except CycleError as exc:
@@ -668,9 +682,15 @@ async def _route_argv(
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)
         if post_unlink is not None:
+            # The landing is replaced the way rename(2) replaces it,
+            # node and subtree alike, and then the source's own node and
+            # subtree land on it. The same four steps the dispatcher
+            # takes for a rename it forwards itself.
             await namespace.unlink(post_unlink)
+            await namespace.purge_under(post_unlink)
         if post_rename is not None:
             await namespace.rename(post_rename[0], post_rename[1])
+            await namespace.rename_under(post_rename[0], post_rename[1])
     if link_errors:
         # A refused link operand fails the line the way a refused
         # backend operand does: its lines lead (they were reported

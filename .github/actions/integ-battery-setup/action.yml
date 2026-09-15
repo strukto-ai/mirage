@@ -91,16 +91,18 @@ runs:
         cat /tmp/sshsrv.log
         echo "SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
         echo "SSH_PORT=2222" >> "$GITHUB_ENV"
+    # Keep in sync with the observability job: 2.21 removed the v1 query
+    # endpoints used by the accessor and jaeger_seed.py.
     - name: Start jaeger all-in-one and seed traces over OTLP
       shell: bash
       run: |
         for i in $(seq 1 5); do
-          docker pull jaegertracing/jaeger:latest && break
+          docker pull jaegertracing/jaeger:2.20.0 && break
           echo "docker pull failed (attempt $i), retrying"; sleep 10
         done
         docker run -d --name mirage-jaeger \
           -p 16686:16686 -p 4317:4317 -p 4318:4318 \
-          jaegertracing/jaeger:latest
+          jaegertracing/jaeger:2.20.0
         ./python/.venv/bin/python integ/server/jaeger_seed.py \
           --host http://localhost:16686 --otlp http://localhost:4318
         echo "JAEGER_URL=http://localhost:16686" >> "$GITHUB_ENV"

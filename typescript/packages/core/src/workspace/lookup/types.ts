@@ -28,6 +28,7 @@ export const Consumer = Object.freeze({
   FUNCTION: 'function',
   CLI: 'cli',
   MOUNT: 'mount',
+  EXTERNAL: 'external',
   UNKNOWN: 'unknown',
 } as const)
 
@@ -40,6 +41,7 @@ export const SHELL_CONSUMERS: ReadonlySet<Consumer> = new Set([
   Consumer.NAMESPACE,
   Consumer.FUNCTION,
   Consumer.CLI,
+  Consumer.EXTERNAL,
 ])
 
 /**

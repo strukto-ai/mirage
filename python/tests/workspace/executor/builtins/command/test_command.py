@@ -11,6 +11,8 @@ class FakeRegistry:
 
     def __init__(self, commands: set[str]):
         self._commands = commands
+        self.runtime_bindings = {}
+        self.runtime_unavailable = {}
         self.clis = CLIRegistry()
 
     def mount_for_command(self, name: str) -> object | None:

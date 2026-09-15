@@ -14,19 +14,20 @@
 
 import shlex
 
-import tree_sitter
-
 from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
                                     FD_STDOUT)
 from mirage.shell.escapes import (decode_ansi_c, unescape_dquoted,
                                   unescape_unquoted)
+from mirage.shell.parse.heredoc import (body_prefix, clean_delimiter,
+                                        delimiter_quoted)
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
+from mirage.shell.types import (ProcessSubDirection, Redirect, RedirectKind,
+                                TSNodeLike)
 from mirage.utils.path import expand_tilde
 
 
-def get_text(node: tree_sitter.Node) -> str:
+def get_text(node: TSNodeLike) -> str:
     """Get the text content of a node."""
     return (node.text or b"").decode()
 
@@ -45,7 +46,7 @@ def byte_offset(text: str, index: int) -> int:
     return len(text[:index].encode())
 
 
-def get_command_name(node: tree_sitter.Node) -> str:
+def get_command_name(node: TSNodeLike) -> str:
     """Get the command name string."""
     for c in node.named_children:
         if c.type == NT.COMMAND_NAME:
@@ -53,8 +54,7 @@ def get_command_name(node: tree_sitter.Node) -> str:
     return ""
 
 
-def claimed_descriptor(command: tree_sitter.Node,
-                       last: tree_sitter.Node) -> int | None:
+def claimed_descriptor(command: TSNodeLike, last: TSNodeLike) -> int | None:
     """The descriptor a bare ``0`` before a redirect operator names.
 
     tree-sitter-bash reads ``0>&-`` and ``0<f`` as an operand ``0``
@@ -65,8 +65,8 @@ def claimed_descriptor(command: tree_sitter.Node,
     begins; ``cat a 0 >&-`` keeps its operand.
 
     Args:
-        command (tree_sitter.Node): the command node the number is in.
-        last (tree_sitter.Node): the command's last child.
+        command (TSNodeLike): the command node the number is in.
+        last (TSNodeLike): the command's last child.
     """
     if last.type != NT.NUMBER or command.parent is None:
         return None
@@ -77,7 +77,7 @@ def claimed_descriptor(command: tree_sitter.Node,
     return None
 
 
-def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
+def get_parts(node: TSNodeLike) -> list[TSNodeLike]:
     """Get command parts as child nodes.
 
     Preserves expansion nodes for later processing. A bare ``$`` word
@@ -89,7 +89,7 @@ def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     """
     _SKIP = frozenset({NT.FILE_REDIRECT, NT.HERESTRING_REDIRECT})
     children = node.children
-    parts: list[tree_sitter.Node] = []
+    parts: list[TSNodeLike] = []
     for position, c in enumerate(children):
         if c.is_named and c.type not in _SKIP:
             if position == len(children) - 1 and claimed_descriptor(
@@ -124,8 +124,7 @@ def brace_expands(text: str) -> bool:
     return False
 
 
-def literal_word(node: tree_sitter.Node,
-                 home: str | None = None) -> str | None:
+def literal_word(node: TSNodeLike, home: str | None = None) -> str | None:
     """The text a word names before any expansion, or None.
 
     A word is literal when nothing in it waits on the shell: a plain
@@ -137,7 +136,7 @@ def literal_word(node: tree_sitter.Node,
     when it runs.
 
     Args:
-        node (tree_sitter.Node): a command word node, or the
+        node (TSNodeLike): a command word node, or the
             command_name wrapping one.
         home (str | None): the home directory a leading ``~`` names;
             None leaves it literal, as bash does with no ``$HOME``.
@@ -188,7 +187,7 @@ def literal_word(node: tree_sitter.Node,
     return None
 
 
-def has_command_substitution(node: tree_sitter.Node) -> bool:
+def has_command_substitution(node: TSNodeLike) -> bool:
     """Whether the node contains a command or process substitution.
 
     The provision planner suppresses substitution execution, so any
@@ -202,16 +201,15 @@ def has_command_substitution(node: tree_sitter.Node) -> bool:
 
 
 def split_env_prefix(
-    parts: list[tree_sitter.Node],
-) -> tuple[list[tree_sitter.Node], list[tree_sitter.Node]]:
+    parts: list[TSNodeLike], ) -> tuple[list[TSNodeLike], list[TSNodeLike]]:
     """Split FOO=1 BAR=2 cmd parts into (assignments, remaining).
 
     The single structural rule for env-prefixed commands, shared by the
     executor (which expands and applies the assignments) and the
     provision planner (which only needs the command parts).
     """
-    assignments: list[tree_sitter.Node] = []
-    remaining: list[tree_sitter.Node] = []
+    assignments: list[TSNodeLike] = []
+    remaining: list[TSNodeLike] = []
     saw_command_name = False
     for p in parts:
         if not saw_command_name and p.type == NT.VARIABLE_ASSIGNMENT:
@@ -224,13 +222,13 @@ def split_env_prefix(
 
 
 def get_pipeline_commands(
-    node: tree_sitter.Node,
-) -> tuple[list[tree_sitter.Node], list[bool]]:  # noqa: E125,E501
+    node: TSNodeLike,
+) -> tuple[list[TSNodeLike], list[bool]]:  # noqa: E125,E501
     """Get (commands, stderr_flags) from pipeline.
 
     Uses node.children for pipe token detection.
     """
-    commands: list[tree_sitter.Node] = []
+    commands: list[TSNodeLike] = []
     stderr_flags: list[bool] = []
     for c in node.children:
         if c.is_named:
@@ -240,9 +238,7 @@ def get_pipeline_commands(
     return commands, stderr_flags
 
 
-def get_while_parts(
-    node: tree_sitter.Node,
-) -> tuple[tree_sitter.Node, list[tree_sitter.Node]]:
+def get_while_parts(node: TSNodeLike, ) -> tuple[TSNodeLike, list[TSNodeLike]]:
     """Get (condition, body_commands) from while/until.
 
     Returns the do_group's children list so multi-statement
@@ -255,8 +251,7 @@ def get_while_parts(
 
 
 def get_for_parts(
-    node: tree_sitter.Node,
-) -> tuple[str, list[tree_sitter.Node], list[tree_sitter.Node]]:
+    node: TSNodeLike, ) -> tuple[str, list[TSNodeLike], list[TSNodeLike]]:
     """Get (variable, values, body_commands) from for/select.
 
     Returns the do_group's children list so multi-statement
@@ -270,8 +265,7 @@ def get_for_parts(
 
 
 def get_cfor_parts(
-    node: tree_sitter.Node,
-) -> tuple[list[list[tree_sitter.Node]], list[tree_sitter.Node]]:
+    node: TSNodeLike, ) -> tuple[list[list[TSNodeLike]], list[TSNodeLike]]:
     """Get ([init, cond, update], body_commands) from a C-style for.
 
     The expression slots are positional between the (( )) delimiters,
@@ -282,12 +276,12 @@ def get_cfor_parts(
     last child dropped `a=1`.
 
     Args:
-        node (tree_sitter.Node): the c_style_for_statement node.
+        node (TSNodeLike): the c_style_for_statement node.
     """
-    exprs: list[list[tree_sitter.Node]] = [[], [], []]
+    exprs: list[list[TSNodeLike]] = [[], [], []]
     slot = 0
     inside = False
-    body: list[tree_sitter.Node] = []
+    body: list[TSNodeLike] = []
     for child in node.children:
         if child.type == NT.ARITH_OPEN:
             inside = True
@@ -306,12 +300,12 @@ def get_cfor_parts(
     return exprs, body
 
 
-def get_subshell_body(node: tree_sitter.Node) -> list[tree_sitter.Node]:
+def get_subshell_body(node: TSNodeLike) -> list[TSNodeLike]:
     """Get body commands from subshell."""
     return list(node.named_children)
 
 
-def is_backgrounded(node: tree_sitter.Node) -> bool:
+def is_backgrounded(node: TSNodeLike) -> bool:
     """Whether a statement's terminator is ``&``.
 
     tree-sitter puts the ``&`` beside the statement it ends, inside
@@ -322,7 +316,7 @@ def is_backgrounded(node: tree_sitter.Node) -> bool:
     launches for a top-level ``cmd &``.
 
     Args:
-        node (tree_sitter.Node): a body statement.
+        node (TSNodeLike): a body statement.
     """
     sibling = node.next_sibling
     return sibling is not None and sibling.type == NT.BACKGROUND
@@ -363,8 +357,7 @@ _REDIRECT_OPERATORS = (
     | frozenset({NT.REDIRECT_OUT, NT.REDIRECT_CLOBBER, NT.REDIRECT_APPEND}))
 
 
-def _parse_file_redirect(child: tree_sitter.Node,
-                         fd: int | None = None) -> Redirect:
+def _parse_file_redirect(child: TSNodeLike, fd: int | None = None) -> Redirect:
     """Parse a single file_redirect node into a Redirect.
 
     The operator token decides the shape and the explicit descriptor,
@@ -397,6 +390,14 @@ def _parse_file_redirect(child: tree_sitter.Node,
             target = get_text(c)
             target_node = c
             break
+
+    document = getattr(child, "heredoc", None)
+    if document is not None:
+        return Redirect(fd=0 if fd is None else fd,
+                        target=document.body.decode(),
+                        target_node=target_node,
+                        kind=RedirectKind.HEREDOC,
+                        expand_vars=not document.quoted)
 
     # `>&word` with a word rather than a number is bash's other spelling
     # of `&>word`, bare or on descriptor 1 (`1>&word` sends both streams
@@ -442,7 +443,7 @@ def _parse_file_redirect(child: tree_sitter.Node,
                     clobber=op == NT.REDIRECT_CLOBBER)
 
 
-def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:
+def _parse_herestring_redirect(child: TSNodeLike) -> Redirect:
     content = ""
     target_node = None
     for candidate in child.named_children:
@@ -456,9 +457,107 @@ def _parse_herestring_redirect(child: tree_sitter.Node) -> Redirect:
                     kind=RedirectKind.HERESTRING)
 
 
+def list_spine(
+        node: TSNodeLike
+) -> tuple[TSNodeLike, tuple[tuple[str, TSNodeLike], ...]]:
+    """The leftmost operand of a ``&&``/``||`` list and the steps after it.
+
+    tree-sitter nests a list to the left (``a || b && c`` is
+    ``list(list(a || b) && c)``), which is bash's own associativity, so
+    walking the left spine yields the first operand and then each
+    operator with its right operand in the order bash applies them.
+
+    Args:
+        node (TSNodeLike): a ``list`` node, or any operand.
+
+    Returns:
+        tuple[TSNodeLike, tuple[tuple[str, TSNodeLike], ...]]:
+        the leftmost operand and the ``(operator, right)`` steps.
+    """
+    steps: list[tuple[str, TSNodeLike]] = []
+    while node.type == NT.LIST:
+        left, op, right = get_list_parts(node)
+        steps.append((op, right))
+        node = left
+    steps.reverse()
+    return node, tuple(steps)
+
+
+def heredoc_tail(
+    redirect_node: TSNodeLike
+) -> tuple[TSNodeLike | None, tuple[tuple[str, TSNodeLike], ...]]:
+    """What the operator line carries past a heredoc's delimiter word.
+
+    Bash reads the body at the newline and then goes on with the line,
+    so ``cat <<EOF | tr a-z A-Z && echo done`` is the pipeline
+    ``cat | tr`` and then ``&& echo done``. tree-sitter-bash parses that
+    tail inside the heredoc_redirect node instead: a ``pipeline`` child
+    holding the stage the command feeds, and an ``&&`` or ``||`` token
+    followed by its right operand. The stage or operand it hands over
+    can itself be a ``list``, wrapping what bash would have bound to
+    the left (``false <<EOF || echo a && echo b`` is
+    ``(false || echo a) && echo b``, not ``false || (echo a && echo b)``),
+    so a list is unwound along its left spine: its first operand takes
+    the stage or operand slot, and the rest become further steps.
+
+    Args:
+        redirect_node (TSNodeLike): a ``heredoc_redirect`` node.
+
+    Returns:
+        tuple[TSNodeLike | None, tuple[tuple[str, Node], ...]]: the
+        node the command's stdout pipes into, or None, and the
+        ``(operator, right)`` steps applied to the statement after that,
+        in order.
+    """
+    pipe_node: TSNodeLike | None = None
+    steps: list[tuple[str, TSNodeLike]] = []
+    children = redirect_node.children
+    index = 0
+    while index < len(children):
+        child = children[index]
+        if child.type == NT.PIPELINE and pipe_node is None and not steps:
+            stages = child.named_children
+            if len(stages) == 1 and stages[0].type == NT.LIST:
+                pipe_node, spine = list_spine(stages[0])
+                steps.extend(spine)
+            else:
+                pipe_node = child
+        elif (child.type in (NT.AND, NT.OR) and index + 1 < len(children)
+              and children[index + 1].is_named):
+            right, spine = list_spine(children[index + 1])
+            steps.append((child.type, right))
+            steps.extend(spine)
+            index += 1
+        index += 1
+    return pipe_node, tuple(steps)
+
+
+def take_continuation(
+        redirects: list[Redirect]) -> tuple[tuple[str, TSNodeLike], ...]:
+    """Detach the ``&&``/``||`` steps a heredoc's operator line carried.
+
+    The steps apply to the whole redirected statement, so the executor
+    takes them off the redirects before running it and folds them in
+    around the result, the way a ``list`` node wraps its left operand.
+
+    Args:
+        redirects (list[Redirect]): the statement's redirects, whose
+            heredocs are left with no continuation.
+
+    Returns:
+        tuple[tuple[str, TSNodeLike], ...]: the steps, in order.
+    """
+    steps: list[tuple[str, TSNodeLike]] = []
+    for r in redirects:
+        if r.continuation:
+            steps.extend(r.continuation)
+            r.continuation = ()
+    return tuple(steps)
+
+
 def get_redirects(
-        node: tree_sitter.Node,  # noqa: E125
-) -> tuple[tree_sitter.Node | None, list[Redirect]]:
+        node: TSNodeLike,  # noqa: E125
+) -> tuple[TSNodeLike | None, list[Redirect]]:
     """Parse all redirects from a redirected_statement.
 
     Returns (command, redirects); command is None for a bare redirect
@@ -485,18 +584,15 @@ def get_redirects(
             continue
         if child.type == NT.HEREDOC_REDIRECT:
             body, _, quoted = get_heredoc_meta(child)
-            pipe_node = None
-            for hc in child.named_children:
-                if hc.type in (NT.PIPELINE, NT.COMMAND):
-                    pipe_node = hc
-                    break
+            pipe_node, continuation = heredoc_tail(child)
             redirects.append(
                 Redirect(fd=0,
                          target=body,
                          target_node=child,
                          kind=RedirectKind.HEREDOC,
                          pipeline=pipe_node,
-                         expand_vars=not quoted))
+                         expand_vars=not quoted,
+                         continuation=continuation))
             # A file redirect written before the heredoc body starts
             # (`cat <<END > out.txt`) parses INSIDE the
             # heredoc_redirect node; hoist it to a sibling.
@@ -525,9 +621,7 @@ def get_redirects(
     return command, redirects
 
 
-def get_list_parts(
-    node: tree_sitter.Node,
-) -> tuple[tree_sitter.Node, str, tree_sitter.Node]:
+def get_list_parts(node: TSNodeLike, ) -> tuple[TSNodeLike, str, TSNodeLike]:
     """Get (left, op, right) from list node."""
     left = node.named_children[0]
     right = node.named_children[1]
@@ -541,9 +635,8 @@ def get_list_parts(
 
 
 def get_if_branches(
-    node: tree_sitter.Node,
-) -> tuple[list[tuple[tree_sitter.Node, list[tree_sitter.Node]]],
-           list[tree_sitter.Node] | None]:
+    node: TSNodeLike,
+) -> tuple[list[tuple[TSNodeLike, list[TSNodeLike]]], list[TSNodeLike] | None]:
     """Get (branches, else_body) from if_statement.
 
     Each branch is (condition, body_commands) where
@@ -551,9 +644,9 @@ def get_if_branches(
     else_body is also a list of nodes, or None.
     """
     nc = node.named_children
-    condition: tree_sitter.Node | None = nc[0]
-    body: list[tree_sitter.Node] = []
-    branches: list[tuple[tree_sitter.Node, list[tree_sitter.Node]]] = []
+    condition: TSNodeLike | None = nc[0]
+    body: list[TSNodeLike] = []
+    branches: list[tuple[TSNodeLike, list[TSNodeLike]]] = []
     else_body = None
 
     for c in nc[1:]:
@@ -577,15 +670,14 @@ def get_if_branches(
     return branches, else_body
 
 
-def get_case_word(node: tree_sitter.Node) -> tree_sitter.Node:
+def get_case_word(node: TSNodeLike) -> TSNodeLike:
     """Get the word being matched in case."""
     return node.named_children[0]
 
 
 def get_case_items(
-    node: tree_sitter.Node,
-) -> list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
-                str]]:  # noqa: E125,E501
+    node: TSNodeLike,
+) -> list[tuple[list[TSNodeLike], list[TSNodeLike], str]]:  # noqa: E125,E501
     """Get (pattern_nodes, body_statements, terminator) triples from case.
 
     Patterns are every named child before the arm's ``)``, kept as
@@ -597,12 +689,11 @@ def get_case_items(
     into the next arm's body unconditionally), or ``;;&`` (keep testing
     the remaining patterns).
     """
-    items: list[tuple[list[tree_sitter.Node], list[tree_sitter.Node],
-                      str]] = []
+    items: list[tuple[list[TSNodeLike], list[TSNodeLike], str]] = []
     for c in node.named_children:
         if c.type == NT.CASE_ITEM:
-            patterns: list[tree_sitter.Node] = []
-            body: list[tree_sitter.Node] = []
+            patterns: list[TSNodeLike] = []
+            body: list[TSNodeLike] = []
             terminator = ";;"
             in_body = False
             for child in c.children:
@@ -620,12 +711,12 @@ def get_case_items(
     return items
 
 
-def get_declaration_keyword(node: tree_sitter.Node) -> str:
+def get_declaration_keyword(node: TSNodeLike) -> str:
     """Get keyword (export/local/declare) from declaration."""
     return node.children[0].type
 
 
-def get_unset_args(node: tree_sitter.Node) -> list[str]:
+def get_unset_args(node: TSNodeLike) -> list[str]:
     """Get every operand word of unset_command, keeping ``-f``/``-v``/``-n``.
 
     The leading option words are preserved so the handler can tell a
@@ -644,13 +735,17 @@ def get_unset_args(node: tree_sitter.Node) -> list[str]:
         return [get_text(c) for c in node.named_children]
 
 
-def get_negated_command(node: tree_sitter.Node) -> tree_sitter.Node:
+def get_negated_command(node: TSNodeLike) -> TSNodeLike:
     """Get inner command from negated_command (! cmd)."""
     return node.named_children[0]
 
 
-def get_heredoc_parts(redirect_node: tree_sitter.Node) -> tuple[str, str]:
-    """Get (delimiter, body) from heredoc_redirect."""
+def get_heredoc_parts(redirect_node: TSNodeLike) -> tuple[str, str]:
+    """Get (delimiter, body) from heredoc_redirect.
+
+    The body opens with the empty lines tree-sitter dropped before its
+    heredoc_body node (see body_prefix); bash keeps them.
+    """
     delimiter = ""
     body = ""
     for c in redirect_node.named_children:
@@ -658,20 +753,18 @@ def get_heredoc_parts(redirect_node: tree_sitter.Node) -> tuple[str, str]:
             delimiter = get_text(c)
         elif c.type == NT.HEREDOC_BODY:
             body = get_text(c)
-    return delimiter, body
+    return delimiter, body_prefix(redirect_node) + body
 
 
-def get_heredoc_meta(
-        redirect_node: tree_sitter.Node) -> tuple[str, bool, bool]:
+def get_heredoc_meta(redirect_node: TSNodeLike) -> tuple[str, bool, bool]:
     """Get (body, dash, quoted) from heredoc_redirect.
 
     - dash: True if operator was `<<-` (strip leading tabs from body lines)
-    - quoted: True if delimiter was wrapped in quotes (no var expansion)
+    - quoted: True if any part of the delimiter was quoted (no var
+      expansion), which a line continuation in it is not
     """
     delimiter, body = get_heredoc_parts(redirect_node)
-    # Any quoting anywhere in the delimiter (even partial, `EN'D'`)
-    # disables expansion, matching bash.
-    quoted = "'" in delimiter or '"' in delimiter or "\\" in delimiter
+    quoted = delimiter_quoted(delimiter)
     dash = False
     for c in redirect_node.children:
         if c.type == "<<-":
@@ -691,7 +784,7 @@ def normalize_heredoc_body(body: str, delimiter: str) -> str:
     loses its final newline to heredoc_end. Bash strips quoting from
     the delimiter before matching and bodies always end with a newline.
     """
-    clean = delimiter.replace("'", "").replace('"', "")
+    clean = clean_delimiter(delimiter)
     suffix = clean + "\n"
     if body.endswith(suffix):
         head = body[:-len(suffix)]
@@ -702,8 +795,7 @@ def normalize_heredoc_body(body: str, delimiter: str) -> str:
     return body
 
 
-def get_process_sub_direction(
-        node: tree_sitter.Node) -> ProcessSubDirection | None:
+def get_process_sub_direction(node: TSNodeLike) -> ProcessSubDirection | None:
     """Return the direction marker on a process_substitution node.
 
     `<(cmd)` is INPUT (inner stdout feeds our stdin), `>(cmd)` is OUTPUT
@@ -719,19 +811,19 @@ def get_process_sub_direction(
     return None
 
 
-def get_process_sub_body(node: tree_sitter.Node) -> str:
+def get_process_sub_body(node: TSNodeLike) -> str:
     text = get_text(node)
     if text.startswith(("<(", ">(")) and text.endswith(")"):
         return text[2:-1]
     return text
 
 
-def get_function_name(node: tree_sitter.Node) -> str:
+def get_function_name(node: TSNodeLike) -> str:
     """Get function name."""
     return get_text(node.named_children[0])
 
 
-def get_function_body(node: tree_sitter.Node) -> FunctionBody:
+def get_function_body(node: TSNodeLike) -> FunctionBody:
     """Get function body commands.
 
     Returns the compound_statement's children list so

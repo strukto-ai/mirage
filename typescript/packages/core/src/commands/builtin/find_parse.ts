@@ -14,6 +14,7 @@
 
 import { FindParseError } from '../errors.ts'
 import { parseDateExpr } from '../../utils/dates.ts'
+import { UTC_ZONE } from '../../utils/timezone.ts'
 import type { PredNode } from './find_eval.ts'
 import {
   EXEC_BATCH_END,
@@ -85,7 +86,7 @@ export function strictlyAfter(timestamp: number): number {
 
 /** One `-newermt` argument as a GNU date expression; naive times are UTC. */
 export function parseNewermt(value: string): number {
-  const ts = parseDateExpr(value, true)
+  const ts = parseDateExpr(value, UTC_ZONE)
   if (ts === null || !Number.isFinite(ts.getTime()) || value.trim() === '@') {
     throw new FindParseError(
       `find: I cannot figure out how to interpret '${value}' as a date or time`,

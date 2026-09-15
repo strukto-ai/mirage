@@ -362,7 +362,7 @@ export async function expandNodeMarked(
 
   if (ntype === NT.COMMAND_SUBSTITUTION) {
     const prefix = foldedWhitespace(tsNode)
-    const rawSub = tsNode.text.slice(prefix.length)
+    const rawSub = (tsNode.sourceText ?? tsNode.text).slice(prefix.length)
     if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
       // Backtick regions are re-lexed here rather than trusted from the
       // grammar, which merges adjacent pairs (see splitBacktickRegion).

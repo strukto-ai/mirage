@@ -71,12 +71,18 @@ def under(path: str, directory: str) -> bool:
 
 
 def matched(paths: set[str], target: str) -> set[str]:
-    """Every path a single operand selects: itself, or a whole subtree.
+    """Every path a single operand selects: itself and its whole subtree.
+
+    Both, not one or the other. A pathspec matches a path that equals it
+    and a path it is a leading directory of, and the two are not
+    exclusive as soon as the candidates come from more than one tree:
+    restoring ``slot`` where the index holds the file ``slot`` and the
+    source holds ``slot/child`` has to select both, or the file is
+    deleted and the directory never written. git 2.50.1 replaces one
+    with the other in either direction.
 
     Args:
         paths (set[str]): the candidate paths, repository-relative.
         target (str): the operand, repository-relative.
     """
-    if target in paths:
-        return {target}
-    return {path for path in paths if under(path, target)}
+    return {path for path in paths if path == target or under(path, target)}

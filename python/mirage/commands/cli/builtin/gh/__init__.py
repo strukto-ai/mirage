@@ -21,7 +21,6 @@ from mirage.commands.cli.builtin.gh.api import api
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Operand, Option
 from mirage.core.github.config import GhConfig
-from mirage.types import ResourceName
 
 REPO = Option(short="-R",
               long="--repo",
@@ -404,7 +403,6 @@ GH = CLISpec(
     name="gh",
     description="GitHub CLI",
     config_model=GhConfig,
-    serves=(ResourceName.GITHUB, ),
     subcommands=(
         CLISpec(name="api",
                 description="Make an authenticated GitHub API request",

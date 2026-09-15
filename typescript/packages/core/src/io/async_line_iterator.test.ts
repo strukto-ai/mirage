@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { AsyncLineIterator, charWidth } from './async_line_iterator.ts'
+import { CachableAsyncIterator } from './cachable_iterator.ts'
 
 async function* fromChunks(chunks: Uint8Array[]): AsyncIterable<Uint8Array> {
   await Promise.resolve()
@@ -109,5 +110,61 @@ describe('readChars counts characters, not bytes', () => {
     expect(await stop.readChars(4, 0x3a).then(([d, ok]) => [decode(d), ok])).toEqual(['ab', true])
     const short = new AsyncLineIterator(fromChunks([encode('ab')]))
     expect(await short.readChars(5, null).then(([d, ok]) => [decode(d), ok])).toEqual(['ab', false])
+  })
+})
+
+describe('AsyncLineIterator under a stalled source', () => {
+  it('lets the read signal win over a pull that never settles', async () => {
+    const stalled: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+      }),
+    }
+    const reader = new AsyncLineIterator(stalled)
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    await expect(reader.readUntil(0x0a, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    // A fresh reader, since an aborted read closes its own.
+    await expect(new AsyncLineIterator(stalled).readline(controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+  })
+
+  it('does not hand out a buffered line once the read signal fired', async () => {
+    // One chunk holding more lines than the amortized yield interval, so
+    // every read after the first is answered from the buffer with no pull.
+    const lines = Array.from({ length: 200 }, (_, i) => `line${String(i)}\n`).join('')
+    const reader = new AsyncLineIterator(new Blob([lines]).stream())
+    const controller = new AbortController()
+    for (let i = 0; i < 63; i++) expect(await reader.readline(controller.signal)).not.toBeNull()
+    // Let the yield budget lapse so the 64th read yields, and fire
+    // the signal while it is parked on that yield.
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    const pending = reader.readline(controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    // A signal already fired is refused before the buffer is consulted.
+    await expect(reader.readline(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('does not wait for a cache discard queued behind the stalled pull', async () => {
+    // An async generator queues `return()` behind its pending `next()`,
+    // so the cache wrapper's discard can only settle once the pull does.
+    async function* stalled(): AsyncGenerator<Uint8Array> {
+      await new Promise<never>(() => undefined)
+      yield new Uint8Array(0)
+    }
+    const input = new CachableAsyncIterator(stalled())
+    const reader = new AsyncLineIterator(input)
+    const controller = new AbortController()
+    setTimeout(() => {
+      controller.abort()
+    }, 20)
+    await expect(reader.readline(controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(input.discarded).toBe(true)
   })
 })

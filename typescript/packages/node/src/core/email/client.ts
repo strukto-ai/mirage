@@ -217,6 +217,23 @@ class CriteriaParser {
   }
 }
 
+/**
+ * Spells a value as an RFC 3501 quoted string.
+ *
+ * The two quoted-specials, `"` and `\\`, are escaped with a backslash and
+ * nothing else is touched. A CR or LF has no spelling inside a quoted
+ * string, so a value holding one is refused here rather than sent, where
+ * it would end the command line early. `tokenizeCriteria` below reads
+ * the same encoding back, so the search builder and this client agree
+ * on what a quote inside a value means.
+ */
+export function quoteString(value: string): string {
+  if (value.includes('\r') || value.includes('\n')) {
+    throw new Error('an IMAP quoted string cannot hold a line break')
+  }
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+}
+
 export function parseSearchCriteria(criteria: string): SearchQuery {
   if (criteria === 'ALL' || criteria === '') return { all: true }
   return new CriteriaParser(tokenizeCriteria(criteria)).parseSequence()

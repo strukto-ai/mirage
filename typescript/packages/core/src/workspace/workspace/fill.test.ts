@@ -1858,3 +1858,30 @@ describe('fillEnv under a profile policy', () => {
     }
   }, 120000)
 })
+
+describe('a managed fetch under the invocation signal', () => {
+  it('releases the caller while the source stalls, and a late value is not written', async () => {
+    const late = { release: (): void => undefined }
+    registerSecrets(
+      'fake-stalled',
+      FakeConfig,
+      () =>
+        new Promise<ResolvedSecret>((resolve) => {
+          late.release = () => {
+            resolve({ fields: { r: 'late' } })
+          }
+        }),
+    )
+    const ws = await makeWs({ TOKEN: { from: 'fake-stalled', ref: 'r' } })
+    try {
+      await expect(
+        ws.execute('echo $TOKEN', { signal: AbortSignal.timeout(50) }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      late.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(ws.getSession(ws.defaultSessionId).vars.TOKEN?.value).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+})

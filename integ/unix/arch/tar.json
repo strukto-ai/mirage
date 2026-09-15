@@ -740,6 +740,40 @@
         "stdout": "a.txt\nsub\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "arch_tar_operand_after_chdir_names_members_by_its_own_spelling",
+      "seq": 962307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/tc/dir && echo x > /data/tc/dir/f.txt && cd /data/tc && tar -cf out.tar -C dir . && tar -tf out.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "./\n./f.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

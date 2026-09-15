@@ -131,6 +131,8 @@ interface Rows {
     title: string
     rows: number
     cols: number
+    rowPixels: string
+    columnPixels: string
     seq: number
   }[]
   cells: {
@@ -346,6 +348,8 @@ function buildRows(tenant: string, st: GwsState): Rows {
         title: tab.title,
         rows: tab.rows,
         cols: tab.cols,
+        rowPixels: JSON.stringify(tab.rowPixels ?? {}),
+        columnPixels: JSON.stringify(tab.columnPixels ?? {}),
         seq: (tabSeq += 1),
       })
       for (const [key, text] of tab.cells) {

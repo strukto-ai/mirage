@@ -14,6 +14,7 @@ permissions:
       - .github/workflows/test_integ.yml
       - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/integ-battery-setup/action.yml
+      - .github/actions/nextcloud-tune/action.yml
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -59,6 +60,7 @@ jobs:
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+              - '.github/actions/nextcloud-tune/action.yml'
             database:
               - 'integ/resources/mongodb/**'
               - 'integ/resources/postgres/**'
@@ -92,6 +94,7 @@ jobs:
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+              - '.github/actions/nextcloud-tune/action.yml'
             observability:
               - 'integ/server/langfuse_compose.yml'
               - 'integ/server/langfuse_seed.py'
@@ -284,19 +287,16 @@ jobs:
           name: integ-typescript-dist
           path: typescript/packages
 
-      - name: Wait for Nextcloud install
-        shell: bash
-        run: |
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:8080/status.php | grep -q '"installed":true'; then
-              echo "Nextcloud is installed"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Nextcloud did not finish installing in time" >&2
-          curl -s http://localhost:8080/status.php || true
-          exit 1
+      - name: Wait for Nextcloud and tune it for the battery
+        uses: ./.github/actions/nextcloud-tune
+        # A composite step cannot carry timeout-minutes, so the bound goes on
+        # the caller, where it covers the whole action.
+        timeout-minutes: 10
+        with:
+          container-id: ${{ job.services.nextcloud.id }}
+          # Read from the job env the battery itself authenticates with, so
+          # the reset and the battery cannot disagree about the password.
+          admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
 
       - name: Run declarative battery on Nextcloud
         working-directory: integ
@@ -305,12 +305,12 @@ jobs:
       - name: Start MinIO
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
+            docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
@@ -318,19 +318,20 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          for i in 1 2 3; do
-            if curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc \
-               && chmod +x /tmp/mc && /tmp/mc --version >/dev/null 2>&1; then
-              break
-            fi
-            echo "mc download attempt $i failed; retrying"; sleep 3
+          # MinIO archived the open-source server and client: the Docker Hub
+          # repo is gone and dl.min.io serves 410 for the mc binary. quay.io
+          # still carries both at the tags we pin. mc runs in the server's
+          # network namespace, and MC_HOST_local replaces `mc alias set`,
+          # which would not survive a --rm container.
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
-          /tmp/mc --version
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-integ || true
-          /tmp/mc mb local/mirage-integ-s3 || true
-          /tmp/mc mb local/mirage-integ-gcs || true
-          /tmp/mc mb local/mirage-integ-minio || true
+          docker run --rm --network container:minio \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-integ local/mirage-integ-s3 \
+              local/mirage-integ-gcs local/mirage-integ-minio
 
 
       # Snapshot roundtrip and out-of-band-delete GC only: the per-command
@@ -397,6 +398,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -451,7 +453,7 @@ jobs:
             -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
 
       - name: Run declarative battery (python hosts)
-        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+        run: ./python/.venv/bin/python integ/runners/python/main.py --facet core --strict --target-jobs 4 --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
       # Moved here from the `integ` job when the HTTP fixture server became a
       # TypeScript kit fake: the adapter still starts it, but the interpreter is
@@ -497,6 +499,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -544,8 +547,10 @@ jobs:
       # fails when it tests nothing; this asserts the kit the fakes are built
       # on still keeps its promises, none of which the battery can reach: no
       # corpus case sends a run or tenant header, and the runner awaits one
-      # case at a time, so run isolation, tenant isolation and the write queue
-      # are unreachable there by construction rather than by omission.
+      # case at a time within a target, so tenant isolation and the write
+      # queue are what keep two concurrent targets from reading each other
+      # once --target-jobs is above one, and no corpus case can reach them
+      # from the inside.
       - name: Assert the mock-server kit (run/tenant isolation, seeder, queue)
         working-directory: integ
         run: pnpm run selftest
@@ -613,7 +618,7 @@ jobs:
 
       - name: Run declarative battery (typescript hosts)
         working-directory: integ
-        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+        run: pnpm exec tsx runners/typescript/main.ts --facet core --strict --target-jobs 4 --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
 
       # The fixture server is python (started by the adapter through
       # startPythonServer), so this runs here rather than in integ-ts, which
@@ -848,19 +853,16 @@ jobs:
           NOTION_ENABLED: "1"
         run: ./python/.venv/bin/python integ/runners/python/main.py --target notion --strict
 
-      - name: Wait for Nextcloud install
-        shell: bash
-        run: |
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:8080/status.php | grep -q '"installed":true'; then
-              echo "Nextcloud is installed"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Nextcloud did not finish installing in time" >&2
-          curl -s http://localhost:8080/status.php || true
-          exit 1
+      - name: Wait for Nextcloud and tune it for the battery
+        uses: ./.github/actions/nextcloud-tune
+        # A composite step cannot carry timeout-minutes, so the bound goes on
+        # the caller, where it covers the whole action.
+        timeout-minutes: 10
+        with:
+          container-id: ${{ job.services.nextcloud.id }}
+          # Read from the job env the battery itself authenticates with, so
+          # the reset and the battery cannot disagree about the password.
+          admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
 
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
@@ -873,15 +875,19 @@ jobs:
         run: |
           docker run -d --name minio-watch -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
-          /tmp/mc alias set local http://localhost:9000 minio minio123
-          /tmp/mc mb local/mirage-watch
+          for i in $(seq 1 5); do
+            docker pull quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+          docker run --rm --network container:minio-watch \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
+            quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+            mb --ignore-existing local/mirage-watch
 
       - name: Start MongoDB for the watch battery
         run: |
@@ -1226,10 +1232,19 @@ jobs:
             --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
             2>/dev/null | tail -40 || true
 
+  # The suite battery is split in two: the runner, both in-process hosts and
+  # the CLI driver all take the same suite-name filter, so one leg's list
+  # drives every step that costs time. Leg A is named and leg B is whatever
+  # is left, so a new integ/runtime/*.json joins a leg instead of leaving CI.
   integ-runtime:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [a, b]
     services:
       redis:
         image: redis:7
@@ -1269,8 +1284,78 @@ jobs:
       # broken build download cannot silently drop wasi/quickjs/docker
       # coverage.
       INTEG_RUNTIME_STRICT: "1"
+      # cli.sh runs the two hosts concurrently and waits on both, so a leg
+      # costs max(python, typescript) rather than their sum. This list was
+      # picked off measured per-suite wall clock to halve BOTH hosts (python
+      # 50/50, typescript 48/52), so the balance holds whichever one binds on
+      # a given runner. Re-read the `suite <host>/<name> <n>s` lines cli.sh
+      # prints before moving a suite across; that step is 89% of the job's
+      # test time, and it is the only one timed per suite.
+      LEG_A_SUITES: "defaults guestops limits lines policy quickjs registry script_cli"
     steps:
       - uses: actions/checkout@v7
+
+      - name: Resolve this leg's suites
+        env:
+          LEG: ${{ matrix.leg }}
+        run: |
+          set -euo pipefail
+          # Collation for sort/comm, and for the name pattern below.
+          export LC_ALL=C
+          # Every suite json has to yield exactly one usable name here. A
+          # file this step drops or repairs instead of refusing is a file
+          # whose name reaches neither leg, so all three drivers skip it
+          # and CI passes without running any of its cases. Both halves
+          # are checked per file, verbatim, naming the file that failed:
+          # `jq -r` renders a missing key as the string "null", which is
+          # itself a legal name shape, so the emptiness check cannot be
+          # folded into the pattern check.
+          names=()
+          for f in integ/runtime/*.json; do
+            n=$(jq -r '.suite // empty' "$f")
+            if [ -z "$n" ]; then
+              echo "$f declares no .suite" >&2
+              exit 1
+            fi
+            case "$n" in
+              *[!a-z0-9_]*)
+                echo "$f: .suite '$n' is not [a-z0-9_]+" >&2
+                exit 1 ;;
+            esac
+            names+=("$n")
+          done
+          all=$(printf '%s\n' "${names[@]}" | sort -u)
+          a=$(printf '%s' "$LEG_A_SUITES" | tr ' ' '\n' | grep -v '^$' | sort -u)
+          unknown=$(comm -13 <(printf '%s\n' "$all") <(printf '%s\n' "$a"))
+          if [ -n "$unknown" ]; then
+            echo "LEG_A_SUITES names suites with no json: $unknown" >&2
+            exit 1
+          fi
+          b=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$a"))
+          if [ -z "$a" ] || [ -z "$b" ]; then
+            echo "a leg is empty: every suite would run twice or not at all" >&2
+            exit 1
+          fi
+          # Exhaustive on purpose: a third matrix leg falling into an
+          # `else` would silently re-run leg B's suites and still exit 0.
+          case "$LEG" in
+            a) suites="$a" ;;
+            b) suites="$b" ;;
+            *) echo "no suite list for leg '$LEG'" >&2; exit 1 ;;
+          esac
+          echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"
+          # Provision only what this leg's suites ask for, keyed on the
+          # resolved list rather than the leg letter, so moving a suite
+          # across moves its service with it.
+          in_leg() { grep -qx "$1" <<<"$suites"; }
+          if in_leg wasi; then echo "NEEDS_WASI=1" >> "$GITHUB_ENV"; fi
+          if in_leg bridge; then echo "NEEDS_MINIO=1" >> "$GITHUB_ENV"; fi
+          if in_leg docker; then echo "NEEDS_DOCKER=1" >> "$GITHUB_ENV"; fi
+          if in_leg ssh; then echo "NEEDS_SSH=1" >> "$GITHUB_ENV"; fi
+          if in_leg docker || in_leg ssh; then
+            echo "NEEDS_SANDBOX_IMAGE=1" >> "$GITHUB_ENV"
+          fi
+          printf 'leg %s runs:\n%s\n' "$LEG" "$suites"
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -1319,6 +1404,7 @@ jobs:
             -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
 
       - name: Cache the CPython WASI build
+        if: env.NEEDS_WASI == '1'
         id: wasi-cache
         uses: actions/cache@v6
         with:
@@ -1326,7 +1412,7 @@ jobs:
           key: cpython-wasi-${{ env.WASI_BUILD }}
 
       - name: Download the CPython WASI build
-        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        if: env.NEEDS_WASI == '1' && steps.wasi-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1336,20 +1422,22 @@ jobs:
           unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       - name: Start MinIO
+        if: env.NEEDS_MINIO == '1'
         run: |
           for i in $(seq 1 5); do
-            docker pull minio/minio:RELEASE.2025-09-07T16-13-09Z && break
+            docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z && break
             echo "docker pull failed (attempt $i), retrying"; sleep 10
           done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
 
       - name: Pull the sandbox image
+        if: env.NEEDS_SANDBOX_IMAGE == '1'
         run: |
           for i in $(seq 1 5); do
             docker pull debian:trixie-slim && break
@@ -1357,9 +1445,11 @@ jobs:
           done
 
       - name: Start the docker sandbox container (user-provisioned)
+        if: env.NEEDS_DOCKER == '1'
         run: docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" debian:trixie-slim sleep infinity
 
       - name: Start the ssh sandbox host (user-provisioned)
+        if: env.NEEDS_SSH == '1'
         run: |
           ssh-keygen -t ed25519 -N '' -f "$MIRAGE_INTEG_SSH_KEY"
           docker run -d --name mirage-integ-ssh-box -p 2222:22 debian:trixie-slim sleep infinity
@@ -1378,17 +1468,18 @@ jobs:
           done
 
       - name: Run every runtime through the JSON suites (python)
-        run: ./python/.venv/bin/python integ/runtime/run.py
+        run: ./python/.venv/bin/python integ/runtime/run.py $SUITES
 
       - name: Run every runtime through the JSON suites (typescript)
         working-directory: integ
-        run: pnpm exec tsx runtime/run.ts
+        run: pnpm exec tsx runtime/run.ts $SUITES
 
       - name: Run every runtime through the CLI and both daemons
         run: |
           bash integ/runtime/cli.sh \
             "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
+            "node typescript/packages/cli/dist/bin/mirage.js" \
+            $SUITES
 
   integ-observability:
     needs: [changes, typescript-build]

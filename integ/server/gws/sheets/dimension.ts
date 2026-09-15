@@ -17,6 +17,7 @@ import type { SheetTab, Spreadsheet } from '../store/types.ts'
 import { asArr, asNum, asObj, asStr } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { googleError } from '../wire/reply.ts'
+import { ROW_PIXELS, COLUMN_PIXELS, tabGrid } from './grid.ts'
 
 export type Dimension = 'ROWS' | 'COLUMNS'
 
@@ -59,6 +60,16 @@ export function remapCells(
     )
   }
   tab.cells = next
+  const sizes = dimension === 'ROWS' ? tab.rowPixels : tab.columnPixels
+  if (sizes !== undefined) {
+    const movedSizes: Record<string, number> = {}
+    for (const [key, value] of Object.entries(sizes)) {
+      const moved = mapIndex(Number(key))
+      if (moved !== null) movedSizes[moved] = value
+    }
+    if (dimension === 'ROWS') tab.rowPixels = movedSizes
+    else tab.columnPixels = movedSizes
+  }
 }
 
 // One cell of an UpdateCellsRequest, rendered the way values.update would
@@ -157,4 +168,49 @@ export function moveDimension(range: DimensionRange, destinationIndex: number): 
     const lifted = i >= range.endIndex ? i - count : i
     return lifted >= target ? lifted + count : lifted
   })
+}
+
+// The fake has no font renderer. Use deterministic text metrics; acceptance,
+// range scoping and persisted metadata follow Sheets, exact font widths do not.
+const TEXT_PIXEL_WIDTH = 7
+const CELL_PADDING = 6
+
+export function autoResizeDimensions(sheet: Spreadsheet, request: JsonObj): Reply | null {
+  const raw = asObj(request.dimensions)
+  const tab = sheet.tabs.find((t) => t.sheetId === (asNum(raw.sheetId) ?? 0))
+  if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+  const dimension = asStr(raw.dimension)
+  if (dimension !== 'ROWS' && dimension !== 'COLUMNS') {
+    return googleError(400, 'Invalid dimension.', 'INVALID_ARGUMENT')
+  }
+  const grid = tabGrid(tab)
+  const limit = dimension === 'ROWS' ? grid.rows : grid.cols
+  const start = asNum(raw.startIndex) ?? 0
+  const end = asNum(raw.endIndex) ?? limit
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end <= start ||
+    end > limit
+  ) {
+    return googleError(400, 'Invalid dimension range.', 'INVALID_ARGUMENT')
+  }
+  const measured = new Map<number, number>()
+  for (const [key, value] of tab.cells) {
+    const [row = 0, col = 0] = key.split(',').map(Number)
+    const index = dimension === 'ROWS' ? row : col
+    if (index < start || index >= end || value === '') continue
+    const lines = value.split('\n')
+    const pixels =
+      dimension === 'ROWS'
+        ? lines.length * ROW_PIXELS
+        : Math.max(...lines.map((line) => [...line].length)) * TEXT_PIXEL_WIDTH + CELL_PADDING
+    measured.set(index, Math.max(measured.get(index) ?? 0, pixels))
+  }
+  const sizes = dimension === 'ROWS' ? (tab.rowPixels ??= {}) : (tab.columnPixels ??= {})
+  for (let i = start; i < end; i += 1) {
+    sizes[i] = measured.get(i) ?? (dimension === 'ROWS' ? ROW_PIXELS : COLUMN_PIXELS)
+  }
+  return null
 }

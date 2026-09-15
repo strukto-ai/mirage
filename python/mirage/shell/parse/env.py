@@ -12,28 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import tree_sitter
-
 from mirage.shell.parse.constants import (CD_ANCHORS, DECL_PRINTER_HEADS,
                                           IMPLICIT_HEAD_READS, NAMEREF_HEADS)
 from mirage.shell.parse.names import (command_args, command_invocations,
                                       literal_text, walk_named_outside_defs)
+from mirage.shell.types import TSNodeLike
 
 
 def _declaration_parts(
-        node: tree_sitter.Node
-) -> tuple[str, list[str], list[tree_sitter.Node]]:
+        node: TSNodeLike) -> tuple[str, list[str], list[TSNodeLike]]:
     """Split a declaration_command into head word, flag words, operands.
 
     Args:
-        node (tree_sitter.Node): a ``declaration_command`` node.
+        node (TSNodeLike): a ``declaration_command`` node.
     """
     head = ""
     if node.children:
         text = node.children[0].text
         head = text.decode() if text else ""
     flags: list[str] = []
-    operands: list[tree_sitter.Node] = []
+    operands: list[TSNodeLike] = []
     for child in node.children[1:]:
         if child.type == "word":
             text = child.text
@@ -59,7 +57,7 @@ def _flag_has(flags: list[str], letter: str) -> bool:
         and letter in flag[1:] for flag in flags)
 
 
-def _env_exclusions(args: list[tree_sitter.Node]) -> frozenset[str] | None:
+def _env_exclusions(args: list[TSNodeLike]) -> frozenset[str] | None:
     """Names an ``env`` invocation provably keeps from the environment
     it hands on: None when it reads no existing name at all, else the
     set a whole-environment read may skip.
@@ -78,7 +76,7 @@ def _env_exclusions(args: list[tree_sitter.Node]) -> frozenset[str] | None:
     the command, demoting every later word to an argument.
 
     Args:
-        args (list[tree_sitter.Node]): the invocation's argument nodes.
+        args (list[TSNodeLike]): the invocation's argument nodes.
     """
     excluded: set[str] = set()
     i = 0
@@ -141,7 +139,7 @@ def _env_exclusions(args: list[tree_sitter.Node]) -> frozenset[str] | None:
     return frozenset(excluded)
 
 
-def _prefix_assignment_names(node: tree_sitter.Node) -> frozenset[str]:
+def _prefix_assignment_names(node: TSNodeLike) -> frozenset[str]:
     """Names a command's assignment prefixes provably override.
 
     ``TOKEN=local printenv TOKEN`` hands the command an environment
@@ -151,7 +149,7 @@ def _prefix_assignment_names(node: tree_sitter.Node) -> frozenset[str]:
     appends to the standing value and proves nothing.
 
     Args:
-        node (tree_sitter.Node): a ``command`` node.
+        node (TSNodeLike): a ``command`` node.
     """
     out: set[str] = set()
     for child in node.named_children:
@@ -168,8 +166,7 @@ def _prefix_assignment_names(node: tree_sitter.Node) -> frozenset[str]:
     return frozenset(out)
 
 
-def env_reads(
-        node: tree_sitter.Node) -> tuple[bool, frozenset[str], frozenset[str]]:
+def env_reads(node: TSNodeLike) -> tuple[bool, frozenset[str], frozenset[str]]:
     """How the line's environment-rendering commands read names.
 
     Returns ``(whole, names, excluded)``: whether some command renders
@@ -197,7 +194,7 @@ def env_reads(
     because a name is skippable only when every such read skips it.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     whole = False
     excluded: frozenset[str] | None = None
@@ -254,7 +251,7 @@ def env_reads(
     return whole, frozenset(names), excluded or frozenset()
 
 
-def opaque_reads(node: tree_sitter.Node) -> bool:
+def opaque_reads(node: TSNodeLike) -> bool:
     """Whether the line reads names no static walk can spell.
 
     Two constructs defeat ``referenced_names``: an indirect expansion
@@ -266,7 +263,7 @@ def opaque_reads(node: tree_sitter.Node) -> bool:
     resolves.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     for n in walk_named_outside_defs(node):
         if n.type == "expansion" and any(c.type == "!" for c in n.children):
@@ -306,7 +303,7 @@ def _cd_reads(args: tuple[str | None, ...]) -> frozenset[str]:
     return frozenset({"CDPATH"})
 
 
-def implicit_reads(node: tree_sitter.Node) -> frozenset[str]:
+def implicit_reads(node: TSNodeLike) -> frozenset[str]:
     """Names the program reads without a ``$NAME`` in the text.
 
     Tilde expansion resolves ``~`` and ``~/...`` against ``$HOME``
@@ -321,7 +318,7 @@ def implicit_reads(node: tree_sitter.Node) -> frozenset[str]:
     ``echo $HOME``.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node):

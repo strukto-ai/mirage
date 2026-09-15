@@ -1040,6 +1040,84 @@
       "targets": [
         "cli-gws"
       ]
+    },
+    {
+      "id": "gw_calendar_insert_malformed_time_is_a_400",
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Malformed\",\"start\":{\"dateTime\":\"not-a-date\"},\"end\":{\"dateTime\":\"not-a-date\"}}' 2>&1 | grep -c 'Invalid format'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "seq": 563076,
+      "targets": [
+        "cli-gws"
+      ]
+    },
+    {
+      "id": "gw_calendar_insert_malformed_time_persists_nothing",
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Malformed\",\"start\":{\"dateTime\":\"not-a-date\"},\"end\":{\"dateTime\":\"not-a-date\"}}' > /dev/null 2>&1; gws calendar events list --params '{\"calendarId\":\"primary\",\"q\":\"Malformed\"}' | jq -r '.items | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "seq": 563077,
+      "targets": [
+        "cli-gws"
+      ]
+    },
+    {
+      "id": "gw_calendar_insert_offset_free_time_needs_a_zone",
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Zoneless refused\",\"start\":{\"dateTime\":\"2026-03-07T09:00:00\"},\"end\":{\"dateTime\":\"2026-03-07T10:00:00\"}}' 2>&1 | grep -c 'Invalid format'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "seq": 563078,
+      "targets": [
+        "cli-gws"
+      ]
+    },
+    {
+      "id": "gw_calendar_insert_unknown_zone_is_a_400",
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Martian\",\"start\":{\"dateTime\":\"2026-03-07T09:00:00\",\"timeZone\":\"Mars/Olympus\"},\"end\":{\"dateTime\":\"2026-03-07T10:00:00\",\"timeZone\":\"Mars/Olympus\"}}' 2>&1 | grep -c 'Invalid time zone definition for start time'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "seq": 563079,
+      "targets": [
+        "cli-gws"
+      ]
+    },
+    {
+      "id": "gw_calendar_insert_impossible_all_day_date_is_a_400",
+      "command": "gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Leap\",\"start\":{\"date\":\"2026-02-30\"},\"end\":{\"date\":\"2026-03-01\"}}' 2>&1 | grep -c 'Invalid format'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "seq": 563080,
+      "targets": [
+        "cli-gws"
+      ]
+    },
+    {
+      "id": "gw_calendar_patch_malformed_time_keeps_the_event",
+      "command": "ID=$(gws calendar events insert --params '{\"calendarId\":\"primary\"}' --json '{\"summary\":\"Patch Guard\",\"start\":{\"dateTime\":\"2026-03-08T09:00:00+08:00\"},\"end\":{\"dateTime\":\"2026-03-08T10:00:00+08:00\"}}' | jq -r .id); gws calendar events patch --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\" --json '{\"start\":{\"dateTime\":\"not-a-date\"}}' 2>&1 | grep -c 'Invalid format'; gws calendar events get --params \"{\\\"calendarId\\\":\\\"primary\\\",\\\"eventId\\\":\\\"$ID\\\"}\" | jq -r '.start.dateTime'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2026-03-08T09:00:00+08:00\n",
+        "stderr": ""
+      },
+      "seq": 563081,
+      "targets": [
+        "cli-gws"
+      ]
     }
   ]
 }

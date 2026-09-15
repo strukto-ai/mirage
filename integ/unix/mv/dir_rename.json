@@ -159,6 +159,102 @@
         "stdout": "",
         "stderr": "mv: cannot stat '/data/mvdirn/nosuch': No such file or directory\n"
       }
+    },
+    {
+      "id": "mv_dir_rename_link_prep",
+      "seq": 613215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/mvdirl/d && echo t > /data/mvdirl/t.txt && ln -s /data/mvdirl/t.txt /data/mvdirl/d/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mv_dir_rename_link_travels",
+      "seq": 613216,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/mvdirl/d /data/mvdirl/e && readlink /data/mvdirl/e/link && cat /data/mvdirl/e/link",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mvdirl/t.txt\nt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mv_dir_rename_link_left_the_old_name",
+      "seq": 613217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "readlink /data/mvdirl/d/link; echo exit=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "exit=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

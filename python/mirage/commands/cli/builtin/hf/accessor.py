@@ -98,10 +98,8 @@ def require_operands(inv: CLIInvocation[HfConfig], names: list[str]) -> None:
                          ", ".join(missing))
 
 
-def text_out(
-        text: str,
-        mutated: bool | None = None) -> tuple[ByteSource | None, IOResult]:
-    return yield_bytes(text.encode()), IOResult(mutated=mutated)
+def text_out(text: str) -> tuple[ByteSource | None, IOResult]:
+    return yield_bytes(text.encode()), IOResult()
 
 
 def require_token(inv: CLIInvocation[HfConfig], what: str) -> None:

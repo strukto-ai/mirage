@@ -18,8 +18,15 @@ import type { GwsState } from '../store/state.ts'
 import type { CalendarEntry, CalendarEvent, EventTime } from '../store/types.ts'
 import { asObj, asStr } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
-import { ok } from '../wire/reply.ts'
-import { eventEndMs, eventStartMs } from './zone.ts'
+import { googleError, ok } from '../wire/reply.ts'
+import {
+  eventEndMs,
+  eventStartMs,
+  formatEventTime,
+  isIanaZone,
+  parseDate,
+  parseDateTime,
+} from './zone.ts'
 
 const DEFAULT_MAX_RESULTS = 250
 
@@ -42,8 +49,8 @@ export function fmtEvent(cal: CalendarEntry, ev: CalendarEvent): JsonObj {
     kind: 'calendar#event',
     id: ev.id,
     status: ev.status,
-    start: { ...ev.start },
-    end: { ...ev.end },
+    start: { ...formatEventTime(ev.start) },
+    end: { ...formatEventTime(ev.end) },
     created: ev.created,
     updated: ev.updated,
     iCalUID: `${ev.id}@google.com`,
@@ -109,6 +116,23 @@ export function listCalendarEvents(
   return ok(out)
 }
 
+export interface EventTimes {
+  start: EventTime
+  end: EventTime
+}
+
+const MISSING_END = 'Missing end time.'
+
+function invalidArgument(message: string): Reply {
+  return googleError(400, message, 'INVALID_ARGUMENT')
+}
+
+// Google's wording for a value its parser cannot read as the field's type,
+// which is what an offset-free dateTime with no zone is to it too.
+function invalidFormat(value: string): Reply {
+  return invalidArgument(`Invalid value for: Invalid format: "${value}"`)
+}
+
 function readSlot(
   raw: JsonValue | undefined,
   fallback: EventTime | undefined,
@@ -125,22 +149,43 @@ function readSlot(
   return slot
 }
 
-export function readEventTimes(
-  body: JsonObj,
-  fallback?: CalendarEvent,
-): { start: EventTime; end: EventTime } | null {
-  const start = readSlot(body.start, fallback?.start)
-  const end = readSlot(body.end, fallback?.end)
-  if (start === undefined || end === undefined) return null
-  for (const t of [start, end]) {
-    if (t.date === undefined && t.dateTime === undefined) return null
+// The refusal one slot earns, or null when it is a well-formed event time.
+// The Event resource takes `date` as yyyy-mm-dd, `dateTime` as RFC3339 with
+// an offset unless the slot names its own `timeZone`, and never both in
+// one slot. Checked here, before anything is stored, because a value that
+// gets through is one the read side turns into NaN: a bounded list drops
+// the event, orderBy=startTime sorts on garbage, and free/busy skips it.
+function slotRefusal(slot: EventTime, which: 'start' | 'end'): Reply | null {
+  if (slot.date !== undefined && slot.dateTime !== undefined) {
+    return invalidArgument(`Invalid ${which} time.`)
   }
-  return { start, end }
+  if (slot.timeZone !== undefined && !isIanaZone(slot.timeZone)) {
+    return invalidArgument(`Invalid time zone definition for ${which} time.`)
+  }
+  if (slot.dateTime !== undefined) {
+    const parsed = parseDateTime(slot.dateTime)
+    if (parsed === null || (parsed.offset === null && slot.timeZone === undefined)) {
+      return invalidFormat(slot.dateTime)
+    }
+  }
+  if (slot.date !== undefined && parseDate(slot.date) === null) return invalidFormat(slot.date)
+  return null
 }
 
-export function makeEvent(st: GwsState, body: JsonObj): CalendarEvent | null {
-  const times = readEventTimes(body)
-  if (times === null) return null
+// The start and end an insert or patch body asks for, or the 400 that
+// refuses it. A patch falls back to the stored slot it does not mention,
+// and is refused before anything replaces the stored event.
+export function readEventTimes(body: JsonObj, fallback?: CalendarEvent): EventTimes | Reply {
+  const start = readSlot(body.start, fallback?.start)
+  const end = readSlot(body.end, fallback?.end)
+  if (start === undefined || end === undefined) return invalidArgument(MISSING_END)
+  for (const t of [start, end]) {
+    if (t.date === undefined && t.dateTime === undefined) return invalidArgument(MISSING_END)
+  }
+  return slotRefusal(start, 'start') ?? slotRefusal(end, 'end') ?? { start, end }
+}
+
+export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): CalendarEvent {
   const now = st.now()
   const ev: CalendarEvent = {
     id: st.nextEventId(),

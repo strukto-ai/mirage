@@ -14,7 +14,7 @@
 
 import re
 from calendar import monthrange
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 
 _UNIT_SECONDS = {
     "sec": 1,
@@ -56,18 +56,100 @@ def _add_months(dt: datetime, count: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 
+def _place(wall: datetime, tz: tzinfo, offset: timedelta | None) -> datetime:
+    """Put a displaced wall clock back on the timeline, the way mktime
+    does when gnulib hands it the base moment's ``tm_isdst``.
+
+    A wall clock the zone shows once is that instant. One it shows
+    twice (the hour repeated when DST ends) is the reading under the
+    base's offset, so a summer base stays in summer time and a winter
+    one in winter time, else the later reading. One it never shows
+    (the hour skipped when DST starts) is read under the offset in
+    force before the change and lands past the gap whichever side the
+    base was on: ``2025-03-29 02:30 CET 1 day`` and ``2025-03-31 02:30
+    CEST 1 day ago`` are both ``03:30 CEST`` under GNU.
+
+    Args:
+        wall (datetime): the naive wall clock after the displacement.
+        tz (tzinfo): the zone it is read in.
+        offset (timedelta | None): the base moment's UTC offset.
+    """
+    first = wall.replace(tzinfo=tz, fold=0)
+    second = wall.replace(tzinfo=tz, fold=1)
+    shown = [
+        reading for reading in (first, second)
+        if reading.astimezone(timezone.utc).astimezone(tz).replace(
+            tzinfo=None) == wall
+    ]
+    if not shown:
+        return first.astimezone(timezone.utc).astimezone(tz)
+    if first.utcoffset() == second.utcoffset():
+        return first
+    for reading in shown:
+        if reading.utcoffset() == offset:
+            return reading
+    return second
+
+
 def _shift(dt: datetime, unit: str, count: int) -> datetime:
+    """Displace a moment by ``count`` units, as gnulib does.
+
+    Months and years move the calendar (``_add_months``), and days and
+    weeks move it too, keeping the wall clock across a DST change; the
+    moved wall clock is then read as mktime reads it (``_place``).
+    Hours, minutes and seconds are exact, so they are added on the UTC
+    timeline (``2025-03-29 12:00 CET 24 hours`` is ``13:00 CEST``). A
+    naive moment has no zone to cross, so every unit is plain
+    arithmetic there.
+
+    Args:
+        dt (datetime): the moment to displace.
+        unit (str): a key of ``_UNIT_SECONDS`` or a calendar unit.
+        count (int): how many units, signed.
+    """
+    calendar = unit in _CALENDAR_UNITS or unit in ("day", "week")
+    if dt.tzinfo is not None and not calendar:
+        delta = timedelta(seconds=_UNIT_SECONDS[unit] * count)
+        return (dt.astimezone(timezone.utc) + delta).astimezone(dt.tzinfo)
+    wall = dt.replace(tzinfo=None)
     if unit == "month":
-        return _add_months(dt, count)
-    if unit == "year":
-        return _add_months(dt, 12 * count)
-    return dt + timedelta(seconds=_UNIT_SECONDS[unit] * count)
+        wall = _add_months(wall, count)
+    elif unit == "year":
+        wall = _add_months(wall, 12 * count)
+    else:
+        wall += timedelta(seconds=_UNIT_SECONDS[unit] * count)
+    if dt.tzinfo is None:
+        return wall
+    return _place(wall, dt.tzinfo, dt.utcoffset())
 
 
-def _localize(dt: datetime, utc: bool) -> datetime:
+def _localize(dt: datetime, tz: tzinfo | None) -> datetime | None:
+    """Place a parsed moment on the timeline the caller reads in.
+
+    A moment carrying its own zone is converted; a naive one is read
+    as a wall clock in ``tz``, or stays naive (host local) when there
+    is none, which is how GNU reads ``-d '2026-01-01 00:00'`` under a
+    ``TZ``. Two wall clocks a zone does not show once are read as
+    glibc's mktime reads them: the hour repeated when DST ends is the
+    later (standard-time) instant, and the hour skipped when it starts
+    is no moment at all, GNU's ``invalid date``.
+
+    Args:
+        dt (datetime): the parsed moment.
+        tz (tzinfo | None): the zone, None for the host's local zone.
+
+    Returns:
+        datetime | None: the moment, or None for a skipped wall clock.
+    """
     if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc) if utc else dt.astimezone()
-    return dt.replace(tzinfo=timezone.utc) if utc else dt
+        return dt.astimezone(tz)
+    if tz is None:
+        return dt
+    placed = dt.replace(tzinfo=tz, fold=1)
+    shown = placed.astimezone(timezone.utc).astimezone(tz)
+    if shown.replace(tzinfo=None) != dt:
+        return None
+    return placed
 
 
 def _apply_relative(base: datetime, words: list[str]) -> datetime | None:
@@ -148,7 +230,7 @@ def _apply_relative(base: datetime, words: list[str]) -> datetime | None:
 
 def parse_date_expr(text: str,
                     *,
-                    utc: bool = False,
+                    tz: tzinfo | None = None,
                     now: datetime | None = None) -> datetime | None:
     """Parse a GNU `date -d` expression, or None when it is invalid.
 
@@ -160,7 +242,9 @@ def parse_date_expr(text: str,
 
     Args:
         text (str): the -d argument as typed.
-        utc (bool): whether -u pinned the timeline to UTC.
+        tz (tzinfo | None): the zone the result is read and rendered
+            in: UTC under ``-u``, the zone ``TZ`` names, or None for
+            the host's local zone, which keeps the result naive.
         now (datetime | None): the current moment, injectable for tests.
     """
     raw = text.strip()
@@ -174,14 +258,14 @@ def parse_date_expr(text: str,
         if _EPOCH_RE.fullmatch(raw) is None:
             return None
         epoch = float(raw[1:])
-        return datetime.fromtimestamp(epoch, tz=timezone.utc if utc else None)
+        return datetime.fromtimestamp(epoch, tz=tz)
     try:
-        return _localize(datetime.fromisoformat(raw), utc)
+        return _localize(datetime.fromisoformat(raw), tz)
     except ValueError:
         pass
     words = raw.split()
     if now is None:
-        now = datetime.now(timezone.utc) if utc else datetime.now()
+        now = datetime.now(tz)
     base = now
     index = 0
     for take in (2, 1):
@@ -189,9 +273,11 @@ def parse_date_expr(text: str,
             continue
         try:
             prefix = _localize(datetime.fromisoformat(" ".join(words[:take])),
-                               utc)
+                               tz)
         except ValueError:
             continue
+        if prefix is None:
+            return None
         base = prefix
         index = take
         break

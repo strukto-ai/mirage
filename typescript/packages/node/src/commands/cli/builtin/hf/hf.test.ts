@@ -22,7 +22,6 @@ import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagValue } from '@struktoai/mirage-core/commands/spec/types'
-import { ResourceName } from '@struktoai/mirage-core/types'
 import type { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { Absence } from '../../../../core/hf_hub/repo.ts'
 import type * as RepoModule from '../../../../core/hf_hub/repo.ts'
@@ -159,12 +158,6 @@ describe('the hf program tree', () => {
     // git declares none and reads mounts instead; an account CLI reaches a
     // service and initializes from its install.
     expect(HF.configModel).not.toBeNull()
-  })
-
-  it('names the three repository mounts it also backs', () => {
-    expect([...HF.serves].sort()).toEqual(
-      [ResourceName.HF_DATASETS, ResourceName.HF_MODELS, ResourceName.HF_SPACES].sort(),
-    )
   })
 
   it('spells repo tag as a group of three, the way upstream hf does', () => {

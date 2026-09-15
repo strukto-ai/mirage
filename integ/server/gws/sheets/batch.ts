@@ -20,6 +20,7 @@ import { asNum, asObj, asObjArr, asStr } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { NOT_FOUND, googleError, ok } from '../wire/reply.ts'
 import {
+  autoResizeDimensions,
   deleteDimension,
   growGrid,
   insertDimension,
@@ -32,8 +33,12 @@ import { GRID_COLUMNS, GRID_ROWS, newTab, tabProperties } from './grid.ts'
 const BAD_SHEET_ID = 'Invalid sheetId.'
 
 export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[]): Reply {
-  const sheet = st.sheets.get(id)
-  if (sheet === undefined) return NOT_FOUND
+  const current = st.sheets.get(id)
+  if (current === undefined) return NOT_FOUND
+  // Later requests may depend on earlier ones, but no change is published
+  // until the entire batch succeeds, including the linked Drive metadata.
+  const sheet = structuredClone(current)
+  let updatedTitle: string | undefined
   const replies: JsonValue[] = []
   for (const request of requests) {
     if ('addSheet' in request) {
@@ -72,6 +77,8 @@ export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[])
         sheetId: newSheetId ?? sheet.nextSheetId,
         title: asStr(r.newSheetName) ?? `Copy of ${src.title}`,
         cells: new Map(src.cells),
+        rowPixels: { ...src.rowPixels },
+        columnPixels: { ...src.columnPixels },
       }
       if (newSheetId === undefined) sheet.nextSheetId += 1
       const at = asNum(r.insertSheetIndex) ?? sheet.tabs.length
@@ -99,6 +106,10 @@ export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[])
       if (range === null) return googleError(400, BAD_SHEET_ID, 'INVALID_ARGUMENT')
       moveDimension(range, asNum(r.destinationIndex) ?? 0)
       replies.push({})
+    } else if ('autoResizeDimensions' in request) {
+      const failed = autoResizeDimensions(sheet, asObj(request.autoResizeDimensions))
+      if (failed !== null) return failed
+      replies.push({})
     } else if ('updateCells' in request) {
       const failed = updateCells(sheet, asObj(request.updateCells))
       if (failed !== null) return failed
@@ -107,8 +118,7 @@ export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[])
       const title = asStr(asObj(asObj(request.updateSpreadsheetProperties).properties).title)
       if (title !== undefined) {
         sheet.title = title
-        const file = st.files.get(id)
-        if (file !== undefined) file.name = title
+        updatedTitle = title
       }
       replies.push({})
     } else {
@@ -119,6 +129,9 @@ export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[])
       )
     }
   }
+  st.sheets.set(id, sheet)
+  const file = st.files.get(id)
+  if (file !== undefined && updatedTitle !== undefined) file.name = updatedTitle
   touchNative(st, id)
   return ok({ spreadsheetId: id, replies })
 }
@@ -143,6 +156,8 @@ export function copySheetTo(
     sheetId: destination.nextSheetId,
     title: `Copy of ${tab.title}`,
     cells: new Map(tab.cells),
+    rowPixels: { ...tab.rowPixels },
+    columnPixels: { ...tab.columnPixels },
   }
   destination.nextSheetId += 1
   destination.tabs.push(copy)

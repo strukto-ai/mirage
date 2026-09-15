@@ -300,6 +300,17 @@ class Dispatcher:
                     and await self._moved_source_is_dir(path)):
                 raise PermissionError(errno.EACCES, os.strerror(errno.EACCES),
                                       path.virtual)
+        if (op == "rename" and isinstance(dst, PathSpec)
+                and self._namespace.link_stats_below(dst.virtual)):
+            # rename(2) replaces a destination directory only when it
+            # is empty, and the node table is half of what empty means
+            # here: a link is invisible to every backend, so a
+            # destination the backend reads as empty can still hold
+            # one. Left to the backend the rename succeeded and the
+            # purge below then deleted the link with it, losing
+            # namespace state silently where POSIX promises ENOTEMPTY.
+            raise OSError(errno.ENOTEMPTY, os.strerror(errno.ENOTEMPTY),
+                          dst.virtual)
         if self._table_answers(op, path.virtual, kwargs):
             return (await self._namespace_table_op(op, path, kwargs,
                                                    report), IOResult())
@@ -435,7 +446,7 @@ class Dispatcher:
             observed = time.time() if op in STAMP_WRITE_OPS else None
             await self.invalidate_after_write(mount, path, observed=observed)
             if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-                await self.invalidate_after_write(mount, kwargs["dst"])
+                await self.invalidate_after_rename(mount, path, kwargs["dst"])
                 # rename(2) replaces the destination, so a node the
                 # table holds at that name does not survive the move.
                 # A link left there shadowed the file that had just
@@ -443,6 +454,25 @@ class Dispatcher:
                 # followed the old link, and the moved content was
                 # reachable under no name at all.
                 await self._namespace.unlink(kwargs["dst"].virtual)
+                # The subtree moves with it, and only the node table can
+                # move the part of it no backend holds: a link or an
+                # attr overlay below the source is addressed by absolute
+                # path, so it would otherwise stay behind at a name the
+                # rename has emptied. The destination's own subtree is
+                # replaced first, as rename(2) replaces what it lands on.
+                await self._namespace.purge_under(kwargs["dst"].virtual)
+                # The node at the source itself is not part of the
+                # subtree below it, so re-anchoring that subtree leaves
+                # it behind: the mode or ownership a chmod recorded
+                # stayed at the emptied name, never reached the
+                # landing, and was inherited by whatever was created at
+                # the old name next. Shell mv compensates for this in
+                # its own prepare step; a verb reaching the dispatcher
+                # directly, as git mv does, had nothing to.
+                await self._namespace.rename(path.virtual,
+                                             kwargs["dst"].virtual)
+                await self._namespace.rename_under(path.virtual,
+                                                   kwargs["dst"].virtual)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
         if bound is not None:
@@ -917,23 +947,46 @@ class Dispatcher:
         FUSE mount, which the local dispatch never saw; without this
         reset the next `cat /data/x` would serve the stale "old".
         """
-        if self._cache is not None:
-            await self._cache.clear()
-        for mount in self._namespace.registry.mounts():
-            if mount.cache_manager is not None:
-                await mount.cache_manager.clear_index(mount.resource.index)
-            else:
-                async with mount.use():
-                    await mount.resource.index.clear()
+        await self._namespace.registry.invalidate_after_external()
+
+    def _manager_for(self, mount: MountEntry) -> CacheManager:
+        """The cache manager that owns a mount's listings and bodies.
+
+        Args:
+            mount (MountEntry): the mount that was written.
+        """
+        manager = mount.cache_manager
+        if manager is None:
+            manager = CacheManager(self._cache, mount.resource.index,
+                                   mount.prefix, mount.resource.caches_reads)
+        return manager
 
     async def invalidate_after_write(self,
                                      mount: MountEntry,
                                      path: PathSpec,
                                      observed: float | None = None) -> None:
         await self._namespace.clear_times(path.virtual, observed=observed)
-        manager = mount.cache_manager
-        if manager is None:
-            manager = CacheManager(self._cache, mount.resource.index,
-                                   mount.prefix, mount.resource.caches_reads)
+        manager = self._manager_for(mount)
         await manager.invalidate_after_write(path)
         await manager.invalidate_ancestors(path)
+
+    async def invalidate_after_rename(self, mount: MountEntry,
+                                      source: PathSpec, dst: PathSpec) -> None:
+        """Drop everything cached below both ends of a rename.
+
+        A rename re-anchors the whole subtree under its source, so the
+        listings and bodies cached one level down under either name
+        are stale, not just the two paths and their parents. Evicting
+        only those left a moved directory's old name answering ``stat``
+        and ``ls`` from its cached children, so the next rename onto
+        that name saw a directory that was no longer there.
+
+        Args:
+            mount (MountEntry): the mount the rename ran on.
+            source (PathSpec): the name the subtree left.
+            dst (PathSpec): the name it now lives under.
+        """
+        manager = self._manager_for(mount)
+        await manager.invalidate_subtree(source)
+        await manager.invalidate_subtree(dst)
+        await manager.invalidate_ancestors(dst)

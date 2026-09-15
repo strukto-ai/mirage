@@ -24,7 +24,8 @@ from mirage.commands.cli.builtin.git.errors import (GitError,
                                                     NoWorkspaceError)
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -90,7 +91,7 @@ async def diff(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts, InvalidOptionError)
+        check_operands(texts, InvalidOptionError, escaped(inv.argv))
         repo, _location = await opened(fl, doors)
         new_rev = texts[1] if len(texts) >= 2 else HEAD
         body = await asyncio.to_thread(_render, repo, texts[0], new_rev)

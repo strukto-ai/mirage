@@ -14,7 +14,8 @@
 
 import { dotglobActive, pathAllowed } from '../context/session_context.ts'
 import type { ChildMounts } from '../ops/types.ts'
-import { PathSpec } from '../types.ts'
+import { type FileStat, FileType, PathSpec } from '../types.ts'
+import { isFsError } from './errors.ts'
 import { fnmatch } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
@@ -319,6 +320,47 @@ function isMissingDir(err: unknown): boolean {
 // directory-shaped spec (`PathSpec.dir`) asks for matches alone, so an empty
 // list means nothing matched -- what a caller merging these matches with
 // another source needs, since only it can tell whether the union is empty.
+// The namespace's stat of what an owed name points at, resolved through
+// the workspace: null when the link dangles or loops.
+export type TargetStat = (virtual: string) => Promise<FileStat | null>
+
+// Whether a match is a directory, the way a trailing slash asks. A name
+// the namespace owes the directory (a nested mount root or a link) is no
+// backend's to stat: the namespace answers for it through `targetStat`,
+// which follows a link and stats what it reaches, so a link to a
+// directory is kept and a link to a file or to nothing is dropped, bash's
+// own rule for `*/`. Without that door the owed name is kept, and without
+// a stat door every match is kept, since nothing can tell them apart.
+// Otherwise one stat per match, served from the index the readdir just
+// filled.
+async function isDirectory<A, I>(
+  stat: ((accessor: A, path: PathSpec, index?: I) => Promise<FileStat>) | undefined,
+  accessor: A,
+  match: PathSpec,
+  index: I | undefined,
+  children: ChildMounts | undefined,
+  targetStat: TargetStat | undefined,
+): Promise<boolean> {
+  if (stat === undefined) return true
+  const trimmed = rstripSlash(match.virtual)
+  const cut = trimmed.lastIndexOf('/')
+  const parent = trimmed.slice(0, cut + 1)
+  const name = trimmed.slice(cut + 1)
+  if (children?.(parent).includes(name) === true) {
+    if (targetStat === undefined) return true
+    const target = await targetStat(trimmed)
+    return target?.type === FileType.DIRECTORY
+  }
+  let row: FileStat
+  try {
+    row = await stat(accessor, match, index)
+  } catch (err) {
+    if (isFsError(err)) return false
+    throw err
+  }
+  return row.type === FileType.DIRECTORY
+}
+
 export async function resolveGlobWith<A, I>(
   readdir: (accessor: A, path: PathSpec, index?: I) => Promise<string[]>,
   accessor: A,
@@ -326,6 +368,8 @@ export async function resolveGlobWith<A, I>(
   index: I | undefined,
   cap?: number,
   children?: ChildMounts,
+  stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
+  targetStat?: TargetStat,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
   for (const p of paths) {
@@ -334,15 +378,50 @@ export async function resolveGlobWith<A, I>(
       continue
     }
     if (p.pattern !== null && p.pattern !== '') {
+      // A trailing slash asks for directories only, and every match keeps
+      // one (`*/` -> `sub/`), the same rule the shell tier applies in
+      // workspace/expand/globs.ts. The slash is not part of the spelling
+      // to rebuild, so it comes off the word here and goes back on each
+      // match; the literal answer to a zero-match glob is still the word
+      // as typed (#1065).
+      const dirsOnly = p.rawPath.endsWith('/') && p.rawPath !== p.virtual
+      const word = dirsOnly
+        ? new PathSpec({
+            virtual: p.virtual,
+            directory: p.directory,
+            resourcePath: p.resourcePath,
+            pattern: p.pattern,
+            resolved: p.resolved,
+            rawPath: rstripSlash(p.rawPath),
+          })
+        : p
       // The hidden filter sits here, in the one loop every backend's
       // resolveGlob runs through, because per-backend glob modules bind
       // raw readdirs that never pass the command-door guard. It runs
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
-      const matched = (await expandPattern(readdir, accessor, p, index, children)).filter((m) =>
+      let matched = (await expandPattern(readdir, accessor, word, index, children)).filter((m) =>
         pathAllowed(m.virtual),
       )
+      if (dirsOnly) {
+        const kept: PathSpec[] = []
+        for (const m of matched) {
+          if (await isDirectory(stat, accessor, m, index, children, targetStat)) {
+            kept.push(
+              new PathSpec({
+                virtual: m.virtual,
+                directory: m.directory,
+                resourcePath: m.resourcePath,
+                pattern: m.pattern,
+                resolved: m.resolved,
+                rawPath: `${m.rawPath}/`,
+              }),
+            )
+          }
+        }
+        matched = kept
+      }
       // Dir-shaped specs keep the empty result, which is what a caller
       // that has to merge these matches with another source asks for.
       if (matched.length === 0 && isWordShaped(p)) {
@@ -437,9 +516,11 @@ export async function expandPattern<A, I>(
         if (!isMissingDir(err)) throw err
         entries = []
       }
+      // A cold listing marks a folder with a trailing slash (box, gdrive,
+      // dropbox); the marker is not part of the name.
       for (const e of entries) {
-        const name = rstripSlash(e).split('/').pop() ?? ''
-        if (globNameMatches(name, matcher)) nextLevel.push(e)
+        const entry = rstripSlash(e)
+        if (globNameMatches(entry.split('/').pop() ?? '', matcher)) nextLevel.push(entry)
       }
       if (children !== undefined) {
         // A nested mount root or a link is a real child of this parent

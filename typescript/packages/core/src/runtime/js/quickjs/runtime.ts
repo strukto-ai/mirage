@@ -26,8 +26,6 @@ import type {
   RuntimeContext,
 } from '../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
-import { PrefixResolver, type MountResolver } from '../../resolver.ts'
-import type { BridgeDispatchFn } from '../../types.ts'
 import { installMirageFs } from './vfs.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
 import { QuickJsUnavailableError } from './errors.ts'
@@ -63,20 +61,12 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
   // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
   // into the workspace bridge: guest I/O has no door around the gate.
   override readonly reach = 'vfs'
+  override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null
-  private workspaceBridge: BridgeDispatchFn | null = null
-  private resolver: MountResolver = new PrefixResolver(() => [])
 
   constructor(options: RuntimeOptions = {}) {
     super(options, HOME_CONFIG_KEYS)
-  }
-
-  override attach(dispatch: BridgeDispatchFn, resolver: MountResolver): void {
-    if (this.workspaceBridge === null) {
-      this.workspaceBridge = dispatch
-      this.resolver = resolver
-    }
   }
 
   override async version(): Promise<RunResult> {
@@ -125,12 +115,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
     const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const vfs =
-        context !== undefined
-          ? new RuntimeVFS(context.dispatch, context.resolver)
-          : this.workspaceBridge !== null
-            ? new RuntimeVFS(this.workspaceBridge, this.resolver)
-            : null
+      const vfs = context !== undefined ? new RuntimeVFS(context.dispatch, context.resolver) : null
       installMirageFs(ctx, vfs)
 
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
@@ -219,12 +204,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
       // Same filesystem surface as run(): an attached workspace serves
       // std.open/os.readdir, so a JS policy script can read mounted
       // content (the python evaluator gets this via run()'s RuntimeVFS).
-      const vfs =
-        context !== undefined
-          ? new RuntimeVFS(context.dispatch, context.resolver)
-          : this.workspaceBridge !== null
-            ? new RuntimeVFS(this.workspaceBridge, this.resolver)
-            : null
+      const vfs = context !== undefined ? new RuntimeVFS(context.dispatch, context.resolver) : null
       installMirageFs(ctx, vfs)
       const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {

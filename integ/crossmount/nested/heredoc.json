@@ -1,0 +1,134 @@
+{
+  "cases": [
+    {
+      "id": "heredoc_nested_mount_quoted_child",
+      "seq": 950100,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<'EOF' > /data/inner/hd-quoted\n$v `echo literal` $(echo literal)\nEOF\ncat /data/inner/hd-quoted",
+      "expect": {
+        "exit": 0,
+        "stdout": "$v `echo literal` $(echo literal)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_parent_child_isolation",
+      "seq": 950101,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<A > /data/hd-same; cat <<B > /data/inner/hd-same\nparent\nA\nchild\nB\ncat /data/hd-same /data/inner/hd-same",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent\nchild\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_expansion_crosses_mounts",
+      "seq": 950102,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "echo parent > /data/hd-source; echo ghost > /ghost/deep/hd-source; v=child; cat <<$END > /data/inner/hd-expanded\n$(cat /data/hd-source) `cat /ghost/deep/hd-source` ${v} $((2+3))\n$END\ncat /data/inner/hd-expanded",
+      "expect": {
+        "exit": 0,
+        "stdout": "parent ghost child 5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_relative_child",
+      "seq": 950103,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cd /data/inner; cat <<EOF > hd-relative\nchild\nEOF\ncat hd-relative; cd /",
+      "expect": {
+        "exit": 0,
+        "stdout": "child\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_append_tabs",
+      "seq": 950104,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<'A' > /data/inner/hd-append\nfirst\nA\ncat <<-B >> /data/inner/hd-append\n\t`echo second`\n\tB\ncat /data/inner/hd-append",
+      "expect": {
+        "exit": 0,
+        "stdout": "first\nsecond\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_pipeline_child",
+      "seq": 950105,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<EOF | tr a-z A-Z > /data/inner/hd-pipeline\nhello\nEOF\ncat /data/inner/hd-pipeline",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_nested_command_child",
+      "seq": 950106,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<OUT > /data/inner/hd-nested\n$(cat <<IN\n`echo nested`\nIN\n)\nOUT\ncat /data/inner/hd-nested",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_eof_child",
+      "seq": 950107,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<EOF > /data/inner/hd-eof; cat /data/inner/hd-eof\nhi\nEOF;\n",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nEOF;\n",
+        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_virtual_parent",
+      "seq": 950108,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "cat <<EOF > /ghost/deep/hd-virtual\n`echo mounted`\nEOF\ncat /ghost/deep/hd-virtual",
+      "expect": {
+        "exit": 0,
+        "stdout": "mounted\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "heredoc_nested_mount_expanded_target",
+      "seq": 950109,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "dir=/data/inner; name=hd-target; cat <<EOF > \"$dir/$name\"\nbody\nEOF\ncat /data/inner/hd-target",
+      "expect": {
+        "exit": 0,
+        "stdout": "body\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

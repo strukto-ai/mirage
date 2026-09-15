@@ -292,3 +292,74 @@ describe('handleSubshell', () => {
     expect(s.lastExitCode).toBe(0)
   })
 })
+
+it.each(['abort', 'timeout'])(
+  'discards pipeline cache reads on %s through wrappers',
+  async (kind) => {
+    const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
+    const { asyncChain } = await import('../../io/stream.ts')
+    const { CommandTimeoutError } = await import('../../commands/errors.ts')
+    let closed = false
+    async function* source() {
+      await Promise.resolve()
+      try {
+        yield encode('first')
+        yield encode('rest')
+      } finally {
+        closed = true
+      }
+    }
+    const input = new CachableAsyncIterator(source())
+    const failure =
+      kind === 'abort'
+        ? new DOMException('cancelled', 'AbortError')
+        : new CommandTimeoutError('wc', 1)
+    const execute: ExecuteNodeFn = async (nd, _session, stdin) => {
+      if (nd.text === 'cat')
+        return [
+          asyncChain(input),
+          new IOResult({ reads: { '/remote': input }, cache: ['/remote'] }),
+          new ExecutionNode({ command: 'cat' }),
+        ]
+      if (stdin === null || stdin instanceof Uint8Array) throw new Error('expected stream')
+      await stdin[Symbol.asyncIterator]().next()
+      throw failure
+    }
+    await expect(
+      handlePipe(execute, [node('cat'), node('wc')], [], new Session({ sessionId: 'test' })),
+    ).rejects.toBe(failure)
+    expect(closed).toBe(true)
+    expect(input.bufferedChunks).toHaveLength(0)
+  },
+)
+
+it('keeps a cache read drainable after a normal early pipeline exit', async () => {
+  const { CachableAsyncIterator } = await import('../../io/cachable_iterator.ts')
+  const { asyncChain } = await import('../../io/stream.ts')
+  let closed = false
+  async function* source() {
+    await Promise.resolve()
+    try {
+      yield encode('first')
+      yield encode('rest')
+    } finally {
+      closed = true
+    }
+  }
+  const input = new CachableAsyncIterator(source())
+  const execute: ExecuteNodeFn = async (nd, _session, stdin) => {
+    if (nd.text === 'cat')
+      return [
+        asyncChain(input),
+        new IOResult({ reads: { '/remote': input }, cache: ['/remote'] }),
+        new ExecutionNode({ command: 'cat' }),
+      ]
+    if (stdin === null || stdin instanceof Uint8Array) throw new Error('expected stream')
+    await stdin[Symbol.asyncIterator]().next()
+    return [encode('first'), new IOResult(), new ExecutionNode({ command: 'head' })]
+  }
+  await handlePipe(execute, [node('cat'), node('head')], [], new Session({ sessionId: 'test' }))
+  expect(closed).toBe(false)
+  expect(decode(await input.drain())).toBe('firstrest')
+  expect(closed).toBe(true)
+})

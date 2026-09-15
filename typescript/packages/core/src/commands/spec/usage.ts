@@ -133,7 +133,23 @@ function pythonOptionError(cmdName: string, line: string): [Uint8Array, number] 
   return [new TextEncoder().encode(line + pythonUsage(cmdName)), usageExitCode(cmdName)]
 }
 
+/**
+ * curl's option refusal: one message line, then its own help hint.
+ *
+ * Pinned on curl 8.14.1 (debian:stable-slim). One divergence: curl names
+ * a whole cluster with a bad letter (`option -sW: is unknown`) where the
+ * parser reports the letter, so mirage says `option -W`.
+ */
+export function curlOptionError(line: string): [Uint8Array, number] {
+  const hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+  return [new TextEncoder().encode(line + hint), usageExitCode('curl')]
+}
+
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
+  if (cmdName === 'curl') {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return curlOptionError(`curl: option ${dashed}: is unknown\n`)
+  }
   if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return [
@@ -205,6 +221,9 @@ export function invalidFloatError(
   option: string,
   value: string,
 ): [Uint8Array, number] {
+  if (cmdName === 'curl') {
+    return curlOptionError(`curl: option ${option}: expected a proper numerical parameter\n`)
+  }
   const line = `${cmdName}: invalid float value: '${value}' for '${option}'\n`
   const hint = `Try '${cmdName} --help' for more information.\n`
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
@@ -215,6 +234,10 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
   if (PYTHON_NAMES.has(cmdName)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)
+  }
+  if (cmdName === 'curl') {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return curlOptionError(`curl: option ${dashed}: requires parameter\n`)
   }
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`

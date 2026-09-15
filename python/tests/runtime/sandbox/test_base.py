@@ -55,7 +55,7 @@ class RecordingSandbox(RemoteSandbox):
     "tsc --version",
 ])
 async def test_version_commands_reach_the_remote_environment(line):
-    box = RecordingSandbox()
+    box = RecordingSandbox(captures=(line.split()[0], ))
     ws = Workspace({"/data": RAMResource()},
                    mode=MountMode.EXEC,
                    runtimes=[box, "vfs"])

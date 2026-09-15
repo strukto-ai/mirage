@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from './base.ts'
-import type { EvalResult, EvalValue, RunResult } from './types.ts'
+import type { EvalResult, EvalValue, ProcessExecution, RunResult } from './types.ts'
 
 /**
  * The nominal evaluator brand (python's EvaluatorMixin inheritance).
@@ -75,8 +75,8 @@ export const LINE_EXECUTOR: unique symbol = Symbol.for('mirage.lineExecutor')
  * owns any line routed to it wholesale: pipes, redirects, and every
  * command in the line run inside the runtime's world (its own cat,
  * its own grep), the workspace shell never splits the line. A line
- * lands on it when the runtime captures one of the line's commands or
- * "*". Interpreter runtimes never implement it: they are the engine
+ * lands on it whole only with an explicit "*" capture; named captures
+ * receive one safely quoted command. Interpreter runtimes never implement it: they are the engine
  * inside one command (python3, node), never the line. The vfs runtime
  * does not either: a line resolved to vfs runs on the workspace
  * executor inline, so there is no delegate to call.
@@ -97,4 +97,17 @@ export interface LineExecutor {
 /** Whether this runtime carries the whole-line capability. */
 export function isLineExecutor(runtime: Runtime): runtime is Runtime & LineExecutor {
   return (runtime as Partial<LineExecutor>)[LINE_EXECUTOR] === true
+}
+
+/** The nominal argv-executor brand (Python's ProcessExecutorMixin). */
+export const PROCESS_EXECUTOR: unique symbol = Symbol.for('mirage.processExecutor')
+
+export interface ProcessExecutor {
+  readonly [PROCESS_EXECUTOR]: true
+  /** Execute argv without shell interpretation. */
+  runProcess(request: ProcessExecution): Promise<RunResult>
+}
+
+export function isProcessExecutor(runtime: Runtime): runtime is Runtime & ProcessExecutor {
+  return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
 }

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { LOCAL_ZONE, UTC_ZONE, type WallParts, type Zone } from './timezone.ts'
+
 export function utcDateFolder(ts?: number): string {
   const d = ts === undefined ? new Date() : new Date(ts)
   return d.toISOString().slice(0, 10)
@@ -71,57 +73,40 @@ function dateUnit(word: string): string | null {
 }
 
 function daysInMonth(year: number, month: number): number {
-  return makeDate(
-    { year, month: month + 1, day: 0, hour: 0, minute: 0, second: 0, ms: 0 },
-    true,
-  ).getUTCDate()
-}
-
-interface DateParts {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  second: number
-  ms: number
-}
-
-function partsOf(dt: Date, utc: boolean): DateParts {
-  return {
-    year: utc ? dt.getUTCFullYear() : dt.getFullYear(),
-    month: utc ? dt.getUTCMonth() : dt.getMonth(),
-    day: utc ? dt.getUTCDate() : dt.getDate(),
-    hour: utc ? dt.getUTCHours() : dt.getHours(),
-    minute: utc ? dt.getUTCMinutes() : dt.getMinutes(),
-    second: utc ? dt.getUTCSeconds() : dt.getSeconds(),
-    ms: utc ? dt.getUTCMilliseconds() : dt.getMilliseconds(),
-  }
+  return UTC_ZONE.fromWall({
+    year,
+    month: month + 1,
+    day: 0,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    ms: 0,
+  }).getUTCDate()
 }
 
 /**
- * A Date from its parts. `Date.UTC` and the `Date` constructor read a
- * year below 100 as 1900 plus that year; the setters do not, so a year
- * GNU and Python accept as itself (`0042-01-01`) lands where it belongs.
+ * The instant `zone` shows `p` at, or null when it shows none: glibc's
+ * mktime finds no instant for the hour skipped when DST starts, and GNU
+ * date answers `-d` for one with `invalid date`. The host's zone is not
+ * checked, since the Python twin reads a host-local moment naively and
+ * cannot refuse there.
  */
-function makeDate(p: DateParts, utc: boolean): Date {
-  const d = new Date(0)
-  if (utc) {
-    d.setUTCFullYear(p.year, p.month, p.day)
-    d.setUTCHours(p.hour, p.minute, p.second, p.ms)
-  } else {
-    d.setFullYear(p.year, p.month, p.day)
-    d.setHours(p.hour, p.minute, p.second, p.ms)
-  }
-  return d
+function placeWall(zone: Zone, p: WallParts): Date | null {
+  const placed = zone.fromWall(p)
+  if (zone === LOCAL_ZONE) return placed
+  const shown = zone.parts(placed)
+  const kept =
+    shown.year === p.year &&
+    shown.month === p.month &&
+    shown.day === p.day &&
+    shown.hour === p.hour &&
+    shown.minute === p.minute &&
+    shown.second === p.second
+  return kept ? placed : null
 }
 
-function dateFrom(p: DateParts, utc: boolean): Date {
-  return makeDate(p, utc)
-}
-
-function addMonthsGnu(dt: Date, count: number, utc: boolean): Date {
-  const p = partsOf(dt, utc)
+function addMonthsGnu(dt: Date, count: number, zone: Zone): Date {
+  const p = zone.parts(dt)
   const total = p.month + count
   let year = p.year + Math.floor(total / 12)
   let month = ((total % 12) + 12) % 12
@@ -137,16 +122,29 @@ function addMonthsGnu(dt: Date, count: number, utc: boolean): Date {
       year += 1
     }
   }
-  return dateFrom({ ...p, year, month, day }, utc)
+  return zone.fromWall({ ...p, year, month, day }, p.offsetSec)
 }
 
-function shiftDate(dt: Date, unit: string, count: number, utc: boolean): Date {
-  if (unit === 'month') return addMonthsGnu(dt, count, utc)
-  if (unit === 'year') return addMonthsGnu(dt, 12 * count, utc)
+// Displace a moment by `count` units, as gnulib does: months and years
+// move the calendar (addMonthsGnu); days and weeks move the calendar too,
+// keeping the wall clock across a DST change; hours, minutes and seconds
+// are exact, so they are added on the UTC timeline (`2025-03-29 12:00 CET
+// 24 hours` is `13:00 CEST`). A moved wall clock is read as mktime reads
+// it with the base's tm_isdst, which gnulib hands it: the hour repeated
+// when DST ends keeps the base's side of the change, and the hour skipped
+// when it starts lands past the gap (`2025-03-29 02:30 CET 1 day` and
+// `2025-03-31 02:30 CEST 1 day ago` are both `03:30 CEST`).
+function shiftDate(dt: Date, unit: string, count: number, zone: Zone): Date {
+  if (unit === 'month') return addMonthsGnu(dt, count, zone)
+  if (unit === 'year') return addMonthsGnu(dt, 12 * count, zone)
+  if (unit === 'day' || unit === 'week') {
+    const p = zone.parts(dt)
+    return zone.fromWall({ ...p, day: p.day + count * (unit === 'week' ? 7 : 1) }, p.offsetSec)
+  }
   return new Date(dt.getTime() + (UNIT_SECONDS[unit] ?? 0) * count * 1000)
 }
 
-function parseIsoWords(text: string, utc: boolean): Date | null {
+function parseIsoWords(text: string, zone: Zone): Date | null {
   const m = ISO_RE.exec(text)
   if (m === null) return null
   const year = Number(m[1])
@@ -169,11 +167,11 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
   // Truncate, never round: `.9999` must stay inside its own second, as
   // it does for `new Date(iso)` and for Python's microsecond field.
   const ms = m[7] !== undefined ? Number(`${m[7]}000`.slice(0, 3)) : 0
-  const zone = m[8]
-  if (zone !== undefined) {
+  const suffix = m[8]
+  if (suffix !== undefined) {
     let offsetMin = 0
-    if (zone !== 'Z' && zone !== 'z') {
-      const zm = /^([+-])(\d{2}):?(\d{2})$/.exec(zone)
+    if (suffix !== 'Z' && suffix !== 'z') {
+      const zm = /^([+-])(\d{2}):?(\d{2})$/.exec(suffix)
       if (zm === null) return null
       const zoneHours = Number(zm[2])
       const zoneMinutes = Number(zm[3])
@@ -185,13 +183,13 @@ function parseIsoWords(text: string, utc: boolean): Date | null {
       if (zoneHours > 23 || zoneMinutes > 59) return null
       offsetMin = (zm[1] === '-' ? -1 : 1) * (zoneHours * 60 + zoneMinutes)
     }
-    const wall = makeDate({ year, month, day, hour, minute, second, ms }, true)
+    const wall = UTC_ZONE.fromWall({ year, month, day, hour, minute, second, ms })
     return new Date(wall.getTime() - offsetMin * 60_000)
   }
-  return dateFrom({ year, month, day, hour, minute, second, ms }, utc)
+  return placeWall(zone, { year, month, day, hour, minute, second, ms })
 }
 
-function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
+function applyRelative(base: Date, words: string[], zone: Zone): Date | null {
   let result = base
   // What `ago` would negate: the state before the last displacement plus
   // that displacement. Re-applying from the checkpoint (rather than
@@ -208,7 +206,7 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
     if (word === 'yesterday' || word === 'tomorrow') {
       const days = word === 'yesterday' ? -1 : 1
       checkpoint = [result, 'day', days]
-      result = shiftDate(result, 'day', days, utc)
+      result = shiftDate(result, 'day', days, zone)
       i += 1
       continue
     }
@@ -217,14 +215,14 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
       if (unit === null) return null
       const count = word === 'last' ? -1 : 1
       checkpoint = [result, unit, count]
-      result = shiftDate(result, unit, count, utc)
+      result = shiftDate(result, unit, count, zone)
       i += 2
       continue
     }
     if (word === 'ago') {
       if (checkpoint === null) return null
       const [before, unit, count] = checkpoint
-      result = shiftDate(before, unit, -count, utc)
+      result = shiftDate(before, unit, -count, zone)
       checkpoint = null
       i += 1
       continue
@@ -242,7 +240,7 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
       if (unit === null) return null
       const count = Number(combined[1]) * sign
       checkpoint = [result, unit, count]
-      result = shiftDate(result, unit, count, utc)
+      result = shiftDate(result, unit, count, zone)
       i += 1
       continue
     }
@@ -251,14 +249,14 @@ function applyRelative(base: Date, words: string[], utc: boolean): Date | null {
       if (unit === null) return null
       const count = Number(word) * sign
       checkpoint = [result, unit, count]
-      result = shiftDate(result, unit, count, utc)
+      result = shiftDate(result, unit, count, zone)
       i += 2
       continue
     }
     const unit = dateUnit(word)
     if (unit !== null) {
       checkpoint = [result, unit, sign]
-      result = shiftDate(result, unit, sign, utc)
+      result = shiftDate(result, unit, sign, zone)
       i += 1
       continue
     }
@@ -287,11 +285,12 @@ export function inMtimeWindow(
 // zone), `@epoch`, and gnulib's relative grammar (`24 hours ago`,
 // `yesterday`, `next month`, `-2 weeks`, an ISO date followed by
 // displacements). A null return is the caller's cue for GNU's
-// `date: invalid date '...'` refusal, never a NaN render. Mirrors the
-// Python parse_date_expr.
+// `date: invalid date '...'` refusal, never a NaN render. The zone is the
+// one the expression is read in: UTC under `-u`, the zone TZ names, or
+// the host's (LOCAL_ZONE). Mirrors the Python parse_date_expr.
 const EPOCH_RE = /^@\s*[+-]?\d+(?:\.\d+)?$/
 
-export function parseDateExpr(text: string, utc: boolean, now?: Date): Date | null {
+export function parseDateExpr(text: string, zone: Zone, now?: Date): Date | null {
   const raw = text.trim()
   if (raw === '') return null
   if (raw.startsWith('@')) {
@@ -302,18 +301,18 @@ export function parseDateExpr(text: string, utc: boolean, now?: Date): Date | nu
     if (!EPOCH_RE.test(raw)) return null
     return new Date(Number(raw.slice(1)) * 1000)
   }
-  const whole = parseIsoWords(raw, utc)
+  const whole = parseIsoWords(raw, zone)
   if (whole !== null) return whole
   const words = raw.split(/\s+/)
   let base = now ?? new Date()
   let index = 0
   for (const take of [2, 1]) {
     if (words.length < take) continue
-    const prefix = parseIsoWords(words.slice(0, take).join(' '), utc)
+    const prefix = parseIsoWords(words.slice(0, take).join(' '), zone)
     if (prefix === null) continue
     base = prefix
     index = take
     break
   }
-  return applyRelative(base, words.slice(index), utc)
+  return applyRelative(base, words.slice(index), zone)
 }

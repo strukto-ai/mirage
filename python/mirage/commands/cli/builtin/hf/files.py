@@ -47,4 +47,4 @@ async def delete_cmd(
                      description=fl.as_str("commit_description") or "",
                      create_pr=bool(fl.as_bool("create_pr")))
         body = "".join(f"Deleted {p} from {repo_id}\n" for p in patterns)
-        return text_out(body, mutated=True)
+        return text_out(body)

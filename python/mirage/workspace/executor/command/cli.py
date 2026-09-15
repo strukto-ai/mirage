@@ -215,6 +215,24 @@ class CLIContext:
     session_view: SessionView | None = None
 
 
+def drops_mount_caches(spec: CLISpec) -> bool:
+    """Whether a write verb of this CLI leaves every mount's caches stale.
+
+    A CLI that reaches a service writes past the dispatcher's per-path
+    invalidation, so no mount can see the write. Two roots do that: one
+    with a ``config_model`` (an account CLI, initialized from it) and a
+    script root, whose config is opaque by construction and whose
+    program may reach anything. A root with neither (``git``) has no
+    service to reach; its writes go through the dispatcher, which
+    invalidates as it goes, so a blanket drop would only cost every
+    other mount a reload.
+
+    Args:
+        spec (CLISpec): the installed root.
+    """
+    return spec.config_model is not None or spec.script is not None
+
+
 async def handle_cli(
     install: CLIInstall,
     parts: list[str | PathSpec],
@@ -357,7 +375,8 @@ async def handle_cli(
                         flags=kw,
                         stdin=stdin,
                         env=env_snapshot(session),
-                        doors=doors)
+                        doors=doors,
+                        spec=leaf)
 
     # asyncio's timeout cancels the runtime task as well as the caller;
     # TypeScript forwards an explicit deadline and abort signal instead.
@@ -400,7 +419,11 @@ async def handle_cli(
                                              stderr=usage_stderr)
     except CommandTimeoutError:
         # A limit timeout is answered by the workspace-level handler
-        # (exit 124), not here.
+        # (exit 124), not here. The cancelled leaf may already have sent
+        # its request, and a service that accepted it will not roll it
+        # back, so the mounts stop trusting their caches now.
+        if leaf.write and drop_caches is not None:
+            await drop_caches()
         raise
     except Exception as exc:
         # Any other thrown leaf error (an API RuntimeError, a ValueError)
@@ -408,9 +431,8 @@ async def handle_cli(
         # (prog: message), so the rest of the line keeps running.
         # The write may already have landed when a leaf throws after its
         # request (a PUT whose --jq program fails filters a response the
-        # service already applied), and with no IOResult to consult the
-        # spec's static answer is the only one left; without the drop a
-        # github mount keeps serving its pre-write bytes.
+        # service already applied); without the drop a github mount keeps
+        # serving its pre-write bytes.
         if leaf.write and drop_caches is not None:
             await drop_caches()
         err_stderr = f"{prog}: {exc}\n".encode()
@@ -422,11 +444,10 @@ async def handle_cli(
         stdout, io = None, IOResult()
     else:
         stdout, io = out
-    # The spec's `write` is the static answer, which is the only one most
-    # verbs have; a handler that knows better says so on its result, so a
-    # read-only `gh api` does not expire every github mount.
-    mutated = leaf.write if io.mutated is None else io.mutated
-    if mutated and drop_caches is not None:
+    # The spec's `write` is the one answer: what policy calls a write,
+    # the cache does too, so a verb that can mutate (`gh api` under any
+    # method) costs the mounts a reload rather than a stale read.
+    if leaf.write and drop_caches is not None:
         await drop_caches()
     io.producer = Producer(command=prog, declared=leaf.limit)
 

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Limit, MountMode, RAMResource, Workspace } from '@struktoai/mirage-browser'
-import { E2BRuntime } from '@struktoai/mirage-browser/runtime/sandbox/e2b/runtime'
+import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 
 import { exerciseCancellation } from './e2b_cancel.ts'
 

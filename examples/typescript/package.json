@@ -8,9 +8,9 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.42",
     "@anthropic-ai/claude-agent-sdk": "^0.3.233",
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-fs": "0.0.1-rc.1",
-    "@deepseek-ai/dsh-shell": "0.0.1-rc.5",
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-shell": "0.1.5-rc.2",
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "@langchain/anthropic": "^1.5.6",
     "@langchain/core": "^1.2.8",

@@ -15,7 +15,7 @@
 from enum import Enum
 
 from mirage.io import IOResult
-from mirage.io.stream import drain, materialize
+from mirage.io.stream import discard_io, discard_streams, drain, materialize
 from mirage.io.types import ByteSource
 
 
@@ -42,8 +42,12 @@ async def apply_barrier(
     """
     if policy is BarrierPolicy.STREAM:
         return stdout
-    if policy is BarrierPolicy.STATUS:
-        await drain(stdout)
-        return None
-    # VALUE
-    return await materialize(stdout)
+    try:
+        if policy is BarrierPolicy.STATUS:
+            await drain(stdout)
+            return None
+        return await materialize(stdout)
+    except BaseException:
+        await discard_io(io)
+        await discard_streams(stdout)
+        raise

@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adapters  # noqa: E402
 import harness  # noqa: E402
 
+from mirage.concurrency import ConcurrencyLimiter  # noqa: E402
 from mirage.types import ConsistencyPolicy  # noqa: E402
 
 HOST = "python"
@@ -121,6 +123,135 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             await run_consistency_case(target, case, report, emit)
 
 
+async def run_slot(target: dict, cases: list[dict], root: Path,
+                   report: harness.Report | None, emit: list[dict] | None,
+                   limiter: ConcurrencyLimiter, lane: asyncio.Lock,
+                   errors: list[tuple[str, BaseException]],
+                   runner: harness.TargetRunner) -> None:
+    """Run one target under its lane and the overall width.
+
+    The lane is taken before the worker so a target waiting on a busy
+    lane is not holding one of the four slots while it waits.
+
+    Args:
+        target (dict): the target manifest entry.
+        cases (list[dict]): every loaded case.
+        root (Path): the integ directory.
+        report (harness.Report | None): this target's own report slot.
+        emit (list[dict] | None): this target's own emit slot.
+        limiter (ConcurrencyLimiter): the overall concurrency width.
+        lane (asyncio.Lock): the lock for this target's lane.
+        errors (list[tuple[str, BaseException]]): where a raising
+            target is recorded.
+        runner (harness.TargetRunner): what runs one target; the gate
+            passes a recorder to watch what actually overlaps.
+    """
+    async with lane, limiter.acquire():
+        try:
+            await runner(target, cases, root, report, emit)
+        except Exception as exc:
+            # Recorded, not raised: a sibling still has a workspace open
+            # and a backend to tear down, and aborting the gather here
+            # would strand both. Every one of these is reported with its
+            # traceback once the pool has drained, and fails the run.
+            errors.append((target["id"], exc))
+
+
+async def run_pool(
+    eligible: list[dict],
+    cases: list[dict],
+    root: Path,
+    report: harness.Report | None,
+    emit: list[dict] | None,
+    services: dict,
+    width: int,
+    runner: harness.TargetRunner | None = None
+) -> list[tuple[str, BaseException]]:
+    """Run every eligible target with at most ``width`` in flight.
+
+    Targets own separate workspaces and mint a fresh run id per open, so
+    they overlap safely; ``plan_run`` names the two kinds that cannot. Output
+    order does not depend on completion order: every target, exclusive
+    ones included, fills its own report and emit slot, and the slots are
+    absorbed in selection order. So a concurrent run prints exactly what
+    the serial run printed on STDOUT; stderr is not ordered, and the
+    ``ERROR`` block below is appended in completion order.
+
+    Args:
+        eligible (list[dict]): targets that passed the host and env checks.
+        cases (list[dict]): every loaded case.
+        root (Path): the integ directory.
+        report (harness.Report | None): the run's report, None when
+            emitting.
+        emit (list[dict] | None): the run's emit rows, or None when reporting.
+        services (dict): the table from load_services.
+        width (int): how many targets may be in flight.
+        runner (harness.TargetRunner | None): what runs one target,
+            defaulting to the real one; the gate passes a recorder.
+
+    Returns:
+        list[tuple[str, BaseException]]: the targets that raised.
+    """
+    run_one = run_target if runner is None else runner
+    alone, pool = harness.plan_run(eligible, services)
+    # On stderr, so the stdout equivalence holds, and unconditional so a
+    # change that quietly routed every run down the serial loop would show
+    # as this line going missing rather than as the battery merely being
+    # slower. Mutation testing found that exact regression invisible.
+    print(
+        f"pool: {len(pool)} target(s) at width {width}, "
+        f"{len(alone)} alone",
+        file=sys.stderr)
+    slots = [(None if report is None else harness.Report(stream=False),
+              None if emit is None else []) for _ in eligible]
+    errors: list[tuple[str, BaseException]] = []
+    for i in alone:
+        try:
+            await run_one(eligible[i], cases, root, *slots[i])
+        except Exception as exc:
+            errors.append((eligible[i]["id"], exc))
+    limiter = ConcurrencyLimiter(width)
+    lanes: dict[str, asyncio.Lock] = {}
+    running: list[asyncio.Task | None] = [None] * len(eligible)
+    for i, lane in pool:
+        lanes.setdefault(lane, asyncio.Lock())
+        running[i] = asyncio.create_task(
+            run_slot(eligible[i], cases, root, slots[i][0], slots[i][1],
+                     limiter, lanes[lane], errors, run_one))
+    # Awaited in selection order, and each slot flushed the moment every
+    # slot before it has. Waiting for the whole pool before printing
+    # anything would give CI one silent step and then a wall of text,
+    # which is the failure mode a buffered script already has here.
+    try:
+        for i, task in enumerate(running):
+            if task is not None:
+                await task
+            slot_report, slot_emit = slots[i]
+            if report is not None and slot_report is not None:
+                report.absorb(slot_report)
+            if emit is not None and slot_emit is not None:
+                emit.extend(slot_emit)
+    finally:
+        # `run_slot` catches Exception, so only a BaseException reaches
+        # here -- a KeyboardInterrupt, or a SystemExit out of a library.
+        # Leaving the rest of the pool unawaited would have the loop
+        # cancel them at teardown, interrupting `run_target`'s cleanup
+        # mid-await and leaking the mongo databases, s3 buckets and fake
+        # subprocesses it exists to reclaim.
+        rest = [t for t in running if t is not None and not t.done()]
+        for task in rest:
+            task.cancel()
+        if rest:
+            await asyncio.gather(*rest, return_exceptions=True)
+        # Inside the finally, not after it: a BaseException on its way out
+        # would otherwise discard every failure the pool had already
+        # recorded, which is the diagnosis the drain exists to preserve.
+        for target_id, exc in errors:
+            print(f"ERROR [{target_id}]", file=sys.stderr)
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
+    return errors
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", action="append", dest="targets")
@@ -132,7 +263,17 @@ async def main() -> None:
     # services it knowingly does not provision. Anything skipping outside
     # this list is a broken job, which is the whole point of --strict.
     parser.add_argument("--allow-skip", dest="allow_skip", default="")
+    # How many targets may be in flight. One is the plain loop below, which
+    # stays the default so a local run is sequential and debuggable and so
+    # landing the scheduler changes nothing until a workflow line asks for it.
+    parser.add_argument("--target-jobs",
+                        dest="target_jobs",
+                        type=int,
+                        default=1)
     args = parser.parse_args()
+    if args.target_jobs < 1:
+        print("--target-jobs takes an integer >= 1", file=sys.stderr)
+        sys.exit(2)
 
     root = harness.integ_root()
     manifest = harness.load_targets(root)
@@ -156,6 +297,7 @@ async def main() -> None:
     ran = 0
     allow_skip = harness.parse_allow_skip(services, args.allow_skip)
     env_skipped: list[str] = []
+    eligible: list[dict] = []
     for target_id in selected:
         target = manifest[target_id]
         if HOST not in target["hosts"]:
@@ -171,8 +313,19 @@ async def main() -> None:
             if target.get("service") not in allow_skip:
                 env_skipped.append(f"{target_id} ({', '.join(missing)})")
             continue
-        await run_target(target, cases, root, report, emit)
+        eligible.append(target)
         ran += 1
+
+    # One worker means the old loop, unchanged. The pool cannot stand in for
+    # it: a target waiting on a busy lane lets a later one take the worker
+    # first, so the default run would quietly reorder itself.
+    if args.target_jobs == 1:
+        for target in eligible:
+            await run_target(target, cases, root, report, emit)
+        raised = []
+    else:
+        raised = await run_pool(eligible, cases, root, report, emit, services,
+                                args.target_jobs)
 
     # A skip is one line on stderr and exit 0, so a facet whose service
     # never came up (or whose env var got renamed in the workflow)
@@ -194,10 +347,23 @@ async def main() -> None:
         sys.exit(2)
 
     if args.emit:
+        # No file, deliberately, where the report path prints partial counts:
+        # parity.py diffs two emits by (target, id), so a short one reads as
+        # a pile of ONLY-PY/ONLY-TS rows rather than as the run that broke.
+        if raised:
+            print(f"{len(raised)} target(s) failed to run", file=sys.stderr)
+            sys.exit(1)
         Path(args.emit).write_text(json.dumps(emit))
         return
     assert report is not None
     print(f"\n{report.summary()}")
+    # Printed before the exit, because a pooled run that lost a target
+    # still ran every other one and its counts are the answer to "what
+    # else broke". The serial loop lets the exception abort the run, so
+    # this is the one place the two modes deliberately differ.
+    if raised:
+        print(f"{len(raised)} target(s) failed to run", file=sys.stderr)
+        sys.exit(1)
     if report.failed:
         sys.exit(1)
 

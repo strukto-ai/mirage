@@ -29,7 +29,7 @@ from mirage.context import (effective_path_mode, get_admission,
                             get_current_session, get_mount_gate,
                             get_op_policies, hidden_paths_intersect,
                             path_allowed, readonly_below)
-from mirage.ops.types import ChildMounts, StatOverlay
+from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
 from mirage.policy.policies import Policies, pre_ops_gate
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.errors import MISS_ERRORS, ReadOnlyError, eisdir
@@ -662,11 +662,17 @@ class CommandIO:
     # factory, because it is session-scoped state and the adapter itself
     # is built once per backend.
     glob_children: ChildMounts | None = None
+    # What an owed name points at, the namespace's own stat resolved
+    # through the workspace. Stamped beside glob_children from
+    # opts.ns.links, so a trailing-slash glob follows a link the way
+    # bash does instead of keeping every link it cannot see through.
+    glob_target_stat: LinkTargetStat | None = None
 
     @property
     def resolve_glob(self) -> ResolveGlobOp:
         return make_resolve_glob(self.readdir, self.max_glob_matches,
-                                 self.glob_children)
+                                 self.glob_children, self.stat,
+                                 self.glob_target_stat)
 
     def operation(self, op: Operation) -> OperationFn | None:
         operations = {

@@ -355,7 +355,9 @@ export async function fanOutTraversal(
   // mount is not a reason for `find` to stop seeing one.
   ns?: NamespaceView,
   statPath: StatPath | null = null,
+  signal?: AbortSignal,
 ): Promise<Result> {
+  signal?.throwIfAborted()
   const targetPath = paths[0]?.virtual ?? cwd
   let descendants = allowedDescendants(registry, targetPath)
   if (cmdName === 'ls') descendants = await lsBlockMounts(descendants, statPath)
@@ -396,6 +398,7 @@ export async function fanOutTraversal(
 
   const mountsToRun: MountEntry[] = [primaryMount, ...descendants]
   for (const mount of mountsToRun) {
+    signal?.throwIfAborted()
     let subPaths: PathSpec[]
     let subFlags: Record<string, FlagValue>
     let subTexts: string[]
@@ -457,9 +460,11 @@ export async function fanOutTraversal(
     // A start point only the namespace serves (a nested mount's
     // ancestor) has no backend listing, so without them the primary run
     // reports the operand missing.
+    signal?.throwIfAborted()
     const [stdout0, io] = await mount.executeCmd(cmdName, subPaths, subTexts, subFlags, {
       stdin,
       cwd,
+      ...(signal === undefined ? {} : { signal }),
       ...(ns === undefined ? {} : { ns }),
       ...(statPath !== null ? { statPath } : {}),
     })
@@ -510,6 +515,7 @@ export async function fanOutTraversal(
     }
     mergedIo = await mergedIo.merge(io)
   }
+  signal?.throwIfAborted()
 
   let rows: PathSpec[] = []
   if (cmdName === 'find') {
@@ -599,6 +605,7 @@ export function runWithFanout(
   ns: NamespaceView | undefined,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
   statPath: StatPath | null = null,
+  signal?: AbortSignal,
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
@@ -627,6 +634,7 @@ export function runWithFanout(
       ensureOpen,
       ns,
       statPath,
+      signal,
     )
     return [stdout, io]
   }

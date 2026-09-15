@@ -21,6 +21,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.resource.ram import RAMResource
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
 from mirage.runtime.resolver import PrefixResolver
@@ -591,7 +592,7 @@ async def test_append_ships_only_the_deltas(runtime: str):
     """
     dispatch = CountingDispatch({"/data/log.txt": b"S" * 64})
     rt = build_runtime(runtime)
-    rt.attach(dispatch, PrefixResolver(lambda: ["/data/"]))
+    rt.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/data/"])))
     code = APPEND_LOOP_JS if runtime == "quickjs" else APPEND_LOOP_PY
     result = await rt.run(RunArgs(code=code))
     await rt.close()

@@ -232,3 +232,37 @@ describe('readFailExitCodeFromLine', () => {
     expect(readFailExitCodeFromLine('sed', 'sed: /ram/Is a directory\n')).toBe(1)
   })
 })
+
+describe('curl wording', () => {
+  const dec = new TextDecoder()
+  const hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+
+  it('exits 2 on a usage error', () => {
+    expect(usageExitCode('curl')).toBe(2)
+  })
+
+  it('reports an unknown option in curl words, a cluster letter dashed', () => {
+    // Pinned on curl 8.14.1 (debian:stable-slim).
+    const [long, code] = unknownOptionError('curl', '--bogus')
+    expect(dec.decode(long)).toBe(`curl: option --bogus: is unknown\n${hint}`)
+    expect(code).toBe(2)
+    const [short] = unknownOptionError('curl', 'Y')
+    expect(dec.decode(short)).toBe(`curl: option -Y: is unknown\n${hint}`)
+  })
+
+  it('reports a missing parameter in curl words', () => {
+    const [short, code] = missingValueError('curl', 'm')
+    expect(dec.decode(short)).toBe(`curl: option -m: requires parameter\n${hint}`)
+    expect(code).toBe(2)
+    const [long] = missingValueError('curl', '--max-time')
+    expect(dec.decode(long)).toBe(`curl: option --max-time: requires parameter\n${hint}`)
+  })
+
+  it('reports a bad number in curl words', () => {
+    const [line, code] = invalidFloatError('curl', '--max-time', 'abc')
+    expect(dec.decode(line)).toBe(
+      `curl: option --max-time: expected a proper numerical parameter\n${hint}`,
+    )
+    expect(code).toBe(2)
+  })
+})

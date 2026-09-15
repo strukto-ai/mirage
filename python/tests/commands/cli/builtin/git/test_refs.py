@@ -13,8 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+from dulwich.refs import Ref
 
-from mirage.commands.cli.builtin.git.refs import load_refs, read_head
+from mirage.commands.cli.builtin.git.refs import (blocking_ref, load_refs,
+                                                  read_head, valid_ref_name,
+                                                  without_packed)
 from mirage.io import IOResult
 
 from .conftest import make_branch, mounted, pack_refs
@@ -100,3 +103,68 @@ async def test_load_refs_walks_nested_ref_names(repo_path, workspace):
 async def test_head_symref_resolves_through_the_container(workspace):
     refs = await load_refs(workspace.dispatch, "/repo/.git")
     assert refs[b"HEAD"] == refs[b"refs/heads/main"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["v1.0", "feat/git-cli", "a10", "B", "@", "x-y_z", "release-2026.01"])
+def test_names_git_accepts_are_valid(name: str):
+    assert valid_ref_name(name)
+
+
+@pytest.mark.parametrize("name", [
+    "", "bad name", "bad..name", "x.lock", ".x", "x/", "/x", "a//b", "x.",
+    "a@{b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "a\tb"
+])
+def test_names_git_refuses_are_invalid(name: str):
+    assert not valid_ref_name(name)
+
+
+PACKED = ("# pack-refs with: peeled fully-peeled sorted \n"
+          "1111111111111111111111111111111111111111 refs/heads/main\n"
+          "2222222222222222222222222222222222222222 refs/tags/ann\n"
+          "^3333333333333333333333333333333333333333\n"
+          "4444444444444444444444444444444444444444 refs/tags/lw\n")
+
+
+def test_dropping_a_packed_tag_drops_its_peeled_line():
+    rewritten = without_packed(PACKED.encode(), "refs/tags/ann")
+    assert rewritten is not None
+    assert b"refs/tags/ann" not in rewritten
+    assert b"^3333" not in rewritten
+    assert b"refs/tags/lw" in rewritten
+    assert b"refs/heads/main" in rewritten
+
+
+def test_dropping_the_last_ref_keeps_the_header():
+    rewritten = without_packed(PACKED.encode(), "refs/tags/lw")
+    assert rewritten is not None
+    assert rewritten.startswith(b"# pack-refs with:")
+    assert b"^3333" in rewritten
+
+
+def test_a_ref_the_file_does_not_hold_rewrites_nothing():
+    assert without_packed(PACKED.encode(), "refs/heads/other") is None
+
+
+def test_a_ref_above_the_new_one_blocks_it():
+    known = {Ref(b"refs/tags/foo"), Ref(b"refs/heads/main")}
+    assert blocking_ref(known, "refs/tags/foo/bar") == "refs/tags/foo"
+    # Every level above is searched, not just the parent.
+    assert blocking_ref(known, "refs/tags/foo/bar/baz") == "refs/tags/foo"
+
+
+def test_a_ref_below_the_new_one_blocks_it_too():
+    known = {Ref(b"refs/tags/foo/c"), Ref(b"refs/tags/foo/a")}
+    # git names one ref, and the walk that finds it is ordered, so the
+    # answer does not depend on how the set happens to iterate.
+    assert blocking_ref(known, "refs/tags/foo") == "refs/tags/foo/a"
+
+
+def test_a_ref_with_no_collision_is_free():
+    known = {Ref(b"refs/tags/foo"), Ref(b"refs/heads/main")}
+    assert blocking_ref(known, "refs/tags/other") is None
+    # A prefix that is not a whole path segment is not a collision.
+    assert blocking_ref(known, "refs/tags/foobar") is None
+    # And the ref itself existing is a different refusal, not this one.
+    assert blocking_ref(known, "refs/tags/foo") is None

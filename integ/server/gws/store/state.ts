@@ -39,10 +39,11 @@ export const EVENT_ID_WIDTH = 23
 // ONE TENANT'S WORLD, in the shapes the handlers and renderers read.
 //
 // This is a working copy, not the store: `loadState` fills it from the tenant's
-// rows at the top of a request and `saveState` writes it back at the bottom of
-// a write. SQLite is the authority between requests, which is what buys the
-// per-run persistence, the scoped /reset and the seeded-template copy that the
-// in-memory version could not have.
+// rows and `saveState` writes it back at the bottom of a write, with
+// `store/cache.ts` holding it between requests on one run. SQLite is the
+// authority either side of that, which is what buys the per-run persistence,
+// the scoped /reset and the seeded-template copy that the in-memory version
+// could not have.
 //
 // Whole-world load and whole-world flush, rather than per-entity queries in
 // each handler, for two reasons. The Router serializes writes per run and makes

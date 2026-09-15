@@ -60,6 +60,33 @@ export interface HeadRef {
   readonly commit: string | null
 }
 
+/**
+ * What moving HEAD carried across, and what it could not do.
+ *
+ * Two things rather than one because git writes both: the paths whose
+ * uncommitted change survived the move go to stdout with their status letters,
+ * and a submodule directory the move could not remove is a warning on stderr
+ * above the line saying the branch changed.
+ */
+export interface HeadMove {
+  /** Each path whose uncommitted change was carried across, by status letter. */
+  readonly carried: ReadonlyMap<string, string>
+  /** The warning lines to write before the note, empty when there are none. */
+  readonly warnings: string
+}
+
+/**
+ * One object id with the type git records for it.
+ *
+ * The pair travels together because a revision that names a tree or a blob is
+ * as legal as one that names a commit wherever an object is wanted, and the
+ * type is what a tag records about its target.
+ */
+export interface GitObject {
+  readonly oid: string
+  readonly type: string
+}
+
 /** One `~` or `^` suffix of a revision. */
 export interface AncestryStep {
   /**
@@ -70,6 +97,15 @@ export interface AncestryStep {
   /** The number after the suffix, 1 when it was bare. */
   readonly count: number
 }
+
+/** One `^{<type>}` suffix of a revision. */
+export interface PeelStep {
+  /** The type word inside the braces, empty for `^{}`. */
+  readonly want: string
+}
+
+/** One operator of a revision, in the order git applies them. */
+export type RevOp = AncestryStep | PeelStep
 
 /**
  * One entry of `.git/index`.

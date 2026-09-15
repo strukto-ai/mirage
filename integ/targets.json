@@ -30,7 +30,8 @@
       ],
       "typescript": [
         "DISCORD_URL"
-      ]
+      ],
+      "shared": true
     },
     "dropbox": {
       "python": [
@@ -56,7 +57,8 @@
       ],
       "typescript": [
         "GITHUB_URL"
-      ]
+      ],
+      "shared": true
     },
     "gridfs": {
       "python": [],
@@ -88,7 +90,8 @@
     },
     "http": {
       "python": [],
-      "typescript": []
+      "typescript": [],
+      "shared": true
     },
     "jaeger": {
       "python": [
@@ -120,7 +123,8 @@
       ],
       "typescript": [
         "LINEAR_URL"
-      ]
+      ],
+      "shared": true
     },
     "mem0": {
       "python": [],
@@ -218,7 +222,8 @@
       ],
       "typescript": [
         "TRELLO_URL"
-      ]
+      ],
+      "shared": true
     }
   },
   "targets": [
@@ -591,6 +596,7 @@
     },
     {
       "id": "opfs",
+      "exclusive": true,
       "hosts": [
         "typescript-browser"
       ],
@@ -2969,6 +2975,7 @@
     },
     {
       "id": "secrets-env",
+      "exclusive": true,
       "hosts": [
         "python",
         "typescript-node"
@@ -2985,6 +2992,7 @@
     },
     {
       "id": "secrets-dead",
+      "exclusive": true,
       "hosts": [
         "python",
         "typescript-node"
@@ -3000,6 +3008,7 @@
     },
     {
       "id": "secrets-gated",
+      "exclusive": true,
       "hosts": [
         "python",
         "typescript-node"
@@ -3030,6 +3039,7 @@
     },
     {
       "id": "secrets-implicit",
+      "exclusive": true,
       "hosts": [
         "python",
         "typescript-node"

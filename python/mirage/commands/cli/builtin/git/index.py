@@ -19,6 +19,7 @@ from typing import IO, BinaryIO, cast
 from dulwich.index import (ConflictedIndexEntry, IndexEntry, read_index_dict,
                            write_index_dict)
 
+from mirage.commands.cli.builtin.git.errors import ResolveIndexError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.runtime.types import DispatchFn
@@ -95,3 +96,24 @@ async def write_index(dispatch: DispatchFn, gitdir: str,
     write_index_dict(cast(IO[bytes], buffer), merged)
     await write_file(dispatch, posixpath.join(gitdir, INDEX_FILE),
                      buffer.getvalue())
+
+
+def refuse_unresolved(state: IndexState) -> None:
+    """Refuse a branch move while the index still records conflict stages.
+
+    Every collision check a checkout makes reads stage 0, so a path held
+    only as stages 1-3 is invisible to all of them, and git refuses
+    before it reads either tree. The refusal is not the moving side's
+    alone: ``git switch <current>`` and ``git checkout <current>`` move
+    nothing and still die on it, so a line that answers "Already on" out
+    of a shortcut has to ask the index first. Pinned against git 2.50.1,
+    where ``git switch -c <new>`` is the one line that survives an
+    unresolved index, because it writes a ref and nothing else.
+
+    Args:
+        state (IndexState): the index as read, entries and stages.
+    """
+    if not state.conflicts:
+        return
+    raise ResolveIndexError(
+        [path.decode("utf-8", errors="replace") for path in state.conflicts])

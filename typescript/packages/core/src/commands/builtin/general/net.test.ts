@@ -88,10 +88,12 @@ describe.concurrent('net (live network, port of test_net.py)', () => {
   it('curl -X POST to postman-echo echoes the data', async () => {
     // postman-echo.com is more reliable than httpbin.org for POST echoing.
     const { out } = await runCurl('https://postman-echo.com/post', {
-      X: 'POST',
-      d: 'hello=world',
+      request: 'POST',
+      data: 'hello=world',
     })
+    // -d carries curl's form Content-Type, so the echo parses the body as
+    // a form the way it does for real curl.
     const body = DEC.decode(out)
-    expect(body).toContain('hello=world')
+    expect(body).toContain('"form":{"hello":"world"}')
   }, 30_000)
 })

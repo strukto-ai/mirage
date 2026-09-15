@@ -16,7 +16,8 @@ import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Resource } from '../../resource/base.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, PathSpec } from '../../types.ts'
+import { isFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
@@ -374,6 +375,58 @@ async function walkGlobstar(
   return out
 }
 
+// Whether a match is a directory, the way a trailing slash asks. bash keeps
+// a directory or a symlink to one and drops a regular file or a broken link
+// (bash 5.2, `*/`). A nested mount root is a directory by construction;
+// anything else is asked of the mount that owns the link-resolved path, one
+// stat per match. That mount is readied first, as levelMatches readies one
+// before listing it, because a link can point into a mount nothing has
+// touched yet. python's twin then reaches the mount's op table; a TypeScript
+// mount entry keeps no op table of its own (ops live on the workspace
+// registry), so the resource is asked through the same direct door the
+// listings use. A resource with no stat of its own cannot tell, so its
+// match is kept.
+async function isDirectory(
+  registry: MountRegistry,
+  mount: MountEntry,
+  links: NamespaceLinks | null,
+  virtual: string,
+): Promise<boolean> {
+  let real = virtual
+  if (links !== null) {
+    try {
+      real = links.follow(virtual)
+    } catch (err) {
+      if (err instanceof CycleError) return false
+      throw err
+    }
+  }
+  const owner = mountOf(registry, real, mount)
+  const prefix = rstripSlash(owner.prefix)
+  if (rstripSlash(real) === prefix) return true
+  await owner.ensureReady()
+  let row: FileStat | undefined
+  try {
+    row = await owner.resource.stat?.(PathSpec.fromStrPath(real, mountKey(real, prefix)))
+  } catch (err) {
+    if (isFsError(err)) return false
+    throw err
+  }
+  if (row === undefined) return true
+  return row.type === FileType.DIRECTORY
+}
+
+function withTrailingSlash(spec: PathSpec): PathSpec {
+  return new PathSpec({
+    virtual: spec.virtual,
+    directory: spec.directory,
+    pattern: spec.pattern,
+    resolved: spec.resolved,
+    resourcePath: spec.resourcePath,
+    rawPath: `${spec.rawPath}/`,
+  })
+}
+
 function hasGlobstarSegment(item: PathSpec): boolean {
   return unmarkGlobs(item.virtual).split('/').includes('**')
 }
@@ -416,14 +469,32 @@ export async function resolveGlobs(
         result.push(item)
         continue
       }
+      // A trailing slash asks for directories only, and every match keeps
+      // one (`*/` -> `sub/`, and so does `*//`). The slash is not part of
+      // the spelling to rebuild, so it comes off the word here and goes
+      // back on each match; the literal answer to a zero-match glob is
+      // still the word as typed. normpath already dropped it from
+      // `virtual`, which is what tells a typed word from a
+      // directory-shaped spec (#1065).
+      const dirsOnly = item.rawPath.endsWith('/') && item.rawPath !== item.virtual
       const withPrefix = new PathSpec({
         virtual: item.virtual,
         directory: item.directory,
         pattern: item.pattern,
         resolved: item.resolved,
         resourcePath: mountKey(item.virtual, prefix),
-        rawPath: item.rawPath,
+        rawPath: dirsOnly ? rstripSlash(item.rawPath) : item.rawPath,
       })
+      const typed = dirsOnly
+        ? new PathSpec({
+            virtual: withPrefix.virtual,
+            directory: withPrefix.directory,
+            pattern: withPrefix.pattern,
+            resolved: withPrefix.resolved,
+            resourcePath: withPrefix.resourcePath,
+            rawPath: item.rawPath,
+          })
+        : withPrefix
       await mount.ensureReady()
       try {
         let resolved: PathSpec[]
@@ -450,23 +521,33 @@ export async function resolveGlobs(
           const own = await mount.expandGlob([withPrefix.dir], prefix)
           resolved = mergeNamespace(own, extra, directory, registry, mount)
         }
+        if (dirsOnly) {
+          const kept: PathSpec[] = []
+          for (const p of resolved) {
+            if (await isDirectory(registry, mount, links, p.virtual)) kept.push(p)
+          }
+          resolved = kept
+        }
         if (resolved.length === 0) {
           // bash's three answers to a zero-match glob: the literal word
           // (default), nothing at all under nullglob, and a fatal
           // expansion error under failglob.
           if (opts.failglob) {
-            const word = unmarkGlobs(withPrefix.rawPath)
+            const word = unmarkGlobs(typed.rawPath)
             throw new ExitSignal(1, new TextEncoder().encode(`bash: no match: ${word}\n`), null, 1)
           }
-          if (!opts.nullglob) result.push(withPrefix)
+          if (!opts.nullglob) result.push(typed)
         } else {
-          for (const p of resolved) result.push(matchRaw(withPrefix, p))
+          for (const p of resolved) {
+            const spelled = matchRaw(withPrefix, p)
+            result.push(dirsOnly ? withTrailingSlash(spelled) : spelled)
+          }
         }
       } catch (err) {
         // A failglob refusal is fatal and propagates; an ordinary
         // resolution failure keeps the literal word.
         if (err instanceof ExitSignal) throw err
-        result.push(withPrefix)
+        result.push(typed)
       }
     } else {
       result.push(item)

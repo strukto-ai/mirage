@@ -33,6 +33,7 @@ KIND_BY_CONSUMER: dict[Consumer, NameKind] = {
     Consumer.NAMESPACE: NameKind.BUILTIN,
     Consumer.FUNCTION: NameKind.FUNCTION,
     Consumer.CLI: NameKind.CLI,
+    Consumer.EXTERNAL: NameKind.EXTERNAL,
     Consumer.MOUNT: NameKind.BUILTIN,
 }
 
@@ -40,5 +41,6 @@ DESCRIPTIONS: dict[NameKind, str] = {
     NameKind.KEYWORD: "a shell keyword",
     NameKind.FUNCTION: "a function",
     NameKind.CLI: "a mirage CLI",
+    NameKind.EXTERNAL: "a runtime command",
     NameKind.BUILTIN: "a shell builtin",
 }

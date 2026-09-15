@@ -12,14 +12,83 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
-import tree_sitter
 
-FunctionBody: TypeAlias = list[tree_sitter.Node]
+class TSNodeLike(Protocol):
+
+    @property
+    def type(self) -> str:
+        ...
+
+    @property
+    def text(self) -> bytes | None:
+        ...
+
+    @property
+    def id(self) -> int:
+        ...
+
+    @property
+    def start_byte(self) -> int:
+        ...
+
+    @property
+    def end_byte(self) -> int:
+        ...
+
+    @property
+    def start_point(self) -> tuple[int, int]:
+        ...
+
+    @property
+    def end_point(self) -> tuple[int, int]:
+        ...
+
+    @property
+    def children(self) -> Sequence["TSNodeLike"]:
+        ...
+
+    @property
+    def named_children(self) -> Sequence["TSNodeLike"]:
+        ...
+
+    @property
+    def parent(self) -> "TSNodeLike | None":
+        ...
+
+    @property
+    def prev_sibling(self) -> "TSNodeLike | None":
+        ...
+
+    @property
+    def next_sibling(self) -> "TSNodeLike | None":
+        ...
+
+    @property
+    def child_count(self) -> int:
+        ...
+
+    @property
+    def is_named(self) -> bool:
+        ...
+
+    @property
+    def is_missing(self) -> bool:
+        ...
+
+    @property
+    def has_error(self) -> bool:
+        ...
+
+    def child_by_field_name(self, name: str) -> "TSNodeLike | None":
+        ...
+
+
+FunctionBody: TypeAlias = list[TSNodeLike]
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,8 +308,17 @@ class Redirect:
         append (bool): whether the write appends rather than truncates.
         clobber (bool): whether the operator was `>|`, which overrides
             `set -C` for this one redirect and nothing else.
-        pipeline (Any): the process substitution feeding the target.
+        pipeline (Any): the node a heredoc's operator line pipes the
+            command into (`cat <<EOF | tr`), run on the command's
+            stdout.
         expand_vars (bool): whether the target undergoes expansion.
+        continuation (tuple[tuple[str, Any], ...]): the `&&`/`||`
+            steps a heredoc's operator line carries past the delimiter
+            word (`false <<EOF || echo x`), each an operator and its
+            right operand, in the order bash applies them to the
+            statement. tree-sitter parses that tail inside the
+            heredoc_redirect node, so it is detached here and applied
+            by the executor around the whole statement.
     """
     fd: int
     target: Any
@@ -250,6 +328,7 @@ class Redirect:
     clobber: bool = False
     pipeline: Any = None
     expand_vars: bool = True
+    continuation: tuple[tuple[str, Any], ...] = ()
 
 
 class ProcessSubDirection(StrEnum):

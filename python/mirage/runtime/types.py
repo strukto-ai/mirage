@@ -64,7 +64,7 @@ class DispatchFn(Protocol):
     ``path`` and return its result with the accounting IOResult.
 
     The contract a sandboxed runtime's file I/O rides: defined here,
-    on the consumer side, because runtimes receive it (attach) while
+    on the consumer side, because runtimes receive it through a binding while
     the workspace provides it, and the runtime package imports no
     workspace module. ``report``, when a caller passes one, is stamped
     by the door the moment the op completes, so an observer reads what
@@ -277,7 +277,7 @@ class ShellExecution:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProcessExecution:
-    """An argv request; current providers do not implement this capability."""
+    """An argv request executed without shell interpretation."""
 
     argv: tuple[str, ...]
     cwd: PathSpec
@@ -287,6 +287,11 @@ class ProcessExecution:
 
 
 ExecutionRequest: TypeAlias = CodeExecution | ShellExecution | ProcessExecution
+
+# Guest APIs that can operate on workspace files. Policy and backend support
+# still decide whether an individual operation is allowed.
+FilesystemOperation: TypeAlias = Literal["read", "write", "list", "stat",
+                                         "glob"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +303,7 @@ class RuntimeCapabilities:
     process: bool = False
     evaluate: bool = False
     reach: RuntimeReach = "process"
+    filesystem: tuple[FilesystemOperation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

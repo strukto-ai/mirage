@@ -51,12 +51,27 @@ describe('extractRequiredLiteral', () => {
     ['ab', null],
     ['foo|bar', null],
     ['(ab)?cdef', 'cdef'],
+    ['(foo)?bar', 'bar'],
+    ['x(foo)*y', null],
+    ['foo(bar)?baz', 'foo'],
+    ['(foo){0,2}bar', 'bar'],
+    ['(foo){1,2}bar', 'foo'],
+    ['(foo)+bar', 'foo'],
+    ['a(b(cdef)?g)?h', null],
+    ['(?:foo)?bar', null],
   ])('extracts the longest required literal from %s', (pattern, expected) => {
     expect(extractRequiredLiteral(pattern)).toBe(expected)
   })
 
   it('the extracted literal is present in every matching sample', () => {
-    for (const pattern of ['import.*os', 'colou?r', '[Ee]rror', '\\d+error']) {
+    for (const pattern of [
+      'import.*os',
+      'colou?r',
+      '[Ee]rror',
+      '\\d+error',
+      '(foo)?bar',
+      'foo(bar)?baz',
+    ]) {
       const literal = extractRequiredLiteral(pattern)
       expect(literal).not.toBeNull()
       const re = new RegExp(pattern)
@@ -67,6 +82,9 @@ describe('extractRequiredLiteral', () => {
         'Error here',
         'an error',
         'x42error',
+        'bar',
+        'foobar',
+        'foobaz',
       ]) {
         if (re.test(sample)) expect(sample).toContain(String(literal))
       }
@@ -84,6 +102,25 @@ describe('searchQuery', () => {
   })
   it('returns null when no literal can be proven', () => {
     expect(searchQuery('foo|bar', false)).toBeNull()
+  })
+  it('reads a dot as the regex it is', () => {
+    // `worker.3` matches `worker-3`, which a substring search for
+    // `worker.3` never returns; only the run before the dot is required.
+    expect(searchQuery('worker.3', false)).toBe('worker')
+    expect(searchQuery('worker.3', true)).toBe('worker.3')
+  })
+  it('reads a basic expression in its own dialect', () => {
+    // grep reads a basic expression unless -E says otherwise, where the
+    // operators are the escaped spellings and bare parens are literal.
+    expect(searchQuery('fo\\(bar\\)\\?baz', false, true)).toBe('baz')
+    expect(searchQuery('(foo)?bar', false, true)).toBe('foo')
+    expect(searchQuery('(foo)?bar', false)).toBe('bar')
+  })
+  it('never answers for a pattern list', () => {
+    // A newline-joined -e list is a set of alternatives; no one literal
+    // is required by all of them.
+    expect(searchQuery('foo\nbar', true)).toBeNull()
+    expect(searchQuery('foo\nbar', false)).toBeNull()
   })
 })
 

@@ -95,6 +95,6 @@ ARITH_OPERATORS = frozenset({
     "--",
 })
 
-# Arithmetic delimiter tokens that mark the start/end of $((...)) and
+# Arithmetic delimiter tokens that mark the start/end of $((...)), $[...], and
 # the (( ... )) arithmetic command.
-ARITH_DELIMITERS = frozenset({"$((", "((", "))"})
+ARITH_DELIMITERS = frozenset({"$((", "((", "))", "$[", "]"})

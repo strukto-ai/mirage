@@ -15,7 +15,8 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
-from mirage.core.email.client import fetch_message, list_message_uids
+from mirage.core.email.client import (fetch_message, list_message_uids,
+                                      quote_string)
 from mirage.core.email.readdir import _date_bucket, _msg_filename
 from mirage.core.email.render import message_json_text
 
@@ -29,17 +30,36 @@ def build_search_criteria(
     before: str | None = None,
     unseen: bool = False,
 ) -> str:
+    """Spell the search as one IMAP SEARCH key sequence.
+
+    Every text-valued key carries its value as a quoted string, so a
+    quote or backslash inside it stays part of the value instead of
+    ending it early and turning the rest into search keys. Dates are
+    bare atoms, as the grammar has them.
+
+    Args:
+        text (str | None): substring of the headers or body (``TEXT``).
+        subject (str | None): substring of the Subject header.
+        from_addr (str | None): substring of the From header.
+        to_addr (str | None): substring of the To header.
+        since (str | None): ``dd-Mon-yyyy`` lower bound on arrival.
+        before (str | None): ``dd-Mon-yyyy`` upper bound on arrival.
+        unseen (bool): only messages without ``\\Seen``.
+
+    Returns:
+        str: the keys joined by spaces, ``ALL`` when there are none.
+    """
     parts: list[str] = []
     if unseen:
         parts.append("UNSEEN")
     if text:
-        parts.append(f'TEXT "{text}"')
+        parts.append(f"TEXT {quote_string(text)}")
     if subject:
-        parts.append(f'SUBJECT "{subject}"')
+        parts.append(f"SUBJECT {quote_string(subject)}")
     if from_addr:
-        parts.append(f'FROM "{from_addr}"')
+        parts.append(f"FROM {quote_string(from_addr)}")
     if to_addr:
-        parts.append(f'TO "{to_addr}"')
+        parts.append(f"TO {quote_string(to_addr)}")
     if since:
         parts.append(f"SINCE {since}")
     if before:
@@ -89,16 +109,29 @@ def _build_vfs_path(prefix: str, folder: str, msg: dict[str, Any]) -> str:
 async def search_and_format(
     accessor: EmailAccessor,
     folder: str,
-    pattern: str,
+    query: str,
     prefix: str,
     max_results: int | None = None,
 ) -> list[tuple[str, str]]:
-    """Run native search and return (vfs_path, message_json) pairs."""
+    """Run a native TEXT search and return (vfs_path, message_json) pairs.
+
+    ``query`` is the substring IMAP is asked for, never a caller's regex:
+    the server matches it case-insensitively against the raw message, so
+    a grep hands over the literal every match must contain and runs its
+    real pattern over the rendered text itself.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        folder (str): the mailbox to search.
+        query (str): the substring every candidate must contain.
+        prefix (str): the mount prefix hits are spelled under.
+        max_results (int | None): keep only the newest this many uids.
+    """
     if not folder:
         return []
     uids = await search_messages(accessor,
                                  folder,
-                                 text=pattern,
+                                 text=query,
                                  max_results=max_results)
     pairs: list[tuple[str, str]] = []
     for uid in uids:

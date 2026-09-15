@@ -15,7 +15,8 @@
 import dataclasses
 import posixpath
 
-from mirage.commands.spec import SPECS, parse_command
+from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
+from mirage.commands.spec.types import FlagView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, ReadOnlyError, fs_strerror
@@ -278,6 +279,8 @@ async def prepare_mv(
     namespace: Namespace,
     dispatch: DispatchFn,
     items: list[str | PathSpec],
+    args: tuple[str, ...],
+    cwd: str,
 ) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None, Result
            | None]:
     """Adjust a two-operand ``mv`` for node-meta operands.
@@ -286,13 +289,26 @@ async def prepare_mv(
     (a link to) a directory receives the move inside it (rename(2)
     preceded by mv's dst stat); any other destination is replaced, so its
     node entry, link or overlay attrs alike, drops once the backend move
-    succeeds. A plain source that carries overlay attributes has its meta
-    travel with the file once the backend move succeeds.
+    succeeds. A plain source hands back the pair to re-anchor once the
+    backend move succeeds, so whatever the node table holds at it and
+    below it travels with the bytes.
+
+    The pair is where this can be done at all: a single-mount ``mv``
+    renames through the backend op bound to the accessor rather than
+    through the dispatcher, so the re-anchoring the dispatcher does for
+    every other caller has to be repeated here. Only a two-operand line
+    qualifies, because a path-shaped word is classified into a PathSpec
+    whether it filled an operand slot or a flag's value, and nothing
+    here can tell ``mv a b dst`` from ``mv -t dst a b``.
 
     Args:
         namespace (Namespace): addressing authority holding the node table.
         dispatch (DispatchFn): op dispatcher used to stat the destination.
         items (list[str | PathSpec]): classified command parts.
+        args (tuple[str, ...]): the line's words after the name, read
+            for the two options that move the destination.
+        cwd (str): session working directory, which the parser resolves
+            path operands against.
 
     Returns:
         tuple: (possibly rewritten parts, node entry to drop after a
@@ -303,6 +319,16 @@ async def prepare_mv(
     paths = [p for p in items if isinstance(p, PathSpec)]
     if len(paths) != 2:
         return items, None, None, None
+    # ``-t`` makes every positional a source and the flag's value the
+    # destination, which is the many-source shape above; ``-T`` names
+    # the destination outright, so no basename is appended to it. Both
+    # are read off the parsed line rather than guessed from the parts,
+    # since a path-shaped flag value is classified into a PathSpec there
+    # exactly as an operand is.
+    fl = FlagView(parse_to_kwargs(parse_command(SPECS["mv"], list(args), cwd)),
+                  spec=SPECS["mv"])
+    if fl.raw("target_directory") is not None:
+        return items, None, None, None
     src, dst = paths
 
     # Where the move lands: inside a directory destination (followed, so
@@ -310,7 +336,8 @@ async def prepare_mv(
     # the destination itself, replaced like rename(2).
     followed = namespace.follow(dst.virtual)
     stat = await stat_or_none(dispatch, PathSpec.from_str_path(followed))
-    into_dir = stat is not None and stat.type == FileType.DIRECTORY
+    into_dir = (not fl.as_bool("no_target_directory") and stat is not None
+                and stat.type == FileType.DIRECTORY)
     if into_dir:
         target_dst = (followed.rstrip("/") + "/" +
                       posixpath.basename(src.virtual))
@@ -351,9 +378,12 @@ async def prepare_mv(
                 f"'{dst.raw_path}': {fs_strerror(exc)}\n")
         return items, None, None, ok("mv")
 
-    post_rename: tuple[str, str] | None = None
-    if namespace.meta_for(src.virtual) is not None:
-        post_rename = (src.virtual, target_dst)
+    # Unconditional: a directory source carries a whole subtree of node
+    # entries that no exact-path lookup at the source can see, and a
+    # symlink below it is destroyed rather than merely forgotten when
+    # they are left behind. Both halves are no-ops when the table holds
+    # nothing there.
+    post_rename = (src.virtual, target_dst)
 
     rewritten = items
     if into_dir and namespace.is_link(dst.virtual):

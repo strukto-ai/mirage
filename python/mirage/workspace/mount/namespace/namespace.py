@@ -495,6 +495,37 @@ class Namespace:
                 if meta.target is not None and path.startswith(base)
                 and "/" not in path[len(base):]]
 
+    async def rename_under(self, src: str, dst: str) -> int:
+        """Re-anchor every node below one directory onto another.
+
+        A rename moves a whole subtree, and the node table addresses its
+        entries by absolute path, so a link or an attr overlay below the
+        source names a path that no longer exists once the backend has
+        moved the bytes. No backend can report those entries, which is
+        why nothing below the dispatcher can do this.
+
+        Args:
+            src (str): absolute virtual path being renamed.
+            dst (str): absolute virtual path it becomes.
+
+        Returns:
+            int: number of entries re-anchored.
+        """
+        base = src.rstrip("/") + "/"
+        moved = [(path, meta) for path, meta in self._nodes.items()
+                 if path.startswith(base)]
+        if not moved:
+            return 0
+        landing = dst.rstrip("/")
+        for path, meta in moved:
+            del self._nodes[path]
+        for path, meta in moved:
+            target = f"{landing}/{path[len(base):]}"
+            self._nodes[target] = meta
+            await self._store.set(target, meta.to_fields())
+        await self._store.delete([path for path, _meta in moved])
+        return len(moved)
+
     async def purge_under(self, directory: str) -> int:
         """Drop every node entry under a directory (``rm -r`` semantics).
 

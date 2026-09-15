@@ -15,6 +15,11 @@
 import { Language, type Node, Parser } from 'web-tree-sitter'
 
 import { ARITH_OPEN_TOKEN, DIGIT, NAME_CONT, QUOTES } from './constants.ts'
+import { heredocOperators, protectedSource, sameShape } from './heredoc/index.ts'
+import { discoverHeredocs } from './heredoc/reader.ts'
+import { lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
+import { HeredocNode } from './heredoc/node.ts'
+import type { ShellNode } from '../types.ts'
 
 export interface ShellParserConfig {
   engineWasm: Uint8Array | ArrayBuffer
@@ -22,7 +27,7 @@ export interface ShellParserConfig {
 }
 
 export interface ShellParser {
-  parse(command: string): Node
+  parse(command: string): ShellNode
 }
 
 /**
@@ -77,6 +82,31 @@ function isArithmetic(parser: Parser, command: string, start: number): boolean {
   if (end === null) return true
   const span = parser.parse(command.slice(start, end))
   return !span?.rootNode.hasError
+}
+
+/**
+ * Parse `text` with every heredoc body shielded from the lexer.
+ *
+ * tree-sitter-bash mis-lexes a body whose first line opens with a
+ * backslash or with whitespace (see protectedSource). The shielded copy
+ * has the same length, so its clean tree is handed back to tree-sitter as
+ * the old tree for a reparse of the untouched text: with no edit to
+ * apply, every node is reused as it stands, and the result reads the
+ * typed text at the shielded structure. The reuse is verified node by
+ * node; when anything differs, or the shielded copy does not parse
+ * cleanly, the plain parse stands.
+ */
+function parseProtected(parser: Parser, text: string): Node {
+  const tree = parser.parse(text)
+  if (tree === null) throw new Error('shell parse returned null')
+  if (!text.includes('<<')) return tree.rootNode
+  const shieldedText = protectedSource(text, tree.rootNode)
+  if (shieldedText === null) return tree.rootNode
+  const shielded = parser.parse(shieldedText)
+  if (shielded === null || shielded.rootNode.hasError) return tree.rootNode
+  const reused = parser.parse(text, shielded)
+  if (reused === null || !sameShape(shielded.rootNode, reused.rootNode)) return tree.rootNode
+  return reused.rootNode
 }
 
 /**
@@ -177,9 +207,9 @@ function repairOrphanedDollars(parser: Parser, root: Node, text: string): Node {
     for (const offset of offsets.sort((a, b) => b - a)) {
       text = rebraceDollar(text, offset)
     }
-    const retried = parser.parse(text)
-    if (retried === null || retried.rootNode.hasError) break
-    root = retried.rootNode
+    const retried = parseProtected(parser, text)
+    if (retried.hasError) break
+    root = retried
   }
   return root
 }
@@ -204,7 +234,9 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
   parser.setLanguage(language)
   return {
     /**
-     * Parse a shell command into a tree-sitter AST.
+     * Parse shell structure after the source reader gathers heredocs.
+     * Bodies become inline expansion words with reader-owned input metadata;
+     * nodes retain their original source for nested evaluation.
      *
      * A leading `((` is lexed as the arithmetic opener and the lexer
      * cannot back out, so a subshell that immediately opens another
@@ -221,13 +253,15 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
      * the line reparsed, so the returned tree can spell `$id` as
      * `${id}`.
      */
-    parse(command: string): Node {
-      const source = stripLineContinuation(command)
-      const tree = parser.parse(source)
-      if (tree === null) {
-        throw new Error('shell parse returned null')
-      }
-      let root = tree.rootNode
+    parse(command: string): ShellNode {
+      const original = command.includes('<<') ? parser.parse(command) : null
+      const documents =
+        command.includes('<<') && original !== null
+          ? discoverHeredocs(command, heredocOperators(original.rootNode))
+          : []
+      const heredocs = documents.length > 0 ? lowerHeredocs(command, documents) : null
+      const source = heredocs?.source ?? stripLineContinuation(command)
+      let root = parseProtected(parser, source)
       let text = source
       if (root.hasError) {
         // Sitting inside an ERROR is not evidence that an opener is
@@ -244,9 +278,9 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
           for (const offset of offsets.sort((a, b) => b - a)) {
             split = `${split.slice(0, offset + 1)} ${split.slice(offset + 1)}`
           }
-          const retried = parser.parse(split)
-          if (retried !== null && !retried.rootNode.hasError) {
-            root = retried.rootNode
+          const retried = parseProtected(parser, split)
+          if (!retried.hasError) {
+            root = retried
             text = split
           }
         }
@@ -254,7 +288,12 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
       if (text.includes('$')) {
         root = repairOrphanedDollars(parser, root, text)
       }
-      return root
+      return heredocs === null
+        ? root
+        : new HeredocNode(
+            root,
+            rebaseSource(heredocs, heredocs.source.slice(0, root.startIndex) + root.text),
+          )
     },
   }
 }

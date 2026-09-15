@@ -28,6 +28,12 @@ export function googleError(code: number, message: string, status: string): Repl
 
 export const NOT_FOUND: Reply = googleError(404, 'File not found.', 'NOT_FOUND')
 
+// Whether a step that reads state answered with a Reply instead of the value
+// it was asked for, so a route can hand the refusal straight back.
+export function isReply<T extends object>(v: T | Reply): v is Reply {
+  return 'status' in v
+}
+
 export function header(headers: Headers, name: string): string {
   const raw = headers[name]
   if (raw === undefined) return ''

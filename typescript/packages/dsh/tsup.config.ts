@@ -15,7 +15,13 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/plugin/service.ts', 'src/plugin/fs.ts', 'src/plugin/shell.ts'],
+  entry: [
+    'src/index.ts',
+    'src/plugin/service.ts',
+    'src/plugin/fs.ts',
+    'src/plugin/shell.ts',
+    'src/plugin/spill-store.ts',
+  ],
   format: ['esm'],
   dts: {
     compilerOptions: {
@@ -25,5 +31,10 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2022',
-  external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-fs', '@deepseek-ai/dsh-shell'],
+  external: [
+    '@deepseek-ai/cordis',
+    '@deepseek-ai/dsh-fs',
+    '@deepseek-ai/dsh-shell',
+    '@deepseek-ai/dsh-spill',
+  ],
 })

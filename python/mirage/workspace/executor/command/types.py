@@ -15,12 +15,11 @@
 from collections.abc import Awaitable, Sequence
 from typing import NamedTuple, Protocol
 
-import tree_sitter
-
 from mirage.commands.spec.types import FlagValue
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
+from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -35,8 +34,8 @@ class ExecuteNodeFn(Protocol):
     """
 
     def __call__(
-        self, node: tree_sitter.Node, session: Session,
-        stdin: ByteSource | None, call_stack: CallStack
+        self, node: TSNodeLike, session: Session, stdin: ByteSource | None,
+        call_stack: CallStack
     ) -> Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]:
         ...
 

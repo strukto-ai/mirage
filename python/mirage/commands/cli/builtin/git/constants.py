@@ -23,7 +23,15 @@ from dulwich.refs import Ref
 REGULAR = 0o100644
 EXECUTABLE = 0o100755
 SYMLINK = 0o120000
+# A gitlink: the commit another repository is checked out at. It is not
+# an object this repository holds, so nothing about it is written into
+# the working tree; git only makes sure a directory stands at the name.
+GITLINK = 0o160000
 OWNER_EXECUTE = 0o100
+# The part of a tree entry's mode that is a permission: what a restored
+# entry's own bits are set from, the object type above it being the
+# mount's business rather than the tree's.
+PERMISSION_BITS = 0o777
 
 # The symbolic ref every verb resolves first, and the ref-space spelling
 # dulwich takes for it.

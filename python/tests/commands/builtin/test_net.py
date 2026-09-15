@@ -139,15 +139,31 @@ def captured_headers(monkeypatch):
     import httpx
     captured: dict[str, dict[str, str]] = {}
 
+    class _Headers:
+
+        def multi_items(self) -> list[tuple[str, str]]:
+            return []
+
+    class _Request:
+
+        def __init__(self, method: str) -> None:
+            self.method = method
+
     class _Resp:
 
         content = b""
         status_code = 200
         reason_phrase = "OK"
+        headers = _Headers()
+        history: list = []
+
+        def __init__(self, method: str, url: str) -> None:
+            self.request = _Request(method)
+            self.url = url
 
     def _fake_request(self, method, url, headers=None, **_kw):
         captured["headers"] = dict(headers or {})
-        return _Resp()
+        return _Resp(method, url)
 
     monkeypatch.setattr(httpx.Client, "request", _fake_request)
     return captured

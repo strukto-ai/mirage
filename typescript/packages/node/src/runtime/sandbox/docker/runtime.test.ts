@@ -105,7 +105,7 @@ describe('DockerRuntime', () => {
   it("registers under the config name 'docker'", () => {
     const runtime = buildRuntime('docker', { config: { container: 'cid-42' } })
     expect(runtime).toBeInstanceOf(DockerRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })
 

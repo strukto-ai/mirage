@@ -28,17 +28,26 @@ def test_classify_pattern_newline_list_is_regex():
     ("ab", None),
     ("foo|bar", None),
     ("(ab)?cdef", "cdef"),
+    ("(foo)?bar", "bar"),
+    ("x(foo)*y", None),
+    ("foo(bar)?baz", "foo"),
+    ("(foo){0,2}bar", "bar"),
+    ("(foo){1,2}bar", "foo"),
+    ("(foo)+bar", "foo"),
+    ("a(b(cdef)?g)?h", None),
+    ("(?:foo)?bar", None),
 ])
 def test_extract_required_literal(pattern, expected):
     assert grep_pushdown.extract_required_literal(pattern) == expected
 
 
 def test_extract_literal_is_required_substring():
-    for pattern in ("import.*os", "colou?r", "[Ee]rror", r"\d+error"):
+    for pattern in ("import.*os", "colou?r", "[Ee]rror", r"\d+error",
+                    "(foo)?bar", "foo(bar)?baz"):
         literal = grep_pushdown.extract_required_literal(pattern)
         assert literal is not None
         for sample in ("import sys, os", "color", "colour", "Error here",
-                       "an error", "x42error"):
+                       "an error", "x42error", "bar", "foobar", "foobaz"):
             if re.search(pattern, sample):
                 assert literal in sample
 
@@ -54,6 +63,29 @@ def test_search_query_regex_extracts_literal():
 
 def test_search_query_regex_no_literal_is_none():
     assert grep_pushdown.search_query("foo|bar", False) is None
+
+
+def test_search_query_reads_a_dot_as_the_regex_it_is():
+    # `worker.3` matches `worker-3`, which a substring search for
+    # `worker.3` never returns; only the run before the dot is required.
+    assert grep_pushdown.search_query("worker.3", False) == "worker"
+    assert grep_pushdown.search_query("worker.3", True) == "worker.3"
+
+
+def test_search_query_reads_a_basic_expression_in_its_own_dialect():
+    # grep reads a basic expression unless -E says otherwise, where the
+    # operators are the escaped spellings and bare parens are literal.
+    assert grep_pushdown.search_query(r"fo\(bar\)\?baz", False,
+                                      basic=True) == "baz"
+    assert grep_pushdown.search_query("(foo)?bar", False, basic=True) == "foo"
+    assert grep_pushdown.search_query("(foo)?bar", False) == "bar"
+
+
+def test_search_query_never_answers_for_a_pattern_list():
+    # A newline-joined -e list is a set of alternatives; no one literal
+    # is required by all of them.
+    assert grep_pushdown.search_query("foo\nbar", True) is None
+    assert grep_pushdown.search_query("foo\nbar", False) is None
 
 
 @pytest.mark.parametrize("pattern,fixed,expected", [

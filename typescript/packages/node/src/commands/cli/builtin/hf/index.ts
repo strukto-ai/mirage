@@ -15,7 +15,6 @@
 import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
 import { Operand, Option } from '@struktoai/mirage-core/commands/spec/index'
-import { ResourceName } from '@struktoai/mirage-core/types'
 import { HfConfigSchema } from '../../../../core/hf_hub/config.ts'
 import { listCmd, whoamiCmd } from './auth.ts'
 import { downloadCmd } from './download.ts'
@@ -212,7 +211,6 @@ export const HF = new CLISpec({
   name: 'hf',
   description: 'hf command helpers',
   configModel: HfConfigSchema,
-  serves: [ResourceName.HF_MODELS, ResourceName.HF_DATASETS, ResourceName.HF_SPACES],
   subcommands: [
     AUTH,
     REPO,

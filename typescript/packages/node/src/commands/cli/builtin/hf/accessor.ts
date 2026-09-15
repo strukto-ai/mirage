@@ -58,9 +58,8 @@ export function hubFor(
   )
 }
 
-function result(text: string, mutated?: boolean): [ByteSource, IOResult] {
-  const io = mutated === undefined ? new IOResult() : new IOResult({ mutated })
-  return [yieldBytes(new TextEncoder().encode(text)), io]
+function result(text: string): [ByteSource, IOResult] {
+  return [yieldBytes(new TextEncoder().encode(text)), new IOResult()]
 }
 
 /**
@@ -80,8 +79,8 @@ export function requireOperands(inv: CLIInvocation, names: readonly string[]): v
   }
 }
 
-export function textOut(text: string, mutated?: boolean): [ByteSource, IOResult] {
-  return result(text, mutated)
+export function textOut(text: string): [ByteSource, IOResult] {
+  return result(text)
 }
 
 /**

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ContextScope } from '../../../../utils/context_scope.ts'
 import { PyodideUnavailableError } from '../errors.ts'
 import { EvalError } from '../../../errors.ts'
 import { CommandTimeoutError } from '../../../../commands/errors.ts'
@@ -98,11 +97,7 @@ export class PyodideWorkerClient {
   private readonly interruptBuffer = new SharedArrayBuffer(16)
   private failure: Error | null = null
 
-  private constructor(
-    private readonly port: WorkerPort,
-    private readonly vfs: RuntimeVFS,
-    private readonly dispatch: BridgeDispatchFn,
-  ) {
+  private constructor(private readonly port: WorkerPort) {
     port.onMessage((message) => {
       if (message.kind === 'ready') {
         this.startup?.resolve()
@@ -122,15 +117,12 @@ export class PyodideWorkerClient {
     })
   }
 
-  static async create(
-    vfs: RuntimeVFS,
-    dispatch: BridgeDispatchFn,
-  ): Promise<PyodideWorkerClient | null> {
+  static async create(): Promise<PyodideWorkerClient | null> {
     let client: PyodideWorkerClient | null = null
     try {
       const port = await createPort()
       if (port === null) return null
-      client = new PyodideWorkerClient(port, vfs, dispatch)
+      client = new PyodideWorkerClient(port)
       // A constructed worker may still fail to load (for example under
       // CSP). Commit to it only after its message handler is listening.
       await client.ready
@@ -143,14 +135,12 @@ export class PyodideWorkerClient {
 
   async execute(
     request: ExecuteRequest,
-    scope: ContextScope,
+    context: RuntimeContext,
     signal?: AbortSignal,
-    context?: RuntimeContext,
   ): Promise<RunResult | EvalResult> {
     if (this.failure !== null) throw this.failure
-    const vfs =
-      context === undefined ? this.vfs : new RuntimeVFS(context.dispatch, context.resolver)
-    const dispatch = context?.dispatch ?? this.dispatch
+    const vfs = new RuntimeVFS(context.dispatch, context.resolver)
+    const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
     const cells = new Int32Array(this.interruptBuffer)
     Atomics.store(cells, 3, 0)

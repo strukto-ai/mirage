@@ -98,6 +98,13 @@ install hint.
 
 ### Differences from CPython
 
+The pinned Monty 0.0.23 lacks `dir()`, `json.load()` and `json.dump()`.
+Use `hasattr(value, 'name')` to check a specific attribute, `json.loads(f.read())` to read JSON, and
+`f.write(json.dumps(value))` to write it. Mirage does not automatically
+switch interpreters when an API is missing. The shared
+`integ/runtime/monty.json` suite records these gaps and the working forms
+so a dependency update can revisit them.
+
 - Command-line arguments are the `argv` global; `sys.argv` does not exist.
 - The builtin `open()` is not bridged yet in the JS binding; use
   `pathlib` (`Path(...).read_text()`, `.write_text()`, `.iterdir()`).

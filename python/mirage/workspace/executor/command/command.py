@@ -38,7 +38,9 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
 from mirage.workspace.executor.builtins.links import path_stat
-from mirage.workspace.executor.command.cli import CLIContext, handle_cli
+from mirage.workspace.executor.command.cli import (CLIContext,
+                                                   drops_mount_caches,
+                                                   handle_cli)
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
 from mirage.workspace.executor.command.routing import (CWD_DEFAULT_RAW,
@@ -64,7 +66,7 @@ from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
 from mirage.workspace.executor.command.run import (  # isort: skip
-    drop_service_caches, exec_node, find_start_points, namespace_view_of,
+    drop_mount_caches, exec_node, find_start_points, namespace_view_of,
     run_on_mount, scalar_find_flags)
 
 # One handler per JOB_BUILTINS member; lookup already narrowed the name.
@@ -207,8 +209,8 @@ async def handle_command(
                 ns=namespace_view_of(registry, namespace, dispatch),
                 session_view=session_view(session, registry.policies),
             ),
-            drop_caches=functools.partial(drop_service_caches, registry,
-                                          cli_install.spec.serves),
+            drop_caches=(functools.partial(drop_mount_caches, registry)
+                         if drops_mount_caches(cli_install.spec) else None),
         )
 
     if cmd_name in CWD_DEFAULT_RAW:

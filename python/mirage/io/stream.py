@@ -106,6 +106,20 @@ async def close_quietly(stream: ByteSource | None) -> None:
         logger.debug("stream closer failed: %s", exc)
 
 
+async def discard_streams(*streams: ByteSource | None) -> None:
+    """Discard failed reads without changing normal early-close behavior."""
+    for stream in streams:
+        if isinstance(stream, CachableAsyncIterator):
+            await stream.discard()
+        else:
+            await close_quietly(stream)
+
+
+async def discard_io(io: IOResult) -> None:
+    await discard_streams(*io.reads.values(), *io.writes.values(), io.stdout,
+                          io.stderr)
+
+
 async def async_chain(*streams: ByteSource | None, ) -> AsyncIterator[bytes]:
     for stream in streams:
         if stream is None:

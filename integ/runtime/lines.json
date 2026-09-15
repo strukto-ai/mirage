@@ -2,7 +2,191 @@
   "suite": "lines",
   "cases": [
     {
-      "id": "whole_line_capture",
+      "id": "public_process_capability",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          "processbox"
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool 'a b' '$(echo literal)' '' | grep native-tool > /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/argv.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\",\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_script_pipeline_stage",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "script": "ctx['command'] == 'native-tool' and not ctx['builtin']"
+          },
+          {
+            "name": "monty",
+            "captures": []
+          },
+          "vfs"
+        ]
+      },
+      "steps": [
+        {
+          "command": "echo ok | native-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"native-tool\"]\n"
+          }
+        },
+        {
+          "command": "echo ok | denied-tool",
+          "expect": {
+            "exit": 126,
+            "stderr": "denied-tool: no runtime accepted this line\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_capture_path_policy",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cat",
+              "grep"
+            ]
+          }
+        ],
+        "mounts": {
+          "/ram": {
+            "resource": "ram",
+            "files": {
+              "secret.txt": "secret\n",
+              "public.txt": "public\n"
+            }
+          }
+        },
+        "profiles": {
+          "default": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "protected",
+                  "commands": {
+                    "cat": [
+                      "/ram/secret.txt"
+                    ],
+                    "grep": [
+                      "/ram/secret.txt"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: protected\n"
+          }
+        },
+        {
+          "command": "cat s*.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: protected\n"
+          }
+        },
+        {
+          "command": "grep secret.txt public*.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"grep\",\"secret.txt\",\"public.txt\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_captures_preserve_shell_builtins",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "cd",
+              "export",
+              "echo",
+              "pwd",
+              "printf",
+              "type",
+              "python3",
+              "node"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "cd /ram; export BUILTIN_VALUE=kept; printf \"%s\\n\" \"$BUILTIN_VALUE\"; echo shell; pwd; type -a echo",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\nshell\n/ram\necho is a shell builtin\n"
+          }
+        },
+        {
+          "command": "python3 --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"--version\"]\n"
+          }
+        },
+        {
+          "command": "node --version",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"node\",\"--version\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "captured_program_pipeline",
       "world": {
         "runtimes": [
           {
@@ -18,10 +202,17 @@
       },
       "steps": [
         {
-          "command": "nvidia-smi -L | grep GPU",
+          "command": "nvidia-smi -L | grep box > /ram/output.txt",
           "expect": {
             "exit": 0,
-            "stdout": "box:nvidia-smi -L | grep GPU\n"
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/output.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nvidia-smi -L\n"
           }
         },
         {
@@ -29,6 +220,42 @@
           "expect": {
             "exit": 0,
             "stdout": "still-the-workspace\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_keeps_mirage_commands",
+      "world": {
+        "runtimes": [
+          {
+            "name": "echobox",
+            "captures": [
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "native-tool --version | grep box > /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/version.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:native-tool --version\n"
+          }
+        },
+        {
+          "command": "echo mirage",
+          "expect": {
+            "exit": 0,
+            "stdout": "mirage\n"
           }
         }
       ]

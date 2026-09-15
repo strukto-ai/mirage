@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { strftime } from './strftime.ts'
+import { LOCAL_ZONE, UTC_ZONE } from '../../../utils/timezone.ts'
 
 const MOMENT = new Date(Date.UTC(2026, 0, 1, 0, 0, 1, 123))
 
@@ -92,15 +93,15 @@ describe('strftime GNU directives', () => {
     ],
     ['%:q|%:%z|%::', '%:q|%:+0000|%::'],
   ])('%s renders %s', (fmt, expected) => {
-    expect(strftime(MOMENT, fmt, true)).toBe(expected)
+    expect(strftime(MOMENT, fmt, UTC_ZONE)).toBe(expected)
   })
 
   it('pads a negative number after its sign', () => {
     // Pinned against date 9.7: zeros go after the sign, spaces before it.
-    expect(strftime(new Date(-1000), '%3s|%s|%_3s|%-3s|%03s|%+3s|%5s|%_5s', true)).toBe(
+    expect(strftime(new Date(-1000), '%3s|%s|%_3s|%-3s|%03s|%+3s|%5s|%_5s', UTC_ZONE)).toBe(
       '-01|-1| -1|-1|-01|-01|-0001|   -1',
     )
-    expect(strftime(new Date(-100000), '%5s|%_5s|%2s', true)).toBe('-0100| -100|-100')
+    expect(strftime(new Date(-100000), '%5s|%_5s|%2s', UTC_ZONE)).toBe('-0100| -100|-100')
   })
 
   it('lets a width pad a composite whole', () => {
@@ -108,13 +109,17 @@ describe('strftime GNU directives', () => {
     // whole, with spaces bare or under `_` and zeros under `0` or `+`;
     // %F alone lets a bare, `0` or `+` width reach the year.
     const moment = new Date(Date.UTC(2026, 8, 3, 5, 7, 9))
-    expect(strftime(moment, '%12F|%-12F|%_12F|%012F|%+12F|%6F|%9F|%_9F|%+9F|%^F|%#F', true)).toBe(
+    expect(
+      strftime(moment, '%12F|%-12F|%_12F|%012F|%+12F|%6F|%9F|%_9F|%+9F|%^F|%#F', UTC_ZONE),
+    ).toBe(
       '002026-09-03|2026-09-03|  2026-09-03|002026-09-03|+02026-09-03|2026-09-03|2026-09-03|2026-09-03|2026-09-03|2026-09-03|2026-09-03',
     )
-    expect(strftime(moment, '%12D|%-12D|%_12D|%012D|%+12D|%12T|%012T|%+12T|%12R|%12r', true)).toBe(
+    expect(
+      strftime(moment, '%12D|%-12D|%_12D|%012D|%+12D|%12T|%012T|%+12T|%12R|%12r', UTC_ZONE),
+    ).toBe(
       '    09/03/26|09/03/26|    09/03/26|000009/03/26|000009/03/26|    05:07:09|000005:07:09|000005:07:09|       05:07| 05:07:09 AM',
     )
-    expect(strftime(moment, '%12c|%^12c|%12x|%12X', true)).toBe(
+    expect(strftime(moment, '%12c|%^12c|%12x|%12X', UTC_ZONE)).toBe(
       'Thu Sep  3 05:07:09 2026|THU SEP  3 05:07:09 2026|    09/03/26|    05:07:09',
     )
   })
@@ -128,27 +133,27 @@ describe('strftime GNU directives', () => {
       strftime(
         narrow,
         '%1d|%2d|%3d|%_3d|%-3d|%03d|%1j|%2j|%4j|%1e|%3e|%_1e|%03e|%-e|%0e|%_e',
-        true,
+        UTC_ZONE,
       ),
     ).toBe('3|03|003|  3|3|003|3|03|0003|3|  3|3|003|3|03| 3')
     expect(
-      strftime(narrow, '%1Y|%5Y|%1y|%1m|%_m|%1H|%1M|%1S|%1k|%3k|%1l|%1u|%3u|%1w|%1U|%1W', true),
+      strftime(narrow, '%1Y|%5Y|%1y|%1m|%_m|%1H|%1M|%1S|%1k|%3k|%1l|%1u|%3u|%1w|%1U|%1W', UTC_ZONE),
     ).toBe('2026|02026|26|1| 1|5|7|9|5|  5|5|6|006|6|0|0')
     expect(
-      strftime(narrow, '%1V|%1C|%1g|%1G|%1I|%+5d|%+1d|%+3e|%^3d|%#3d|%-d|%-_3d|%_-3d', true),
+      strftime(narrow, '%1V|%1C|%1g|%1G|%1I|%+5d|%+1d|%+3e|%^3d|%#3d|%-d|%-_3d|%_-3d', UTC_ZONE),
     ).toBe('1|20|26|2026|5|00003|3|003|003|003|3|  3|3')
-    expect(strftime(narrow, '%5a|%05a|%-5a|%_5a', true)).toBe('  Sat|00Sat|Sat|  Sat')
+    expect(strftime(narrow, '%5a|%05a|%-5a|%_5a', UTC_ZONE)).toBe('  Sat|00Sat|Sat|  Sat')
   })
 
   it('renders the local zone with its colon forms', () => {
     const prior = process.env.TZ
     process.env.TZ = 'Asia/Kolkata'
     try {
-      expect(strftime(new Date(0), '%:z|%::z|%:::z|%_:z|%8:z|%-z|%_z|%3z|%08z', false)).toBe(
+      expect(strftime(new Date(0), '%:z|%::z|%:::z|%_:z|%8:z|%-z|%_z|%3z|%08z', LOCAL_ZONE)).toBe(
         '+05:30|+05:30:00|+05:30| +5:30|+0005:30|+530| +530|+530|+0000530',
       )
       process.env.TZ = 'Etc/GMT-1'
-      expect(strftime(new Date(0), '%z|%-z|%_z|%6z|%_8z|%3z|%-:z|%_:::z', false)).toBe(
+      expect(strftime(new Date(0), '%z|%-z|%_z|%6z|%_8z|%3z|%-:z|%_:::z', LOCAL_ZONE)).toBe(
         '+0100|+100| +100|+00100|    +100|+100|+1:00| +1',
       )
     } finally {

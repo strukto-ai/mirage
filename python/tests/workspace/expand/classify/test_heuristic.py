@@ -81,7 +81,27 @@ def test_relative_glob_resolves_against_cwd():
     assert result.directory == "/ram/"
 
 
-def test_bare_glob_operator_stays_text():
+# bash expands every unquoted glob word, a bare `*` included (`echo *`
+# lists the directory); a quoted one arrives without glob marks and is
+# text, which is how `expr 4 '*' 3` keeps its operator.
+def test_a_bare_glob_is_a_pattern_under_cwd():
     registry = MountRegistry()
     registry.mount("/ram/", RAMResource(), MountMode.WRITE)
-    assert classify_word("*", registry, "/ram") == "*"
+    result = classify_word("*", registry, "/ram")
+    assert isinstance(result, PathSpec)
+    assert result.pattern == "*"
+    assert result.directory == "/ram/"
+
+
+def test_a_glob_with_no_name_character_still_globs():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    result = classify_word("*-*", registry, "/ram")
+    assert isinstance(result, PathSpec)
+    assert result.pattern == "*-*"
+
+
+def test_a_glob_beside_shell_syntax_stays_text():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    assert classify_word("x=*", registry, "/ram") == "x=*"

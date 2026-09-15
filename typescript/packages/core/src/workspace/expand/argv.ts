@@ -12,13 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RouteDecision } from '../../runtime/routing/types.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { WordPolicy, endOptionsAfterProgram, lookup, wordPolicy } from '../lookup/index.ts'
+import {
+  Consumer,
+  WordPolicy,
+  endOptionsAfterProgram,
+  lookup,
+  runtimeRefused,
+  wordPolicy,
+} from '../lookup/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
@@ -49,12 +57,26 @@ export class Argv {
   readonly args: readonly string[]
   /** Classified view (what mount dispatch, test, and ln consume). */
   readonly operands: readonly (string | PathSpec)[]
+  /** Original words forming the matched name. */
+  readonly prefix: readonly string[]
 
-  constructor(name: string, args: readonly string[], operands: readonly (string | PathSpec)[]) {
+  constructor(
+    name: string,
+    args: readonly string[],
+    operands: readonly (string | PathSpec)[],
+    prefix: readonly string[] = [name],
+  ) {
     this.name = name
     this.args = args
     this.operands = operands
+    this.prefix = prefix
     Object.freeze(this)
+  }
+
+  /** Native argv, preserving word boundaries within a matched name. */
+  get tokens(): [string, ...string[]] {
+    const [head = this.name, ...tail] = this.prefix
+    return [head, ...tail, ...this.args]
   }
 
   /** Full classified word list, name included. */
@@ -65,7 +87,7 @@ export class Argv {
 
   /** Copy with the classified view replaced (e.g. after symlink rewriting). */
   withOperands(operands: readonly (string | PathSpec)[]): Argv {
-    return new Argv(this.name, this.args, [...operands])
+    return new Argv(this.name, this.args, [...operands], this.prefix)
   }
 }
 
@@ -84,6 +106,7 @@ export async function expandArgv(
   registry: MountRegistry,
   namespace: NamespaceLinks | null = null,
   view?: SessionView,
+  routing?: RouteDecision,
 ): Promise<Argv> {
   let expanded = await expandWords(parts, session, executeFn, callStack, view)
   if (expanded.length === 0) return new Argv('', [], [])
@@ -103,15 +126,18 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const shadowed = Object.hasOwn(session.functions, name)
+  const consumer = lookup(name, session, registry, routing)
+  const refused = runtimeRefused(name, session, registry, routing)
+  const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)
   const lineWords = [...expanded.slice(0, consumed), ...tail]
 
-  const policy = wordPolicy(lookup(name, session, registry))
+  const policy = wordPolicy(consumer)
   let wordKinds: (ValueType | null)[] | null = null
   let wordBases: (string | null)[] | null = null
-  if (policy === WordPolicy.MOUNT) {
+  // Native captures still need the spec's path roles for admission.
+  if (policy === WordPolicy.MOUNT || consumer === Consumer.EXTERNAL) {
     const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
@@ -134,7 +160,8 @@ export async function expandArgv(
   // matches fail.
   const globOpts = globOptions(session)
   const words =
-    policy === WordPolicy.SHELL || globNeedsShell(globOpts) || scopesPaths(session.commands, name)
+    !refused &&
+    (policy === WordPolicy.SHELL || globNeedsShell(globOpts) || scopesPaths(session.commands, name))
       ? await resolveGlobs(classified, registry, false, namespace, globOpts)
       : // A pattern still owes its backend a resolution, so it travels
         // marked and the marks come off there; every other word is done
@@ -147,5 +174,10 @@ export async function expandArgv(
   // relative form, not the resolved absolute path. Quote removal is part
   // of "as typed": a word never reaches a command marked.
   const textView = words.map((w) => unmarkGlobs(wordText(w)))
-  return new Argv(name, textView.slice(consumed), words.slice(consumed))
+  return new Argv(
+    name,
+    textView.slice(consumed),
+    words.slice(consumed),
+    expanded.slice(0, consumed).map(unmarkGlobs),
+  )
 }

@@ -19,6 +19,8 @@ export const AwkCmpOp = {
   LT: '<',
   GE: '>=',
   LE: '<=',
+  MATCH: '~',
+  NOT_MATCH: '!~',
 } as const
 export type AwkCmpOp = (typeof AwkCmpOp)[keyof typeof AwkCmpOp]
 
@@ -43,7 +45,7 @@ export type AwkBuiltin = (typeof AwkBuiltin)[keyof typeof AwkBuiltin]
 
 export const FIELD_PREFIX = '$'
 export const PRINT_STMT = 'print'
-export const CMP_OP_PATTERN = /==|!=|>=|<=|>|</
+export const CMP_OP_PATTERN = /==|!=|>=|<=|!~|~|>|</
 
 export const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 

@@ -20,6 +20,7 @@ import { hiddenPathsIntersect, pathRulesActive } from '../../../../context/sessi
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import type { Builder, CommandIO } from '../adapter.ts'
+import { resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 
@@ -40,12 +41,13 @@ export const CP_BUILDER: Builder = {
   name: 'cp',
   write: true,
   requirements: ['copy'],
-  fn: (ops, accessor, paths, _texts, opts) => {
+  fn: async (ops, accessor, paths, _texts, opts) => {
     const { copy, dirCopy, find, mkdir } = ops
     if (copy === undefined) {
       throw new Error('cp: backend provides no copy op')
     }
     const idx = opts.index ?? undefined
+    const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     // No native find op: fall back to a readdir walk (mirrors Python's
     // _make_find). Passing the index lets stat classify entries from the
     // cache instead of re-fetching, matching the find command.
@@ -72,7 +74,7 @@ export const CP_BUILDER: Builder = {
     // relay's own path), which is also where GNU's per-entry refusals
     // are worded.
     const { write } = ops
-    const guarded = pathRulesActive() || paths.some((p) => hiddenPathsIntersect(p.virtual))
+    const guarded = pathRulesActive() || resolved.some((p) => hiddenPathsIntersect(p.virtual))
     const strategy: NativeCopy | PrimitiveCopy =
       guarded && write !== undefined && mkdir !== undefined
         ? {
@@ -90,7 +92,7 @@ export const CP_BUILDER: Builder = {
             ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
           }
     return cpGeneric(
-      paths,
+      resolved,
       overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
       strategy,
       parsed,

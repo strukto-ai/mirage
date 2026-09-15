@@ -22,9 +22,8 @@ from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.bootstrap import bootstrap
 from mirage.runtime.python.flags import init_argv
-from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import (DispatchFn, RunArgs, RunResult, RuntimeReach,
-                                  ScriptSource)
+from mirage.runtime.types import (FilesystemOperation, RunArgs, RunResult,
+                                  RuntimeContext, RuntimeReach, ScriptSource)
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmFsConfig, WasmRuntime, WasmVFS
 
@@ -78,6 +77,9 @@ class WasiRuntime(PythonRuntime):
     # read-only (mutations raise PermissionError in WasmVFS), so
     # nothing goes around the gate.
     reach: RuntimeReach = "vfs"
+    filesystem: ClassVar[tuple[FilesystemOperation,
+                               ...]] = ('read', 'write', 'list', 'stat',
+                                        'glob')
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig
@@ -104,22 +106,21 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
-        self._dispatch: DispatchFn | None = None
-        self._resolver: MountResolver | None = None
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
-    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
-        if self._dispatch is None:
-            self._dispatch = dispatch
-            self._resolver = resolver
+    async def _execute_code(self, args: RunArgs,
+                            context: RuntimeContext | None) -> RunResult:
+        return await self.run(args, context)
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self,
+                  args: RunArgs,
+                  context: RuntimeContext | None = None) -> RunResult:
+        context = context or self._capture_context()
         # Mount prefixes route to the workspace bridge; everything else
         # is served from the build directory, so a mount at "/" never
         # collides with the interpreter's own files.
-        core = (RuntimeVFS(self._dispatch, asyncio.get_running_loop(),
-                           self._resolver)
-                if self._dispatch is not None else None)
+        core = (RuntimeVFS(context.dispatch, asyncio.get_running_loop(),
+                           context.resolver) if context is not None else None)
         fs = WasmVFS(WasmFsConfig(host_root=str(self._root)), core)
         # sys.argv becomes [prog, *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._runtime.run(

@@ -46,7 +46,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_function_body, get_function_name, get_if_branches, get_list_parts,
     get_negated_command, get_parts, get_pipeline_commands, get_redirects,
     get_subshell_body, get_text, get_while_parts, has_command_substitution,
-    split_env_prefix)
+    split_env_prefix, take_continuation)
 
 # eval / source execute their payload, so they are NOT free builtins:
 # leaving them out lets them fall through to command resolution, which
@@ -253,6 +253,28 @@ async def _provision_redirected(
     return result
 
 
+async def _provision_planned(
+    recurse: Callable[..., Any],
+    plan: ProvisionResult,
+    planned: Any,
+    node: Any,
+    session: Session,
+) -> ProvisionResult:
+    """Provision recurse wrapper that answers one node with a plan already
+    made and provisions every other node normally.
+
+    Args:
+        recurse (Callable): the provision recursion.
+        plan (ProvisionResult): the plan standing for ``planned``.
+        planned (Any): the node the plan was made for.
+        node (Any): the node being provisioned.
+        session (Session): shell session state.
+    """
+    if node is planned:
+        return plan
+    return await recurse(node, session)
+
+
 async def _provision_reassociated(
     recurse: Callable[..., Any],
     registry: MountRegistry,
@@ -391,6 +413,7 @@ async def provision_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
+        continuation = take_continuation(redirects)
         if command is not None and command.type == NT.LIST:
             # Mirror the executor: a trailing redirect hoisted over an
             # &&/|| list binds to the last command.
@@ -398,11 +421,21 @@ async def provision_node(
             wrapped = partial(_provision_reassociated, recurse, registry,
                               namespace, execute_fn, plan_scope, agent_id,
                               redirects, right)
-            return await handle_connection_provision(wrapped, left, op, right,
+            plan = await handle_connection_provision(wrapped, left, op, right,
                                                      session)
-        return await _provision_redirected(recurse, registry, namespace,
-                                           execute_fn, plan_scope, agent_id,
-                                           command, redirects, session)
+        else:
+            plan = await _provision_redirected(recurse, registry, namespace,
+                                               execute_fn, plan_scope,
+                                               agent_id, command, redirects,
+                                               session)
+        # Mirror the executor again: the `&&`/`||` steps a heredoc's
+        # operator line carried wrap the whole statement, so each one
+        # joins the plan so far to its right operand.
+        for op, right in continuation:
+            wrapped = partial(_provision_planned, recurse, plan, node)
+            plan = await handle_connection_provision(wrapped, node, op, right,
+                                                     session)
+        return plan
 
     if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)

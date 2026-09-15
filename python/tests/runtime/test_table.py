@@ -117,24 +117,22 @@ class _LineRuntime(Runtime, LineExecutorMixin):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
-def test_whole_line_runtime_matches_a_captured_command():
+def test_named_capture_does_not_take_the_whole_line():
     box = _LineRuntime()
-    assert whole_line_runtime({"nvidia-smi": box},
-                              ["cat", "nvidia-smi"]) is box
+    assert whole_line_runtime({"nvidia-smi": box}) is None
 
 
-def test_whole_line_runtime_specific_beats_star():
+def test_only_star_takes_the_whole_line():
     box, star = _LineRuntime(), _LineRuntime()
     bindings = {"nvidia-smi": box, "*": star}
-    assert whole_line_runtime(bindings, ["nvidia-smi"]) is box
-    assert whole_line_runtime(bindings, ["ls"]) is star
+    assert whole_line_runtime(bindings) is star
 
 
 def test_whole_line_runtime_skips_stage_engines_and_vfs():
     vfs = VFSRuntime(captures=["grep"])
     monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
-    assert whole_line_runtime(bindings, ["grep", "python3"]) is None
+    assert whole_line_runtime(bindings) is None
 
 
 def test_vfs_is_a_pure_routing_marker():

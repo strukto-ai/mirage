@@ -31,6 +31,7 @@ class Consumer(Enum):
     FUNCTION = auto()
     CLI = auto()
     MOUNT = auto()
+    EXTERNAL = auto()
     UNKNOWN = auto()
 
 
@@ -41,6 +42,7 @@ SHELL_CONSUMERS = frozenset({
     Consumer.NAMESPACE,
     Consumer.FUNCTION,
     Consumer.CLI,
+    Consumer.EXTERNAL,
 })
 
 

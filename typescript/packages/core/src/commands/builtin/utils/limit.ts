@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../../io/cooperative.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
@@ -235,4 +236,21 @@ export async function applyOpLimit(result: unknown, limit: Limit | null): Promis
     throw new LimitExceededError(message.trim())
   }
   return data
+}
+
+/** Capture an invocation's deadline before a lazy producer starts running. */
+export function guardInput(
+  source: ByteSource,
+  opts: { signal?: AbortSignal; timeoutSeconds?: number; command?: string },
+): AsyncIterable<Uint8Array> {
+  const seconds = opts.timeoutSeconds
+  const deadline = seconds !== undefined && seconds > 0 ? performance.now() + seconds * 1000 : null
+  return (async function* () {
+    for await (const chunk of chunks(source, opts.signal)) {
+      if (deadline !== null && performance.now() >= deadline) {
+        throw new CommandTimeoutError(opts.command ?? '?', seconds ?? 0)
+      }
+      yield chunk
+    }
+  })()
 }

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { HF_RESOURCES } from '../../../accessor/hf.ts'
 import { HF_COMMANDS } from './index.ts'
+import { HF_IO } from './io.ts'
 
 const EXPECTED_NAMES = [
   'awk',
@@ -77,6 +78,14 @@ const EXPECTED_NAMES = [
 ]
 
 describe('HF_COMMANDS', () => {
+  it('binds the native find op for the generic builder, like python', () => {
+    // hf_buckets puts its find on the IO and takes the generic command,
+    // whose builder resolves a pattern operand through the shared
+    // adapter; a bespoke wrapper left that to the dispatcher, which
+    // cannot see the namespace.
+    expect(HF_IO.find).toBeDefined()
+  })
+
   it('registers the python hf_buckets command list', () => {
     const names = new Set(HF_COMMANDS.map((c) => c.name))
     for (const name of EXPECTED_NAMES) {

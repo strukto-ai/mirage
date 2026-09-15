@@ -15,6 +15,7 @@
 import { GitIndexManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
+import { ResolveIndexError } from './errors.ts'
 import { exists, under } from './io.ts'
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, Dispatch, IndexEntry, IndexState } from './types.ts'
@@ -153,4 +154,20 @@ export async function updateIndex(
       })
     }
   })
+}
+
+/**
+ * Refuse a branch move while the index still records conflict stages.
+ *
+ * Every collision check a checkout makes reads stage 0, so a path held only as
+ * stages 1-3 is invisible to all of them, and git refuses before it reads
+ * either tree. The refusal is not the moving side's alone: `git switch
+ * <current>` and `git checkout <current>` move nothing and still die on it, so
+ * a line that answers "Already on" out of a shortcut has to ask the index
+ * first. Pinned against git 2.50.1, where `git switch -c <new>` is the one line
+ * that survives an unresolved index, because it writes a ref and nothing else.
+ */
+export function refuseUnresolved(state: IndexState): void {
+  if (state.conflicts.size === 0) return
+  throw new ResolveIndexError([...state.conflicts.keys()])
 }

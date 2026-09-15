@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import itertools
+import sys
 from email.parser import BytesParser
 from email.policy import default as default_policy
 
@@ -22,6 +24,7 @@ from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.commands.cli.builtin.himalaya import util as util_module
 from mirage.core.email.config import EmailConfig
 from mirage.io.types import materialize
+from mirage.resource.email.email import EmailResource
 
 CONFIG = {
     "imap_host": "h",
@@ -141,3 +144,125 @@ async def test_unknown_verb_uses_git_wording():
     assert err == (b"himalaya: 'bogus' is not a himalaya command. "
                    b"See 'himalaya --help'.\n")
     await ws.close()
+
+
+def _header(uid: str, subject: str) -> dict:
+    return {
+        "uid": uid,
+        "subject": subject,
+        "from": {
+            "name": "",
+            "email": "me@example.com"
+        },
+        "reply_to": [],
+        "to": [],
+        "cc": [],
+        "date": "Mon, 14 Sep 2026 10:00:00 +0000",
+        "internal_date": "14-Sep-2026 10:00:00 +0000",
+        "body_text": "",
+        "body_html": "",
+        "snippet": "",
+        "message_id": f"<{uid}@example.com>",
+        "in_reply_to": None,
+        "references": [],
+        "has_attachments": False,
+        "attachments": [],
+        "flags": [],
+    }
+
+
+@pytest.fixture
+def mailbox(monkeypatch):
+    # The CLI and a mount are two doors to one account, so a message the
+    # CLI files has to show in the mount's listing without waiting out
+    # the index TTL. The mailbox here is test state; the resource, the
+    # CLI, the workspace and its caches are the real ones.
+    readdir_module = sys.modules["mirage.core.email.readdir"]
+    store: dict[str, list[str]] = {}
+    headers: dict[str, dict] = {}
+    listed: list[str] = []
+    uids = itertools.count(101)
+
+    def file(folder: str, raw: bytes) -> None:
+        message = BytesParser(policy=default_policy).parsebytes(raw)
+        uid = str(next(uids))
+        headers[uid] = _header(uid, message["Subject"] or "")
+        store.setdefault(folder, []).append(uid)
+
+    async def list_folders(accessor):
+        return ["INBOX", "Sent"]
+
+    async def list_uids(accessor,
+                        folder,
+                        search_criteria="ALL",
+                        max_results=None):
+        listed.append(folder)
+        return list(store.get(folder, []))
+
+    async def fetch_headers(accessor, folder, uids):
+        return [headers[uid] for uid in uids]
+
+    async def save(config, raw, folder=None):
+        file(folder or "Sent", raw)
+        return folder or "Sent"
+
+    async def deliver(config, raw, save=None):
+        if save is not None:
+            file(save, raw)
+        return BytesParser(policy=default_policy).parsebytes(raw), ""
+
+    monkeypatch.setattr(readdir_module, "list_folders", list_folders)
+    monkeypatch.setattr(readdir_module, "list_message_uids", list_uids)
+    monkeypatch.setattr(readdir_module, "fetch_headers", fetch_headers)
+    monkeypatch.setattr(util_module, "save_sent_copy", save)
+    monkeypatch.setattr(util_module, "deliver", deliver)
+    file("INBOX", b"Subject: Older\r\n\r\n")
+    return listed
+
+
+def mounted() -> Workspace:
+    ws = Workspace({
+        "/mail": EmailResource(config=EmailConfig(**CONFIG)),
+        "/alias": EmailResource(config=EmailConfig(**CONFIG)),
+    })
+    ws.register_cli("himalaya", HIMALAYA, CONFIG)
+    return ws
+
+
+async def out(ws: Workspace, line: str) -> str:
+    io = await ws.execute(line)
+    assert io.exit_code == 0, await materialize(io.stderr)
+    return (await materialize(io.stdout)).decode()
+
+
+@pytest.mark.asyncio
+async def test_a_saved_message_reaches_every_listed_mount_of_the_account(
+        mailbox):
+    ws = mounted()
+    try:
+        assert await out(ws, "ls /mail/Sent") == ""
+        assert await out(ws, "ls /alias/Sent") == ""
+        await out(
+            ws, "himalaya message compose --to r@example.invalid "
+            "--subject Example --body Hello --save Sent")
+        assert await out(ws, "ls /mail/Sent") == "2026-09-14\n"
+        assert ("/alias/Sent/2026-09-14/Example__102.email.json\n" in await
+                out(ws, "find /alias -type f"))
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sent_copy_lands_in_a_listed_folder_that_already_had_mail(
+        mailbox):
+    ws = mounted()
+    try:
+        assert await out(
+            ws, "ls /mail/INBOX/2026-09-14") == "Older__101.email.json\n"
+        await out(
+            ws, "himalaya message compose --to r@example.invalid "
+            "--subject Copy --body Hello --send --save INBOX")
+        assert await out(ws, "ls /mail/INBOX/2026-09-14") == (
+            "Copy__102.email.json\nOlder__101.email.json\n")
+    finally:
+        await ws.close()

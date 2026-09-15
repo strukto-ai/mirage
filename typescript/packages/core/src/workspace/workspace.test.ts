@@ -32,9 +32,10 @@ import { op, OpsRegistry } from '../ops/registry.ts'
 import { FileType, MountMode, ResourceName, PathSpec } from '../types.ts'
 import { BaseResource, type Resource } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
+import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
-import type { BridgeDispatchFn, RunArgs, RunResult } from '../runtime/types.ts'
+import type { RunArgs, RunResult } from '../runtime/types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
@@ -1035,8 +1036,9 @@ class ResolverProbe extends LanguageRuntime {
   constructor() {
     super({ captures: ['probe-run'] })
   }
-  override attach(_dispatch: BridgeDispatchFn, resolver: MountResolver): void {
-    this.resolver = resolver
+  override bind(binding: WorkspaceBinding): void {
+    super.bind(binding)
+    this.resolver = binding.resolver
   }
   run(_args: RunArgs): Promise<RunResult> {
     return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
@@ -1044,7 +1046,7 @@ class ResolverProbe extends LanguageRuntime {
 }
 
 describe('runtime-visible mounts', () => {
-  it('attach withholds the history view from runtimes', async () => {
+  it('binding withholds the history view from runtimes', async () => {
     // The history view is a shell surface, not a place to put files;
     // announcing it would make a WASI guest preopen /.bash_history.
     const probe = new ResolverProbe()
@@ -1056,7 +1058,7 @@ describe('runtime-visible mounts', () => {
     await ws.close()
   })
 
-  it('attach withholds the synthetic root anchor', async () => {
+  it('binding withholds the synthetic root anchor', async () => {
     // Nobody mounted the anchor; forwarding it would make every
     // runtime claim a resource the embedder never asked for.
     const probe = new ResolverProbe()
@@ -1065,7 +1067,7 @@ describe('runtime-visible mounts', () => {
     await ws.close()
   })
 
-  it('attach forwards an explicit root mount', async () => {
+  it('binding forwards an explicit root mount', async () => {
     // Withheld for being synthetic, never for being `/`: a runtime
     // that cannot serve the root refuses on its own (pyodide does).
     const probe = new ResolverProbe()

@@ -32,7 +32,6 @@ from mirage.types import JsonValue, PathSpec
 
 INT_RE = re.compile(r"^-?\d+$")
 KEY_RE = re.compile(r"^([^\[\]]+)((?:\[[^\[\]]*\])*)$")
-READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class _EmptyArray:
@@ -242,7 +241,6 @@ async def api(
     upper = method.upper()
     path = expand(endpoint, inv.config)
     path = path if path.startswith("/") else f"/{path}"
-    mutated = upper not in READ_METHODS
 
     params: dict[str, str] | None = None
     body: "JsonValue | None" = None
@@ -283,22 +281,22 @@ async def api(
                    if fl.as_bool("paginate") else None)
 
     if fl.as_bool("silent"):
-        return text_out("", mutated)
+        return text_out("")
     slurp = fl.as_bool("slurp")
     program = fl.as_str("jq")
     if program:
         inputs = [pages] if slurp else pages
         lines = "".join(f"{jq_line(value)}\n" for item in inputs
                         for value in jq_eval(item, program))
-        return text_out(lines, mutated)
+        return text_out(lines)
     if slurp:
-        return json_out(pages, mutated)
+        return json_out(pages)
     if len(pages) == 1:
         if isinstance(pages[0], str):
-            return text_out(pages[0], mutated)
-        return json_out(pages[0], mutated)
+            return text_out(pages[0])
+        return json_out(pages[0])
     rendered = "".join(
         "" if page is None else
         page if isinstance(page, str) else f"{json.dumps(page, indent=2)}\n"
         for page in pages)
-    return text_out(rendered, mutated)
+    return text_out(rendered)

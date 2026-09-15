@@ -232,6 +232,8 @@ model SheetTab {
   title         String
   rows          Int    @default(1000)
   cols          Int    @default(26)
+  rowPixels     String @default("{}")
+  columnPixels  String @default("{}")
   seq           Int    @default(0)
 
   spreadsheet Spreadsheet @relation(fields: [tenant, spreadsheetId], references: [tenant, id])

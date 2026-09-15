@@ -694,6 +694,97 @@
         "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "em_grep_class_with_quote_narrows_on_its_literal",
+      "seq": 540212,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl 'worker[^\"<]*' /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_grep_alternation_scans_instead_of_no_match",
+      "seq": 540213,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlE 'parser|percent' /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_grep_dotted_pattern_is_a_regex_not_a_literal",
+      "seq": 540214,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl 'worker.3' /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_grep_fixed_quote_is_not_an_imap_error",
+      "seq": 540215,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rF 'say \"hi\"' /mail/INBOX",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_rg_alternation_scans_instead_of_no_match",
+      "seq": 540216,
+      "targets": [
+        "email"
+      ],
+      "command": "rg -l 'parser|percent' /mail/INBOX | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_grep_optional_group_keeps_the_match_without_it",
+      "seq": 540217,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rlE '(forecast)?percent' /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-07/Server_alert_worker-3__3.email.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "em_grep_basic_expression_narrows_in_its_own_dialect",
+      "seq": 540218,
+      "targets": [
+        "email"
+      ],
+      "command": "grep -rl 'the \\(brand-new tokenizer or \\)\\?parser' /mail/INBOX",
+      "expect": {
+        "exit": 0,
+        "stdout": "/mail/INBOX/2026-01-05/Standup_notes__2.email.json\n",
+        "stderr": ""
+      }
     }
   ]
 }

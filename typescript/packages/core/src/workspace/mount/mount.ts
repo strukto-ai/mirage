@@ -505,7 +505,12 @@ export class MountEntry {
           }),
       )
 
-      const expandedPaths = await this.expandGlob(prefixedPaths, '')
+      // A pattern operand travels to the handler whole. The handler
+      // resolves it once, through the shared adapter, which is where the
+      // namespace facts (links, nested mount roots, a trailing slash) are
+      // in view; the resource's glob hook serves the shell tier and cannot
+      // see them, so expanding here would lose what the handler needs.
+      // Python's dispatcher never expands either.
 
       const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
       const cmdOpts: CommandOpts = {
@@ -612,7 +617,7 @@ export class MountEntry {
                     let result: CommandFnResult
                     try {
                       result = await runWithTimeout(
-                        Promise.resolve(cmd.fn(accessor, expandedPaths, texts, runOpts)),
+                        Promise.resolve(cmd.fn(accessor, prefixedPaths, texts, runOpts)),
                         cmdTimeout,
                         cmdName,
                       )

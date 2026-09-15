@@ -27,8 +27,8 @@ from mirage.policy.types import (VALIDITY, Action, Ask, CommandContext, Deny,
                                  OpsContext, ProfileScript, SessionContext,
                                  SessionScriptsQuery)
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import EvalError
-from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import eval_with_ctx, script_engine
@@ -461,13 +461,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             engine = self._engines.get(entry.runtime)
             if engine is None:
                 engine = script_engine(entry.script, entry.runtime)
-                # Attached before the first eval, as Runtimes attaches
-                # an agent's engine: the script's open() then reads the
-                # mounts through the same door, and an unattached
-                # engine sees no file.
-                if (self._dispatch is not None and self._resolver is not None
-                        and isinstance(engine, LanguageRuntime)):
-                    engine.attach(self._reading, self._resolver)
+                if self._dispatch is not None and self._resolver is not None:
+                    engine.bind(WorkspaceBinding(self._reading,
+                                                 self._resolver))
                 self._engines[entry.runtime] = engine
             # script_engine refuses anything that cannot evaluate, so
             # this narrows a fact already established.

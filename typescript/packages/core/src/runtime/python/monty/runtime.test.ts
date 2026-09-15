@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { MontyRuntime } from './index.ts'
@@ -153,11 +154,12 @@ const text = (b: Uint8Array | null): string => (b === null ? '' : new TextDecode
 describe('MontyRuntime', () => {
   const runtimes: MontyRuntime[] = []
   const make = (
-    dispatch?: Parameters<MontyRuntime['attach']>[0],
+    dispatch?: WorkspaceBinding['dispatch'],
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
-    if (dispatch !== undefined) rt.attach(dispatch, new PrefixResolver(listMounts))
+    if (dispatch !== undefined)
+      rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(listMounts)))
     runtimes.push(rt)
     return rt
   }

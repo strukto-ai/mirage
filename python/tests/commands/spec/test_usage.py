@@ -171,3 +171,37 @@ def test_read_fail_exit_line_keeps_the_catch_all_for_anything_else():
     assert read_fail_exit_line("sed", b"sed: -e expression #1: unknown\n") == 1
     assert read_fail_exit_line("sed", b"") == 1
     assert read_fail_exit_line("sed", b"sed: /ram/Is a directory\n") == 1
+
+
+def test_curl_usage_errors_exit_2():
+    assert usage_exit_code("curl") == 2
+
+
+def test_curl_unknown_option_uses_curl_wording():
+    # Pinned on curl 8.14.1 (debian:stable-slim): one message line, then
+    # curl's own help hint. A cluster letter is reported dashed.
+    hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+    assert unknown_option_error(
+        "curl",
+        "--bogus") == (("curl: option --bogus: is unknown\n" + hint).encode(),
+                       2)
+    assert unknown_option_error(
+        "curl", "Y") == (("curl: option -Y: is unknown\n" + hint).encode(), 2)
+
+
+def test_curl_missing_value_uses_curl_wording():
+    hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+    assert missing_value_error(
+        "curl",
+        "m") == (("curl: option -m: requires parameter\n" + hint).encode(), 2)
+    assert missing_value_error(
+        "curl",
+        "--max-time") == (("curl: option --max-time: requires parameter\n" +
+                           hint).encode(), 2)
+
+
+def test_curl_bad_number_uses_curl_wording():
+    hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
+    assert invalid_float_error("curl", "--max-time", "abc") == (
+        ("curl: option --max-time: expected a proper numerical parameter\n" +
+         hint).encode(), 2)

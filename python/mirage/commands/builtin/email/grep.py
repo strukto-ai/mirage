@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
 from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   search_query,
                                                    text_search_results)
 from mirage.commands.builtin.grep_scan import grep_lines
 from mirage.commands.builtin.utils.output import format_records
@@ -77,13 +78,24 @@ async def grep(accessor: EmailAccessor, paths: list[PathSpec],
     # gate's. A scope that names no folder falls through to the generic scan
     # rather than answering, which is what the mount root does.
     operand = pushdown_operand(paths, opts.flags, pattern, SEARCH_HONORED)
-    if (pattern is not None and operand is not None
+    # IMAP TEXT is a case-insensitive substring search, not a regex engine,
+    # so the server is asked for the literal every match must contain and
+    # the real pattern runs over each candidate. A pattern with no such
+    # literal (an alternation, a class with nothing required around it)
+    # takes the generic scan rather than a search for the regex's spelling.
+    # grep reads a basic expression unless -E says otherwise, and the
+    # literal has to be read off the same dialect the matcher will use.
+    basic = not fl.as_bool("E")
+    query = (search_query(pattern, fl.as_bool("F"), basic=basic)
+             if pattern else None)
+    if (pattern is not None and query is not None and operand is not None
             and (fl.as_bool("r") or fl.as_bool("R"))):
         match = detect_scope(operand)
         if match.kind in NATIVE_KINDS:
             result = await _grep_server_side(accessor,
                                              match.slots["folder"],
                                              pattern,
+                                             query,
                                              operand,
                                              i=fl.as_bool("i"),
                                              n=fl.as_bool("n"),
@@ -91,7 +103,8 @@ async def grep(accessor: EmailAccessor, paths: list[PathSpec],
                                              w=fl.as_bool("w"),
                                              F=fl.as_bool("F"),
                                              o=fl.as_bool("o"),
-                                             max_count=fl.as_int("m"))
+                                             max_count=fl.as_int("m"),
+                                             basic=basic)
 
             if result is not None:
                 return result
@@ -113,6 +126,7 @@ async def _grep_server_side(
     accessor: EmailAccessor,
     folder: str,
     pattern: str,
+    query: str,
     operand: PathSpec,
     i: bool = False,
     n: bool = False,
@@ -121,12 +135,13 @@ async def _grep_server_side(
     F: bool = False,
     o: bool = False,
     max_count: int | None = None,
+    basic: bool = False,
 ) -> tuple[ByteSource | None, IOResult] | None:
     file_prefix = mount_prefix_of(operand.virtual, operand.resource_path)
     pairs = await search_and_format(
         accessor,
         folder,
-        pattern,
+        query,
         file_prefix,
         max_results=accessor.config.max_messages,
     )
@@ -135,7 +150,9 @@ async def _grep_server_side(
     if not pairs:
         return b"", IOResult(exit_code=1)
 
-    pat = compile_pattern(pattern, i, F, w)
+    # The same dialect the literal was read off: a basic expression
+    # compiled as an extended one matches a different language.
+    pat = compile_pattern(pattern, i, F, w, basic)
     all_results: list[str] = []
     any_match = False
     for vfs_path, msg_text in pairs:

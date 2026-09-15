@@ -17,12 +17,13 @@ import type { EvalValue, RuntimeLanguage } from '../types.ts'
 
 /** One command of the line being routed, distilled from the parse. */
 export interface ParsedCommand {
+  /** Registered command prefix, or the first word when no longer prefix matches. */
   command: string
   words: readonly string[]
   builtin: boolean
   paths: readonly string[]
   /**
-   * The installed CLI whose head word `command` is, null otherwise.
+   * The installed CLI named by the first word, null otherwise.
    * Lets a policy steer an installed name between the virtual CLI and
    * a runtime capturing the same word.
    */

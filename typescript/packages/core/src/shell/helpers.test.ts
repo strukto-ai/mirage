@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { Language, Parser } from 'web-tree-sitter'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
@@ -34,6 +37,7 @@ import {
   getPipelineCommands,
   getProcessSubBody,
   getRedirects,
+  takeContinuation,
   getSubshellBody,
   getText,
   getTestArgv,
@@ -493,5 +497,84 @@ describe('claimedDescriptor', () => {
       [0, 'a'],
       [1, 'b'],
     ])
+  })
+})
+
+// ── heredoc operator-line tail ───────────────────────────────────────────
+
+describe('heredocTail', () => {
+  let rawParser: Parser
+  beforeAll(async () => {
+    // These helpers consume native tree-sitter heredoc nodes. The workspace
+    // parser lowers heredocs before parsing and covers execution in integration.
+    const require = createRequire(import.meta.url)
+    await Parser.init({
+      wasmBinary: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
+    })
+    const language = await Language.load(
+      new Uint8Array(readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))),
+    )
+    rawParser = new Parser()
+    rawParser.setLanguage(language)
+  })
+  const heredoc = (line: string): TSNodeLike => {
+    const stmt = rawParser.parse(line)?.rootNode.children[0]
+    if (stmt?.type !== NT.REDIRECTED_STATEMENT) throw new Error(line)
+    return stmt
+  }
+  const first = (redirects: Redirect[]): Redirect => {
+    const only = redirects[0]
+    if (only === undefined) throw new Error('no redirect')
+    return only
+  }
+  const steps = (redirect: Redirect): [string, string][] =>
+    (redirect.continuation as readonly (readonly [string, TSNodeLike])[]).map(([op, right]) => [
+      op,
+      getText(right),
+    ])
+
+  it('a list step is a continuation, not a pipe', () => {
+    // tree-sitter parses `|| echo recovered` inside the heredoc_redirect;
+    // a bare command there used to be taken for a pipeline stage.
+    const [, redirects] = getRedirects(heredoc("false <<'EOF' || echo recovered\nignored\nEOF"))
+    expect(redirects).toHaveLength(1)
+    expect(first(redirects).pipeline).toBeNull()
+    expect(steps(first(redirects))).toEqual([['||', 'echo recovered']])
+  })
+
+  it('unwinds a list along its left spine', () => {
+    // `false <<EOF || echo a && echo b` is `(false || echo a) && echo b`.
+    const [, redirects] = getRedirects(heredoc('false <<EOF || echo a && echo b\nx\nEOF'))
+    expect(steps(first(redirects))).toEqual([
+      ['||', 'echo a'],
+      ['&&', 'echo b'],
+    ])
+  })
+
+  it('a pipe then a list', () => {
+    const [, redirects] = getRedirects(heredoc('cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF'))
+    const only = first(redirects)
+    expect(getText(only.pipeline as TSNodeLike)).toBe('tr a-z A-Z')
+    expect(steps(only)).toEqual([['&&', 'echo done']])
+  })
+
+  it('a plain pipe keeps the pipeline node', () => {
+    const [, redirects] = getRedirects(heredoc('cat <<EOF | tr a-z A-Z\nabc\nEOF'))
+    const only = first(redirects)
+    expect((only.pipeline as TSNodeLike).type).toBe(NT.PIPELINE)
+    expect(only.continuation).toEqual([])
+  })
+
+  it('after a hoisted file redirect', () => {
+    const [, redirects] = getRedirects(heredoc('cat <<EOF > /o && cat /o\ninner\nEOF'))
+    expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.HEREDOC, RedirectKind.STDOUT])
+    expect(steps(first(redirects))).toEqual([['&&', 'cat /o']])
+  })
+
+  it('takeContinuation detaches the steps', () => {
+    const [, redirects] = getRedirects(heredoc('false <<EOF || echo a && echo b\nx\nEOF'))
+    expect(takeContinuation(redirects).map(([op]) => op)).toEqual(['||', '&&'])
+    expect(first(redirects).continuation).toEqual([])
+    expect(takeContinuation(redirects)).toEqual([])
   })
 })

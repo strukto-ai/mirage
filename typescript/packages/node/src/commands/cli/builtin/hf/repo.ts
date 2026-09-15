@@ -47,7 +47,6 @@ export async function createCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   const url = result.url
   return textOut(
     typeof url === 'string' ? `${url}\n` : `${repoUrl(hfEndpoint(config), repoType, repoId)}\n`,
-    true,
   )
 }
 
@@ -66,7 +65,7 @@ export async function tagCreateCmd(inv: CLIInvocation): Promise<CommandFnResult>
     fl.asStr('revision') ?? DEFAULT_REVISION,
     fl.asStr('message'),
   )
-  return textOut(`Tag ${tag} created on ${repoId}\n`, true)
+  return textOut(`Tag ${tag} created on ${repoId}\n`)
 }
 
 /** List a repository's tags. */
@@ -112,5 +111,5 @@ export async function tagDeleteCmd(inv: CLIInvocation): Promise<CommandFnResult>
     )
   }
   await deleteTag(inv.config as HfConfig, repoId, tag, repoTypeOf(fl))
-  return textOut(`Tag ${tag} deleted on ${repoId}\n`, true)
+  return textOut(`Tag ${tag} deleted on ${repoId}\n`)
 }

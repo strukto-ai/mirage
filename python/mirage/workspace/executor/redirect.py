@@ -15,8 +15,6 @@
 import logging
 from enum import Enum, auto
 
-import tree_sitter
-
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.io import IOResult
@@ -31,7 +29,7 @@ from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
 from mirage.shell.descriptors import (bad_descriptor_line, unreadable_stdin,
                                       unsupported_descriptor)
 from mirage.shell.helpers import get_text
-from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, format_fs_error, fs_strerror
 from mirage.workspace.executor.builtins import _to_scope
@@ -113,7 +111,7 @@ def _stdin_dest(session: Session) -> _Fd | str:
 async def handle_redirect(
     execute_node,
     dispatch,
-    command: tree_sitter.Node | None,
+    command: TSNodeLike | None,
     redirects: list[Redirect],
     session: Session,
     stdin: ByteSource | None = None,
@@ -424,11 +422,11 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     return (f"{label}: {strerror}\n" if strerror else f"{label}\n").encode()
 
 
-def _closed_write_line(command: tree_sitter.Node) -> bytes:
+def _closed_write_line(command: TSNodeLike) -> bytes:
     """GNU's line for a write onto a closed stdout, in the command's name.
 
     Args:
-        command (tree_sitter.Node): the command whose stdout was closed.
+        command (TSNodeLike): the command whose stdout was closed.
     """
     words = get_text(command).split()
     name = words[0] if words else "redirect"

@@ -15,11 +15,13 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
+import { CLISpec } from '../../../commands/cli/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { createShellParser } from '../../../shell/parse/index.ts'
-import { ConsistencyPolicy, MountMode, PathSpec, ResourceName } from '../../../types.ts'
+import { ConsistencyPolicy, MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { dropServiceCaches } from './run.ts'
+import { dropMountCaches } from './run.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -27,62 +29,155 @@ const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
 const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
-function warmWorkspace(): [Workspace, RAMResource] {
+function warmWorkspace(): [Workspace, RAMResource, RAMResource] {
   const ram = new RAMResource()
+  const other = new RAMResource()
   // An account CLI's service caches reads, so a body already read is served
   // warm; forcing it on RAM reproduces that without a network backend.
   ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+  ;(other as unknown as { cachesReads: boolean }).cachesReads = true
   const ws = new Workspace(
-    { '/r': ram },
+    { '/r': ram, '/o': other },
     {
       mode: MountMode.WRITE,
       consistency: ConsistencyPolicy.LAZY,
       shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
     },
   )
-  return [ws, ram]
+  return [ws, ram, other]
 }
 
-describe('dropServiceCaches', () => {
-  it('drops bodies as well as listings after a CLI write', async () => {
+async function seed(ram: RAMResource, other: RAMResource): Promise<void> {
+  await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+  await other.writeFile(PathSpec.fromStrPath('/b.txt'), ENC.encode('v1\n'))
+}
+
+async function warm(ws: Workspace): Promise<void> {
+  await ws.execute('cat /r/a.txt')
+  await ws.execute('ls /r')
+  await ws.execute('cat /o/b.txt')
+}
+
+async function mutateOutOfBand(ram: RAMResource, other: RAMResource): Promise<void> {
+  await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
+  await ram.writeFile(PathSpec.fromStrPath('/new.txt'), ENC.encode('fresh\n'))
+  await other.writeFile(PathSpec.fromStrPath('/b.txt'), ENC.encode('v2\n'))
+}
+
+async function readBack(ws: Workspace): Promise<[string, string, string]> {
+  return [
+    DEC.decode((await ws.execute('cat /r/a.txt')).stdout),
+    DEC.decode((await ws.execute('ls /r')).stdout),
+    DEC.decode((await ws.execute('cat /o/b.txt')).stdout),
+  ]
+}
+
+describe('dropMountCaches', () => {
+  it('drops bodies as well as listings, on every mount', async () => {
     // A stale listing hides a create; a stale body hides an edit. The cached
     // body is the one that answers without reaching the service, so clearing
-    // the index alone leaves `cat` serving pre-write content.
-    const [ws, ram] = warmWorkspace()
+    // the index alone leaves `cat` serving pre-write content. Which mounts the
+    // CLI's service backs is not the CLI's business, so every mount drops.
+    const [ws, ram, other] = warmWorkspace()
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await seed(ram, other)
+      await warm(ws)
       expect(DEC.decode((await ws.execute('cat /r/a.txt')).stdout)).toContain('v1')
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
-      await ram.writeFile(PathSpec.fromStrPath('/new.txt'), ENC.encode('fresh\n'))
-      await dropServiceCaches(ws.registry, [ResourceName.RAM])
-      expect(DEC.decode((await ws.execute('cat /r/a.txt')).stdout)).toContain('v2')
-      expect(DEC.decode((await ws.execute('ls /r')).stdout)).toContain('new.txt')
+      await mutateOutOfBand(ram, other)
+      await dropMountCaches(ws.registry)
+      const [body, listing, otherBody] = await readBack(ws)
+      expect(body).toContain('v2')
+      expect(listing).toContain('new.txt')
+      expect(otherBody).toContain('v2')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+function outOfBandWriter(ram: RAMResource): () => Promise<[Uint8Array, IOResult]> {
+  // A leaf that reaches its service past every mount, as an account CLI does:
+  // the file lands in the store, and no vfs path was touched.
+  return async () => {
+    await ram.writeFile(PathSpec.fromStrPath('/made.txt'), ENC.encode('made\n'))
+    return [ENC.encode('ok\n'), new IOResult()]
+  }
+}
+
+describe('a CLI write and the mount caches', () => {
+  it('an account CLI write refreshes every mount', async () => {
+    // Nothing on the CLI names the mount and nothing on the mount names the
+    // CLI: a write verb on a CLI with a config model is the whole signal.
+    const [ws, ram, other] = warmWorkspace()
+    try {
+      ws.registerCli(
+        'acme',
+        new CLISpec({
+          name: 'acme',
+          configModel: (input) => input,
+          subcommands: [new CLISpec({ name: 'close', write: true, fn: outOfBandWriter(ram) })],
+        }),
+        { token: 't' },
+      )
+      await seed(ram, other)
+      await warm(ws)
+      await mutateOutOfBand(ram, other)
+      expect((await ws.execute('acme close')).exitCode).toBe(0)
+      const [body, listing, otherBody] = await readBack(ws)
+      expect(body).toContain('v2')
+      expect(listing).toContain('made.txt')
+      expect(otherBody).toContain('v2')
     } finally {
       await ws.close()
     }
   })
 
-  it('drops nothing for a CLI that serves nothing', async () => {
-    const [ws, ram] = warmWorkspace()
+  it('an account CLI read keeps every mount warm', async () => {
+    const [ws, ram, other] = warmWorkspace()
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
-      await ws.execute('cat /r/a.txt')
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
-      await dropServiceCaches(ws.registry, [])
-      expect(DEC.decode((await ws.execute('cat /r/a.txt')).stdout)).toContain('v1')
+      ws.registerCli(
+        'acme',
+        new CLISpec({
+          name: 'acme',
+          configModel: (input) => input,
+          subcommands: [new CLISpec({ name: 'peek', fn: outOfBandWriter(ram) })],
+        }),
+        { token: 't' },
+      )
+      await seed(ram, other)
+      await warm(ws)
+      await mutateOutOfBand(ram, other)
+      expect((await ws.execute('acme peek')).exitCode).toBe(0)
+      // RAM lists its store live, so the cached body is what shows the
+      // mount stayed warm.
+      const [body, , otherBody] = await readBack(ws)
+      expect(body).toContain('v1')
+      expect(otherBody).toContain('v1')
     } finally {
       await ws.close()
     }
   })
 
-  it('leaves an unrelated service its cache', async () => {
-    const [ws, ram] = warmWorkspace()
+  it('a mount-tier CLI write drops nothing', async () => {
+    // A CLI without a config model (git) writes through the dispatcher, which
+    // invalidates the paths it touched as it went; a blanket drop would only
+    // cost every other mount a reload.
+    const [ws, ram, other] = warmWorkspace()
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
-      await ws.execute('cat /r/a.txt')
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
-      await dropServiceCaches(ws.registry, [ResourceName.GDRIVE])
-      expect(DEC.decode((await ws.execute('cat /r/a.txt')).stdout)).toContain('v1')
+      ws.registerCli(
+        'tool',
+        new CLISpec({
+          name: 'tool',
+          subcommands: [new CLISpec({ name: 'poke', write: true, fn: outOfBandWriter(ram) })],
+        }),
+      )
+      await seed(ram, other)
+      await warm(ws)
+      await mutateOutOfBand(ram, other)
+      expect((await ws.execute('tool poke')).exitCode).toBe(0)
+      const [body, , otherBody] = await readBack(ws)
+      expect(body).toContain('v1')
+      expect(otherBody).toContain('v1')
     } finally {
       await ws.close()
     }

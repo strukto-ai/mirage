@@ -409,6 +409,32 @@ export class Namespace {
     return out
   }
 
+  /**
+   * Re-anchor every node below one directory onto another.
+   *
+   * A rename moves a whole subtree, and the node table addresses its entries by
+   * absolute path, so a link or an attr overlay below the source names a path
+   * that no longer exists once the backend has moved the bytes. No backend can
+   * report those entries, which is why nothing below the dispatcher can do this.
+   */
+  async renameUnder(src: string, dst: string): Promise<number> {
+    const base = rstripSlash(src) + '/'
+    const moved: [string, NodeMeta][] = []
+    for (const [path, meta] of this.nodeTable) {
+      if (path.startsWith(base)) moved.push([path, meta])
+    }
+    if (moved.length === 0) return 0
+    const landing = rstripSlash(dst)
+    for (const [path] of moved) this.nodeTable.delete(path)
+    for (const [path, meta] of moved) {
+      const target = `${landing}/${path.slice(base.length)}`
+      this.nodeTable.set(target, meta)
+      await this.store.set(target, metaToFields(meta))
+    }
+    await this.store.delete(moved.map(([path]) => path))
+    return moved.length
+  }
+
   // Drop every node entry under a directory (`rm -r` semantics).
   async purgeUnder(directory: string): Promise<number> {
     const base = rstripSlash(directory) + '/'

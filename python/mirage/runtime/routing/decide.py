@@ -14,7 +14,7 @@
 
 import asyncio
 import inspect
-from collections.abc import Mapping
+from collections.abc import Container, Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
@@ -116,8 +116,12 @@ async def _eval_source(source: str, ctx_payload: dict[str, EvalValue],
         raise ValueError(prefix + str(exc))
 
 
-async def evaluate_script(script: RouteScript, ctx: RouteContext,
-                          runtime: Runtime, entries: list[Runtime]) -> bool:
+async def evaluate_script(
+    script: RouteScript,
+    ctx: RouteContext,
+    runtime: Runtime,
+    entries: list[Runtime],
+    external_commands: Container[str] = ()) -> bool:
     """Ask one runtime's script whether it wants the line.
 
     The script sees the runtime's own view of the context
@@ -131,6 +135,8 @@ async def evaluate_script(script: RouteScript, ctx: RouteContext,
         runtime (Runtime): the runtime being asked (ctx.runtime).
         entries (list[Runtime]): the workspace's ordered world; a
             ScriptSource selects its evaluator from it by language.
+        external_commands (Container[str]): stages resolved to the external
+            fallback by workspace lookup.
 
     Raises:
         RouteError: the script answered with a policy verdict shape
@@ -138,7 +144,7 @@ async def evaluate_script(script: RouteScript, ctx: RouteContext,
             deny-dict is truthy, so coercing it would mean "willing",
             the opposite of intent.
     """
-    view = ctx.for_runtime(runtime)
+    view = ctx.for_runtime(runtime, external_commands)
     verdict: Any
     if isinstance(script, ScriptSource):
         verdict = await _eval_source(script.source, view.to_dict(runtime),
@@ -220,9 +226,13 @@ async def evaluate_policy(policy: RoutePolicy, ctx: RouteContext,
     return parse_verdict(verdict)
 
 
-async def decide_line(entries: list[Runtime], policy: RoutePolicy | None,
-                      ctx: RouteContext,
-                      static_bindings: dict[str, Runtime]) -> RouteDecision:
+async def decide_line(
+    entries: list[Runtime],
+    policy: RoutePolicy | None,
+    ctx: RouteContext,
+    static_bindings: dict[str, Runtime],
+    external_commands: Container[str] = ()
+) -> RouteDecision:
     """Resolve the policy ladder for one line: policy, then scripts.
 
     A policy verdict overlays the named runtime's captures on the
@@ -240,6 +250,8 @@ async def decide_line(entries: list[Runtime], policy: RoutePolicy | None,
         ctx (RouteContext): the parse context for the line.
         static_bindings (dict[str, Runtime]): the workspace's static
             command bindings.
+        external_commands (Container[str]): stages resolved to the external
+            fallback by workspace lookup.
     """
     if policy is not None:
         name = await evaluate_policy(policy, ctx, entries)
@@ -253,7 +265,7 @@ async def decide_line(entries: list[Runtime], policy: RoutePolicy | None,
     willing: list[Runtime] = []
     for entry in entries:
         wants = (True if entry.script is None else await evaluate_script(
-            entry.script, ctx, entry, entries))
+            entry.script, ctx, entry, entries, external_commands))
         if wants:
             willing.append(entry)
     # Every captured command resolves: to its first willing capturer,

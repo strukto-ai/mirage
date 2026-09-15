@@ -70,7 +70,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_case_word, get_cfor_parts, get_for_parts,
     get_function_body, get_function_name, get_if_branches, get_list_parts,
     get_negated_command, get_parts, get_pipeline_commands, get_redirects,
-    get_text, get_unset_args, get_while_parts)
+    get_text, get_unset_args, get_while_parts, take_continuation)
 
 
 async def _eval_cfor_expr(
@@ -249,6 +249,149 @@ async def _recurse_pipe_stderr(
     return stdout, io, exec_node
 
 
+async def _run_redirected(
+    recurse: Callable[..., Any],
+    dispatch: DispatchFn,
+    execute_fn: Callable[..., Any],
+    registry: MountRegistry,
+    view: SessionView | None,
+    command: Any,
+    redirects: list[Redirect],
+    session: Session,
+    stdin: Any,
+    call_stack: CallStack | None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Run a redirected statement: the command under its redirects, then
+    the pipeline a heredoc's operator line fed it into.
+
+    Args:
+        recurse (Callable): the plain execute_node recursion.
+        dispatch (DispatchFn): VFS op dispatcher.
+        execute_fn (Callable): recursive execute (for expansions).
+        registry (MountRegistry): mount registry.
+        view (SessionView | None): the session plane's gated door.
+        command (Any): the redirected command node, None for a bare
+            redirect.
+        redirects (list[Redirect]): the statement's parsed redirects.
+        session (Session): shell session state.
+        stdin (Any): input stream.
+        call_stack (CallStack | None): shell call stack.
+    """
+    if command is not None and command.type == NT.LIST:
+        # tree-sitter hoists a trailing redirect over the whole
+        # &&/|| list; bash binds it to the last command:
+        #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
+        # Re-associate and defer target expansion until R runs, so
+        # `cd /x && echo hi > f` writes under /x. Compound and
+        # subshell bodies keep the whole-body redirect (bash group
+        # semantics).
+        left, op, right = get_list_parts(command)
+        wrapped = partial(_recurse_reassociated, recurse, dispatch, execute_fn,
+                          registry, redirects, right)
+        return await handle_connection(wrapped, left, op, right, session,
+                                       stdin, call_stack)
+    if command is not None and command.type == NT.PIPELINE:
+        commands, stderr_flags = get_pipeline_commands(command)
+        right = commands[-1]
+        wrapped = partial(_recurse_reassociated, recurse, dispatch, execute_fn,
+                          registry, redirects, right)
+        return await handle_pipe(wrapped, commands, stderr_flags, session,
+                                 stdin, call_stack)
+    expanded_redirects, pipe_node = await expand_redirects(redirects,
+                                                           session,
+                                                           execute_fn,
+                                                           registry,
+                                                           call_stack,
+                                                           view=view)
+    # `exec > file` with no command installs the redirects on the
+    # shell for every later statement, rather than applying them to
+    # one command. `exec cmd > file` still has a command and falls
+    # through to the ordinary path, which refuses the command form.
+    if _is_bare_exec(command):
+        return await install_exec_redirects(dispatch, session,
+                                            expanded_redirects)
+    stdout, io, exec_node = await handle_redirect(recurse, dispatch, command,
+                                                  expanded_redirects, session,
+                                                  stdin, call_stack)
+    if pipe_node is not None and stdout is not None:
+        stdout, io2, exec_node2 = await recurse(pipe_node, session, stdout,
+                                                call_stack)
+        io = await io.merge(io2)
+        exec_node = exec_node2
+    return stdout, io, exec_node
+
+
+async def _run_continuation(
+    recurse: Callable[..., Any],
+    run_left: Callable[..., Any],
+    left: Any,
+    steps: tuple[tuple[str, Any], ...],
+    session: Session,
+    stdin: Any,
+    call_stack: CallStack | None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Fold the ``&&``/``||`` steps a heredoc's operator line carried
+    around the statement, left to right.
+
+    The last step's operator joins everything before it to its right
+    operand, so the fold is ``handle_connection`` with the statement's
+    node standing for that left side; the wrapper below runs the
+    remaining steps when asked for it and recurses normally for the
+    right operand. The list semantics (short-circuit, ``$?``,
+    ``PIPESTATUS``, ``set -e`` immunity) are therefore the ``list``
+    node's own, not a second copy.
+
+    Args:
+        recurse (Callable): the plain execute_node recursion.
+        run_left (Callable): runs the redirected statement itself, given
+            ``(session, stdin, call_stack)``.
+        left (Any): the redirected_statement node, standing for the
+            left side in ``handle_connection``.
+        steps (tuple[tuple[str, Any], ...]): the ``(operator, right)``
+            steps, in order.
+        session (Session): shell session state.
+        stdin (Any): input stream.
+        call_stack (CallStack | None): shell call stack.
+    """
+    if not steps:
+        return await run_left(session, stdin, call_stack)
+    op, right = steps[-1]
+    wrapped = partial(_recurse_continuation, recurse, run_left, left,
+                      steps[:-1])
+    return await handle_connection(wrapped, left, op, right, session, stdin,
+                                   call_stack)
+
+
+async def _recurse_continuation(
+    recurse: Callable[..., Any],
+    run_left: Callable[..., Any],
+    left: Any,
+    steps: tuple[tuple[str, Any], ...],
+    node: Any,
+    session: Session,
+    stdin: Any = None,
+    call_stack: CallStack | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Recurse wrapper for a heredoc continuation: the statement's own
+    node runs the steps before the current one, anything else recurses.
+
+    Args:
+        recurse (Callable): the plain execute_node recursion.
+        run_left (Callable): runs the redirected statement itself.
+        left (Any): the redirected_statement node.
+        steps (tuple[tuple[str, Any], ...]): the steps before the
+            current one.
+        node (Any): the node ``handle_connection`` asks for.
+        session (Session): shell session state.
+        stdin (Any): input stream.
+        call_stack (CallStack | None): shell call stack.
+    """
+    if node is left:
+        return await _run_continuation(recurse, run_left, left, steps, session,
+                                       stdin, call_stack)
+    return await recurse(node, session, stdin, call_stack)
+
+
 def _is_bare_exec(command: Any) -> bool:
     """Whether a redirected statement's command is a bare `exec`.
 
@@ -390,8 +533,11 @@ async def _execute_node(
     # after the typed line has ended has to stand under that one.
     # Under the line's, the inner gate could not see the grant the job
     # holds and asked again, and what it claimed went back to a
-    # hand-off nothing revokes any more.
-    execute_fn = partial(execute_fn, handed=handed)
+    # hand-off nothing revokes any more. The event is rebound for the
+    # same reason: a background job runs without the caller's, and so
+    # must the lines it evaluates, or a `$(...)` inside the job would
+    # die of an abort that was never the job's.
+    execute_fn = partial(execute_fn, handed=handed, cancel=cancel)
 
     recurse = partial(execute_node,
                       dispatch,
@@ -490,49 +636,17 @@ async def _execute_node(
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        if command is not None and command.type == NT.LIST:
-            # tree-sitter hoists a trailing redirect over the whole
-            # &&/|| list; bash binds it to the last command:
-            #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
-            # Re-associate and defer target expansion until R runs, so
-            # `cd /x && echo hi > f` writes under /x. Compound and
-            # subshell bodies keep the whole-body redirect (bash group
-            # semantics).
-            left, op, right = get_list_parts(command)
-            wrapped = partial(_recurse_reassociated, recurse, dispatch,
-                              execute_fn, registry, redirects, right)
-            return await handle_connection(wrapped, left, op, right, session,
-                                           stdin, cs)
-        if command is not None and command.type == NT.PIPELINE:
-            commands, stderr_flags = get_pipeline_commands(command)
-            right = commands[-1]
-            wrapped = partial(_recurse_reassociated, recurse, dispatch,
-                              execute_fn, registry, redirects, right)
-            return await handle_pipe(wrapped, commands, stderr_flags, session,
-                                     stdin, cs)
-        expanded_redirects, pipe_node = await expand_redirects(redirects,
-                                                               session,
-                                                               execute_fn,
-                                                               registry,
-                                                               cs,
-                                                               view=view)
-        # `exec > file` with no command installs the redirects on the
-        # shell for every later statement, rather than applying them to
-        # one command. `exec cmd > file` still has a command and falls
-        # through to the ordinary path, which refuses the command form.
-        if _is_bare_exec(command):
-            return await install_exec_redirects(dispatch, session,
-                                                expanded_redirects)
-        stdout, io, exec_node = await handle_redirect(recurse, dispatch,
-                                                      command,
-                                                      expanded_redirects,
-                                                      session, stdin, cs)
-        if pipe_node is not None and stdout is not None:
-            stdout, io2, exec_node2 = await recurse(pipe_node, session, stdout,
-                                                    cs)
-            io = await io.merge(io2)
-            exec_node = exec_node2
-        return stdout, io, exec_node
+        # The `&&`/`||` steps a heredoc's operator line carried
+        # (`false <<EOF || echo x`) wrap the whole statement, hoisted
+        # list and all, exactly as a `list` node would have wrapped it
+        # had the parser read the line the way bash does.
+        continuation = take_continuation(redirects)
+        run_left = partial(_run_redirected, recurse, dispatch, execute_fn,
+                           registry, view, command, redirects)
+        if not continuation:
+            return await run_left(session, stdin, cs)
+        return await _run_continuation(recurse, run_left, node, continuation,
+                                       session, stdin, cs)
 
     # ── subshell ────────────────────────────────
     if kind == NodeKind.SUBSHELL:

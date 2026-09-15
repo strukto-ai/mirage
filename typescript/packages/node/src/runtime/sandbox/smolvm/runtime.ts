@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
+import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type {
+  ProcessExecution,
+  RunResult,
+  RuntimeOptions,
+} from '@struktoai/mirage-core/runtime/types'
 import { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './config.ts'
 import { RUNNING_STATE, SMOLVM_CLI_HINT, notRunningHint } from './constants.ts'
 
@@ -40,7 +45,8 @@ interface SmolvmResult {
  * the guest at the host's mount prefixes, the same contract every
  * provider in this family carries.
  */
-export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> {
+export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements ProcessExecutor {
+  readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'smolvm'
 
   constructor(options: RuntimeOptions<SmolvmConfig> | Record<string, unknown> = {}) {
@@ -51,9 +57,17 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> {
   }
 
   // One smolvm CLI invocation; the seam tests override.
-  protected smolvm(args: string[], stdin: Uint8Array | null = null): Promise<SmolvmResult> {
+  protected smolvm(
+    args: string[],
+    stdin: Uint8Array | null = null,
+    signal?: AbortSignal,
+  ): Promise<SmolvmResult> {
     return new Promise((resolve, reject) => {
-      const child = spawn('smolvm', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+      const child = spawn('smolvm', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        signal,
+        killSignal: 'SIGKILL',
+      })
       const out: Buffer[] = []
       const err: Buffer[] = []
       child.stdout.on('data', (chunk: Buffer) => out.push(chunk))
@@ -107,13 +121,36 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> {
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
+  }
+
+  async runProcess(request: ProcessExecution): Promise<RunResult> {
+    if (request.argv.length === 0) throw new Error('process argv must not be empty')
+    await this.ensureConnected(request.signal)
+    return this.execArgv(
+      request.argv,
+      request.stdin,
+      { ...this.config.env, ...request.env },
+      request.cwd.virtual,
+      request.signal,
+    )
+  }
+
+  private async execArgv(
+    argv: readonly string[],
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+    signal?: AbortSignal,
   ): Promise<RunResult> {
     const args = ['machine', 'exec', '--name', this.config.machine, '-i', '-w', cwd]
     for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
     // `--` ends the flags: the command is a trailing var arg, so a
     // line starting with a dash would otherwise parse as one.
-    args.push('--', 'sh', '-c', line)
-    const result = await this.smolvm(args, stdin)
+    args.push('--', ...argv)
+    const result = await this.smolvm(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 }

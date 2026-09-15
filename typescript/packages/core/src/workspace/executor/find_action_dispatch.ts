@@ -50,6 +50,9 @@ export interface FindActionDoors {
   // where `-exec` is refused.
   executeFn?: ExecuteFn
   sessionId?: string
+  // The invocation's abort, checked between matches so a cancelled
+  // `-delete` or `-exec` stops at the next row instead of the last one.
+  signal?: AbortSignal
   // The name plane's facts, threaded into the -ls sub-dispatch so a
   // namespace-only row (a mount point, a symlink) renders the way
   // `ls -l` renders it.
@@ -492,6 +495,7 @@ export async function applyFindActions(
   const identity = doors.identity ?? null
   const starts = doors.starts ?? []
   const namespace = doors.namespace ?? null
+  const signal = doors.signal
   const once =
     doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
   if (matchedRuns === null)
@@ -512,6 +516,7 @@ export async function applyFindActions(
   const statted = testsStat(expr)
   const startVirtuals = new Set(starts.length > 0 ? starts.map((s) => s.virtual) : [cwd])
   for (const match of matches) {
+    signal?.throwIfAborted()
     const path = match.rawPath || match.virtual
     // The stat -ls renders is the one find already holds, taken before
     // any action of the chain can remove the row; a row it never statted
@@ -569,6 +574,7 @@ export async function applyFindActions(
   for (const [position, action] of actions.entries()) {
     const paths = batches.get(position)
     if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
+    signal?.throwIfAborted()
     if (
       !(await runExec(
         executeFn,

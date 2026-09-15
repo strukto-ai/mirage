@@ -21,11 +21,11 @@ async function main(): Promise<void> {
 
   console.log('=== export FOO=bar; python3 reads os.environ ===')
   await ws.execute('export FOO=bar')
-  const r1 = await ws.execute('python3 -c "import os; print(os.environ.get(\'FOO\', \'missing\'))"')
+  const r1 = await ws.execute("python3 -c \"import os; print(os.environ.get('FOO', 'missing'))\"")
   console.log(`stdout: ${r1.stdoutText.trim()}  (expected: bar)\n`)
 
   console.log('=== mutations inside python3 do NOT flow back to session.env ===')
-  await ws.execute('python3 -c "import os; os.environ[\'FOO\'] = \'mutated_inside_python\'"')
+  await ws.execute("python3 -c \"import os; os.environ['FOO'] = 'mutated_inside_python'\"")
   const r2 = await ws.execute('python3 -c "import os; print(os.environ[\'FOO\'])"')
   console.log(
     `stdout: ${r2.stdoutText.trim()}  (expected: bar — previous mutation died with the call)\n`,
@@ -49,11 +49,22 @@ async function main(): Promise<void> {
   await wsA.close()
   await wsB.close()
 
-  console.log('=== os.environ merges runtime env + session.env ===')
-  const merge = await ws.execute('python3 -c "import os; print(\'HOME\' in os.environ)"')
-  console.log(
-    `HOME in os.environ: ${merge.stdoutText.trim()}  (expected: True — process.env is merged in under the session env)\n`,
-  )
+  console.log('=== host environment is not inherited ===')
+  const key = 'MIRAGE_PYODIDE_HOST_ONLY'
+  const previous = process.env[key]
+  process.env[key] = 'host-marker'
+  try {
+    const command = `python3 -c "import os; print(os.environ.get('${key}', 'missing'))"`
+    const isolated = await ws.execute(command)
+    console.log(`host-only value: ${isolated.stdoutText.trim()}  (expected: missing)`)
+    const explicit = await ws.execute(command, {
+      env: { [key]: 'guest-marker' },
+    })
+    console.log(`explicit command value: ${explicit.stdoutText.trim()}  (expected: guest-marker)\n`)
+  } finally {
+    if (previous === undefined) delete process.env[key]
+    else process.env[key] = previous
+  }
 
   await ws.close()
 }

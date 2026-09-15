@@ -166,8 +166,12 @@ export function gridData(tab: SheetTab): JsonObj[] {
       rowData: rows.map(
         (row): JsonValue => (row.length === 0 ? {} : { values: row.map(cellData) }),
       ),
-      rowMetadata: Array.from({ length: grid.rows }, () => ({ pixelSize: ROW_PIXELS })),
-      columnMetadata: Array.from({ length: grid.cols }, () => ({ pixelSize: COLUMN_PIXELS })),
+      rowMetadata: Array.from({ length: grid.rows }, (_, i) => ({
+        pixelSize: tab.rowPixels?.[i] ?? ROW_PIXELS,
+      })),
+      columnMetadata: Array.from({ length: grid.cols }, (_, i) => ({
+        pixelSize: tab.columnPixels?.[i] ?? COLUMN_PIXELS,
+      })),
     },
   ]
 }

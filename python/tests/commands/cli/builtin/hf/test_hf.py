@@ -20,7 +20,6 @@ from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView, UsageStyle
 from mirage.core.hf_hub.config import HfConfig
-from mirage.types import ResourceName
 from tests.commands.cli.builtin.hf.conftest import inv
 
 
@@ -32,14 +31,6 @@ def test_declares_a_config_model_because_it_is_an_account_cli():
     """An account CLI reaches a service and consults no mount, which is
     exactly what declaring a config_model and no mount says."""
     assert HF.config_model is HfConfig
-
-
-def test_serves_the_three_repo_resources():
-    assert set(HF.serves) == {
-        ResourceName.HF_MODELS,
-        ResourceName.HF_DATASETS,
-        ResourceName.HF_SPACES,
-    }
 
 
 def test_uses_the_argparse_dialect():

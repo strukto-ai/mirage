@@ -58,7 +58,7 @@ The isolation holds under concurrency, and subshells are still covered by the pe
 
 ## Mid-flight cancellation: `cancel` / `signal`
 
-Both bindings support cooperative cancellation observed at recursion boundaries (LIST, PIPELINE, FOR/WHILE/UNTIL iterations, COMMAND, subshells, command substitution) and inside `sleep`. On cancel, the call raises an abort error.
+Both bindings support cooperative cancellation. TypeScript observes the signal at recursion boundaries (LIST, PIPELINE, FOR/WHILE/UNTIL iterations, COMMAND, subshells, command substitution), inside `sleep`, in the readers, and at the op door. Python runs the whole line as one task, which the event cancels at whatever await it is in, and joins before raising. On cancel, the call raises an abort error. A handler you write has to cooperate: let `CancelledError` propagate, and observe the signal in any loop of your own.
 
 <Tabs>
   <Tab title="Python​​" icon="/images/python-logo.svg">

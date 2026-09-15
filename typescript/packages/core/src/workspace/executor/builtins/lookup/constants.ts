@@ -33,6 +33,7 @@ export const KIND_BY_CONSUMER: Readonly<Partial<Record<Consumer, NameKind>>> = O
   [Consumer.NAMESPACE]: NameKind.BUILTIN,
   [Consumer.FUNCTION]: NameKind.FUNCTION,
   [Consumer.CLI]: NameKind.CLI,
+  [Consumer.EXTERNAL]: NameKind.EXTERNAL,
   [Consumer.MOUNT]: NameKind.BUILTIN,
 })
 
@@ -41,5 +42,6 @@ export const DESCRIPTIONS: Readonly<Record<NameKind, string>> = Object.freeze({
   [NameKind.KEYWORD]: 'a shell keyword',
   [NameKind.FUNCTION]: 'a function',
   [NameKind.CLI]: 'a mirage CLI',
+  [NameKind.EXTERNAL]: 'a runtime command',
   [NameKind.BUILTIN]: 'a shell builtin',
 })

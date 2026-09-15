@@ -19,6 +19,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
+import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
 import { DiskNamespaceStore } from './workspace/namespace/disk.ts'
 import { RedisNamespaceStore } from './workspace/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
@@ -134,6 +135,29 @@ describe('configToWorkspaceArgs', () => {
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
   })
+
+  it.each([undefined, ['@external']])(
+    'loads the external capture default from YAML: %j',
+    async (captures) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-captures-'))
+      try {
+        const filename = join(dir, 'workspace.yaml')
+        writeFileSync(
+          filename,
+          'mounts:\n  /:\n    resource: ram\nruntimes:\n  - name: sandlock\n' +
+            (captures === undefined ? '' : '    captures: ["@external"]\n'),
+        )
+        const cfg = loadWorkspaceConfigFile(filename)
+        const args = await configToWorkspaceArgs(cfg)
+        expect(args.options.runtimes?.[0]).toBeInstanceOf(SandlockRuntime)
+        expect((args.options.runtimes?.[0] as { captures: readonly string[] }).captures).toEqual([
+          '@external',
+        ])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('builds runtime entries from the ordered list', async () => {
     const cfg = loadWorkspaceConfig({

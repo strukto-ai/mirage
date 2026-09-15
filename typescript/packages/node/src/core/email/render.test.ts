@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { FetchedMessage } from './client.ts'
-import { messageJsonBytes } from './render.ts'
+import { envelopesJsonBytes, messageJsonBytes } from './render.ts'
 
 const MESSAGE: FetchedMessage = {
   from: { name: 'Alice', email: 'alice@example.com' },
@@ -53,5 +53,52 @@ describe('messageJsonBytes', () => {
     const withOut = { ...MESSAGE, internalDate: '' }
 
     expect(messageJsonBytes(MESSAGE)).toEqual(messageJsonBytes(withOut))
+  })
+})
+
+const FULL: FetchedMessage = {
+  ...MESSAGE,
+  body_html: '<p>hi there</p>',
+  has_attachments: true,
+  attachments: [{ filename: 'a.txt', content_type: 'text/plain', size: 3 }],
+}
+
+describe('envelopesJsonBytes', () => {
+  it('carries no body', () => {
+    // Listing a mailbox fetches every full source, because attachment
+    // metadata lives in the MIME structure, but the listing itself is the
+    // envelope: 25 HTML bodies do not belong in it (#1067).
+    const [row] = JSON.parse(decoder.decode(envelopesJsonBytes([FULL]))) as Record<
+      string,
+      unknown
+    >[]
+    expect(row).toBeDefined()
+    expect('body_text' in (row ?? {})).toBe(false)
+    expect('body_html' in (row ?? {})).toBe(false)
+    expect('snippet' in (row ?? {})).toBe(false)
+    expect('internalDate' in (row ?? {})).toBe(false)
+  })
+
+  it('keeps identifiers, headers, flags and attachment metadata', () => {
+    const [row] = JSON.parse(decoder.decode(envelopesJsonBytes([FULL]))) as Record<
+      string,
+      unknown
+    >[]
+    expect(row?.uid).toBe('101')
+    expect(row?.subject).toBe('Hello')
+    expect(row?.from).toEqual({ name: 'Alice', email: 'alice@example.com' })
+    expect(row?.flags).toEqual([])
+    expect(row?.has_attachments).toBe(true)
+    expect(row?.attachments).toEqual(FULL.attachments)
+  })
+
+  it('leaves the document renderer carrying the body', () => {
+    // The projection is the listing's alone: `cat` of the .email.json and
+    // `message read` serve the whole message, at the byte length readdir
+    // advertised.
+    const body = JSON.parse(decoder.decode(messageJsonBytes(FULL))) as Record<string, unknown>
+    expect(body.body_text).toBe('hi there')
+    expect(body.body_html).toBe('<p>hi there</p>')
+    expect(body.snippet).toBe('hi there')
   })
 })

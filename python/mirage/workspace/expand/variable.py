@@ -16,8 +16,6 @@ import os
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 
-import tree_sitter
-
 from mirage.ops.types import SessionView
 from mirage.policy import PolicyDenied
 from mirage.shell.arith import evaluate_arith
@@ -30,6 +28,7 @@ from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
 from mirage.shell.types import ArithWrite, ElementOps
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.session import (Session, ensure_var_visible,
@@ -42,7 +41,7 @@ from mirage.workspace.session.state import (RandomReader, nameref_target,
                                             session_elements, subscript_index,
                                             visible_assocs)
 
-ExpandChild = Callable[[tree_sitter.Node], Awaitable[str]]
+ExpandChild = Callable[[TSNodeLike], Awaitable[str]]
 
 _PARAM_OPS = frozenset({
     ":-", "-", ":+", "+", ":?", "?", ":=", "=", "#", "##", "%", "%%", "/",
@@ -313,8 +312,8 @@ class _BraceParse:
     length_op: bool
     indirect_op: bool
     op: str | None
-    groups: tuple[tuple[tree_sitter.Node, ...], ...]
-    subscript_nodes: tuple[tree_sitter.Node, ...] = ()
+    groups: tuple[tuple[TSNodeLike, ...], ...]
+    subscript_nodes: tuple[TSNodeLike, ...] = ()
 
 
 def _group_separator(op: str | None) -> str | None:
@@ -325,14 +324,14 @@ def _group_separator(op: str | None) -> str | None:
     return None
 
 
-def _parse_braces(node: tree_sitter.Node) -> _BraceParse:
+def _parse_braces(node: TSNodeLike) -> _BraceParse:
     var_name = None
     subscript = None
-    subscript_nodes: tuple[tree_sitter.Node, ...] = ()
+    subscript_nodes: tuple[TSNodeLike, ...] = ()
     length_op = False
     indirect_op = False
     op = None
-    groups: list[list[tree_sitter.Node]] = []
+    groups: list[list[TSNodeLike]] = []
     seen_var = False
     for c in node.children:
         if c.type == "${" or c.type == "}":
@@ -349,7 +348,7 @@ def _parse_braces(node: tree_sitter.Node) -> _BraceParse:
             seen_var = True
             continue
         if c.type == "subscript" and not seen_var:
-            sub_nodes: list[tree_sitter.Node] = []
+            sub_nodes: list[TSNodeLike] = []
             for sc in c.named_children:
                 if sc.type == NT.VARIABLE_NAME and var_name is None:
                     var_name = get_text(sc)
@@ -522,7 +521,7 @@ def _pattern_text(text: str, session: Session,
     return "".join(out)
 
 
-async def _expand_operand(node: tree_sitter.Node, expand_child: ExpandChild,
+async def _expand_operand(node: TSNodeLike, expand_child: ExpandChild,
                           pattern_mode: bool, session: Session,
                           call_stack: CallStack | None) -> str:
     if node.type == NT.CONCATENATION:
@@ -538,7 +537,7 @@ async def _expand_operand(node: tree_sitter.Node, expand_child: ExpandChild,
     return await expand_child(node)
 
 
-async def _expand_group(nodes: tuple[tree_sitter.Node, ...],
+async def _expand_group(nodes: tuple[TSNodeLike, ...],
                         expand_child: ExpandChild, pattern_mode: bool,
                         session: Session, call_stack: CallStack | None) -> str:
     """Expand adjacent operand nodes, preserving inter-node whitespace.
@@ -838,7 +837,7 @@ def _value_op(op: str, val: str, groups: list[str],
     return val
 
 
-async def expand_braces(node: tree_sitter.Node,
+async def expand_braces(node: TSNodeLike,
                         session: Session,
                         call_stack: CallStack | None,
                         expand_child: ExpandChild,
@@ -851,7 +850,7 @@ async def expand_braces(node: tree_sitter.Node,
     reader settles, so the line ends where bash's does.
 
     Args:
-        node (tree_sitter.Node): the ``expansion`` tree-sitter node.
+        node (TSNodeLike): the ``expansion`` tree-sitter node.
         session (Session): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node
@@ -874,7 +873,7 @@ async def expand_braces(node: tree_sitter.Node,
     return value
 
 
-async def _expand_braces(node: tree_sitter.Node, session: Session,
+async def _expand_braces(node: TSNodeLike, session: Session,
                          call_stack: CallStack | None,
                          expand_child: ExpandChild, view: SessionView | None,
                          operand: _ArithOperand) -> str:
@@ -1126,7 +1125,7 @@ def _positional_args(session: Session,
     return getattr(session, "positional_args", None) or []
 
 
-def is_multiword_at(node: tree_sitter.Node) -> bool:
+def is_multiword_at(node: TSNodeLike) -> bool:
     """Report whether a "${a[@]...}" splat word-splits when quoted.
 
     True for the ``@``-subscript forms bash keeps as one word per
@@ -1136,7 +1135,7 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     or a default/alternate op that acts on the joined value).
 
     Args:
-        node (tree_sitter.Node): the ``expansion`` node.
+        node (TSNodeLike): the ``expansion`` node.
     """
     if node.type == NT.SIMPLE_EXPANSION:
         # Bare "$@" is the positional splat. It word-splits exactly like
@@ -1153,7 +1152,7 @@ def is_multiword_at(node: tree_sitter.Node) -> bool:
     return p.op in _MULTIWORD_AT_OPS
 
 
-async def expand_array_at(node: tree_sitter.Node,
+async def expand_array_at(node: TSNodeLike,
                           session: Session,
                           call_stack: CallStack | None,
                           expand_child: ExpandChild,
@@ -1167,7 +1166,7 @@ async def expand_array_at(node: tree_sitter.Node,
     words are known, as ``expand_braces`` lands its own.
 
     Args:
-        node (tree_sitter.Node): the ``expansion`` node.
+        node (TSNodeLike): the ``expansion`` node.
         session (Session): shell session (arrays, env).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
@@ -1187,7 +1186,7 @@ async def expand_array_at(node: tree_sitter.Node,
     return words
 
 
-async def _expand_array_at(node: tree_sitter.Node, session: Session,
+async def _expand_array_at(node: TSNodeLike, session: Session,
                            call_stack: CallStack | None,
                            expand_child: ExpandChild,
                            operand: _ArithOperand) -> list[str]:

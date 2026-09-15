@@ -15,10 +15,9 @@
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
-import { HF_FIND } from './find.ts'
 import { HF_IO } from './io.ts'
 
-const HF_OVERRIDES = new Set(['cp', 'mv', 'find'])
+const HF_OVERRIDES = new Set(['cp', 'mv'])
 
 export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ...HF_RESOURCES.flatMap((resource) =>
@@ -26,5 +25,4 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
       overrides: HF_OVERRIDES,
     }),
   ),
-  ...HF_FIND,
 ]

@@ -45,6 +45,15 @@ function obj(text: string): JsonObj {
   return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
 }
 
+function pixelSizes(text: string): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(obj(text)).map(([key, value]) => {
+      if (typeof value !== 'number') throw new Error('invalid stored pixel size')
+      return [key, value]
+    }),
+  )
+}
+
 // Prisma hands Bytes back as a Uint8Array, not a Buffer, and every consumer
 // here calls a Buffer method on it (`toString('utf8')`, `subarray` for a Range,
 // `length` for a Content-Length). Wrapping shares the memory rather than
@@ -221,6 +230,8 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
           title: t.title,
           rows: t.rows,
           cols: t.cols,
+          rowPixels: pixelSizes(t.rowPixels),
+          columnPixels: pixelSizes(t.columnPixels),
           cells: new Map(
             (cellsOf.get(`${t.spreadsheetId} ${String(t.sheetId)}`) ?? []).map((c) => [
               `${String(c.row)},${String(c.col)}`,

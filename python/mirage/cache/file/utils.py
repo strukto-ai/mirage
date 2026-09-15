@@ -14,6 +14,8 @@
 
 import hashlib
 
+from mirage.io.cooperative import chunks
+
 
 def parse_limit(limit: str | int) -> int:
     if isinstance(limit, int):
@@ -27,6 +29,13 @@ def parse_limit(limit: str | int) -> int:
 
 def default_fingerprint(data: bytes) -> str:
     return hashlib.md5(data).hexdigest()
+
+
+async def default_fingerprint_async(data: bytes) -> str:
+    digest = hashlib.md5()
+    async for chunk in chunks(data):
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def glob_escape(literal: str) -> str:

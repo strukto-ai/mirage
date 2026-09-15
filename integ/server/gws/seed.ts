@@ -15,7 +15,7 @@
 import { ResetBodyError } from '../kit/typescript/index.ts'
 import type { JsonValue } from '../kit/typescript/index.ts'
 import { createDriveItem } from './drive/item.ts'
-import { eventsOf, makeEvent } from './calendar/event.ts'
+import { eventsOf, makeEvent, readEventTimes } from './calendar/event.ts'
 import { DEFAULT_CALENDAR_TZ } from './store/state.ts'
 import type { GwsState } from './store/state.ts'
 import type { DocTab, FormDoc } from './store/types.ts'
@@ -23,6 +23,7 @@ import { newFormItem } from './forms/form.ts'
 import { asBool, asObjArr, asStr, isObj } from './wire/json.ts'
 import type { JsonObj } from './wire/json.ts'
 import { DOC_MIME, FORM_MIME } from './wire/mime.ts'
+import { isReply } from './wire/reply.ts'
 
 // A secondary calendar and a form carrying responses are both harness state
 // rather than anything the API can mint: you own every calendar you create,
@@ -47,10 +48,11 @@ export function seedCalendars(st: GwsState, entries: JsonObj[]): void {
     })
     const bucket = eventsOf(st, id)
     for (const raw of asObjArr(entry.events)) {
-      const ev = makeEvent(st, raw)
-      if (ev === null) {
-        throw new Error(`seed event needs a start and an end: ${JSON.stringify(raw)}`)
+      const times = readEventTimes(raw)
+      if (isReply(times)) {
+        throw new Error(`seed event ${JSON.stringify(raw)} refused: ${JSON.stringify(times.body)}`)
       }
+      const ev = makeEvent(st, raw, times)
       bucket.set(ev.id, ev)
     }
   }

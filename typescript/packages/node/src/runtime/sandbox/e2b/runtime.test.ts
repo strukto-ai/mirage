@@ -17,7 +17,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
 import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
-import { E2BRuntime, type E2bSdk } from './runtime.ts'
+import { E2BRuntime, type E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 
 const DEC = new TextDecoder()
 
@@ -52,7 +52,7 @@ class FakeHandle {
     return Promise.resolve()
   }
   wait() {
-    if (this.command === 'sleep')
+    if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
     if (this.command === 'exit 3')
       return Promise.reject(new FakeExitError(3, 'partial', 'boom-err'))
@@ -197,7 +197,7 @@ describe('E2BRuntime', () => {
   it('registers under e2b', () => {
     const runtime = buildRuntime('e2b', { config: { sandboxId: 'sb-live' } })
     expect(runtime).toBeInstanceOf(E2BRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })
 
@@ -308,7 +308,10 @@ describe('E2B cancellation and validation', () => {
   })
 
   it.each(['caller', 'timeout'])('propagates %s cancellation from a workspace', async (kind) => {
-    const runtime = makeRuntime()
+    const runtime = new FakedE2BRuntime({
+      captures: ['native-sleep'],
+      config: { sandboxId: 'sb-live' },
+    })
     const abort = new AbortController()
     const workspace = new Workspace(
       { '/data': new RAMResource() },
@@ -316,12 +319,12 @@ describe('E2B cancellation and validation', () => {
         mode: MountMode.EXEC,
         runtimes: [runtime, 'vfs'],
         ...(kind === 'timeout'
-          ? { commandLimits: { '/data': { sleep: new Limit({ timeoutSeconds: 0.05 }) } } }
+          ? { commandLimits: { '/data': { 'native-sleep': new Limit({ timeoutSeconds: 0.05 }) } } }
           : {}),
       },
     )
     try {
-      const run = workspace.execute('sleep', { signal: abort.signal })
+      const run = workspace.execute('native-sleep', { signal: abort.signal })
       if (kind === 'caller') {
         const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
         await vi.waitFor(() => {

@@ -30,6 +30,23 @@ export class HttpConnectError extends Error {
   }
 }
 
+/**
+ * The request ran past its deadline before an HTTP response arrived.
+ *
+ * A subclass, because a timeout is one more way the request never got a
+ * response, so a caller content with that answer (wget) keeps catching
+ * one type; curl tells them apart for its exit 28.
+ */
+export class HttpTimeoutError extends HttpConnectError {
+  readonly elapsedMs: number
+
+  constructor(host: string, port: number, elapsedMs: number) {
+    super(host, port)
+    this.name = 'HttpTimeoutError'
+    this.elapsedMs = elapsedMs
+  }
+}
+
 // An invalid -k field specification or ordering letter (GNU sort).
 // Mirrors Python's mirage.commands.builtin.errors.SortKeyError.
 export class SortKeyError extends Error {}

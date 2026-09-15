@@ -124,6 +124,17 @@ class MountRegistry:
         self._reconciler: ReadReconciler | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
 
+    async def invalidate_after_external(self) -> None:
+        """Refetch cached data after native code may have changed files."""
+        if self._file_cache is not None:
+            await self._file_cache.clear()
+        for mount in self.mounts():
+            if mount.cache_manager is not None:
+                await mount.cache_manager.clear_index(mount.resource.index)
+            else:
+                async with mount.use():
+                    await mount.resource.index.clear()
+
     def set_consistency(self, consistency: ConsistencyPolicy) -> None:
         self._consistency = consistency
 

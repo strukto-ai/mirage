@@ -26,10 +26,9 @@ from mirage.runtime.python.monty.binding import pydantic_monty
 from mirage.runtime.python.monty.constants import MISSING_EXTRA_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.osaccess import MirageOSAccess
-from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
-                                  RunResult, RuntimeContext, RuntimeReach,
-                                  ScriptSource)
+from mirage.runtime.types import (EvalResult, EvalValue, FilesystemOperation,
+                                  RunArgs, RunResult, RuntimeContext,
+                                  RuntimeReach, ScriptSource)
 
 
 class MontyRuntime(PythonRuntime, EvaluatorMixin):
@@ -55,6 +54,8 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     # environment, or network door, and its file I/O is serviced only
     # through the workspace dispatch, so nothing goes around the gate.
     reach: RuntimeReach = "vfs"
+    filesystem: ClassVar[tuple[FilesystemOperation,
+                               ...]] = ('read', 'write', 'list', 'stat')
     # No import system to resolve a module with, so `-m` has nothing to
     # run; the refusal names this runtime rather than inventing a
     # "No module named" that would imply a search happened.
@@ -68,14 +69,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
         if pydantic_monty is None:
             raise ImportError(MISSING_EXTRA_HINT)
         super().__init__(captures, config, script)
-        self._workspace_dispatch: DispatchFn | None = None
-        self._resolver: MountResolver | None = None
         self._execution = MontyExecution()
-
-    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
-        if self._workspace_dispatch is None:
-            self._workspace_dispatch = dispatch
-            self._resolver = resolver
 
     async def _execute_code(self, args: RunArgs,
                             context: RuntimeContext | None) -> RunResult:
@@ -119,6 +113,6 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     def _bridge(self, env: dict[str, str],
                 context: RuntimeContext | None) -> MirageOSAccess:
         return MirageOSAccess(
-            asyncio.get_running_loop(), context.dispatch
-            if context is not None else self._workspace_dispatch, env,
-            context.resolver if context is not None else self._resolver)
+            asyncio.get_running_loop(),
+            context.dispatch if context is not None else None, env,
+            context.resolver if context is not None else None)

@@ -43,6 +43,27 @@ export function messageJsonBytes(message: FetchedMessage): Uint8Array {
   return encoder.encode(messageJsonText(message))
 }
 
-export function messagesJsonBytes(messages: readonly FetchedMessage[]): Uint8Array {
-  return encoder.encode(JSON.stringify(messages.map((m) => messageDocument(m))))
+export type Envelope = Omit<FetchedMessage, 'internalDate' | 'body_text' | 'body_html' | 'snippet'>
+
+/**
+ * Projects a fetched message onto its envelope.
+ *
+ * The envelope is the message without its body: identifiers, headers,
+ * flags and attachment metadata stay; `body_text`, `body_html` and the
+ * body-derived `snippet` go, along with INTERNALDATE. Listing a mailbox
+ * fetches every full source because attachment names live in the MIME
+ * structure, but a page of envelopes must not carry a page of HTML
+ * bodies. Those are `message read`'s and the mounted .email.json's,
+ * which render through `messageDocument`.
+ */
+function envelopeDocument(message: FetchedMessage): Envelope {
+  const body = messageDocument(message)
+  delete body.body_text
+  delete body.body_html
+  delete body.snippet
+  return body as Envelope
+}
+
+export function envelopesJsonBytes(messages: readonly FetchedMessage[]): Uint8Array {
+  return encoder.encode(JSON.stringify(messages.map((m) => envelopeDocument(m))))
 }

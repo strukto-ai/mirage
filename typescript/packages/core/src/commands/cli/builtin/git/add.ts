@@ -37,7 +37,7 @@ import { matched, repoRelative } from './pathspec.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
 import type { RepoLocation, WorkTree } from './types.ts'
-import { checkOperands, fatal, startPoint } from './util.ts'
+import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -187,7 +187,7 @@ export async function add(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
     const parsed = parseFlags(fl)
     if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
     const repo: Repo = await opened(fl, doors)

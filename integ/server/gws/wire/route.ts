@@ -15,6 +15,7 @@
 import { Prisma } from '../../../generated/gws/index.js'
 import { RouteError } from '../../kit/typescript/index.ts'
 import type { Ctx, Dmmf, KitHandler, KitRoute, Reply } from '../../kit/typescript/index.ts'
+import { dropState, installFlushed, withState } from '../store/cache.ts'
 import type { C } from '../store/client.ts'
 import { loadState } from '../store/load.ts'
 import { saveState } from '../store/save.ts'
@@ -55,40 +56,76 @@ export interface RouteOpts {
 
 // The store boundary, and the only place it exists. A handler is written
 // against GwsState -- the whole tenant world in the shapes the renderers read
-// -- and this is what turns one into a Prisma request: load before, call, and
-// on a write route flush after. Wrapping in `route()` rather than in each
+// -- and this is what turns one into a Prisma request: take the world, call,
+// and on a write route flush after. Wrapping in `route()` rather than in each
 // handler is what keeps the port from touching 38 call sites, and it means a
 // route CANNOT forget the flush, because declaring `write: true` is the same
 // act as asking for one.
 //
+// The world comes from `store/cache.ts` and is only read from the rows on a
+// miss: SQLite stays the authority for everything that is not a request, but
+// between two requests on one run nothing else can have changed the rows.
+//
 // A read is not flushed, so a handler on a read route must not mutate. That is
-// true of every route today, and the two things a read could plausibly advance
-// without looking like a mutation -- the clock and the mint counters, which a
-// handler touches by calling `now()` or `nextId()` -- are checked below rather
-// than trusted. Losing one silently is exactly the failure this whole port is
-// meant to remove: the request that advanced the counter still answers with
-// the new id, and only the NEXT request finds it handed out twice.
+// true of every route today, and it is checked rather than trusted. Cached,
+// such a mutation would survive in a world that never reaches the file, so a
+// mismatch evicts as well as complaining.
 function stateful(handler: KitHandler<GwsState>, write: boolean): KitHandler<C> {
   return async (ctx: Ctx<C>): Promise<Reply> => {
-    const st = await loadState(ctx.db, ctx.tenant)
+    const st = await withState(ctx.db, ctx.tenant, () => loadState(ctx.db, ctx.tenant))
     const before = write ? 0 : fingerprint(st)
-    const reply = await handler({ ...ctx, db: st })
-    if (write) {
-      await saveState(ctx.db, DMMF, ctx.tenant, st)
-    } else if (fingerprint(st) !== before) {
-      process.stderr.write(
-        `gws fake: read route advanced the clock or a mint counter and the ` +
-          `advance was dropped; mark it write: true\n`,
-      )
+    try {
+      const reply = await handler({ ...ctx, db: st })
+      if (write) {
+        await saveState(ctx.db, DMMF, ctx.tenant, st)
+        // The rows now say what this world says, so it becomes the cached
+        // one and every load still in flight is stale; see `Cached`.
+        installFlushed(ctx.db, ctx.tenant, st)
+      } else if (fingerprint(st) !== before) {
+        dropState(ctx.db, ctx.tenant)
+        process.stderr.write(
+          `gws fake: read route advanced the clock or a mint counter and the ` +
+            `advance was dropped; mark it write: true\n`,
+        )
+      }
+      return reply
+    } catch (err: unknown) {
+      // A handler mutates in place, so a throw leaves a world that is partly
+      // applied and was never written. That used to die with the request.
+      dropState(ctx.db, ctx.tenant)
+      throw err
     }
-    return reply
   }
 }
 
+// Cheap proof that a read route left the world alone.
+//
+// The clock and the mint counters, because a handler advances them by calling
+// `now()` or `nextId()` and the request still answers with the new id -- only
+// the NEXT one finds it handed out twice. Every map's size rides along because
+// cached, any other mutation survives too. Folded rather than summed so a `+1`
+// tick and a `-1` file cannot cancel out; it cannot catch a field edited in
+// place, and nothing this cheap can.
 function fingerprint(st: GwsState): number {
-  let sum = st.ticks
-  for (const n of st.counters.values()) sum += n
-  return sum
+  let h = st.ticks
+  for (const n of st.counters.values()) h = (h * 31 + n) | 0
+  for (const size of [
+    st.files.size,
+    st.drives.size,
+    st.docs.size,
+    st.sheets.size,
+    st.presentations.size,
+    st.messages.size,
+    st.labels.size,
+    st.calendars.size,
+    st.events.size,
+    st.forms.size,
+    st.counters.size,
+  ]) {
+    h = (h * 31 + size) | 0
+  }
+  for (const bucket of st.events.values()) h = (h * 31 + bucket.size) | 0
+  return h
 }
 
 export function route(

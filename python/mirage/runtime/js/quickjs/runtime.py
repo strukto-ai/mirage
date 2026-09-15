@@ -24,10 +24,9 @@ from mirage.runtime.config import HomeConfig, RuntimeConfig
 from mirage.runtime.errors import EvalError
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.mixin import EvaluatorMixin
-from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import (DispatchFn, EvalResult, EvalValue, RunArgs,
-                                  RunResult, RuntimeContext, RuntimeReach,
-                                  ScriptSource)
+from mirage.runtime.types import (EvalResult, EvalValue, FilesystemOperation,
+                                  RunArgs, RunResult, RuntimeContext,
+                                  RuntimeReach, ScriptSource)
 from mirage.runtime.vfs import RuntimeVFS
 from mirage.runtime.wasm import WasmRuntime, WasmVFS
 
@@ -90,6 +89,8 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
     # The engine is a WASI guest whose `std.open`/`os.readdir` suspend
     # into the workspace bridge: guest I/O has no door around the gate.
     reach: RuntimeReach = "vfs"
+    filesystem: ClassVar[tuple[FilesystemOperation,
+                               ...]] = ('read', 'write', 'list', 'stat')
 
     config_cls: ClassVar[type[RuntimeConfig]] = HomeConfig
     config: HomeConfig
@@ -112,14 +113,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
-        self._dispatch: DispatchFn | None = None
-        self._resolver: MountResolver | None = None
         self._runtime = WasmRuntime(self._wasm, "js")
-
-    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
-        if self._dispatch is None:
-            self._dispatch = dispatch
-            self._resolver = resolver
 
     async def version(self, env: dict[str, str]) -> RunResult:
         stdout, stderr, exit_code = await self._runtime.run(
@@ -155,8 +149,8 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
         # any filename (quickjs-ng v0.15.1 qjs.c).
         named = [args.prog] if args.prog else []
         argv += ["-e", args.code, "--", *named, *args.args]
-        dispatch = context.dispatch if context is not None else self._dispatch
-        resolver = context.resolver if context is not None else self._resolver
+        dispatch = context.dispatch if context is not None else None
+        resolver = context.resolver if context is not None else None
         core = (RuntimeVFS(dispatch, asyncio.get_running_loop(), resolver)
                 if dispatch is not None else None)
         fs = WasmVFS(core=core)

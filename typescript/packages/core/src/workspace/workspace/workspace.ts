@@ -1106,11 +1106,7 @@ export class Workspace {
    * serving pre-line state.
    */
   private async invalidateAllAfterRemote(): Promise<void> {
-    await this.dispatcher.clearFileCache()
-    for (const m of this.registry.allMounts()) {
-      if (m.cacheManager !== null) await m.cacheManager.clearIndex(m.resource.index)
-      else await m.use(() => m.resource.index?.clear() ?? Promise.resolve())
-    }
+    await this.registry.invalidateAfterExternal()
   }
 
   async invalidateAfterWriteByPath(path: string): Promise<void> {

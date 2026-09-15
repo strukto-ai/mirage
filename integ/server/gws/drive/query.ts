@@ -35,55 +35,120 @@ export function unescapeQ(value: string): string {
   return out
 }
 
-// AND-only Drive query parser covering the clauses mirage and the gws
-// commands emit: 'id' in parents, name = / contains, mimeType =, trashed,
-// modifiedTime >= / <.
-export function parseDriveQuery(q: string): QueryClause[] {
-  const clauses: QueryClause[] = []
-  let depth = false
-  let current = ''
-  const parts: string[] = []
-  for (let i = 0; i < q.length; i += 1) {
-    const c = q[i] as string
-    // Drive escapes a quote inside a quoted value as \', so the splitter
-    // has to step over the pair the way the clause regexes below already
-    // do; toggling on it would end the value early and swallow the ` and `
-    // that follows into the same clause.
-    if (depth && c === '\\' && i + 1 < q.length) {
-      current += c + (q[i + 1] as string)
-      i += 1
-      continue
-    }
-    if (c === "'") depth = !depth
-    if (!depth && q.slice(i, i + 5) === ' and ') {
-      parts.push(current)
-      current = ''
-      i += 4
-      continue
-    }
-    current += c
+export type QueryExpression =
+  | { kind: 'clause'; clause: QueryClause }
+  | { kind: 'and' | 'or'; left: QueryExpression; right: QueryExpression }
+  | { kind: 'not'; operand: QueryExpression }
+
+const QUERY_TOKEN = /\s*(?:'((?:[^'\\]|\\.)*)'|([()]|!=|>=|<=|=|>|<)|([A-Za-z][A-Za-z0-9_]*))/y
+const QUERY_OPERATORS: Record<string, readonly string[]> = {
+  parents: ['in'],
+  name: ['=', '!=', 'contains'],
+  mimeType: ['=', '!=', 'contains'],
+  fullText: ['contains'],
+  trashed: ['=', '!='],
+  modifiedTime: ['=', '!=', '>', '>=', '<', '<='],
+}
+
+interface QueryToken {
+  value: string
+  quoted: boolean
+}
+
+class QueryReader {
+  private position = 0
+  constructor(private readonly tokens: QueryToken[]) {}
+
+  private take(value: string): boolean {
+    const token = this.tokens[this.position]
+    if (token === undefined || token.quoted || token.value !== value) return false
+    this.position += 1
+    return true
   }
-  if (current.trim() !== '') parts.push(current)
-  for (const raw of parts) {
-    const part = raw.trim()
-    let m = /^'((?:[^'\\]|\\.)*)'\s+in\s+parents$/.exec(part)
-    if (m !== null) {
-      clauses.push({ field: 'parents', op: 'in', value: unescapeQ(m[1] as string) })
-      continue
-    }
-    m = /^(\w+)\s*(=|!=|>=|<=|>|<|contains)\s*'((?:[^'\\]|\\.)*)'$/.exec(part)
-    if (m !== null) {
-      clauses.push({ field: m[1] as string, op: m[2] as string, value: unescapeQ(m[3] as string) })
-      continue
-    }
-    m = /^(\w+)\s*=\s*(true|false)$/.exec(part)
-    if (m !== null) {
-      clauses.push({ field: m[1] as string, op: '=', value: m[2] as string })
-      continue
-    }
-    throw new Error(`unsupported query clause: ${part}`)
+
+  private next(): QueryToken {
+    const token = this.tokens[this.position++]
+    if (token === undefined) throw new Error('incomplete query')
+    return token
   }
-  return clauses
+
+  parse(): QueryExpression {
+    const result = this.expression(0)
+    if (this.position !== this.tokens.length) throw new Error('unexpected query token')
+    return result
+  }
+
+  private expression(depth: number): QueryExpression {
+    let left = this.conjunction(depth)
+    while (this.take('or')) left = { kind: 'or', left, right: this.conjunction(depth) }
+    return left
+  }
+
+  private conjunction(depth: number): QueryExpression {
+    let left = this.atom(depth)
+    while (this.take('and')) left = { kind: 'and', left, right: this.atom(depth) }
+    return left
+  }
+
+  private atom(depth: number): QueryExpression {
+    if (depth > 128) throw new Error('query nesting too deep')
+    if (this.take('not')) return { kind: 'not', operand: this.atom(depth + 1) }
+    if (this.take('(')) {
+      const inner = this.expression(depth + 1)
+      if (!this.take(')')) throw new Error('unclosed query group')
+      return inner
+    }
+    const first = this.next()
+    const operator = this.next()
+    const last = this.next()
+    const field = first.quoted ? last.value : first.value
+    const value = first.quoted ? first : last
+    const op = operator.value
+    if (!Object.hasOwn(QUERY_OPERATORS, field)) throw new Error(`unsupported query field: ${field}`)
+    if (
+      operator.quoted ||
+      (op === 'in' && !first.quoted) ||
+      (first.quoted && (last.quoted || op !== 'in')) ||
+      !QUERY_OPERATORS[field]?.includes(op)
+    ) {
+      throw new Error(`unsupported query clause: ${field} ${op}`)
+    }
+    if (
+      field === 'trashed' ? value.quoted || !['true', 'false'].includes(value.value) : !value.quoted
+    ) {
+      throw new Error(`invalid query value for ${field}`)
+    }
+    return { kind: 'clause', clause: { field, op, value: value.value } }
+  }
+}
+
+export function parseDriveQuery(q: string): QueryExpression {
+  const tokens: QueryToken[] = []
+  let position = 0
+  while (position < q.trimEnd().length) {
+    QUERY_TOKEN.lastIndex = position
+    const match = QUERY_TOKEN.exec(q)
+    if (match === null) throw new Error(`invalid query at ${String(position)}`)
+    tokens.push({
+      value: match[1] === undefined ? (match[2] ?? match[3] ?? '') : unescapeQ(match[1]),
+      quoted: match[1] !== undefined,
+    })
+    position = QUERY_TOKEN.lastIndex
+  }
+  return new QueryReader(tokens).parse()
+}
+
+export function matchQuery(st: GwsState, item: DriveItem, query: QueryExpression): boolean {
+  switch (query.kind) {
+    case 'clause':
+      return matchClause(st, item, query.clause)
+    case 'not':
+      return !matchQuery(st, item, query.operand)
+    case 'and':
+      return matchQuery(st, item, query.left) && matchQuery(st, item, query.right)
+    case 'or':
+      return matchQuery(st, item, query.left) || matchQuery(st, item, query.right)
+  }
 }
 
 // Everything the live index searches for `fullText`: the display name, a
@@ -122,8 +187,11 @@ export function matchClause(st: GwsState, item: DriveItem, clause: QueryClause):
       }
       return fullTextOf(st, item).toLowerCase().includes(clause.value.toLowerCase())
     case 'trashed':
-      return item.trashed === (clause.value === 'true')
+      return clause.op === '!='
+        ? item.trashed !== (clause.value === 'true')
+        : item.trashed === (clause.value === 'true')
     case 'modifiedTime': {
+      if (clause.op === '!=') return item.modifiedTime !== clause.value
       if (clause.op === '>=') return item.modifiedTime >= clause.value
       if (clause.op === '<') return item.modifiedTime < clause.value
       if (clause.op === '>') return item.modifiedTime > clause.value

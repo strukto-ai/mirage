@@ -189,6 +189,12 @@ async function twoPhaseCard(ctx: Ctx<C>): Promise<Reply> {
   return { status: 201, body: cardJson(row) }
 }
 
+// What `afterReset` was handed, newest last.
+const RESETS: { tenants: string[]; run: string }[] = []
+// Which run each client belongs to, so a check can assert the hook was handed
+// THIS run's. Keyed by the object, so it holds nothing the pool has let go.
+const RUN_OF = new WeakMap<C, string>()
+
 export const selftestFake: Fake<C> = {
   config,
   client: PrismaClient,
@@ -246,7 +252,15 @@ export const selftestFake: Fake<C> = {
           },
         }),
       }),
+  // Recorded rather than acted on; gws is the caller that does something.
+  afterReset: (db: C, tenants: readonly string[]): void => {
+    RESETS.push({ tenants: [...tenants], run: RUN_OF.get(db) ?? 'unknown' })
+  },
   routes: (): KitRoute<C>[] => [
+    route('GET', '/_selftest/resets', (ctx) => {
+      RUN_OF.set(ctx.db, ctx.run)
+      return { status: 200, body: RESETS }
+    }),
     // Echoes what a HANDLER sees, which is not what the router matched on: the
     // run prefix has to be gone from ctx.url too, because handlers render this
     // pathname into responses and one fake looks rows up by it.

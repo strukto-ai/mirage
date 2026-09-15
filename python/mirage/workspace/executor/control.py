@@ -15,8 +15,6 @@
 from collections.abc import Callable
 from typing import Any
 
-import tree_sitter
-
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
@@ -30,6 +28,7 @@ from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
 from mirage.shell.errors import ArithError, ReadonlyError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.jobs import run_statement
@@ -54,7 +53,7 @@ def _line_buffer(stdin: ByteSource) -> AsyncLineIterator:
 
 async def _execute_body(
     execute_node: Callable[..., Any],
-    body: list[tree_sitter.Node],
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -150,8 +149,8 @@ def _collect_loop_result(
 
 async def handle_if(
     execute_node: Callable[..., Any],
-    branches: list[tuple[tree_sitter.Node, list[tree_sitter.Node]]],
-    else_body: list[tree_sitter.Node] | None,
+    branches: list[tuple[TSNodeLike, list[TSNodeLike]]],
+    else_body: list[TSNodeLike] | None,
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -190,7 +189,7 @@ async def handle_for(
     execute_node: Callable[..., Any],
     variable: str,
     values: list[str | PathSpec],
-    body: list[tree_sitter.Node],
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -267,8 +266,8 @@ async def handle_for(
 
 async def _condition_loop(
     execute_node: Callable[..., Any],
-    condition: tree_sitter.Node,
-    body: list[tree_sitter.Node],
+    condition: TSNodeLike,
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -345,8 +344,8 @@ async def _condition_loop(
 
 async def handle_cfor(
     execute_node: Callable[..., Any],
-    exprs: list[list[tree_sitter.Node]],
-    body: list[tree_sitter.Node],
+    exprs: list[list[TSNodeLike]],
+    body: list[TSNodeLike],
     eval_expr: Callable[..., Any],
     session: Session,
     stdin: ByteSource | None = None,
@@ -360,10 +359,10 @@ async def handle_cfor(
 
     Args:
         execute_node (Callable): recursive node executor.
-        exprs (list[list[tree_sitter.Node]]): init, condition and
+        exprs (list[list[TSNodeLike]]): init, condition and
             update expression slots, each the comma-separated
             expressions it holds; any may be empty (`for ((;;))`).
-        body (list[tree_sitter.Node]): do_group statements.
+        body (list[TSNodeLike]): do_group statements.
         eval_expr (Callable): async evaluator taking (expr, default)
             and returning the expression's integer value, or the
             default when the slot is empty; raises ArithError with the
@@ -454,8 +453,8 @@ async def handle_cfor(
 
 async def handle_while(
     execute_node: Callable[..., Any],
-    condition: tree_sitter.Node,
-    body: list[tree_sitter.Node],
+    condition: TSNodeLike,
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -480,8 +479,8 @@ async def handle_while(
 
 async def handle_until(
     execute_node: Callable[..., Any],
-    condition: tree_sitter.Node,
-    body: list[tree_sitter.Node],
+    condition: TSNodeLike,
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -507,7 +506,7 @@ async def handle_until(
 async def handle_case(
     execute_node: Callable[..., Any],
     word: str,
-    items: list[tuple[list[str], list[tree_sitter.Node], str]],
+    items: list[tuple[list[str], list[TSNodeLike], str]],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -554,7 +553,7 @@ async def handle_select(
     execute_node: Callable[..., Any],
     variable: str,
     values: list[str | PathSpec],
-    body: list[tree_sitter.Node],
+    body: list[TSNodeLike],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
@@ -576,7 +575,7 @@ async def handle_select(
         execute_node (Callable): recursive node executor.
         variable (str): the select variable name.
         values (list[str | PathSpec]): menu entries, already expanded.
-        body (list[tree_sitter.Node]): loop body statements.
+        body (list[TSNodeLike]): loop body statements.
         session (Session): shell session state.
         stdin (ByteSource | None): line source for choices.
         call_stack (CallStack | None): function-call scope, if any.

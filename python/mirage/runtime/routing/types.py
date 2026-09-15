@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Container, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.types import ScriptSource
 
 
@@ -25,12 +26,13 @@ class ParsedCommand:
     """One command of the line being routed, distilled from the parse.
 
     Args:
-        command (str): the command name (first word).
+        command (str): the registered command prefix, or the first word
+            when no longer prefix matches.
         words (tuple[str, ...]): every word of the command, name first.
         builtin (bool): whether the command has a builtin spec.
         paths (tuple[str, ...]): absolute-path operands.
-        cli (str | None): the installed CLI whose head word ``command``
-            is, None otherwise. Lets a policy steer an installed name
+        cli (str | None): the installed CLI named by the first word,
+            None otherwise. Lets a policy steer an installed name
             between the virtual CLI and a runtime capturing the same
             word.
     """
@@ -95,7 +97,9 @@ class RouteContext:
     agent_id: str
     mounts: tuple[str, ...]
 
-    def for_runtime(self, runtime: Runtime) -> "RouteContext":
+    def for_runtime(
+        self, runtime: Runtime, external_commands: Container[str] = ()
+    ) -> "RouteContext":
         """The context as one runtime's script sees it.
 
         ``command``/``builtin`` become the first stage the runtime
@@ -106,9 +110,13 @@ class RouteContext:
 
         Args:
             runtime (Runtime): the runtime being consulted.
+            external_commands (Container[str]): stages resolved to the
+                external fallback by the workspace's command lookup.
         """
         for parsed in self.commands:
-            if parsed.command in runtime.captures:
+            if (parsed.command in runtime.captures
+                    or EXTERNAL_COMMANDS in runtime.captures
+                    and parsed.command in external_commands):
                 return replace(self,
                                command=parsed.command,
                                builtin=parsed.builtin)

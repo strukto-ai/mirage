@@ -107,6 +107,50 @@ describe('Mount.resolveCommand fallback chain', () => {
   })
 })
 
+describe('Mount.executeCmd glob operands', () => {
+  // The dispatcher hands a pattern to the handler whole. Resolving is the
+  // handler's job, done once through the shared adapter, which is where
+  // the namespace facts (links, nested mount roots, a trailing slash) are
+  // in view; the resource's own glob hook cannot see them, so expanding
+  // here would destroy what the handler needs. Python's dispatcher never
+  // expands either.
+  class GlobbingResource extends StubResource {
+    glob(): Promise<PathSpec[]> {
+      return Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')])
+    }
+  }
+  const pattern = new PathSpec({
+    virtual: '/ram/*.txt',
+    directory: '/ram/',
+    resourcePath: '*.txt',
+    pattern: '*.txt',
+    resolved: false,
+    rawPath: '*.txt',
+  })
+
+  it('hands the pattern to the handler rather than expanding it', async () => {
+    const m = new MountEntry({
+      prefix: '/ram/',
+      resource: new GlobbingResource(),
+      mode: MountMode.WRITE,
+    })
+    let got: string[] = []
+    const [cmd] = command({
+      name: 'cat',
+      resource: 'ram',
+      spec: BASIC_SPEC,
+      fn: (_a, paths) => {
+        got = paths.map((p) => p.virtual)
+        return [null, new IOResult({ exitCode: 0 })]
+      },
+    })
+    if (cmd === undefined) throw new Error('missing')
+    m.register(cmd)
+    await m.executeCmd('cat', [pattern], [], {})
+    expect(got).toEqual(['/ram/*.txt'])
+  })
+})
+
 describe('Mount.specFor', () => {
   it('returns the registered spec', () => {
     const m = makeMount()

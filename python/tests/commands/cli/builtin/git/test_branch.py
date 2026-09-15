@@ -222,3 +222,41 @@ async def test_an_unknown_switch_is_not_read_as_a_branch_name(git_rw):
     code, _out, err = await _run(git_rw, "branch -Z")
     assert code == 129
     assert err == b"error: unknown switch `Z'\n"
+
+
+@pytest.mark.asyncio
+async def test_branch_refuses_a_name_that_escapes_the_ref_tree(
+        git_rw, repo_path: Path):
+    before = (repo_path / ".git" / "config").read_bytes()
+    result = await git_rw.execute("git -C /repo branch ../../config")
+    err = result.stderr or b""
+    assert result.exit_code == 128
+    assert err.startswith(b"fatal: '../../config' is not a valid branch name")
+    assert (repo_path / ".git" / "config").read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_a_bad_branch_name_is_named_before_its_start_point(git_rw):
+    result = await git_rw.execute(
+        "git -C /repo branch ../../config nosuchstart")
+    err = result.stderr or b""
+    assert err.startswith(b"fatal: '../../config' is not a valid branch name")
+
+
+@pytest.mark.asyncio
+async def test_a_branch_cannot_be_made_below_one_that_exists(git_rw):
+    assert (await git_rw.execute("git -C /repo branch bb")).exit_code == 0
+    result = await git_rw.execute("git -C /repo branch bb/cc")
+    assert result.exit_code == 128
+    assert result.stderr == (b"fatal: cannot lock ref 'refs/heads/bb/cc': "
+                             b"'refs/heads/bb' exists; cannot create "
+                             b"'refs/heads/bb/cc'\n")
+
+
+@pytest.mark.asyncio
+async def test_a_bad_start_point_outranks_the_collision(git_rw):
+    assert (await git_rw.execute("git -C /repo branch bb")).exit_code == 0
+    # The lock is taken last, so a start point that resolves to nothing
+    # is reported first.
+    result = await git_rw.execute("git -C /repo branch bb/cc nosuchrev")
+    assert b"cannot lock ref" not in (result.stderr or b"")

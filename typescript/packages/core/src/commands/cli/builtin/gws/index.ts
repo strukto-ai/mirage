@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GoogleConfigSchema } from '../../../../core/google/config.ts'
-import { ResourceName } from '../../../../types.ts'
 import { CLISpec } from '../../types.ts'
 import { Option } from '../../../spec/types.ts'
 import { apiGroups } from './api.ts'
@@ -38,13 +37,6 @@ export const GWS = new CLISpec({
   name: 'gws',
   description: 'Google Workspace API commands',
   configModel: GoogleConfigSchema,
-  serves: [
-    ResourceName.GDRIVE,
-    ResourceName.GDOCS,
-    ResourceName.GSHEETS,
-    ResourceName.GSLIDES,
-    ResourceName.GMAIL,
-  ],
   subcommands: [
     new CLISpec({
       name: 'drive',

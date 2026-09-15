@@ -29,7 +29,7 @@ import { matched, repoRelative } from './pathspec.ts'
 import { opened, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
-import { checkOperands, fatal, startPoint } from './util.ts'
+import { checkOperands, escaped, fatal, startPoint, switches } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -87,7 +87,7 @@ export async function reset(inv: CLIInvocation): Promise<CommandFnResult> {
     if (statPath === undefined || dispatch === undefined) {
       throw new NoWorkspaceError()
     }
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
     const repo = await opened(fl, doors)
     const state = await readIndex(repo, dispatch)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()

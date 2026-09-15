@@ -1,10 +1,15 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from mirage.utils.dates import iso_timestamp, parse_date_expr, timestamp_iso
+from mirage.utils.timezone import resolve_tz
 
 NOW = datetime(2026, 8, 16, 13, 45, 30)
+BERLIN = ZoneInfo("Europe/Berlin")
+POSIX_CET = resolve_tz("CET-1CEST,M3.5.0,M10.5.0/3")
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def test_relative_hours_ago():
@@ -41,13 +46,49 @@ def test_iso_base_with_relative_tail():
                            now=NOW) == datetime(2026, 8, 15, 12, 0, 0)
 
 
+# GNU date on debian:stable-slim: a shift landing in the hour a zone skips
+# moves past the gap under the offset in force before the change, whichever
+# side it started from, and one landing in the hour it repeats keeps the
+# base's side of the change, as gnulib hands mktime the base's tm_isdst.
+@pytest.mark.parametrize("tz", [BERLIN, POSIX_CET], ids=["zoneinfo", "posix"])
+@pytest.mark.parametrize("text,epoch", [
+    ("2025-03-29 02:30:00 1 day", 1743298200),
+    ("2025-03-31 02:30:00 1 day ago", 1743298200),
+    ("2025-03-23 02:30:00 1 week", 1743298200),
+    ("2025-04-30 02:30:00 1 month ago", 1743298200),
+    ("2024-03-30 02:30:00 1 year", 1743298200),
+    ("2025-10-25 02:30:00 1 day", 1761438600),
+    ("2025-10-27 02:30:00 1 day ago", 1761442200),
+    ("2025-10-26 02:30:00 0 day", 1761442200),
+])
+def test_calendar_shift_reads_the_moved_wall_clock_as_mktime_does(
+        tz, text, epoch):
+    parsed = parse_date_expr(text, tz=tz)
+    assert parsed is not None
+    assert parsed.timestamp() == epoch
+
+
+@pytest.mark.parametrize("text,epoch", [
+    ("2025-03-08 02:30:00 1 day", 1741505400),
+    ("2025-03-10 02:30:00 1 day ago", 1741505400),
+    ("2025-11-01 01:30:00 1 day", 1762061400),
+    ("2025-11-03 01:30:00 1 day ago", 1762065000),
+])
+def test_calendar_shift_west_of_utc(text, epoch):
+    # The same rules on the other side of UTC: 02:30 the night EDT starts
+    # is 03:30 EDT, and 01:30 the night it ends keeps the base's side.
+    parsed = parse_date_expr(text, tz=NEW_YORK)
+    assert parsed is not None
+    assert parsed.timestamp() == epoch
+
+
 def test_epoch():
-    parsed = parse_date_expr("@1755300000", utc=True)
+    parsed = parse_date_expr("@1755300000", tz=timezone.utc)
     assert parsed == datetime(2025, 8, 15, 23, 20, tzinfo=timezone.utc)
 
 
 def test_iso_datetime_with_offset_converts_under_utc():
-    parsed = parse_date_expr("2026-08-16T10:00:00+02:00", utc=True)
+    parsed = parse_date_expr("2026-08-16T10:00:00+02:00", tz=timezone.utc)
     assert parsed is not None
     assert parsed.hour == 8
     assert parsed.tzinfo == timezone.utc
@@ -57,8 +98,10 @@ def test_iso_zone_past_a_day_is_invalid():
     # GNU refuses `+99:99`; a zone strictly inside a day is also the
     # rule datetime enforces, and the TypeScript twin mirrors it.
     for zone in ("+99:99", "+24:00", "+23:60"):
-        assert parse_date_expr(f"2026-01-01T00:00{zone}", utc=True) is None
-    assert parse_date_expr("2026-01-01T00:00+23:59", utc=True) is not None
+        assert parse_date_expr(f"2026-01-01T00:00{zone}",
+                               tz=timezone.utc) is None
+    assert parse_date_expr("2026-01-01T00:00+23:59",
+                           tz=timezone.utc) is not None
 
 
 def test_invalid_returns_none():
@@ -101,4 +144,4 @@ def test_timestamp_iso_passes_none_through():
 def test_epoch_is_a_decimal_count_of_seconds(word, accepted):
     # findutils 4.10 (gnulib): float() would take `0x1`, `1e2`, `1.` and
     # `.5`, and GNU refuses every one of them.
-    assert (parse_date_expr(word, utc=True) is not None) is accepted
+    assert (parse_date_expr(word, tz=timezone.utc) is not None) is accepted

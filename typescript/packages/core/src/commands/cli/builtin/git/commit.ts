@@ -52,7 +52,7 @@ const AUTHOR_EMAIL = 'GIT_AUTHOR_EMAIL'
 const FALLBACK_EMAIL = 'EMAIL'
 
 /** An author string split into the two halves git records separately. */
-interface Identity {
+export interface Identity {
   readonly name: string
   readonly email: string
   /** The `Name <email>` spelling, which is what a reflog line carries. */
@@ -77,7 +77,7 @@ interface Identity {
  * Read through the session plane's door rather than the frozen `inv.env`
  * snapshot, so a hidden name reads as unset exactly as it does in the shell.
  */
-function identity(fl: FlagView, session: SessionView | undefined): Identity {
+export function identity(fl: FlagView, session: SessionView | undefined): Identity {
   const author = fl.asStr('author')
   if (author === undefined || author === '') {
     const name = session?.get(AUTHOR_NAME) ?? null

@@ -14,19 +14,45 @@
 
 import pytest
 
-from mirage.commands.builtin.errors import HttpConnectError
+from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils import http as http_mod
 from mirage.commands.builtin.utils.http import (DEFAULT_USER_AGENT,
                                                 HttpResponse, _endpoint,
                                                 _with_default_ua, http_request)
 
 
+class _FakeHeaders:
+
+    def __init__(self, items: list[tuple[str, str]]) -> None:
+        self._items = items
+
+    def multi_items(self) -> list[tuple[str, str]]:
+        return list(self._items)
+
+
+class _FakeRequest:
+
+    def __init__(self, method: str) -> None:
+        self.method = method
+
+
 class _FakeResponse:
 
-    def __init__(self, status: int, reason: str, content: bytes) -> None:
+    def __init__(self,
+                 status: int,
+                 reason: str,
+                 content: bytes,
+                 headers: list[tuple[str, str]] | None = None,
+                 url: str = "http://x.test/f",
+                 method: str = "GET",
+                 history: list["_FakeResponse"] | None = None) -> None:
         self.status_code = status
         self.reason_phrase = reason
         self.content = content
+        self.headers = _FakeHeaders(headers or [])
+        self.url = url
+        self.request = _FakeRequest(method)
+        self.history = list(history or [])
 
 
 class _FakeClient:
@@ -59,9 +85,14 @@ class _FakeTransportError(Exception):
     pass
 
 
+class _FakeTimeoutException(_FakeTransportError):
+    pass
+
+
 class _FakeHttpx:
 
     TransportError = _FakeTransportError
+    TimeoutException = _FakeTimeoutException
 
     def __init__(self, resp=None, exc=None) -> None:
         self.resp = resp
@@ -125,7 +156,68 @@ def test_redirects_are_not_followed_by_default(monkeypatch):
     assert fake.client_kwargs["follow_redirects"] is True
 
 
+def test_followed_redirects_are_kept_as_history_in_order(monkeypatch):
+    hop = _FakeResponse(302,
+                        "Found",
+                        b"302: Found", [("Location", "/f")],
+                        url="http://x.test/r")
+    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"ok", history=[hop]))
+    monkeypatch.setattr(http_mod, "httpx", fake)
+    resp = http_request("http://x.test/r", follow_redirects=True)
+    assert [(h.status, h.url)
+            for h in resp.history] == [(302, "http://x.test/r")]
+    assert resp.history[0].headers == (("Location", "/f"), )
+    assert resp.history[0].body == b"302: Found"
+    assert (resp.status, resp.url) == (200, "http://x.test/f")
+
+
+def test_each_hop_reports_the_method_the_client_sent(monkeypatch):
+    # A 302 turns a POST into a GET, in httpx as in curl.
+    hop = _FakeResponse(302,
+                        "Found",
+                        b"",
+                        url="http://x.test/r",
+                        method="POST")
+    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"ok", history=[hop]))
+    monkeypatch.setattr(http_mod, "httpx", fake)
+    resp = http_request("http://x.test/r",
+                        method="POST",
+                        data=b"a=1",
+                        follow_redirects=True)
+    assert resp.history[0].method == "POST"
+    assert resp.method == "GET"
+
+
 def test_missing_httpx_raises_with_the_extra_hint(monkeypatch):
     monkeypatch.setattr(http_mod, "httpx", None)
     with pytest.raises(ImportError, match=r"mirage\[http\]"):
         http_request("http://x.test/x")
+
+
+def test_timeout_becomes_http_timeout_error_with_elapsed_ms(monkeypatch):
+    fake = _FakeHttpx(exc=_FakeTimeoutException("read timed out"))
+    monkeypatch.setattr(http_mod, "httpx", fake)
+    with pytest.raises(HttpTimeoutError) as excinfo:
+        http_request("http://127.0.0.1:1/f", timeout=0.5)
+    assert isinstance(excinfo.value, HttpConnectError)
+    assert (excinfo.value.host, excinfo.value.port) == ("127.0.0.1", 1)
+    assert excinfo.value.elapsed_ms >= 0
+    assert fake.client_kwargs["timeout"] == 0.5
+
+
+def test_none_timeout_reaches_the_client(monkeypatch):
+    # curl's `--max-time 0` disables the deadline; httpx spells that None.
+    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"x"))
+    monkeypatch.setattr(http_mod, "httpx", fake)
+    http_request("http://x.test/f", timeout=None)
+    assert fake.client_kwargs["timeout"] is None
+
+
+def test_response_headers_are_captured_in_order(monkeypatch):
+    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"x", [(
+        "Content-Type", "text/plain"), ("Set-Cookie", "a"), ("Set-Cookie",
+                                                             "b")]))
+    monkeypatch.setattr(http_mod, "httpx", fake)
+    resp = http_request("http://x.test/f")
+    assert resp.headers == (("Content-Type", "text/plain"),
+                            ("Set-Cookie", "a"), ("Set-Cookie", "b"))

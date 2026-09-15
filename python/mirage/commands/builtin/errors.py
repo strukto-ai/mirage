@@ -31,5 +31,23 @@ class HttpConnectError(Exception):
         self.port = port
 
 
+class HttpTimeoutError(HttpConnectError):
+    """The request ran past its deadline before an HTTP response arrived.
+
+    A subclass, because a timeout is one more way the request never got
+    a response, so a caller content with that answer (wget) keeps
+    catching one type; curl tells them apart for its exit 28.
+
+    Args:
+        host (str): host from the requested URL.
+        port (int): port from the requested URL, defaulted by scheme.
+        elapsed_ms (int): wall time spent before giving up.
+    """
+
+    def __init__(self, host: str, port: int, elapsed_ms: int) -> None:
+        super().__init__(host, port)
+        self.elapsed_ms = elapsed_ms
+
+
 class SortKeyError(ValueError):
     """An invalid -k field specification or ordering letter (GNU sort)."""

@@ -21,9 +21,14 @@ import { checkout } from './checkout.ts'
 import { commit } from './commit.ts'
 import { diff } from './diff.ts'
 import { log } from './log.ts'
+import { mv } from './mv.ts'
 import { reset } from './reset.ts'
+import { restore } from './restore.ts'
+import { rm } from './rm.ts'
 import { show } from './show.ts'
 import { status } from './status.ts'
+import { switchBranch } from './switch.ts'
+import { tag } from './tag.ts'
 
 // `-C` is git's own before-anything-else option, so it sits on the root and
 // every verb inherits it. The "." default is load-bearing: a PATH default lands
@@ -148,6 +153,76 @@ const CHECKOUT_OPTIONS = [
   new Option({ short: '-b', description: 'Create the branch and switch to it' }),
 ]
 
+const SWITCH_OPTIONS = [
+  new Option({
+    short: '-c',
+    long: '--create',
+    type: 'str',
+    description: 'Create the branch and switch to it',
+  }),
+  new Option({ short: '-d', long: '--detach', description: 'Detach HEAD at the named commit' }),
+]
+
+const RESTORE_OPTIONS = [
+  new Option({ short: '-S', long: '--staged', description: 'Restore the index' }),
+  new Option({
+    short: '-W',
+    long: '--worktree',
+    description: 'Restore the working tree (default)',
+  }),
+  new Option({
+    short: '-s',
+    long: '--source',
+    type: 'str',
+    description: 'Which tree-ish to restore from',
+  }),
+]
+
+const RM_OPTIONS = [
+  new Option({ short: '-r', description: 'Allow recursive removal' }),
+  new Option({ long: '--cached', description: 'Only remove from the index, keeping the file' }),
+  new Option({ short: '-f', long: '--force', description: 'Override the up-to-date check' }),
+  new Option({ short: '-q', long: '--quiet', description: 'Do not list removed files' }),
+  new Option({
+    long: '--ignore-unmatch',
+    description: 'Exit with a zero status even if nothing matched',
+  }),
+]
+
+const MV_OPTIONS = [
+  new Option({
+    short: '-f',
+    long: '--force',
+    description: 'Force move/rename even if target exists',
+  }),
+  new Option({ short: '-k', description: 'Skip move/rename errors' }),
+  new Option({ short: '-n', long: '--dry-run', description: 'Dry run' }),
+  new Option({ short: '-v', long: '--verbose', description: 'Be verbose' }),
+]
+
+const TAG_OPTIONS = [
+  new Option({ short: '-l', long: '--list', description: 'List tag names' }),
+  // git spells the count attached (`-n2`) or not at all, never as a separate
+  // token, which is what valueOptional says: a bare -n means one line and the
+  // next word is left alone to be a pattern.
+  new Option({
+    short: '-n',
+    type: 'int',
+    valueOptional: true,
+    description: 'Print <n> lines of each tag message',
+  }),
+  new Option({ short: '-d', long: '--delete', description: 'Delete tags' }),
+  new Option({ short: '-a', long: '--annotate', description: 'Annotated tag, needs a message' }),
+  new Option({
+    short: '-m',
+    long: '--message',
+    type: 'str',
+    multiple: true,
+    description: 'Tag message (repeatable, one paragraph each)',
+  }),
+  new Option({ short: '-f', long: '--force', description: 'Replace the tag if exists' }),
+]
+
 const BRANCH_OPTIONS = [
   new Option({ short: '-a', description: 'List local and remote-tracking branches' }),
   new Option({ short: '-r', description: 'List remote-tracking branches' }),
@@ -232,6 +307,46 @@ export const GIT = new CLISpec({
       fn: checkout,
       options: CHECKOUT_OPTIONS,
       rest: REVISION,
+      write: true,
+    }),
+    new CLISpec({
+      name: 'switch',
+      description: 'Switch branches',
+      fn: switchBranch,
+      options: SWITCH_OPTIONS,
+      rest: REVISION,
+      write: true,
+    }),
+    new CLISpec({
+      name: 'restore',
+      description: 'Restore working tree files',
+      fn: restore,
+      options: RESTORE_OPTIONS,
+      rest: PATHSPEC,
+      write: true,
+    }),
+    new CLISpec({
+      name: 'rm',
+      description: 'Remove files from the working tree and the index',
+      fn: rm,
+      options: RM_OPTIONS,
+      rest: PATHSPEC,
+      write: true,
+    }),
+    new CLISpec({
+      name: 'mv',
+      description: 'Move or rename a file, a directory, or a symlink',
+      fn: mv,
+      options: MV_OPTIONS,
+      rest: PATHSPEC,
+      write: true,
+    }),
+    new CLISpec({
+      name: 'tag',
+      description: 'Create, list or delete a tag',
+      fn: tag,
+      options: TAG_OPTIONS,
+      rest: new Operand({ type: 'str' }),
       write: true,
     }),
   ],

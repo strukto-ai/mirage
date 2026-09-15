@@ -102,6 +102,7 @@ export async function applyIo(
     if (source instanceof Uint8Array) {
       await setCached(cache, path, source, records, isCacheable)
     } else if (source instanceof CachableAsyncIterator) {
+      if (source.discarded) continue
       if (source.exhausted) {
         await setCached(cache, path, concat(source.bufferedChunks), records, isCacheable)
       } else {

@@ -180,6 +180,63 @@ describe('the node table answers every verb that names a link', () => {
     }
   })
 
+  it('carries the nodes below a renamed directory', async () => {
+    // A rename re-anchors a whole subtree, and the part of it no backend can
+    // see has to move with it: the link below the source used to stay at a
+    // name the rename had emptied, so the moved directory was missing it and
+    // the old name still answered readlink.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
+      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a rename destination holding a link', async () => {
+    // A link is a directory entry no backend can see, so a destination the
+    // backend reads as empty is not: POSIX rename(2) answers ENOTEMPTY for it
+    // (probed on debian:stable-slim, where a directory holding one broken
+    // symlink refuses the rename). Letting the backend decide replaced the
+    // directory and deleted the link with it, which loses namespace state
+    // where the kernel refuses.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.execute('mkdir /ram/e')
+      await ws.execute('ln -s gone /ram/e/stale')
+      await expect(
+        ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')]),
+      ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+      // Nothing moved: both ends are as they were.
+      expect(DEC.decode((await ws.execute('readlink /ram/e/stale')).stdout)).toBe('gone\n')
+      expect(DEC.decode((await ws.execute('readlink /ram/d/inner')).stdout)).toBe('a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('replaces an empty rename destination', async () => {
+    // The other half of rename(2): a destination with nothing in it is
+    // replaced, and the subtree re-anchors onto the new name.
+    const ws = await linkWorkspace()
+    try {
+      await ws.execute('echo hi > /ram/d/a.txt')
+      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.execute('mkdir /ram/e')
+      await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
+      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('answers a no-follow stat with the link row', async () => {
     // lstat asks for the row only the node table holds; a following stat
     // arrives resolved to the target and must not see a link at all.
@@ -358,6 +415,47 @@ describe('the turf mode gates the node table', () => {
         ).rejects.toMatchObject({ code: 'EROFS', virtualPath: '/ro/lk' })
       })
       expect(ws.namespace.isLink('/rw/lk')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a rename moves what the node table holds', () => {
+  it('carries the node at the source itself', async () => {
+    // The subtree below the source was re-anchored and the source's own
+    // node was not, so an overlay recorded there stayed at the emptied
+    // name: it never reached the landing, and whatever was created at
+    // the old name next inherited it.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMResource() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('printf one > /a/f.txt')
+      await ws.namespace.setAttrs('/a/f.txt', { mode: 0o400 })
+      await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
+      expect(ws.namespace.metaFor('/a/f.txt')).toBeNull()
+      expect(ws.namespace.metaFor('/a/g.txt')?.mode).toBe(0o400)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('replaces the node at the landing', async () => {
+    // rename(2) replaces the destination, so the overlay it carried
+    // goes with it rather than staying to shadow what just landed.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMResource() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.execute('printf one > /a/f.txt && printf two > /a/g.txt')
+      await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
+      await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
+      expect(ws.namespace.metaFor('/a/g.txt')).toBeNull()
     } finally {
       await ws.close()
     }

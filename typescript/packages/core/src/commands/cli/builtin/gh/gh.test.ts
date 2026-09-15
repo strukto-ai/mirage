@@ -17,7 +17,6 @@ import type * as AccessorModule from './accessor.ts'
 import { bodyValue, repoNumber } from './accessor.ts'
 import { type GitHubResponse, type GitHubTransport } from '../../../../core/github/client.ts'
 import { cliSpecFor } from '../../specs.ts'
-import { ResourceName } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { FlagView } from '../../../spec/types.ts'
 import type { CLIInvocation } from '../../types.ts'
@@ -144,14 +143,6 @@ describe('gh tree', () => {
     expect(groups.release).toEqual(['list', 'view', 'create'])
     expect(groups.run).toEqual(['list', 'view', 'rerun'])
     expect(groups.workflow).toEqual(['list', 'view', 'run'])
-  })
-
-  // A gh write lands on the repository a `github` mount reads, by name
-  // rather than by any vfs path, so the mount cannot invalidate itself.
-  // Without this the executor's post-write cache drop is a no-op and a
-  // committed file still reads back as its pre-write bytes.
-  it('names the mounted resource its writes invalidate', () => {
-    expect(GH.serves).toEqual([ResourceName.GITHUB])
   })
 })
 
@@ -427,11 +418,10 @@ describe('gh api', () => {
     expect(CALLS.map((call) => call.path)).toEqual(['/items', '/items?page=2'])
   })
 
-  it('suppresses --silent output without losing mutation', async () => {
+  it('suppresses --silent output', async () => {
     reset({ ok: true })
     const out = await api(inv(['x'], { method: 'POST', silent: true }))
     expect(out === null ? '' : text(out)).toBe('')
-    expect(out?.[1].mutated).toBe(true)
   })
 })
 

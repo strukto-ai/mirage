@@ -371,7 +371,7 @@ export async function downloadCmd(inv: CLIInvocation): Promise<CommandFnResult> 
       workers,
     )
   }
-  if (fl.asBool('quiet')) return textOut(`${base}\n`, true)
+  if (fl.asBool('quiet')) return textOut(`${base}\n`)
   const body = written.map((p) => `${p}\n`).join('')
-  return textOut(`${body}${base}\n`, true)
+  return textOut(`${body}${base}\n`)
 }

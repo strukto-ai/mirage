@@ -14,10 +14,12 @@
 
 import pytest
 
-from mirage.commands.cli.builtin.git.errors import (FATAL_EXIT,
-                                                    NotARepositoryError)
-from mirage.commands.cli.builtin.git.util import fatal, start_point
-from mirage.commands.spec.types import FlagView
+from mirage.commands.cli.builtin.git.errors import (  # yapf: disable
+    FATAL_EXIT, NotARepositoryError, UnknownSwitchError)
+from mirage.commands.cli.builtin.git.util import (check_operands, escaped,
+                                                  fatal, start_point, switches)
+from mirage.commands.cli.types import CLIInvocation, CLISpec
+from mirage.commands.spec.types import FlagView, Option
 
 
 def test_start_point_reads_the_resolved_c_flag():
@@ -120,3 +122,72 @@ async def test_branch_speaks_the_same_dialect(git_ws):
     result = await git_ws.execute("git -C /repo branch -Z")
     assert result.exit_code == 129
     assert result.stderr == b"error: unknown switch `Z'\n"
+
+
+def test_no_marker_escapes_nothing():
+    assert escaped(("rm", "-f", "a.txt")) == frozenset()
+
+
+def test_the_marker_escapes_every_word_after_it():
+    assert escaped(("rm", "--", "-draft", "b.txt")) == {"-draft", "b.txt"}
+
+
+def test_only_the_first_marker_counts():
+    assert escaped(("rm", "--", "-a", "--", "-b")) == {"-a", "--", "-b"}
+
+
+def test_an_escaped_operand_is_not_a_switch():
+    check_operands(("-draft", ), UnknownSwitchError, frozenset({"-draft"}))
+
+
+def test_an_unescaped_dashed_operand_is_still_refused():
+    with pytest.raises(UnknownSwitchError):
+        check_operands(("-draft", ), UnknownSwitchError, frozenset({"-other"}))
+
+
+# git's parse-options consumes the letters it knows and names the first
+# it does not (`git mv -nx` says `x', `git mv -draft` says `d'), so the
+# refusal takes the verb's own switches; without them the whole word is
+# named, which is how log, show and diff word theirs.
+def test_a_cluster_is_refused_at_its_first_unknown_letter():
+    with pytest.raises(UnknownSwitchError) as caught:
+        check_operands(("-nx", ), UnknownSwitchError, frozenset(),
+                       frozenset({"n"}))
+    assert str(caught.value) == "unknown switch `x'"
+    with pytest.raises(UnknownSwitchError) as caught:
+        check_operands(("-draft", ), UnknownSwitchError, frozenset(),
+                       frozenset({"f", "k", "n", "v"}))
+    assert str(caught.value) == "unknown switch `d'"
+
+
+def test_a_verb_with_no_switches_still_names_the_first_letter():
+    # reset declares none, and git still says `Z' for `git reset -Zq`.
+    with pytest.raises(UnknownSwitchError) as caught:
+        check_operands(("-Zq", ), UnknownSwitchError, frozenset(), frozenset())
+    assert str(caught.value) == "unknown switch `Z'"
+
+
+def test_a_long_option_is_refused_whole():
+    with pytest.raises(UnknownSwitchError) as caught:
+        check_operands(("--bogus", ), UnknownSwitchError, frozenset(),
+                       frozenset({"n"}))
+    assert str(caught.value) == "unknown option `bogus'"
+
+
+def test_without_known_switches_the_whole_word_is_named():
+    with pytest.raises(UnknownSwitchError) as caught:
+        check_operands(("-nx", ), UnknownSwitchError)
+    assert str(caught.value) == "unknown switch `nx'"
+
+
+async def _verb(inv: CLIInvocation) -> None:
+    return None
+
+
+def test_switches_reads_the_leaf_the_line_was_parsed_against():
+    leaf = CLISpec(name="mv",
+                   fn=_verb,
+                   options=(Option(short="-f", long="--force"),
+                            Option(short="-k"), Option(long="--sparse")))
+    assert switches(CLIInvocation(None, spec=leaf)) == {"f", "k"}
+    assert switches(CLIInvocation(None)) == frozenset()

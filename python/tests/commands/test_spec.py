@@ -357,7 +357,13 @@ def test_curl_spec():
     spec = SPECS["curl"]
     parsed = parse_command(spec, ["-H", "Accept: json", "http://example.com"],
                            cwd="/")
-    assert parsed.flag("-H") == "Accept: json"
+    # Both spellings land on the long dest, the way every aliased option does.
+    assert parsed.flag("--header") == "Accept: json"
+    assert parsed.texts() == ["http://example.com"]
+    # The URL is a positional slot, so an unknown option is refused rather
+    # than fetched (#1065).
+    parsed = parse_command(spec, ["-sv", "http://example.com"], cwd="/")
+    assert parsed.flag("--verbose") is True
     assert parsed.texts() == ["http://example.com"]
 
 

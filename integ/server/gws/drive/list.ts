@@ -20,7 +20,7 @@ import type { JsonObj } from '../wire/json.ts'
 import { DOC_MIME, SHEET_MIME } from '../wire/mime.ts'
 import { googleError, ok } from '../wire/reply.ts'
 import { fmtFile } from './item.ts'
-import { matchClause, parseDriveQuery } from './query.ts'
+import { matchQuery, parseDriveQuery } from './query.ts'
 import { tabToCsv } from '../sheets/grid.ts'
 
 export const DEFAULT_PAGE_SIZE = 100
@@ -39,11 +39,11 @@ export function listFiles(st: GwsState, query: URLSearchParams): Reply {
   }
   if (q !== null && q.trim() !== '') {
     // Matching sits inside the guard too: an unknown field surfaces from
-    // matchClause, and the live API answers a query it cannot interpret
+    // matchQuery, and the live API answers a query it cannot interpret
     // with 400 invalid-query, never a 500.
     try {
       const clauses = parseDriveQuery(q)
-      items = items.filter((item) => clauses.every((c) => matchClause(st, item, c)))
+      items = items.filter((item) => matchQuery(st, item, clauses))
     } catch (err) {
       return googleError(400, err instanceof Error ? err.message : String(err), 'INVALID_ARGUMENT')
     }

@@ -26,7 +26,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.core.api.client import ApiResponse
 from mirage.core.github.config import GhConfig
 from mirage.io.types import materialize
-from mirage.types import PathSpec, ResourceName
+from mirage.types import PathSpec
 
 CONFIG = GhConfig(token="t")
 CALLS: list[dict] = []
@@ -192,14 +192,6 @@ def test_subject_url_kind_must_match_the_verb():
         repo_number(_inv(), FlagView({}),
                     "https://github.com/acme/tools/issues/42", "pull request",
                     "pull")
-
-
-# A gh write lands on the repository a `github` mount reads, by name rather
-# than by any vfs path, so the mount cannot invalidate itself. Without this
-# the executor's post-write cache drop is a no-op and a committed file still
-# reads back as its pre-write bytes.
-def test_names_the_mounted_resource_its_writes_invalidate():
-    assert GH.serves == (ResourceName.GITHUB, )
 
 
 @pytest.mark.asyncio
@@ -467,10 +459,9 @@ async def test_api_strips_the_enterprise_prefix_from_link_pages():
 
 
 @pytest.mark.asyncio
-async def test_api_silent_suppresses_output_without_losing_mutation():
-    out, io = await api(_inv(["x"], {"method": "POST", "silent": True}))
+async def test_api_silent_suppresses_output():
+    out, _io = await api(_inv(["x"], {"method": "POST", "silent": True}))
     assert await materialize(out) == b""
-    assert io.mutated is True
 
 
 @pytest.mark.asyncio
@@ -511,18 +502,6 @@ async def test_api_jq_emits_one_line_per_output():
     _reset({"a": "x", "b": "y"})
     out, _io = await api(_inv(["repos/o/r"], {"jq": ".a, .b"}))
     assert await materialize(out) == b"x\ny\n"
-
-
-@pytest.mark.asyncio
-async def test_api_jq_keeps_the_write_flag_of_the_method():
-    _reset({"ok": True})
-    _out, io = await api(
-        _inv(["repos/o/r/contents/f"], {
-            "method": "PUT",
-            "raw_field": ["content=YQ=="],
-            "jq": ".ok"
-        }))
-    assert io.mutated is True
 
 
 # gh prints two tab-separated header lines and then the README verbatim;

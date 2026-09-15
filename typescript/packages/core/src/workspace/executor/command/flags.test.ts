@@ -38,6 +38,73 @@ describe('parseFlags', () => {
     expect(parsed.paths[0]).toBe(p)
   })
 
+  it('keeps each spelling of one path on its own operand', () => {
+    // `ls -d 2026/ lnk/` with lnk -> 2026: both operands resolve to one
+    // virtual path, and a lookup keyed by that path handed the second
+    // spelling to both rows.
+    const first = new PathSpec({
+      virtual: '/data/2026',
+      directory: '/data/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: '2026/',
+    })
+    const second = new PathSpec({
+      virtual: '/data/2026',
+      directory: '/data/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: 'lnk/',
+    })
+    const parsed = parseFlags(['-d', first, second], SPECS.ls ?? null, 'ls', '/data')
+    expect(parsed.paths[0]).toBe(first)
+    expect(parsed.paths[1]).toBe(second)
+  })
+
+  it('keeps an operand after a chdir option on its own spelling', () => {
+    // `tar -cf out.tar -C dir .`: the option's value and the operand resolve
+    // to one path, and the operand's spelling names the members (GNU tar
+    // 1.35 stores `./f.txt`, not `dir/f.txt`).
+    const out = new PathSpec({
+      virtual: '/data/out.tar',
+      directory: '/data/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: 'out.tar',
+    })
+    const base = new PathSpec({
+      virtual: '/data/dir',
+      directory: '/data/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: 'dir',
+    })
+    const dot = new PathSpec({
+      virtual: '/data/dir',
+      directory: '/data/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: '.',
+    })
+    const parsed = parseFlags(['-cf', out, '-C', base, dot], SPECS.tar ?? null, 'tar', '/data')
+    expect(parsed.paths[0]).toBe(dot)
+  })
+
+  it('synthesizes a word the parser normalized instead of pairing it', () => {
+    // A followed link whose target climbs through `..` reaches the parse
+    // as `/data/b/../a/f.txt`; the parser resolves that to `/data/a/f.txt`
+    // and a keyed backend can only read the resolved spelling.
+    const climbing = new PathSpec({
+      virtual: '/data/b/../a/f.txt',
+      directory: '/data/b/../a/',
+      resourcePath: '',
+      resolved: true,
+      rawPath: '/data/b/link',
+    })
+    const parsed = parseFlags([climbing], SPECS.cat ?? null, 'cat', '/data')
+    expect(parsed.paths[0]?.virtual).toBe('/data/a/f.txt')
+  })
+
   it('synthesized paths leave the backend key to the mount', () => {
     // A spec-classified PATH operand the classifier left as text; the
     // mount stamps resourcePath at execute time (sentinel-proven in

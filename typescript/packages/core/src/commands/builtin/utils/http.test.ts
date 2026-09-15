@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HttpConnectError } from '../errors.ts'
+import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { httpFormRequest, httpRequest, isHttpError, setHttpProxyBase } from './http.ts'
 
 const ENC = new TextEncoder()
@@ -154,5 +154,157 @@ describe('http proxy routing', () => {
       host: '127.0.0.1',
       port: 1,
     })
+  })
+})
+
+describe('http deadlines', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  // The deadline can fire while the body is still arriving: the abort then
+  // surfaces from the body read, and it is the same timeout.
+  it('reports an abort during the body read as HttpTimeoutError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers(),
+          arrayBuffer: () => Promise.reject(new DOMException('aborted', 'AbortError')),
+        } as unknown as Response),
+      ),
+    )
+    await expect(httpRequest('http://127.0.0.1:1/x', { timeoutMs: 50 })).rejects.toThrow(
+      HttpTimeoutError,
+    )
+  })
+
+  // A null deadline is curl's `--max-time 0`: nothing ever aborts.
+  it('never aborts when the deadline is null', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('aborted', 'AbortError'))
+            })
+            setTimeout(() => {
+              resolve(new Response('late', { status: 200, statusText: 'OK' }))
+            }, 120_000)
+          }),
+      ),
+    )
+    const pending = httpRequest('http://127.0.0.1:1/x', { timeoutMs: null })
+    await vi.advanceTimersByTimeAsync(120_000)
+    const resp = await pending
+    expect(new TextDecoder().decode(resp.body)).toBe('late')
+  })
+})
+
+// Redirects are followed by hand so every hop stays observable, the way
+// httpx keeps `response.history` for the python twin.
+describe('redirect history', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function redirectThen(
+    status: number,
+    method: string,
+    body: string,
+  ): ReturnType<typeof vi.fn<typeof fetch>> {
+    return vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('302: Found', {
+          status,
+          statusText: 'Found',
+          headers: { Location: '/hello' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(body, { status: 200, statusText: method }))
+  }
+
+  it('keeps each followed redirect in history, in order', async () => {
+    const mock = redirectThen(302, 'OK', 'hello')
+    vi.stubGlobal('fetch', mock)
+    const resp = await httpRequest('http://x.test/redirect', { followRedirects: true })
+    expect([resp.status, resp.url]).toEqual([200, 'http://x.test/hello'])
+    expect(resp.history.map((h) => [h.status, h.url, new Map(h.headers).get('location')])).toEqual([
+      [302, 'http://x.test/redirect', '/hello'],
+    ])
+    expect(new TextDecoder().decode(resp.history[0]?.body)).toBe('302: Found')
+    expect(urlsCalled(mock)).toEqual(['http://x.test/redirect', 'http://x.test/hello'])
+    // Every hop is asked for by hand, so the platform never hides one.
+    expect(mock.mock.calls.map((call) => call[1]?.redirect)).toEqual(['manual', 'manual'])
+  })
+
+  it('turns a POST into a GET after a 302 and drops the body', async () => {
+    const mock = redirectThen(302, 'OK', 'hello')
+    vi.stubGlobal('fetch', mock)
+    const resp = await httpRequest('http://x.test/redirect', {
+      method: 'POST',
+      body: ENC.encode('a=1'),
+      followRedirects: true,
+    })
+    expect(resp.history[0]?.method).toBe('POST')
+    expect(resp.method).toBe('GET')
+    expect(mock.mock.calls[1]?.[1]?.method).toBe('GET')
+    expect(mock.mock.calls[1]?.[1]?.body).toBeUndefined()
+  })
+
+  it('keeps the method and body across a 307', async () => {
+    const mock = redirectThen(307, 'OK', 'hello')
+    vi.stubGlobal('fetch', mock)
+    const resp = await httpRequest('http://x.test/redirect', {
+      method: 'POST',
+      body: ENC.encode('a=1'),
+      followRedirects: true,
+    })
+    expect(resp.method).toBe('POST')
+    expect(mock.mock.calls[1]?.[1]?.method).toBe('POST')
+    expect(mock.mock.calls[1]?.[1]?.body).toBeDefined()
+  })
+
+  it('keeps Authorization on a same-origin hop and drops it when the origin changes', async () => {
+    const same = redirectThen(302, 'OK', 'hello')
+    vi.stubGlobal('fetch', same)
+    await httpRequest('http://x.test/redirect', {
+      headers: { Authorization: 'Bearer t' },
+      followRedirects: true,
+    })
+    expect((same.mock.calls[1]?.[1]?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer t',
+    )
+    const away = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 302,
+          statusText: 'Found',
+          headers: { Location: 'http://other.test/hello' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('hello', { status: 200, statusText: 'OK' }))
+    vi.stubGlobal('fetch', away)
+    const resp = await httpRequest('http://x.test/redirect', {
+      headers: { Authorization: 'Bearer t' },
+      followRedirects: true,
+    })
+    expect(resp.url).toBe('http://other.test/hello')
+    expect(away.mock.calls[1]?.[1]?.headers).not.toHaveProperty('Authorization')
+  })
+
+  it('returns the redirect itself when not following', async () => {
+    const mock = redirectThen(302, 'OK', 'hello')
+    vi.stubGlobal('fetch', mock)
+    const resp = await httpRequest('http://x.test/redirect', { followRedirects: false })
+    expect([resp.status, resp.history]).toEqual([302, []])
+    expect(mock).toHaveBeenCalledTimes(1)
   })
 })

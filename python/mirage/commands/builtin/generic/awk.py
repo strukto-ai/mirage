@@ -36,16 +36,178 @@ def parse_flags(fl: FlagView) -> AwkFlags:
     )
 
 
+_CMP_RE = re.compile(CMP_OP_PATTERN)
+_STRING_QUOTE = '"'
+_REGEX_DELIM = "/"
+_REGEX_ERROR = ("awk: syntax error in regular expression {pattern} "
+                "at source line 1")
+
+
+def _literal_end(text: str, start: int) -> int | None:
+    """Index just past the literal opening at ``start``.
+
+    Covers the two literals a pattern can hold, a ``"string"`` and a
+    ``/regex/``; a backslash escapes the next character in both, which
+    is how ``/a\\/b/`` keeps its slash. None when the literal never
+    closes.
+
+    Args:
+        text (str): the program source.
+        start (int): index of the opening quote or slash.
+    """
+    delim = text[start]
+    i = start + 1
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == delim:
+            return i + 1
+        i += 1
+    return None
+
+
+def _is_literal(tok: str) -> bool:
+    return tok[:1] in (_STRING_QUOTE, _REGEX_DELIM) and _literal_end(
+        tok, 0) == len(tok)
+
+
+def _is_regex_literal(tok: str) -> bool:
+    return tok.startswith(_REGEX_DELIM) and _is_literal(tok)
+
+
+# Where a `/` opens a regex rather than dividing: at the start of a
+# condition and after an operator that wants an operand.
+_REGEX_OPENERS = frozenset("~!&|(,")
+
+
+def _opens_regex(text: str, at: int) -> bool:
+    before = text[:at].rstrip()
+    return not before or before[-1] in _REGEX_OPENERS
+
+
+def _split_bool(condition: str, op: str) -> list[str]:
+    """Split a condition at ``op`` outside its literals.
+
+    A ``"string"`` or a ``/regex/`` can hold the operator's characters
+    (`$0 ~ /A&&B/`, `$1 == "a||b"`), so the split walks the text and
+    steps over each literal whole; a ``/`` opens a regex only where awk
+    expects an operand, so the slash of a bare word is not one.
+    Validator and evaluator both split through here, so they cannot
+    disagree about where a term ends. A literal that never closes ends
+    the scan, and the validator refuses what is left.
+
+    Args:
+        condition (str): the pattern's source text.
+        op (str): the boolean operator, ``&&`` or ``||``.
+    """
+    parts: list[str] = []
+    start = 0
+    i = 0
+    while i < len(condition):
+        ch = condition[i]
+        if ch == _STRING_QUOTE or (ch == _REGEX_DELIM
+                                   and _opens_regex(condition, i)):
+            end = _literal_end(condition, i)
+            if end is None:
+                break
+            i = end
+        elif condition.startswith(op, i):
+            parts.append(condition[start:i])
+            i += len(op)
+            start = i
+        else:
+            i += 1
+    parts.append(condition[start:])
+    return parts
+
+
+def _action_start(program: str) -> int:
+    """Index of the ``{`` that opens the action, or -1 without one.
+
+    Literals are skipped whole, so the brace in a pattern's ``/a{2}/``
+    is not mistaken for the action's.
+
+    Args:
+        program (str): the main rule's source text.
+    """
+    i = 0
+    while i < len(program):
+        ch = program[i]
+        if ch in (_STRING_QUOTE, _REGEX_DELIM):
+            end = _literal_end(program, i)
+            if end is None:
+                return -1
+            i = end
+            continue
+        if ch == "{":
+            return i
+        i += 1
+    return -1
+
+
 def _parse_program(program: str) -> tuple[str, str]:
     program = program.strip()
-    if program.startswith("{"):
-        return "", program[1:].rstrip().removesuffix("}").strip()
-    if "{" in program:
-        idx = program.index("{")
-        condition = program[:idx].strip()
-        action = program[idx + 1:].rstrip().removesuffix("}").strip()
-        return condition, action
-    return program, ""
+    idx = _action_start(program)
+    if idx == -1:
+        return program, ""
+    condition = program[:idx].strip()
+    action = program[idx + 1:].rstrip().removesuffix("}").strip()
+    return condition, action
+
+
+def _split_comparison(expr: str) -> tuple[str, str, str] | None:
+    """Split ``lhs OP rhs`` at the first operator outside a leading literal.
+
+    A leading ``/regex/`` or ``"string"`` is skipped whole, so the ``<``
+    inside ``/a<b/`` is not read as a comparison; after that the leftmost
+    operator wins, which is how ``$0 ~ /a==b/`` keeps ``==`` in its
+    regex. None when the expression is not a comparison.
+
+    Args:
+        expr (str): one simple condition, already stripped.
+    """
+    scan_from = 0
+    if expr[:1] in (_STRING_QUOTE, _REGEX_DELIM):
+        end = _literal_end(expr, 0)
+        if end is None:
+            return None
+        scan_from = end
+    m = _CMP_RE.search(expr, scan_from)
+    if m is None or m.start() == 0:
+        return None
+    lhs = expr[:m.start()].strip()
+    rhs = expr[m.end():].strip()
+    if not lhs or not rhs:
+        return None
+    return lhs, m.group(0), rhs
+
+
+def _strip_negation(expr: str) -> tuple[bool, str]:
+    """Peel one leading ``!`` off a probe (``!/re/``, ``!x``).
+
+    ``!=`` and ``!~`` are operators, not negations, so they stay put.
+
+    Args:
+        expr (str): one simple condition, already stripped.
+    """
+    if expr.startswith("!") and not expr.startswith(
+        (AwkCmpOp.NE, AwkCmpOp.NOT_MATCH)):
+        return True, expr[1:].strip()
+    return False, expr
+
+
+def _compile_regex(pattern: str) -> re.Pattern[str]:
+    """Compile an awk regex, refusing a bad one with awk's exit 2.
+
+    Args:
+        pattern (str): the regex source, delimiters stripped.
+    """
+    try:
+        return re.compile(pattern)
+    except re.error as exc:
+        raise UsageError(_REGEX_ERROR.format(pattern=pattern)) from exc
 
 
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*\Z")
@@ -161,17 +323,30 @@ def _validate_action(action: str) -> None:
 
 def _validate_simple(expr: str) -> None:
     expr = expr.strip()
-    m = re.match(rf"(.+?)\s*({CMP_OP_PATTERN})\s*(.+)", expr)
-    if not m:
-        if len(expr) >= 2 and expr.startswith("/") and expr.endswith("/"):
+    negated, probe = _strip_negation(expr)
+    split = _split_comparison(probe)
+    if split is None:
+        if _is_regex_literal(probe):
+            _compile_regex(probe[1:-1])
             return
-        if not _is_simple_operand(expr):
+        if not _is_simple_operand(probe):
             _reject(expr)
         return
-    lhs = m.group(1).strip()
-    rhs = m.group(3).strip()
+    if negated:
+        # `!$1 == 2` negates the operand, not the comparison, and nothing
+        # here evaluates that shape.
+        _reject(expr)
+    lhs, op, rhs = split
     if not _is_simple_operand(lhs):
         _reject(expr)
+    if op in (AwkCmpOp.MATCH, AwkCmpOp.NOT_MATCH):
+        # A literal regex is checked now; a variable or field is a
+        # dynamic regex, compiled against each record.
+        if _is_literal(rhs):
+            _compile_regex(rhs[1:-1])
+        elif not _is_simple_operand(rhs):
+            _reject(expr)
+        return
     if rhs.startswith('"') or rhs.startswith(FIELD_PREFIX):
         if not _is_simple_operand(rhs):
             _reject(expr)
@@ -197,14 +372,12 @@ def _validate_condition(condition: str) -> None:
     condition = condition.strip()
     if not condition or condition in (AwkBlock.BEGIN, AwkBlock.END):
         return
-    if AwkBoolOp.OR in condition:
-        for part in condition.split(AwkBoolOp.OR):
-            _validate_condition(part)
-        return
-    if AwkBoolOp.AND in condition:
-        for part in condition.split(AwkBoolOp.AND):
-            _validate_condition(part)
-        return
+    for op in (AwkBoolOp.OR, AwkBoolOp.AND):
+        parts = _split_bool(condition, op)
+        if len(parts) > 1:
+            for part in parts:
+                _validate_condition(part)
+            return
     _validate_simple(condition)
 
 
@@ -237,19 +410,27 @@ def _resolve_token(tok: str, field_map: Mapping[str, str]) -> str:
 
 def _eval_simple(expr: str, field_map: Mapping[str, str]) -> bool:
     expr = expr.strip()
-    m = re.match(rf"(.+?)\s*({CMP_OP_PATTERN})\s*(.+)", expr)
-    if not m:
-        if expr.startswith("/") and expr.endswith("/"):
-            regex = expr[1:-1]
-            return bool(re.search(regex, field_map.get(AwkBuiltin.REC, "")))
-        val = _resolve_token(expr, field_map)
-        try:
-            return float(val) != 0
-        except ValueError:
-            return bool(val)
-    lhs_raw, op, rhs_raw = m.group(1).strip(), m.group(2), m.group(3).strip()
-    rhs_raw = rhs_raw.strip('"')
+    negated, probe = _strip_negation(expr)
+    split = _split_comparison(probe)
+    if split is None:
+        if _is_regex_literal(probe):
+            record = field_map.get(AwkBuiltin.REC, "")
+            hit = _compile_regex(probe[1:-1]).search(record) is not None
+        else:
+            val = _resolve_token(probe, field_map)
+            try:
+                hit = float(val) != 0
+            except ValueError:
+                hit = bool(val)
+        return hit != negated
+    lhs_raw, op, rhs_raw = split
     lhs = _resolve_token(lhs_raw, field_map)
+    if op in (AwkCmpOp.MATCH, AwkCmpOp.NOT_MATCH):
+        pattern = (rhs_raw[1:-1] if _is_literal(rhs_raw) else _resolve_token(
+            rhs_raw, field_map))
+        hit = _compile_regex(pattern).search(lhs) is not None
+        return hit if op == AwkCmpOp.MATCH else not hit
+    rhs_raw = rhs_raw.strip('"')
     rhs = _resolve_token(rhs_raw, field_map) if rhs_raw.startswith(
         FIELD_PREFIX) or rhs_raw in field_map else rhs_raw
     try:
@@ -274,14 +455,12 @@ def _eval_condition(condition: str, field_map: Mapping[str, str]) -> bool:
     condition = condition.strip()
     if condition == AwkBlock.BEGIN or condition == AwkBlock.END:
         return False
-    if AwkBoolOp.OR in condition:
-        return any(
-            _eval_condition(p, field_map)
-            for p in condition.split(AwkBoolOp.OR))
-    if AwkBoolOp.AND in condition:
-        return all(
-            _eval_condition(p, field_map)
-            for p in condition.split(AwkBoolOp.AND))
+    parts = _split_bool(condition, AwkBoolOp.OR)
+    if len(parts) > 1:
+        return any(_eval_condition(p, field_map) for p in parts)
+    parts = _split_bool(condition, AwkBoolOp.AND)
+    if len(parts) > 1:
+        return all(_eval_condition(p, field_map) for p in parts)
     return _eval_simple(condition, field_map)
 
 

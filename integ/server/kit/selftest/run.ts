@@ -978,6 +978,49 @@ async function main(): Promise<void> {
       advertised,
     )
 
+    process.stdout.write('\n22. afterReset fires for every reset, successful or not\n')
+    // Three promises, each easy to lose: it fires on both reset branches, it
+    // fires on the FAILING path too, and it is handed the run's OWN client.
+    const hooked = await launch()
+    try {
+      const reseed = (run: string, tenant: string): ReturnType<typeof call> =>
+        call(hooked, '/reset', { method: 'POST', runInPath: run, body: { tenants: [tenant] } })
+      const touch = (run: string): ReturnType<typeof call> =>
+        call(hooked, '/_selftest/resets', { runInPath: run, tenant: 'a1' })
+      // Two runs, because "the run's OWN client" is not testable with one. A
+      // run's first reset precedes any request on it, so the fake cannot have
+      // learnt its name yet; the resets after a request are the ones that
+      // distinguish z1's client from z2's.
+      await reseed('z1', 'a1')
+      await reseed('z2', 'a1')
+      await touch('z1')
+      await touch('z2')
+      await reseed('z1', 'a1')
+      await reseed('z2', 'a1')
+      const failing = await reseed('z1', 'boom')
+      check('the failing reset is a 500', failing.status === 500, String(failing.status))
+      const seen = await touch('z1')
+      const rows = Array.isArray(seen.json) ? seen.json : []
+      const row = (r: JsonValue): Record<string, JsonValue> =>
+        typeof r === 'object' && r !== null && !Array.isArray(r) ? r : {}
+      // `default` leads because `start()` seeds that run before it listens,
+      // and a startup seed IS a reset. `boom` trails because the hook fires on
+      // the failing path too.
+      eq(
+        'it fired once per reset, in order, with the tenants each named',
+        rows.map((r) => String(row(r).tenants)),
+        ['default', 'a1', 'a1', 'a1', 'a1', 'boom'],
+      )
+      // The three resets that followed a request on their run.
+      eq(
+        'and each with the client of the run being reset',
+        rows.slice(3).map((r) => String(row(r).run)),
+        ['z1', 'z2', 'z1'],
+      )
+    } finally {
+      hooked.child.kill('SIGTERM')
+    }
+
     process.stdout.write(`\nselftest: ${String(checks)} checks passed\n`)
   } finally {
     fake.child.kill('SIGTERM')

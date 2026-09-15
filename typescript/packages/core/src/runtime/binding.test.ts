@@ -138,6 +138,8 @@ describe('execution bindings', () => {
     expect(language.capabilities.shell).toBe(false)
     expect(native.capabilities.shell).toBe(true)
     expect(native.capabilities.process).toBe(false)
+    expect(language.capabilities.filesystem).toEqual([])
+    expect(native.capabilities.filesystem).toEqual([])
     expect(dec.decode((await language.execute({ ...code, args: [] })).stdout)).toBe('hello')
     expect(dec.decode((await native.execute(shell)).stdout)).toBe('echo hello:/work!')
     await expect(language.execute(shell)).rejects.toBeInstanceOf(UnsupportedExecutionError)
@@ -245,6 +247,13 @@ it.each([
   '%s uses each execution context for filesystem callbacks',
   async (_name, create) => {
     const runtime = create()
+    expect(runtime.capabilities.filesystem).toEqual(
+      _name === 'monty'
+        ? ['read', 'write', 'list']
+        : _name === 'quickjs'
+          ? ['read', 'write', 'list', 'stat']
+          : ['read', 'write', 'list', 'stat', 'glob'],
+    )
     const ws = await world([runtime])
     try {
       await ws.execute('echo shared > /data/file; ln -s /data/file /data/link')

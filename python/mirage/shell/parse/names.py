@@ -15,16 +15,15 @@
 import re
 from collections.abc import Iterator
 
-import tree_sitter
-
 from mirage.shell.parse.constants import (ARITH_OPEN_TOKEN,
                                           ARITH_TEST_OPERATORS,
                                           DECLARING_NODES, TARGET_NAME_FIELDS)
+from mirage.shell.types import TSNodeLike
 
 _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def _collect_names(node: tree_sitter.Node, out: set[str]) -> None:
+def _collect_names(node: TSNodeLike, out: set[str]) -> None:
     if node.type == "function_definition":
         return
     if node.type == "variable_name":
@@ -49,8 +48,7 @@ def _collect_names(node: tree_sitter.Node, out: set[str]) -> None:
         _collect_names(child, out)
 
 
-def walk_named_outside_defs(
-        node: tree_sitter.Node) -> Iterator[tree_sitter.Node]:
+def walk_named_outside_defs(node: TSNodeLike) -> Iterator[TSNodeLike]:
     """Named nodes, skipping function_definition subtrees.
 
     A definition's body runs at invocation, not where it is defined,
@@ -59,7 +57,7 @@ def walk_named_outside_defs(
     bodies back in through its own node set (``line_nodes``).
 
     Args:
-        node (tree_sitter.Node): subtree root.
+        node (TSNodeLike): subtree root.
     """
     if node.type == "function_definition":
         return
@@ -68,7 +66,7 @@ def walk_named_outside_defs(
         yield from walk_named_outside_defs(child)
 
 
-def referenced_names(node: tree_sitter.Node) -> frozenset[str]:
+def referenced_names(node: TSNodeLike) -> frozenset[str]:
     """Every variable name a parsed program may read when it runs.
 
     A textual over-approximation over the whole tree, which is safe by
@@ -83,14 +81,14 @@ def referenced_names(node: tree_sitter.Node) -> frozenset[str]:
     `raw_string` with no children, so `'$X'` never reads X.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: set[str] = set()
     _collect_names(node, out)
     return frozenset(out)
 
 
-def command_words(node: tree_sitter.Node) -> frozenset[str]:
+def command_words(node: TSNodeLike) -> frozenset[str]:
     """The first word of every command a parsed program runs.
 
     What the whole-env scan and the CLI env-name lookup key on.
@@ -102,7 +100,7 @@ def command_words(node: tree_sitter.Node) -> frozenset[str]:
     where the fill layer walks the stored body instead.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node):
@@ -117,7 +115,7 @@ def command_words(node: tree_sitter.Node) -> frozenset[str]:
     return frozenset(out)
 
 
-def literal_text(node: tree_sitter.Node) -> str | None:
+def literal_text(node: TSNodeLike) -> str | None:
     """The argument's text when the parser fixed it, else None.
 
     A plain word, a number, a raw string and a double-quoted string of
@@ -125,7 +123,7 @@ def literal_text(node: tree_sitter.Node) -> str | None:
     expansion or a substitution is dynamic and reads as None.
 
     Args:
-        node (tree_sitter.Node): an argument node of a command.
+        node (TSNodeLike): an argument node of a command.
     """
     if node.type in ("word", "number"):
         text = node.text
@@ -143,11 +141,11 @@ def literal_text(node: tree_sitter.Node) -> str | None:
     return None
 
 
-def command_args(node: tree_sitter.Node) -> list[tree_sitter.Node]:
+def command_args(node: TSNodeLike) -> list[TSNodeLike]:
     """A command node's argument children: no name, prefixes, redirects.
 
     Args:
-        node (tree_sitter.Node): a ``command`` node.
+        node (TSNodeLike): a ``command`` node.
     """
     name_node = node.child_by_field_name("name")
     return [
@@ -158,7 +156,7 @@ def command_args(node: tree_sitter.Node) -> list[tree_sitter.Node]:
 
 
 def command_invocations(
-    node: tree_sitter.Node
+        node: TSNodeLike
 ) -> tuple[tuple[str | None, tuple[str | None, ...]], ...]:
     """Every plain command's head word with its argument words.
 
@@ -171,7 +169,7 @@ def command_invocations(
     Assignment prefixes and redirects are not arguments.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: list[tuple[str | None, tuple[str | None, ...]]] = []
     for n in walk_named_outside_defs(node):
@@ -202,7 +200,7 @@ def identifier_names(text: str) -> frozenset[str]:
     return frozenset(_IDENTIFIER_RE.findall(text))
 
 
-def _arith_region_names(region: tree_sitter.Node, out: set[str]) -> None:
+def _arith_region_names(region: TSNodeLike, out: set[str]) -> None:
     """Names read inside one arithmetic region.
 
     The grammar is inconsistent about identifiers here: ``$((name))``
@@ -212,7 +210,7 @@ def _arith_region_names(region: tree_sitter.Node, out: set[str]) -> None:
     ``identifier_names`` rather than reading as one name.
 
     Args:
-        region (tree_sitter.Node): the region's root node.
+        region (TSNodeLike): the region's root node.
         out (set[str]): collects the names.
     """
     for n in walk_named_outside_defs(region):
@@ -226,7 +224,7 @@ def _arith_region_names(region: tree_sitter.Node, out: set[str]) -> None:
                 out.update(identifier_names(text.decode()))
 
 
-def _substring_arith_names(expansion: tree_sitter.Node, out: set[str]) -> None:
+def _substring_arith_names(expansion: TSNodeLike, out: set[str]) -> None:
     """Names in a ``${v:offset:length}`` expansion's arithmetic part.
 
     The substring form is told apart from ``${v:-d}`` and friends by
@@ -234,7 +232,7 @@ def _substring_arith_names(expansion: tree_sitter.Node, out: set[str]) -> None:
     length, both evaluated as arithmetic.
 
     Args:
-        expansion (tree_sitter.Node): an ``expansion`` node.
+        expansion (TSNodeLike): an ``expansion`` node.
         out (set[str]): collects the names.
     """
     seen_colon = False
@@ -246,11 +244,11 @@ def _substring_arith_names(expansion: tree_sitter.Node, out: set[str]) -> None:
             _arith_region_names(child, out)
 
 
-def _test_arith_names(test: tree_sitter.Node, out: set[str]) -> None:
+def _test_arith_names(test: TSNodeLike, out: set[str]) -> None:
     """Names the numeric comparators of one ``[[`` read as arithmetic.
 
     Args:
-        test (tree_sitter.Node): a ``test_command`` node.
+        test (TSNodeLike): a ``test_command`` node.
         out (set[str]): collects the names.
     """
     for n in walk_named_outside_defs(test):
@@ -270,7 +268,7 @@ def _test_arith_names(test: tree_sitter.Node, out: set[str]) -> None:
                 _arith_region_names(child, out)
 
 
-def arith_reads(node: tree_sitter.Node) -> frozenset[str]:
+def arith_reads(node: TSNodeLike) -> frozenset[str]:
     """Names the program reads in an arithmetic context.
 
     Arithmetic resolution recurses through values (``name=TOKEN;
@@ -284,7 +282,7 @@ def arith_reads(node: tree_sitter.Node) -> frozenset[str]:
     bare word there never resolves as a variable.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node):
@@ -314,7 +312,7 @@ def arith_reads(node: tree_sitter.Node) -> frozenset[str]:
 
 
 def assignment_values(
-    node: tree_sitter.Node
+        node: TSNodeLike
 ) -> tuple[tuple[str, str | None, frozenset[str]], ...]:
     """Every plain assignment's target with what its value may hold.
 
@@ -327,7 +325,7 @@ def assignment_values(
     value.
 
     Args:
-        node (tree_sitter.Node): root node from parse().
+        node (TSNodeLike): root node from parse().
     """
     out: list[tuple[str, str | None, frozenset[str]]] = []
     for n in walk_named_outside_defs(node):

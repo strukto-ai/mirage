@@ -20,7 +20,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
-import { messagesJsonBytes } from '../../../../core/email/render.ts'
+import { envelopesJsonBytes } from '../../../../core/email/render.ts'
 import { pageSlice, sortHeaders, uidBudget } from './query.ts'
 
 export const DEFAULT_PAGE_SIZE = 25
@@ -41,6 +41,6 @@ export async function listEnvelopes(inv: CLIInvocation): Promise<CommandFnResult
     await accessor.close()
   }
   const pageOf = pageSlice(sortHeaders(headers, []), page, pageSize)
-  const out: ByteSource = messagesJsonBytes(pageOf)
+  const out: ByteSource = envelopesJsonBytes(pageOf)
   return [out, new IOResult()]
 }

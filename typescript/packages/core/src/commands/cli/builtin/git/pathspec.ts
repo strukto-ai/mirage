@@ -59,18 +59,24 @@ export function repoRelative(location: RepoLocation, start: string, operand: str
  * @param path repository-relative path
  * @param directory repository-relative directory
  */
-function under(path: string, directory: string): boolean {
+export function under(path: string, directory: string): boolean {
   return directory === '' || path.startsWith(`${directory}/`)
 }
 
 /**
- * Every path a single operand selects: itself, or a whole subtree.
+ * Every path a single operand selects: itself and its whole subtree.
+ *
+ * Both, not one or the other. A pathspec matches a path that equals it
+ * and a path it is a leading directory of, and the two are not exclusive
+ * as soon as the candidates come from more than one tree: restoring
+ * `slot` where the index holds the file `slot` and the source holds
+ * `slot/child` has to select both, or the file is deleted and the
+ * directory never written. git 2.50.1 replaces one with the other in
+ * either direction.
  *
  * @param paths the candidate paths, repository-relative
  * @param target the operand, repository-relative
  */
 export function matched(paths: Iterable<string>, target: string): Set<string> {
-  const all = [...paths]
-  if (all.includes(target)) return new Set([target])
-  return new Set(all.filter((path) => under(path, target)))
+  return new Set([...paths].filter((path) => path === target || under(path, target)))
 }

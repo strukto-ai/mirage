@@ -378,6 +378,6 @@ async def download_cmd(
                                                             or "").rstrip("/"),
                 bool(fl.as_bool("force_download")), workers)
         if fl.as_bool("quiet"):
-            return text_out(f"{base}\n", mutated=True)
+            return text_out(f"{base}\n")
         body = "".join(f"{path}\n" for path in written)
-        return text_out(f"{body}{base}\n", mutated=True)
+        return text_out(f"{body}{base}\n")

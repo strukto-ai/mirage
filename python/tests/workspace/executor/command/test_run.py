@@ -19,9 +19,9 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.resource.disk import DiskResource
-from mirage.types import MountMode, ResourceName
+from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.executor.command.run import (drop_service_caches,
+from mirage.workspace.executor.command.run import (drop_mount_caches,
                                                    link_view,
                                                    registry_child_mounts)
 
@@ -132,20 +132,28 @@ def test_stat_overlay_is_read_where_stats_render():
     assert named == {"ls", "stat", "cp", "mv", "find"}
 
 
-async def _cli_write_case(tmp_path) -> tuple[str, str]:
+async def _cli_write_case(tmp_path) -> tuple[str, str, str]:
     """A CLI write mutates the service out of band, exactly as gws does
-    by file id, then drops the caches for the mounts that service backs."""
-    (tmp_path / "a.txt").write_bytes(b"v1\n")
-    disk = DiskResource(root=str(tmp_path))
-    disk.caches_reads = True
-    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
-    await (await ws.execute("cat /data/a.txt")).stdout_str()
-    (tmp_path / "a.txt").write_bytes(b"v2\n")
-    (tmp_path / "new.txt").write_bytes(b"fresh\n")
-    await drop_service_caches(ws._registry, (ResourceName.DISK, ))
-    second = await (await ws.execute("cat /data/a.txt")).stdout_str()
-    listing = await (await ws.execute("ls /data")).stdout_str()
-    return second, listing
+    by file id, then every mount drops its caches."""
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    (tmp_path / "one" / "a.txt").write_bytes(b"v1\n")
+    (tmp_path / "two" / "b.txt").write_bytes(b"v1\n")
+    one = DiskResource(root=str(tmp_path / "one"))
+    two = DiskResource(root=str(tmp_path / "two"))
+    one.caches_reads = True
+    two.caches_reads = True
+    ws = Workspace({"/one/": one, "/two/": two}, mode=MountMode.WRITE)
+    await (await ws.execute("cat /one/a.txt")).stdout_str()
+    await (await ws.execute("cat /two/b.txt")).stdout_str()
+    (tmp_path / "one" / "a.txt").write_bytes(b"v2\n")
+    (tmp_path / "one" / "new.txt").write_bytes(b"fresh\n")
+    (tmp_path / "two" / "b.txt").write_bytes(b"v2\n")
+    await drop_mount_caches(ws._registry)
+    body = await (await ws.execute("cat /one/a.txt")).stdout_str()
+    listing = await (await ws.execute("ls /one")).stdout_str()
+    other = await (await ws.execute("cat /two/b.txt")).stdout_str()
+    return body, listing, other
 
 
 @pytest.mark.asyncio
@@ -153,30 +161,14 @@ async def test_a_cli_write_drops_bodies_as_well_as_listings(tmp_path):
     """A stale listing hides a create; a stale body hides an edit. The
     cached body is the one that answers without reaching the service, so
     clearing the index alone leaves `cat` serving pre-write content."""
-    body, listing = await _cli_write_case(tmp_path)
+    body, listing, _other = await _cli_write_case(tmp_path)
     assert body == "v2\n"
     assert "new.txt" in listing
 
 
 @pytest.mark.asyncio
-async def test_a_cli_that_serves_nothing_drops_nothing(tmp_path):
-    (tmp_path / "a.txt").write_bytes(b"v1\n")
-    disk = DiskResource(root=str(tmp_path))
-    disk.caches_reads = True
-    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
-    await ws.execute("cat /data/a.txt")
-    (tmp_path / "a.txt").write_bytes(b"v2\n")
-    await drop_service_caches(ws._registry, ())
-    assert await (await ws.execute("cat /data/a.txt")).stdout_str() == "v1\n"
-
-
-@pytest.mark.asyncio
-async def test_an_unrelated_service_keeps_its_cache(tmp_path):
-    (tmp_path / "a.txt").write_bytes(b"v1\n")
-    disk = DiskResource(root=str(tmp_path))
-    disk.caches_reads = True
-    ws = Workspace({"/data/": disk}, mode=MountMode.WRITE)
-    await ws.execute("cat /data/a.txt")
-    (tmp_path / "a.txt").write_bytes(b"v2\n")
-    await drop_service_caches(ws._registry, (ResourceName.GDRIVE, ))
-    assert await (await ws.execute("cat /data/a.txt")).stdout_str() == "v1\n"
+async def test_a_cli_write_drops_every_mount(tmp_path):
+    # Which mounts the CLI's service backs is not the CLI's business, so
+    # the executor says the one thing it knows: a write happened.
+    _body, _listing, other = await _cli_write_case(tmp_path)
+    assert other == "v2\n"

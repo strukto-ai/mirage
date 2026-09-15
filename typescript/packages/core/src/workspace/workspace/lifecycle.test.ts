@@ -18,7 +18,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { command } from '../../commands/config.ts'
 import { CommandSpec, Operand } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { CapacityState, ResourceName } from '../../types.ts'
+import { CapacityState } from '../../types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
@@ -26,7 +26,7 @@ import { MountMode } from '../../types.ts'
 import { ExecutionNode } from '../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
-import { dropServiceCaches } from '../executor/command/run.ts'
+import { dropMountCaches } from '../executor/command/run.ts'
 
 let parser: ShellParser
 
@@ -401,10 +401,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   })
   const manager = ws.mount('/data').cacheManager
   if (manager === null) throw new Error('missing cache manager')
-  const updating =
-    kind === 'service'
-      ? dropServiceCaches(ws.registry, [ResourceName.RAM])
-      : manager.clearIndex(index)
+  const updating = kind === 'service' ? dropMountCaches(ws.registry) : manager.clearIndex(index)
   let removing: Promise<void> | undefined
   try {
     await entered

@@ -15,6 +15,8 @@
 // GNU date's format directives, rendered the way `date +FMT` and
 // `ls --time-style=+FMT` print them; `%q` and `%N` are the two GNU adds
 // no C library strftime knows.
+import type { Zone } from '../../../utils/timezone.ts'
+
 export const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export const MONTH_NAMES = [
   'Jan',
@@ -54,14 +56,13 @@ function isoWeekParts(year: number, month: number, day: number): [number, number
   return [ty, Math.floor((yday - 1) / 7) + 1]
 }
 
-export function strftime(dt: Date, fmt: string, utc: boolean): string {
-  const year = utc ? dt.getUTCFullYear() : dt.getFullYear()
-  const month = utc ? dt.getUTCMonth() : dt.getMonth()
-  const day = utc ? dt.getUTCDate() : dt.getDate()
-  const dow = utc ? dt.getUTCDay() : dt.getDay()
-  const hour = utc ? dt.getUTCHours() : dt.getHours()
-  const minute = utc ? dt.getUTCMinutes() : dt.getMinutes()
-  const second = utc ? dt.getUTCSeconds() : dt.getSeconds()
+// Render `fmt` for the instant `dt` on the wall clock `zone` shows for it:
+// the fields, `%z` and `%Z` all come from one reading of the zone, so a
+// rendering cannot mix a UTC field with a local offset.
+export function strftime(dt: Date, fmt: string, zone: Zone): string {
+  const parts = zone.parts(dt)
+  const { year, month, day, hour, minute, second } = parts
+  const dow = parts.weekday
   const render = (code: string): string => {
     switch (code) {
       case 'a':
@@ -118,10 +119,7 @@ export function strftime(dt: Date, fmt: string, utc: boolean): string {
       case 'n':
         return '\n'
       case 'N':
-        return String((utc ? dt.getUTCMilliseconds() : dt.getMilliseconds()) * 1_000_000).padStart(
-          9,
-          '0',
-        )
+        return String(parts.ms * 1_000_000).padStart(9, '0')
       case 'P':
         return hour < 12 ? 'am' : 'pm'
       case 'q':
@@ -165,18 +163,15 @@ export function strftime(dt: Date, fmt: string, utc: boolean): string {
       case 's':
         return String(Math.floor(dt.getTime() / 1000))
       case 'z':
-        return utc ? '+0000' : formatTZOffset(dt)
+        return zoneOffset(parts.offsetSec, 0, '', null)
       case 'Z':
-        return utc ? 'UTC' : ''
+        return parts.abbrev
       case 'e':
         return String(day).padStart(2, ' ')
       case 'T':
         return `${pad2(hour)}:${pad2(minute)}:${pad2(second)}`
-      case 'j': {
-        const start = Date.UTC(year, 0, 0)
-        const diff = (utc ? dt.getTime() : Date.UTC(year, month, day)) - start
-        return String(Math.floor(diff / 86_400_000)).padStart(3, '0')
-      }
+      case 'j':
+        return String(dayOfYear(year, month, day)).padStart(3, '0')
       case 'w':
         return String(dow)
       case 'u':
@@ -192,7 +187,7 @@ export function strftime(dt: Date, fmt: string, utc: boolean): string {
     (_m, flags: string, digits: string, colons: string, code: string) => {
       if (code === 'z') {
         const width = digits === '' ? null : Number(digits)
-        return zoneOffset(utc ? 0 : -dt.getTimezoneOffset(), colons.length, flags, width)
+        return zoneOffset(parts.offsetSec, colons.length, flags, width)
       }
       return modified(render(code), code, flags, digits)
     },
@@ -295,24 +290,27 @@ function padSigned(sign: string, digits: string, pad: string | null, width: numb
   return sign + digits.padStart(width, '0')
 }
 
-// %z and its colon forms: %:z is +05:30, %::z adds seconds, %:::z keeps
-// only the parts that are not zero.
+// %z and its colon forms, from the offset in seconds east of UTC: %:z is
+// +05:30, %::z adds seconds, %:::z keeps only the parts that are not zero.
+// Mirrors the Python zone_offset.
 function zoneOffset(
-  offsetMin: number,
+  offsetSec: number,
   colons: number,
   flags: string,
   width: number | null,
 ): string {
-  const sign = offsetMin < 0 ? '-' : '+'
-  const hours = Math.floor(Math.abs(offsetMin) / 60)
-  const minutes = Math.abs(offsetMin) % 60
+  const sign = offsetSec < 0 ? '-' : '+'
+  const total = Math.abs(offsetSec)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
   if (colons === 0) {
     const digits = width === null ? 4 : width - 1
     return padSigned(sign, String(hours * 100 + minutes), winningPad(flags), digits)
   }
   let tail: string
-  if (colons === 1 || (colons === 3 && minutes !== 0)) tail = `:${pad2(minutes)}`
-  else if (colons === 2) tail = `:${pad2(minutes)}:00`
+  if (colons === 1 || (colons === 3 && minutes !== 0 && seconds === 0)) tail = `:${pad2(minutes)}`
+  else if (colons === 2 || seconds !== 0) tail = `:${pad2(minutes)}:${pad2(seconds)}`
   else tail = ''
   const digits = width === null ? 2 : width - tail.length - 1
   return padSigned(sign, String(hours), winningPad(flags), digits) + tail
@@ -356,11 +354,4 @@ function modified(base: string, code: string, flags: string, digits: string): st
     else out = padSigned(sign, signed[2] ?? '', '0', width - sign.length)
   }
   return out
-}
-
-export function formatTZOffset(dt: Date): string {
-  const offsetMin = -dt.getTimezoneOffset()
-  const sign = offsetMin >= 0 ? '+' : '-'
-  const abs = Math.abs(offsetMin)
-  return `${sign}${pad2(Math.floor(abs / 60))}${pad2(abs % 60)}`
 }

@@ -24,6 +24,8 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
+const BUNDLED = ['discord', 'gh', 'git', 'gws', 'linear', 'ntn', 'slack']
+
 function tree(name: string): CLISpec {
   return new CLISpec({ name, subcommands: [new CLISpec({ name: 'run', fn: noop })] })
 }
@@ -66,7 +68,7 @@ describe('cli spec registry', () => {
   // itself, a caller saw only the CLIs whose modules something had
   // already imported -- which the old barrel hid by importing them all.
   it('resolves the bundled CLIs without importing their modules', () => {
-    for (const name of ['discord', 'gh', 'git', 'gws', 'linear', 'ntn', 'slack']) {
+    for (const name of BUNDLED) {
       expect(cliSpecFor(name).name).toBe(name)
     }
   })

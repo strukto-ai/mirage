@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../../binding.ts'
 import { expect, it, vi } from 'vitest'
 import { PyodideRuntime } from '../runtime.ts'
 import { PrefixResolver } from '../../../resolver.ts'
@@ -52,7 +53,7 @@ it.each(['construction', 'startup'])(
       return Promise.reject(new Error(`unexpected ${op}`))
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/data/'])))
     try {
       for (let i = 0; i < 2; i++) {
         const result = await rt.run({

@@ -14,17 +14,20 @@
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.routing.types import RouteScript
 from mirage.runtime.sandbox.config import SandboxConfig
-from mirage.runtime.types import RunResult, RuntimeReach
+from mirage.runtime.types import RunResult, RuntimeReach, ScriptSource
 
 
 class RemoteSandbox(Runtime, LineExecutorMixin):
-    """A runtime that runs whole lines inside a sandbox the user runs.
+    """A runtime that executes programs in a sandbox the user runs.
+
+    Captures default to unresolved program names. An explicit "*"
+    delegates whole shell lines.
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
     your own (a running container, a live Daytona or E2B sandbox) and
@@ -47,14 +50,15 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     # gate never sees those effects, however well isolated the
     # sandbox itself is.
     reach: RuntimeReach = "remote"
-    captures: tuple[str, ...] = ("*", )
+    captures: tuple[str, ...] = (EXTERNAL_COMMANDS, )
     config_cls: ClassVar[type[SandboxConfig]] = SandboxConfig
     config: SandboxConfig
 
-    def __init__(self,
-                 captures: Sequence[str] | None = None,
-                 config: SandboxConfig | dict[str, Any] | None = None,
-                 script: RouteScript | None = None) -> None:
+    def __init__(
+            self,
+            captures: Sequence[str] | None = None,
+            config: SandboxConfig | dict[str, Any] | None = None,
+            script: Callable[..., Any] | ScriptSource | None = None) -> None:
         super().__init__(captures, config, script)
         # Connect-once latch: the first captured line connects; later
         # lines just execute. A failed connect leaves it unset so the
@@ -77,12 +81,15 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             env (dict[str, str]): the session environment.
             cwd (str): the session working directory.
         """
+        await self._ensure_connected()
+        merged = {**self.config.env, **env}
+        return await self.exec_line(line, stdin, merged, cwd)
+
+    async def _ensure_connected(self) -> None:
         async with self._connect_lock:
             if not self._connected:
                 await self.connect()
                 self._connected = True
-        merged = {**self.config.env, **env}
-        return await self.exec_line(line, stdin, merged, cwd)
 
     async def connect(self) -> None:
         """Attach to the user's live sandbox, failing loud if absent."""

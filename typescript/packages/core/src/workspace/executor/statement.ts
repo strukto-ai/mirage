@@ -20,7 +20,8 @@ import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { Session } from '../session/session.ts'
+import type { Session, StatusWriter } from '../session/session.ts'
+import { abortedLine, lineStatusWriter, makeAbortError } from '../abort.ts'
 
 /**
  * Record a finished statement's exit status: `$?` and `${PIPESTATUS[@]}`
@@ -37,11 +38,76 @@ import type { Session } from '../session/session.ts'
  * (`{ false | true; }` keeps `1 0`).
  */
 export function recordStatus(session: Session, code: number, transparent = false): void {
+  // A statement that settles after the caller was released is an orphan.
+  // Its status is nobody's `$?`, and the throw ends the loop that would
+  // otherwise run the next statement on a shell nobody is waiting on.
+  const lineAbort = abortedLine(session)
+  if (lineAbort !== undefined) throw makeAbortError(lineAbort)
+  // Whose status this is, so an aborted line puts back only what it
+  // overwrote and never a concurrent line's finished result.
+  session.statusWriter = lineStatusWriter(session)
   session.lastExitCode = code
   const pending = session.pipeStatusPending
   session.pipeStatusPending = null
   if (pending !== null) session.pipeStatus = pending
   else if (!transparent) session.pipeStatus = [code]
+}
+
+/**
+ * The status a line found, taken before its first statement runs and
+ * put back if the caller aborts the line.
+ *
+ * An aborted invocation is the caller's outcome, not the shell's, so it
+ * must leave `$?` where it was. But the abort lands on one await inside
+ * the line, and every statement before that await has already stamped
+ * through `recordStatus`. The status door refuses a statement that
+ * settles after the caller was released; this is for the ones that
+ * landed before it, and only a copy taken before the line can undo them.
+ *
+ * The three fields travel together because they are one shell fact:
+ * `$?`, `${PIPESTATUS[@]}`, and the per-segment statuses a pipeline
+ * parked for its boundary to claim. Restoring one without the others
+ * would leave a state no bash line produces.
+ */
+export interface StatusSnapshot {
+  lastExitCode: number
+  pipeStatus: readonly number[]
+  pipeStatusPending: readonly number[] | null
+}
+
+/** Capture `$?` and `${PIPESTATUS[@]}` before a line runs. */
+export function snapshotStatus(session: Session): StatusSnapshot {
+  return {
+    lastExitCode: session.lastExitCode,
+    pipeStatus: session.pipeStatus,
+    pipeStatusPending: session.pipeStatusPending,
+  }
+}
+
+/**
+ * Put back the status a line found, for a line the caller aborted.
+ * Statements inside the line may already have stamped their own status
+ * before the abort landed, and an aborted invocation is the caller's
+ * outcome, not the shell's.
+ *
+ * Only what this line overwrote, though. Two `execute()` calls can
+ * share a session, and a snapshot taken before a concurrent line
+ * finished is older than that line's result: putting it back would
+ * resurrect a value the shell had already moved past. So the restore
+ * happens only while the last stamp is still this line's. When nobody
+ * has stamped since the snapshot the status already equals it and
+ * declining is the same thing; when someone else did, declining is the
+ * point.
+ */
+export function restoreStatus(
+  session: Session,
+  snapshot: StatusSnapshot,
+  writer: StatusWriter | null,
+): void {
+  if (session.statusWriter !== writer) return
+  session.lastExitCode = snapshot.lastExitCode
+  session.pipeStatus = snapshot.pipeStatus
+  session.pipeStatusPending = snapshot.pipeStatusPending
 }
 
 /**

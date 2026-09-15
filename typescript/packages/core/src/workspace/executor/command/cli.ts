@@ -174,6 +174,21 @@ export interface CLIContext {
 }
 
 /**
+ * Whether a write verb of this CLI leaves every mount's caches stale.
+ *
+ * A CLI that reaches a service writes past the dispatcher's per-path
+ * invalidation, so no mount can see the write. Two roots do that: one with a
+ * `configModel` (an account CLI, initialized from it) and a script root, whose
+ * config is opaque by construction and whose program may reach anything. A
+ * root with neither (`git`) has no service to reach; its writes go through the
+ * dispatcher, which invalidates as it goes, so a blanket drop would only cost
+ * every other mount a reload.
+ */
+export function dropsMountCaches(spec: CLISpec): boolean {
+  return spec.configModel !== null || spec.script !== null
+}
+
+/**
  * Execute a line whose head word is an installed CLI.
  *
  * Dispatch is by NAME: the install resolves the program tree and the
@@ -293,6 +308,7 @@ export async function handleCli(
     stdin,
     env: envSnapshot(session),
     ...(Object.keys(doors).length > 0 ? { doors } : {}),
+    spec: leaf,
   }
 
   // The outer timer bounds the whole invocation; the runtime deadline
@@ -362,6 +378,21 @@ export async function handleCli(
     // (exit 124), not here.
     if (err instanceof CommandTimeoutError) {
       abort.abort()
+      // Racing a promise does not stop its work: a typed fn that ignores
+      // the abort signal keeps running, and its request may land after
+      // exit 124. Drop now, for a write the service already accepted, and
+      // again when the body settles, for one still in flight.
+      if (leaf.write && dropCaches !== null) {
+        await dropCaches()
+        const settle = (): Promise<void> => dropCaches()
+        void body.then(settle, settle).catch((dropErr: unknown) => {
+          // The command already returned, so a drop that fails here (a
+          // workspace torn down under it) has no stream to land on; it
+          // is reported rather than left as an unhandled rejection.
+          const reason = dropErr instanceof Error ? dropErr.message : String(dropErr)
+          console.warn(`${prog}: cache drop after timeout failed: ${reason}`)
+        })
+      }
       throw err
     }
     // Any other thrown leaf error (an API error, a TypeError) becomes
@@ -369,9 +400,8 @@ export async function handleCli(
     // the rest of the line keeps running.
     // The write may already have landed when a leaf throws after its
     // request (a PUT whose --jq program fails filters a response the
-    // service already applied), and with no IOResult to consult the
-    // spec's static answer is the only one left; without the drop a
-    // github mount keeps serving its pre-write bytes.
+    // service already applied); without the drop a github mount keeps
+    // serving its pre-write bytes.
     if (leaf.write && dropCaches !== null) await dropCaches()
     const message = err instanceof Error ? err.message : String(err)
     const stderr = new TextEncoder().encode(`${prog}: ${message}\n`)
@@ -381,18 +411,10 @@ export async function handleCli(
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
     ]
   }
-  // An account CLI mutates its service by id, so no vfs path can be derived
-  // from the call and per-path invalidation has nothing to aim at: a newly
-  // created file has no cache entry to expire, which is the case that
-  // matters. Dropping the service's listings is what lets the agent's next
-  // `ls` see what it just made, and dropping its cached bodies is what lets
-  // the next `cat` see an edit rather than the pre-write content.
-  //
-  // The spec's `write` is the static answer, which is the only one most
-  // verbs have; a handler that knows better says so on its result, so a
-  // read-only `gh api` does not expire every github mount.
-  const mutated = io.mutated ?? leaf.write
-  if (mutated && dropCaches !== null) await dropCaches()
+  // The spec's `write` is the one answer: what policy calls a write, the
+  // cache does too, so a verb that can mutate (`gh api` under any method)
+  // costs the mounts a reload rather than a stale read.
+  if (leaf.write && dropCaches !== null) await dropCaches()
 
   io.producer = { command: prog, prefixes: [], declared: leaf.limit ?? null }
 

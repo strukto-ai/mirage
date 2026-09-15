@@ -561,3 +561,87 @@ def test_midpath_glob_does_not_descend_into_a_file():
     _run(_seed(ws))
     assert _out(ws, "echo /base/f*/f1").split() == ["/base/f*/f1"]
     assert _out(ws, "echo /base/f1/*").split() == ["/base/f1/*"]
+
+
+def _dirs_ws():
+    """Workspace whose /data/records holds directories, a file and links."""
+    ws = Workspace({
+        "/": RAMResource(),
+        "/data/records/inner": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("s")
+    return ws
+
+
+async def _seed_dirs(ws):
+    await ws.execute(
+        "mkdir -p /data/records/2026-09-10 /data/records/2026-09-11",
+        session_id="s")
+    await ws.execute("echo sample > /data/records/2026-09-10/sample.txt",
+                     session_id="s")
+    await ws.execute("echo plain > /data/records/plain.txt", session_id="s")
+    await ws.execute("ln -s /data/records/2026-09-10 /data/records/lnk",
+                     session_id="s")
+    await ws.execute("ln -s /data/records/nowhere /data/records/broken",
+                     session_id="s")
+
+
+# Trailing-slash pathname expansion, pinned against bash 5.2.37
+# (debian:stable-slim) and bash 3.2.57: a word ending in a slash matches
+# directories only (a symlink to a directory counts, a broken link and a
+# regular file do not), and every match keeps exactly one trailing slash
+# (#1065).
+
+
+def test_trailing_slash_glob_keeps_the_slash_and_only_directories():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(ws, "cd /data/records && printf '<%s>\\n' */") == (
+        "<2026-09-10/>\n<2026-09-11/>\n<inner/>\n<lnk/>\n")
+
+
+def test_trailing_slash_glob_spells_an_absolute_word():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(ws, "printf '<%s>\\n' /data/records/2026*/") == (
+        "</data/records/2026-09-10/>\n</data/records/2026-09-11/>\n")
+
+
+def test_trailing_slash_glob_spells_a_relative_head():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(ws, "cd /data && printf '<%s>\\n' records/2026*/") == (
+        "<records/2026-09-10/>\n<records/2026-09-11/>\n")
+
+
+def test_trailing_slash_glob_walks_a_mid_path_pattern():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(ws, "cd /data && printf '<%s>\\n' */2026*/") == (
+        "<records/2026-09-10/>\n<records/2026-09-11/>\n")
+
+
+def test_trailing_slash_glob_zero_match_stays_literal():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(
+        ws,
+        "cd /data/records && printf '<%s>\\n' nomatch*/") == ("<nomatch*/>\n")
+
+
+def test_doubled_trailing_slash_keeps_one():
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    assert _out(ws, "cd /data/records && printf '<%s>\\n' 2026*//") == (
+        "<2026-09-10/>\n<2026-09-11/>\n")
+
+
+def test_trailing_slash_glob_drives_the_issue_loop():
+    # The traversal from #1065: `"$d"*.txt` concatenates the spelled
+    # directory, so a missing slash made every file invisible.
+    ws = _dirs_ws()
+    _run(_seed_dirs(ws))
+    line = ("cd /data/records && for d in */; do for f in \"$d\"*.txt; do "
+            "[ -f \"$f\" ] || continue; cat \"$f\"; done; done")
+    assert _out(ws, line) == "sample\nsample\n"

@@ -53,6 +53,28 @@ function synthesizePathSpec(value: string): PathSpec {
   })
 }
 
+/**
+ * The next classified word spelling `value`, in argv order. Two words can
+ * resolve to one path (`ls -d dir/ link/` with link -> dir, `tar -C dir .`),
+ * each with its own spelling, so every consumer takes the next word for
+ * its path off a queue rather than reading a lookup keyed by the path
+ * alone, which handed them all the last spelling; the parser hands
+ * positionals back in argv order, the guarantee argparse gives too. A path
+ * no word spells (one the parser normalized, a followed link whose target
+ * climbs through `..`) falls back to the map, which still serves a word
+ * the classifier left as text, and is synthesized after that, since a
+ * keyed backend cannot read `b/../a`. Mirrors `take_spelling`.
+ */
+function takeSpelling(
+  spellings: Map<string, PathSpec[]>,
+  scopeMap: Map<string, PathSpec>,
+  value: string,
+): PathSpec {
+  const taken = spellings.get(rstripSlash(value) || '/')?.shift()
+  if (taken !== undefined) return taken
+  return scopeMap.get(value) ?? synthesizePathSpec(value)
+}
+
 export function parseFlags(
   parts: readonly (string | PathSpec)[],
   spec: CommandSpec | null,
@@ -73,6 +95,15 @@ export function parseFlags(
       if (stripped !== '' && stripped !== item.virtual) scopeMap.set(stripped, item)
     }
   }
+  const spellings = new Map<string, PathSpec[]>()
+  for (const item of parts) {
+    if (item instanceof PathSpec) {
+      const key = rstripSlash(item.virtual) || '/'
+      const queue = spellings.get(key)
+      if (queue === undefined) spellings.set(key, [item])
+      else queue.push(item)
+    }
+  }
 
   if (spec !== null) {
     const parsed = parseCommand(spec, argv, cwd, env)
@@ -86,13 +117,21 @@ export function parseFlags(
         }
       }
     }
+    // An option's value is read before the operands, which is POSIX order
+    // and the order -C requires (its value moves the operands after it),
+    // so `tar -cf out.tar -C dir .` hands `dir` to -C and `.` to the
+    // operand. A flag value stays a string here, so its word only leaves
+    // the queue. A permuted line spelling one path twice, once as an
+    // option's value typed after the operand, swaps the two spellings and
+    // nothing else.
+    for (const value of parsed.pathFlagValues) takeSpelling(spellings, scopeMap, value)
 
+    // Classify positional args: each operand takes its own word.
     const paths: PathSpec[] = []
     const texts: string[] = []
     for (const [value, kind] of parsed.args) {
       if (kind === 'path') {
-        const existing = scopeMap.get(value)
-        paths.push(existing ?? synthesizePathSpec(value))
+        paths.push(takeSpelling(spellings, scopeMap, value))
       } else {
         texts.push(value)
       }

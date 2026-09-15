@@ -15,8 +15,9 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
+import type { ProcessExecution, RuntimeOptions } from '@struktoai/mirage-core/runtime/types'
 import { describe, expect, it } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
 import { SmolvmRuntime } from './runtime.ts'
@@ -159,7 +160,7 @@ describe('SmolvmRuntime', () => {
   it("registers under the config name 'smolvm'", () => {
     const runtime = buildRuntime('smolvm', { config: { machine: 'vm' } })
     expect(runtime).toBeInstanceOf(SmolvmRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })
 
@@ -185,4 +186,47 @@ describe.skipIf(process.platform === 'win32')('SmolvmRuntime stdin EPIPE', () =>
       await rm(dir, { recursive: true, force: true })
     }
   })
+})
+
+it('preserves argv through execute and shares the shell connection', async () => {
+  const runtime = makeRuntime({ config: { machine: 'vm', env: { E: 'config' } } })
+  const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
+  const stdin = ENC.encode('input')
+  const result = await runtime.execute({
+    kind: 'process',
+    argv,
+    cwd: PathSpec.fromStrPath('/work'),
+    env: { E: 'request' },
+    stdin,
+  })
+  expect(DEC.decode(result.stdout)).toBe('out:--flag')
+  expect(runtime.calls.at(-1)).toEqual([
+    ['machine', 'exec', '--name', 'vm', '-i', '-w', '/work', '-e', 'E=request', '--', ...argv],
+    stdin,
+  ])
+  await runtime.execute({
+    kind: 'shell',
+    line: 'pwd',
+    cwd: PathSpec.fromStrPath('/work'),
+    env: {},
+    stdin: null,
+  })
+  expect(runtime.calls.filter(([args]) => args[1] === 'status')).toHaveLength(1)
+  expect(runtime.capabilities).toMatchObject({ process: true, shell: true, filesystem: [] })
+})
+
+it('refuses empty argv and a stopped VM before executing', async () => {
+  const runtime = makeRuntime()
+  runtime.state = 'stopped'
+  const request = {
+    kind: 'process' as const,
+    argv: [] as unknown as ProcessExecution['argv'],
+    cwd: PathSpec.fromStrPath('/'),
+    env: {},
+    stdin: null,
+  }
+  await expect(runtime.execute(request)).rejects.toThrow('argv must not be empty')
+  expect(runtime.calls).toHaveLength(0)
+  await expect(runtime.execute({ ...request, argv: ['node'] })).rejects.toThrow('not running')
+  expect(runtime.calls).toHaveLength(1)
 })

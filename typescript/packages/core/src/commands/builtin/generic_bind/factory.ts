@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { guardInput } from '../utils/limit.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { type FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enotdir, isMissingPath } from '../../../utils/errors.ts'
+import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -25,6 +27,7 @@ import {
   type StatOp,
   resolveGlobOf,
   supports,
+  withAbortGuard,
   withDirGuard,
   withPathGuards,
   withPolicyGuard,
@@ -141,6 +144,22 @@ export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
   opsOverrides?: Record<string, CommandIO<A>>
 }
 
+// The namespace facts a glob resolver reads, stamped on the adapter per
+// invocation: the child names the namespace owes a directory, and the
+// stat of what such a name points at, so a trailing slash follows a link
+// the way bash does. Conditional spreads, not `undefined` values, because
+// exactOptionalPropertyTypes refuses an explicit undefined on an optional
+// field; Python's fields are `| None` and take the uniform path.
+function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView): CommandIO {
+  return {
+    ...raw,
+    ...(children === undefined ? {} : { globChildren: children }),
+    ...(links === undefined
+      ? {}
+      : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
+  }
+}
+
 export function makeGenericCommands<A extends Accessor = Accessor>(
   resource: string,
   ops: CommandIO<A>,
@@ -185,26 +204,34 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // coded preOps deny fires before a warm serve, the dispatcher's
     // own order at the op door; the invocation's mount prefix rides
     // into its wrap-time scope for readers drained after the gate
-    // scopes return.
-    const fn: CommandFn = (accessor, paths, texts, opts) =>
-      b.fn(
+    // scopes return. The abort guard sits outermost: once the
+    // invocation's signal has fired no slot starts, so a handler the
+    // caller was released from begins no further read or write
+    // between its operands.
+    const fn: CommandFn = (accessor, paths, texts, opts) => {
+      const guarded = withAbortGuard(
         withDirGuard(
           withPolicyGuard(
-            finish(
-              withPathGuards(
-                opts.ns?.childMounts === undefined
-                  ? raw
-                  : { ...raw, globChildren: opts.ns.childMounts },
-              ),
-            ),
+            finish(withPathGuards(stampNamespace(raw, opts.ns?.childMounts, opts.ns?.links))),
             opts.mountPrefix,
           ),
         ),
+        opts.signal,
+      )
+      return b.fn(
+        {
+          ...guarded,
+          readStream: (acc, path, index) => guardInput(guarded.readStream(acc, path, index), opts),
+        },
         accessor,
         paths,
         texts,
-        opts,
+        {
+          ...opts,
+          stdin: opts.stdin === null ? null : guardInput(opts.stdin, opts),
+        },
       )
+    }
     const provision =
       b.name in provOver
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)

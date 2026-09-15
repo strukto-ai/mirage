@@ -17,12 +17,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-import tree_sitter
-
 from mirage.commands.spec.types import ValueType
 from mirage.ops.types import SessionView
 from mirage.policy.match import scopes_paths
+from mirage.runtime.routing.types import RouteDecision
 from mirage.shell.call_stack import CallStack
+from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
 from mirage.utils.glob_walk import literal_word, mark_globs, unmark_globs
 from mirage.workspace.expand.classify import classify_parts
@@ -31,8 +31,9 @@ from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_bases,
                                                 spec_word_kinds)
-from mirage.workspace.lookup import (WordPolicy, end_options_after_program,
-                                     lookup, word_policy)
+from mirage.workspace.lookup import (Consumer, WordPolicy,
+                                     end_options_after_program, lookup,
+                                     runtime_refused, word_policy)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
@@ -57,11 +58,18 @@ class Argv:
         args (tuple[str, ...]): text view (what builtins consume).
         operands (tuple[str | PathSpec, ...]): classified view (what
             mount dispatch, test, and ln consume).
+        prefix (tuple[str, ...]): original words forming the matched name.
     """
 
     name: str
     args: tuple[str, ...]
     operands: tuple[str | PathSpec, ...]
+    prefix: tuple[str, ...] = ()
+
+    @property
+    def tokens(self) -> tuple[str, ...]:
+        """Native argv, preserving word boundaries within a matched name."""
+        return (*(self.prefix or (self.name, )), *self.args)
 
     @property
     def words(self) -> list[str | PathSpec]:
@@ -81,13 +89,14 @@ class Argv:
 
 
 async def expand_argv(
-    parts: list[tree_sitter.Node],
+    parts: list[TSNodeLike],
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
     namespace: Namespace | None = None,
     view: SessionView | None = None,
+    routing: RouteDecision | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -96,7 +105,7 @@ async def expand_argv(
     PATH (classify even bare filenames).
 
     Args:
-        parts (list[tree_sitter.Node]): word nodes after env-prefix
+        parts (list[TSNodeLike]): word nodes after env-prefix
             stripping and process-substitution removal.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
@@ -131,14 +140,17 @@ async def expand_argv(
     # python3` masks the function for its inner run, which is exactly
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
-    if name not in session.functions:
+    consumer = lookup(name, session, registry, routing)
+    refused = runtime_refused(name, session, registry, routing)
+    if name not in session.functions and consumer is not Consumer.EXTERNAL:
         expanded = expanded[:consumed] + end_options_after_program(
             name, expanded[consumed:])
 
-    policy = word_policy(lookup(name, session, registry))
+    policy = word_policy(consumer)
     word_kinds: list[ValueType | None] | None = None
     word_bases: list[str | None] | None = None
-    if policy is WordPolicy.MOUNT:
+    # Native captures still need the spec's path roles for admission.
+    if policy is WordPolicy.MOUNT or consumer is Consumer.EXTERNAL:
         spec = spec_for_command(name, registry, session.cwd)
         if spec:
             # Before anything reads the line: an option carrying a
@@ -162,8 +174,8 @@ async def expand_argv(
     # patterns for backend pushdown; unknown names fail without
     # touching backends.
     glob_opts = glob_options(session)
-    if (policy is WordPolicy.SHELL or glob_opts.needs_shell
-            or scopes_paths(session.commands, name)):
+    if (not refused and (policy is WordPolicy.SHELL or glob_opts.needs_shell
+                         or scopes_paths(session.commands, name))):
         # A backend's resolve_glob speaks bash's defaults only, so a
         # session that turned on nullglob, failglob or globstar has its
         # mount-command globs expanded here too, and the command receives
@@ -191,4 +203,6 @@ async def expand_argv(
     text_view = [unmark_globs(word_text(p)) for p in words]
     return Argv(name=name,
                 args=tuple(text_view[consumed:]),
-                operands=tuple(words[consumed:]))
+                operands=tuple(words[consumed:]),
+                prefix=tuple(
+                    unmark_globs(word) for word in expanded[:consumed]))

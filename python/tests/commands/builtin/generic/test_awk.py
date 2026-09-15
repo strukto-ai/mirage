@@ -558,18 +558,137 @@ async def test_awk_rejects_if_statement():
         )
 
 
-@pytest.mark.asyncio
-async def test_awk_rejects_tilde_match_condition():
+async def _run_stdin(program: str, stdin: bytes, flags=None) -> str:
     rb, rs = _make_backend({})
+    output, _ = await awk(
+        [],
+        (program, ),
+        flags,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=stdin,
+    )
+    return (await _drain(output)).decode()
+
+
+FIELDS = b"alice 30 engineer\nbob 25 designer\ncarol 40 manager\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_matches_a_field_against_a_regex():
+    # Issue #1065: the standard field-regex predicate.
+    out = await _run_stdin("$4 ~ /[Aa]pplication/ {print}",
+                           b"a|b|c|Application\nx|y|z|Other\n", {"F": "|"})
+    assert out == "a|b|c|Application\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_boolean_operator_inside_a_regex_is_regex_text():
+    # awk 20200816 and mawk 1.3.4 both print the line: the `&&` belongs
+    # to the regex, it is not a conjunction.
+    out = await _run_stdin("$0 ~ /A&&B/ {print}", b"xA&&By\nAB\n")
+    assert out == "xA&&By\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_boolean_operator_inside_a_string_is_string_text():
+    out = await _run_stdin('$1 == "a||b" {print $2}', b"a||b q\nz 1\n")
+    assert out == "q\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_bare_regex_pattern_holding_an_operator_matches():
+    out = await _run_stdin("/A&&B/", b"xA&&By\nAB\n")
+    assert out == "xA&&By\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_not_tilde_negates_the_match():
+    out = await _run_stdin("$3 !~ /^d/ {print $1}", FIELDS)
+    assert out == "alice\ncarol\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_string_rhs_is_a_dynamic_regex():
+    out = await _run_stdin('$2 ~ "0" && $1 ~ /^c/', FIELDS)
+    assert out == "carol 40 manager\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_variable_rhs_is_a_dynamic_regex():
+    out = await _run_stdin("$1 ~ pat {print $2}", FIELDS, {"v": "pat=ar"})
+    assert out == "40\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_numeric_rhs_matches_as_text():
+    out = await _run_stdin("$1 ~ 1", b"12\n3\n")
+    assert out == "12\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_lhs_may_be_nf_field_or_builtin():
+    assert await _run_stdin("$NF ~ /^App/", b"x y Application\nx y Other\n") \
+        == "x y Application\n"
+    assert await _run_stdin("NR ~ /[13]/", b"a\nb\nc\n") == "a\nc\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_regex_may_contain_a_comparison_operator():
+    assert await _run_stdin("$0 ~ /a<b/", b"a<b\nab\n") == "a<b\n"
+    assert await _run_stdin("$0 ~ /a==b/", b"a==b\nab\n") == "a==b\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_bare_regex_may_contain_a_comparison_operator():
+    assert await _run_stdin("/a<b/", b"a<b\nab\n") == "a<b\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_regex_with_escaped_slash():
+    assert await _run_stdin(r"$1 ~ /a\/b/", b"a/b\nab\n") == "a/b\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_regex_brace_is_not_the_action_brace():
+    assert await _run_stdin("$1 ~ /a{2}/ {print $2}", b"aa 1\na 2\n") == "1\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_without_surrounding_spaces():
+    assert await _run_stdin("$1~/a/", b"a b\nc d\n") == "a b\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_negated_bare_regex():
+    assert await _run_stdin("!/bob/ {print $1}", FIELDS) == "alice\ncarol\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_negated_operand_tests_falsiness():
+    assert await _run_stdin("!$1", b"0\n1\nfoo\n\n") == "0\n\n"
+    assert await _run_stdin("!x", b"a\nb\n", {"v": "x=0"}) == "a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_invalid_regex_is_usage_error():
+    # Exit 2, like mawk and onetrueawk (gawk exits 1 here).
+    with pytest.raises(UsageError,
+                       match=r"awk: syntax error in regular expression "
+                       r"\(a at source line 1"):
+        await _run_stdin("$1 ~ /(a/ {print}", b"a\n")
+
+
+@pytest.mark.asyncio
+async def test_awk_bare_invalid_regex_is_usage_error():
+    with pytest.raises(UsageError, match="syntax error in regular expression"):
+        await _run_stdin("/(a/", b"a\n")
+
+
+@pytest.mark.asyncio
+async def test_awk_tilde_rejects_an_unsupported_lhs():
     with pytest.raises(UsageError, match="unsupported construct"):
-        await awk(
-            [],
-            ("$1 ~ /x/ {print}", ),
-            None,
-            read_bytes=rb,
-            read_stream=rs,
-            stdin=b"x\n",
-        )
+        await _run_stdin("length($1) ~ /1/", b"a\n")
 
 
 @pytest.mark.asyncio

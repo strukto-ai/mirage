@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.cooperative import chunks
 from mirage.types import PathSpec, Producer, Refusal
 
 ByteSource = bytes | AsyncIterator[bytes]
@@ -33,7 +34,7 @@ async def materialize(stream: ByteSource | None) -> bytes:
         return stream
     if isinstance(stream, CachableAsyncIterator):
         return await stream.drain()
-    return b"".join([chunk async for chunk in stream])
+    return b"".join([chunk async for chunk in chunks(stream)])
 
 
 @dataclass
@@ -123,12 +124,6 @@ class IOResult:
             context. Facts ride the envelope as policy input; the
             decision a chain hands down rides beside them as
             ``refusal``, written after the last hook has spoken.
-        mutated (bool | None): whether this run changed service state,
-            when only the handler can tell. A CLI leaf declares
-            ``write`` statically because for almost every verb it is
-            static, but ``gh api`` carries its method on the line, so a
-            plain ``gh api /user`` is a read through a leaf that is
-            declared writable. None leaves the spec's answer standing.
         refusal (Refusal | None): why the line did not run, when a
             policy or an unanswered ask refused it; None on every
             ordinary run. stderr stays in bash's voice, this carries
@@ -144,7 +139,6 @@ class IOResult:
                  writes: dict[str, ByteSource] | None = None,
                  cache: list[str] | None = None,
                  producer: Producer | None = None,
-                 mutated: bool | None = None,
                  refusal: Refusal | None = None,
                  matched_runs: list[list[PathSpec]] | None = None) -> None:
         self.stdout = stdout
@@ -156,7 +150,6 @@ class IOResult:
                           ByteSource] = writes if writes is not None else {}
         self.cache: list[str] = cache if cache is not None else []
         self.producer = producer
-        self.mutated = mutated
         self.refusal = refusal
         self._stream_source: IOResult | None = None
 

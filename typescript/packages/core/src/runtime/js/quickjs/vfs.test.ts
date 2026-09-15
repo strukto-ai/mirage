@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -59,7 +60,7 @@ describe('quickjs std.open reads stat failures', () => {
   it('a non-absence stat failure refuses the open and mutates nothing', async () => {
     const bridge = makeStatProbeBridge('EIO', 'precious')
     const rt = new QuickJsRuntime()
-    rt.attach(bridge.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(OPEN_APPEND_JS))
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -73,7 +74,7 @@ describe('quickjs std.open reads stat failures', () => {
   it('a confirmed absence still lets a create-capable mode establish', async () => {
     const bridge = makeStatProbeBridge('ENOENT', '')
     const rt = new QuickJsRuntime()
-    rt.attach(bridge.dispatch, new PrefixResolver(() => ['/data/']))
+    rt.bind(new WorkspaceBinding(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
     const result = await rt.run(runArgs(OPEN_APPEND_JS))
     await rt.close()
     expect(result.exitCode).toBe(0)

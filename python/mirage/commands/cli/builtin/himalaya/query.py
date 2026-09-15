@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
+from mirage.core.email.client import quote_string
 from mirage.types import JsonValue
 
 # himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
@@ -122,11 +123,6 @@ def _keyword(token: Token | None) -> str | None:
     return token.text.lower()
 
 
-def _quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
 def _imap_date(text: str) -> date:
     parts = text.split("-")
     if len(parts) != 3:
@@ -220,7 +216,7 @@ class _Parser:
                 raise QueryError(f"unknown flag {value!r}, expected one of "
                                  f"{', '.join(sorted(FLAGS))}")
             return key
-        return f"{word.upper()} {_quote(value)}"
+        return f"{word.upper()} {quote_string(value)}"
 
     def parse_sorters(self) -> tuple[Sorter, ...]:
         self.take()

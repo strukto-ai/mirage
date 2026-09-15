@@ -13,10 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { realpathGeneric } from '../../generic/realpath.ts'
-import { type Builder } from '../adapter.ts'
+import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const REALPATH_BUILDER: Builder = {
   name: 'realpath',
-  fn: (ops, accessor, paths, texts, opts) =>
-    realpathGeneric(paths, texts, opts, (p) => ops.stat(accessor, p, opts.index ?? undefined)),
+  fn: async (ops, accessor, paths, texts, opts) =>
+    realpathGeneric(
+      await resolveGlobOf(ops)(accessor, paths, opts.index ?? undefined),
+      texts,
+      opts,
+      (p) => ops.stat(accessor, p, opts.index ?? undefined),
+    ),
 }

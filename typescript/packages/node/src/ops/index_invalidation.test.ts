@@ -15,7 +15,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { DiskResource } from '../resource/disk/disk.ts'
 import { tmpRoot } from '../test-utils.ts'
 import { Workspace } from '../workspace.ts'
@@ -78,6 +78,26 @@ describe('dispatcher evicts the index after a write op', () => {
       expect(names(await ws.dispatch('readdir', '/d/'))).toEqual(['gone', 'seed'])
       await ws.dispatch('rmdir', '/d/gone')
       expect(names(await ws.dispatch('readdir', '/d/'))).toEqual(['seed'])
+    } finally {
+      await ws.close()
+      cleanup()
+    }
+  })
+})
+
+describe('dispatcher evicts both subtrees after a rename', () => {
+  it('the old name of a moved directory stops answering from its cached children', async () => {
+    // The old name kept answering from its cached children after the move,
+    // so a later rename onto that name saw a directory that was no longer
+    // there and landed the source inside it.
+    const { ws, cleanup } = diskWorkspace()
+    try {
+      await ws.dispatch('write', '/d/seed/readme.md', [new TextEncoder().encode('notes\n')])
+      expect(names(await ws.dispatch('readdir', '/d/seed'))).toEqual(['readme.md'])
+      await ws.dispatch('rename', '/d/seed', [PathSpec.fromStrPath('/d/moved')])
+      await expect(ws.dispatch('stat', '/d/seed')).rejects.toThrow()
+      await expect(ws.dispatch('readdir', '/d/seed')).rejects.toThrow()
+      expect(names(await ws.dispatch('readdir', '/d/moved'))).toEqual(['readme.md'])
     } finally {
       await ws.close()
       cleanup()

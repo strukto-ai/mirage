@@ -145,6 +145,6 @@ describe('DaytonaRuntime', () => {
   it("registers under the config name 'daytona'", () => {
     const runtime = buildRuntime('daytona', { config: { sandboxId: 'sb-live' } })
     expect(runtime).toBeInstanceOf(DaytonaRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })

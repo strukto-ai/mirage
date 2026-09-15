@@ -12,14 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.registry import command
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
+from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.resource.ram import RAMResource
+from mirage.workspace.abort import ABORT_JOIN_SECONDS, MirageAbortError
+from mirage.workspace.session.ram import RAMSessionStore
+from mirage.workspace.session.store import SessionFields
+
+
+class _StalledSessionStore(RAMSessionStore):
+
+    async def load(self) -> dict[str, SessionFields]:
+        await asyncio.Event().wait()
+        return {}
+
+
+class _StallableSessionStore(RAMSessionStore):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stall = False
+
+    async def cas_set(self, session_id, fields, expected_generation):
+        if self.stall:
+            await asyncio.Event().wait()
+        return await super().cas_set(session_id, fields, expected_generation)
+
+
+class _StalledObserverStore(RAMObserverStore):
+
+    async def append(self, path, data) -> None:
+        await asyncio.Event().wait()
 
 
 def _register(ws: Workspace, prefix: str, fn) -> None:
@@ -295,3 +326,140 @@ async def test_a_negated_pipeline_keeps_its_refusal():
     assert io.exit_code == 0
     assert io.refusal is not None
     assert io.refusal.reason == "secrets stay put"
+
+
+@pytest.mark.asyncio
+async def test_cancel_releases_a_line_stalled_before_it_runs():
+    # The session store never answers its load, so the line is stuck
+    # before its first gate; the caller's event still has to release it.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=_StalledSessionStore())
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("echo hi", cancel=cancel)
+    finally:
+        timer.cancel()
+
+
+@pytest.mark.asyncio
+async def test_abort_during_preflight_is_not_recorded():
+    # A line is recorded once it has been parsed; one that never got past
+    # the loading of workspace state leaves no history entry, as in
+    # TypeScript.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=_StalledSessionStore())
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("echo hi", cancel=cancel)
+    finally:
+        timer.cancel()
+    assert await ws.observer.command_events() == []
+
+
+@pytest.mark.asyncio
+async def test_abort_on_the_flush_restores_status():
+    # The line stamped its status and then its flush never settles: the
+    # caller gets the abort, `$?` is what the line found, and the next
+    # line flushes normally because the cancelled write kept the
+    # generation the store knows.
+    store = _StallableSessionStore()
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=store)
+    await ws.execute("false")
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    store.stall = True
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("export MARK=1", cancel=cancel)
+    finally:
+        timer.cancel()
+    assert session.last_exit_code == 1
+    store.stall = False
+    r = await ws.execute("echo next")
+    assert r.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_abort_on_the_history_record_restores_status():
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   observe=_StalledObserverStore())
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    session.last_exit_code = 7
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.execute("echo hi", cancel=cancel)
+    finally:
+        timer.cancel()
+    assert session.last_exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_abort_of_a_running_line_is_not_held_by_a_dead_history_store():
+    # The cancel lands on the body (`sleep`), and the line's finally then
+    # records into a store that never answers. The caller is released
+    # after the grace all the same, with the abort and `$?` restored.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   observe=_StalledObserverStore())
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    session.last_exit_code = 7
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await asyncio.wait_for(ws.execute("sleep 5", cancel=cancel), 2)
+    finally:
+        timer.cancel()
+    assert session.last_exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_a_wait_for_timeout_is_not_held_by_a_dead_history_store():
+    # The event is never set: the caller is cancelled from outside, by a
+    # wait_for. The line still gets both cancels and the grace between
+    # them, so the dead store does not hold the caller, and `$?` is what
+    # the line found rather than what it stamped.
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   observe=_StalledObserverStore())
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    session.last_exit_code = 7
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(
+            ws.execute("false; echo hi", cancel=asyncio.Event()), 0.05)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed < ABORT_JOIN_SECONDS + 1
+    assert session.last_exit_code == 7
+
+
+@pytest.mark.asyncio
+async def test_abort_of_a_running_line_is_not_held_by_a_dead_session_store():
+    store = _StallableSessionStore()
+    ws = Workspace({"/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_store=store)
+    await ws.execute("false")
+    session = ws._session_mgr.get(ws._session_mgr.default_id)
+    store.stall = True
+    cancel = asyncio.Event()
+    timer = asyncio.get_running_loop().call_later(0.05, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await asyncio.wait_for(
+                ws.execute("export MARK=1; sleep 5", cancel=cancel), 2)
+    finally:
+        timer.cancel()
+    assert session.last_exit_code == 1

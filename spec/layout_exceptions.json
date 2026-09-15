@@ -4,7 +4,6 @@
  "directories": {
   "python_only": {
    "runtime/wasm": "The wasmtime WASI host. npm ships quickjs-emscripten and pyodide with their own hosts and python has no equivalent, so there is nothing to mirror. CLAUDE.md says do not port it.",
-   "runtime/python/sandlock": "Confines the host python3 with Landlock and seccomp, both Linux kernel features with no browser analogue and no node binding to mirror (sandlock ships python and go SDKs over its C ABI, and no npm package). The TypeScript python tier reaches the host through runtime/python/local.ts, which could wrap the same CLI; mirror this directory there if that lands.",
    "bridge": "sync.py and thread.py exist to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
    "agents/camel": "Ecosystem split: camel is a python-only framework, and pyproject declares it conflicting with the openai extra.",
@@ -73,6 +72,11 @@
    "typescript_only": {
     "list": "Encodes directory entries as QuickJS Emscripten handles. Python QuickJS uses the shared WASI host callbacks instead.",
     "stat": "Encodes stat results as QuickJS Emscripten handles. Python QuickJS uses the shared WASI host callbacks instead."
+   }
+  },
+  "utils": {
+   "typescript_only": {
+    "tz_abbrevs": "The tzdata abbreviation table `date` renders %Z from, generated from zoneinfo by scripts/gen_tz_abbrevs.py. Python reads zoneinfo itself and has nothing to mirror; Intl offers no tzdata names, so typescript ships the data."
    }
   }
  }

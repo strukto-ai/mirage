@@ -31,12 +31,11 @@ from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus
-from mirage.types import (CapacityResult, CapacityState, MountMode, PathSpec,
-                          ResourceName)
+from mirage.types import CapacityResult, CapacityState, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.shared import expand_operands
-from mirage.workspace.executor.command.run import drop_service_caches
+from mirage.workspace.executor.command.run import drop_mount_caches
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode
 
@@ -864,7 +863,7 @@ async def test_unmount_drains_service_index_invalidation(monkeypatch, kind):
     manager = ws.mount("/data").cache_manager
     assert manager is not None
     updating = asyncio.create_task(
-        drop_service_caches(ws._registry, (ResourceName.RAM, )) if kind ==
+        drop_mount_caches(ws._registry) if kind ==
         "service" else manager.clear_index(index))
     removing = None
     try:

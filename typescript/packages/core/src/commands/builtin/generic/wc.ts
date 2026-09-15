@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { guardInput } from '../utils/limit.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
@@ -23,7 +24,6 @@ import type { FlagValue } from '../../spec/types.ts'
 import { advanceColumn, isSpace } from '../../../utils/width.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -70,36 +70,56 @@ export function parseFlags(flags: Record<string, FlagValue>): WcFlags | string {
 // running maximum rather than a per-line one because carriage return and form
 // feed rewind the column without ending the line -- which is why the old
 // `split(/\r?\n/)` could not express it. Mirrors Python's `_scan_text`.
-function countsOf(data: Uint8Array): WcCounts {
-  const text = DEC.decode(data)
+async function countsOf(source: ByteSource, opts: CommandOpts, flags: WcFlags): Promise<WcCounts> {
+  const byteCountsOnly =
+    (flags.lines || flags.bytes) && !flags.words && !flags.chars && !flags.maxLineLength
+  if (byteCountsOnly) {
+    let lines = 0
+    let bytes = 0
+    for await (const chunk of guardInput(source, opts)) {
+      bytes += chunk.byteLength
+      if (flags.lines) for (let i = 0; i < chunk.byteLength; i++) if (chunk[i] === 0x0a) lines++
+    }
+    return { lines, words: 0, bytes, chars: 0, maxLineLength: 0 }
+  }
+  const decoder = new TextDecoder('utf-8', { fatal: false })
+  let bytes = 0
   let lines = 0
   let words = 0
   let chars = 0
   let inWord = false
   let column = 0
   let maxLineLength = 0
-  for (const ch of text) {
-    const cp = ch.codePointAt(0) ?? 0
-    chars += 1
-    if (isSpace(cp)) {
-      if (inWord) {
-        words += 1
-        inWord = false
+  const scan = (text: string): void => {
+    for (const ch of text) {
+      const cp = ch.codePointAt(0) ?? 0
+      chars += 1
+      if (isSpace(cp)) {
+        if (inWord) {
+          words += 1
+          inWord = false
+        }
+      } else {
+        inWord = true
       }
-    } else {
-      inWord = true
-    }
-    if (cp === 0x0a) {
-      lines += 1
+      if (cp === 0x0a) {
+        lines += 1
+        if (column > maxLineLength) maxLineLength = column
+        column = 0
+        continue
+      }
+      column = advanceColumn(column, cp)
       if (column > maxLineLength) maxLineLength = column
-      column = 0
-      continue
     }
-    column = advanceColumn(column, cp)
-    if (column > maxLineLength) maxLineLength = column
   }
+  for await (const chunk of guardInput(source, opts)) {
+    bytes += chunk.byteLength
+    scan(decoder.decode(chunk, { stream: true }))
+  }
+  scan(decoder.decode())
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- scan mutates inWord across decoded chunks.
   if (inWord) words += 1
-  return { lines, words, bytes: data.byteLength, chars, maxLineLength }
+  return { lines, words, bytes, chars, maxLineLength }
 }
 
 function selectedValues(counts: WcCounts, flags: WcFlags): number[] {
@@ -182,15 +202,14 @@ export async function wcGeneric(
     const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
     let err = ''
     for (const p of paths) {
-      let data: Uint8Array
+      let counts: WcCounts
       try {
-        data = await materialize(stream(p))
+        counts = await countsOf(stream(p), opts, parsed)
       } catch (e) {
         if (!isFsError(e)) throw e
         err += fsErrorLine('wc', p, e)
         continue
       }
-      const counts = countsOf(data)
       rows.push({ values: selectedValues(counts, parsed), label: p.rawPath })
       addCounts(total, counts)
     }
@@ -207,8 +226,7 @@ export async function wcGeneric(
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
-  const raw = await materialize(source)
-  const counts = countsOf(raw)
+  const counts = await countsOf(source, opts, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
     return [ENC.encode(`${values.join(' ')}\n`), new IOResult()]

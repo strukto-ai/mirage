@@ -683,3 +683,23 @@ it('preserves newline mount names and filenames through print0 and ls', async ()
     await ws.close()
   }
 })
+
+describe('find actions under an aborted invocation', () => {
+  it('stops running -exec at the next match', async () => {
+    const ws = await singleMountWs()
+    try {
+      await ws.execute('mkdir -p /d; touch /d/a.html /d/b.html /d/c.html')
+      const controller = new AbortController()
+      setTimeout(() => {
+        controller.abort()
+      }, 100)
+      const t0 = Date.now()
+      await expect(
+        ws.execute("find /d -name '*.html' -exec sleep 0.5 \\;", { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(Date.now() - t0).toBeLessThan(1200)
+    } finally {
+      await ws.close()
+    }
+  })
+})

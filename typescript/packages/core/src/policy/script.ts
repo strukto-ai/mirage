@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../runtime/binding.ts'
 import { CommandTimeoutError } from '../commands/errors.ts'
 import type { Runtime } from '../runtime/base.ts'
 import { EvalError } from '../runtime/errors.ts'
-import { LanguageRuntime } from '../runtime/language.ts'
 import type { Evaluator } from '../runtime/mixin.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import type { ScriptSource } from '../runtime/routing/types.ts'
@@ -427,13 +427,9 @@ export class ScriptPolicy implements Policy, SessionScoped {
       let engine = this.engines.get(entry.runtime)
       if (engine === undefined) {
         engine = scriptEngine(entry.script, entry.runtime)
-        // Attached before the first eval, as `Runtimes` attaches an
-        // agent's engine: the script's `open()` then reads the mounts
-        // through the same door, and an unattached engine sees no file.
-        // The bridge is built for this policy's token, so every op the
-        // engine dispatches reaches `preOps` above as the policy's own.
-        if (this.wiring !== null && engine instanceof LanguageRuntime) {
-          engine.attach(this.wiring.bridge(this.issuer), this.wiring.resolver)
+        // Keep policy-origin attribution on the binding's dispatch.
+        if (this.wiring !== null) {
+          engine.bind(new WorkspaceBinding(this.wiring.bridge(this.issuer), this.wiring.resolver))
         }
         this.engines.set(entry.runtime, engine)
       }

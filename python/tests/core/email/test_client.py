@@ -20,7 +20,8 @@ from mirage.accessor.email import EmailAccessor
 from mirage.core.email.client import (fetch_headers, fetch_message,
                                       list_folder_entries, list_folders,
                                       list_message_uids, parse_folder_line,
-                                      quote_mailbox, select_folder)
+                                      quote_mailbox, quote_string, read_quoted,
+                                      select_folder)
 from mirage.core.email.config import EmailConfig
 
 MESSAGE = (b"From: alice@example.com\r\n"
@@ -298,3 +299,25 @@ async def test_fetch_asks_for_metadata_before_the_body(accessor):
     assert items.index("INTERNALDATE") < items.index("BODY.PEEK[]")
     assert items.index("FLAGS") < items.index("BODY.PEEK[]")
     assert items.index("UID") < items.index("BODY.PEEK[]")
+
+
+def test_quote_string_escapes_the_two_quoted_specials():
+    assert quote_string('say "hi"') == '"say \\"hi\\""'
+    assert quote_string("back\\slash") == '"back\\\\slash"'
+    assert quote_string("plain words") == '"plain words"'
+    assert quote_string("会議の記録") == '"会議の記録"'
+
+
+def test_quote_string_round_trips_through_read_quoted():
+    for value in ('say "hi"', "a\\b", "", 'x "y" \\ z', "tail\\"):
+        assert read_quoted(quote_string(value) + " rest") == (value, "rest")
+
+
+def test_quote_string_refuses_a_line_break():
+    # RFC 3501 has no escape for CR or LF inside a quoted string, so a value
+    # holding one cannot be spelled this way and must fail here rather than
+    # end the command line early on the wire.
+    with pytest.raises(ValueError):
+        quote_string("two\nlines")
+    with pytest.raises(ValueError):
+        quote_string("two\rlines")

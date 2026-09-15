@@ -54,7 +54,7 @@ export type RuntimeReach = 'vfs' | 'process' | 'remote'
 /**
  * The workspace op dispatch: run `op` against the mount owning `path`
  * and return its result with the accounting IOResult. Defined here, on
- * the consumer side, because runtimes receive it (attach) while the
+ * the consumer side, because runtimes receive it through a binding while the
  * workspace provides it, and the runtime package imports no workspace
  * module — the home of Python's DispatchFn protocol (runtime/types).
  * `report`, when a caller passes one, is stamped by the door the moment
@@ -183,7 +183,7 @@ export interface ShellExecution {
   signal?: AbortSignal
 }
 
-/** Current providers refuse argv requests until they implement this capability. */
+/** An argv request executed without shell interpretation. */
 export interface ProcessExecution {
   kind: 'process'
   argv: readonly [string, ...string[]]
@@ -195,6 +195,9 @@ export interface ProcessExecution {
 
 export type ExecutionRequest = CodeExecution | ShellExecution | ProcessExecution
 
+/** Guest APIs for workspace files; policy and backend support still apply per operation. */
+export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'
+
 /** Derived execution support; reach remains a separate guarantee. */
 export interface RuntimeCapabilities {
   readonly languages: readonly RuntimeLanguage[]
@@ -202,6 +205,7 @@ export interface RuntimeCapabilities {
   readonly process: boolean
   readonly evaluate: boolean
   readonly reach: RuntimeReach
+  readonly filesystem: readonly FilesystemOperation[]
 }
 
 /** Local workspace doors captured for one execution, never guest globals. */
@@ -266,7 +270,8 @@ export interface EvalResult {
 /** Constructor options every runtime accepts (a yaml entry's keys). */
 export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown>> {
   /**
-   * Commands this runtime claims, overriding the class default; ["*"]
+   * Commands this runtime claims; EXTERNAL_COMMANDS captures unresolved
+   * program names. ["*"]
    * claims every line for a line-executing runtime.
    */
   captures?: readonly string[]

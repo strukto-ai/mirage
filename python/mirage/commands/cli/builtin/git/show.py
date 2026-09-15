@@ -32,8 +32,8 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.summary import (diffstat, stat_table,
                                                      tree_entries)
-from mirage.commands.cli.builtin.git.util import (check_operands, fatal,
-                                                  revision_arg)
+from mirage.commands.cli.builtin.git.util import (  # yapf: disable
+    check_operands, escaped, fatal, revision_arg)
 from mirage.commands.cli.types import CLIDoors, CLIInvocation
 from mirage.commands.spec.types import FlagView
 from mirage.io.stream import yield_bytes
@@ -189,7 +189,7 @@ async def show(inv: CLIInvocation[None]) -> tuple[ByteSource | None, IOResult]:
     try:
         if dispatch is None:
             raise NoWorkspaceError()
-        check_operands(texts)
+        check_operands(texts, marked=escaped(inv.argv))
         parsed = parse_show_flags(fl)
         repo, _location = await opened(fl, doors)
         rendered = await asyncio.to_thread(_render, repo, revision_arg(texts),

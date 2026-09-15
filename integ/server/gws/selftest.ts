@@ -13,12 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
+import { isDeepStrictEqual } from 'node:util'
 import type { ChildProcessByStdio } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
+import { start } from '../kit/typescript/serve.ts'
+import { DEFAULT_RUN, DEFAULT_TENANT } from '../kit/typescript/tenant.ts'
 import type { JsonValue } from '../kit/typescript/types.ts'
+import { gwsFake } from './fake.ts'
+import { cachedState, dropState, withState } from './store/cache.ts'
+import { loadState } from './store/load.ts'
+
+import { parseDriveQuery, matchQuery } from './drive/query.ts'
+import { createDriveItem } from './drive/item.ts'
+import { GwsState } from './store/state.ts'
+import { newTab, gridData } from './sheets/grid.ts'
+import { sheetsBatchUpdate } from './sheets/batch.ts'
+import { formatEventTime, slotMs } from './calendar/zone.ts'
 
 // The corpus exercises the SURFACES of this fake heavily -- seven vendor APIs
 // across the gdrive, gdocs, gsheets, gslides, gmail and gcal targets -- so this
@@ -148,11 +161,303 @@ const FORMS: JsonValue = [
   },
 ]
 
+function compatibilityDirect(): void {
+  const st = new GwsState(Date.parse(EPOCH))
+  const mime = 'application/vnd.google-apps.spreadsheet'
+  const file = createDriveItem(st, "GDP2022 report and O'Brien", mime, [])
+  let tab = newTab(0, 'Sheet1')
+  tab.cells.set('0,0', 'a long headline for sizing')
+  st.sheets.set(file.id, { title: file.name, tabs: [tab], nextSheetId: 1 })
+  for (const [q, want] of [
+    [`mimeType = '${mime}' and (name contains 'GDP2022' or fullText contains 'missing')`, true],
+    ["name = 'absent' or name contains 'GDP2022' and trashed = false", true],
+    ["(name = 'absent' or name contains 'GDP2022') and trashed = true", false],
+    ["not (trashed = true or name = 'absent')", true],
+    ["'root' in parents", true],
+    ["not ('missing' in parents) and ('root' in parents or name = 'absent')", true],
+    ["name contains 'O\\'Brien' and name contains ' and '", true],
+  ] as const)
+    eq(`direct Drive: ${q}`, matchQuery(st, file, parseDriveQuery(q)), want)
+  for (const q of [
+    "name = 'x' or",
+    "(name = 'x'",
+    "name = 'x')",
+    "name = 'x' or unknown = 'y'",
+    "name = 'unterminated",
+    '()',
+    "trashed = 'true'",
+    "parents in 'root'",
+    "name = 'absent' and parents in 'root'",
+    "not (parents in 'root')",
+    "'root' in 'parents'",
+    "'root' in name",
+  ]) {
+    let refused = false
+    try {
+      parseDriveQuery(q)
+    } catch (err) {
+      refused = err instanceof Error
+    }
+    check(`direct Drive rejects ${q}`, refused)
+  }
+  const resize = (dimensions: Obj) =>
+    sheetsBatchUpdate(st, file.id, [{ autoResizeDimensions: { dimensions } }])
+  eq(
+    'direct Sheets accepts column resize',
+    resize({ sheetId: 0, dimension: 'COLUMNS', startIndex: 0, endIndex: 8 }).status,
+    200,
+  )
+  tab = st.sheets.get(file.id)!.tabs[0]!
+  check('direct Sheets sizes content', Number(tab.columnPixels?.[0]) > 100)
+  eq(
+    'direct Sheets leaves cells unchanged',
+    tab.cells.get('0,0') ?? '',
+    'a long headline for sizing',
+  )
+  eq('direct Sheets accepts row resize', resize({ dimension: 'ROWS' }).status, 200)
+  tab = st.sheets.get(file.id)!.tabs[0]!
+  for (const dimensions of [
+    { sheetId: 9, dimension: 'COLUMNS' },
+    { dimension: 'INVALID' },
+    { dimension: 'COLUMNS', startIndex: -1 },
+    { dimension: 'COLUMNS', endIndex: 27 },
+    { dimension: 'COLUMNS', startIndex: 8, endIndex: 3 },
+    { dimension: 'COLUMNS', startIndex: 0.5 },
+  ]) {
+    eq('direct Sheets rejects invalid dimension range', resize(dimensions).status, 400)
+  }
+  check('direct Sheets exposes pixel metadata', arr(gridData(tab)[0]?.columnMetadata).length === 26)
+  for (const failure of [
+    { unsupported: {} },
+    { autoResizeDimensions: { dimensions: { sheetId: 99, dimension: 'ROWS' } } },
+  ]) {
+    const before = structuredClone(st.sheets.get(file.id))
+    const modified = file.modifiedTime
+    const ticks = st.ticks
+    const failed = sheetsBatchUpdate(st, file.id, [
+      { updateSpreadsheetProperties: { properties: { title: 'must not persist' } } },
+      { addSheet: { properties: { title: 'must not exist' } } },
+      { deleteDimension: { range: { sheetId: 0, dimension: 'COLUMNS', endIndex: 1 } } },
+      { autoResizeDimensions: { dimensions: { sheetId: 0, dimension: 'COLUMNS' } } },
+      failure,
+    ])
+    eq('direct Sheets rejects entire mixed batch', failed.status, 400)
+    check(
+      'direct Sheets preserves all state on failure',
+      isDeepStrictEqual(st.sheets.get(file.id), before),
+    )
+    eq(
+      'direct Sheets preserves Drive metadata and clock',
+      [file.name, file.modifiedTime, st.ticks],
+      [before!.title, modified, ticks],
+    )
+  }
+  const added = sheetsBatchUpdate(st, file.id, [
+    { addSheet: { properties: { title: 'New tab' } } },
+    {
+      updateCells: {
+        start: { sheetId: 1 },
+        rows: [{ values: [{ userEnteredValue: { stringValue: 'new value' } }] }],
+      },
+    },
+    { autoResizeDimensions: { dimensions: { sheetId: 1, dimension: 'COLUMNS', endIndex: 1 } } },
+  ])
+  eq('direct Sheets commits dependent requests together', added.status, 200)
+  eq(
+    'direct Sheets reuses uncommitted sheet id and writes cells',
+    st.sheets.get(file.id)!.tabs[1]!.cells.get('0,0') ?? '',
+    'new value',
+  )
+  for (const [timeZone, dateTime, expected] of [
+    ['Etc/GMT+12', '2026-09-25T20:59:00', '2026-09-25T20:59:00-12:00'],
+    ['America/Los_Angeles', '2026-07-01T10:00:00', '2026-07-01T10:00:00-07:00'],
+    ['America/Los_Angeles', '2026-01-01T10:00:00', '2026-01-01T10:00:00-08:00'],
+    ['Asia/Kolkata', '2026-07-01T10:00:00.123', '2026-07-01T10:00:00.123+05:30'],
+  ] as const) {
+    const input = { timeZone, dateTime }
+    const result = formatEventTime(input)
+    eq('direct Calendar serializes a zoned instant', result.dateTime ?? '', expected ?? '')
+    eq('direct Calendar preserves instant', slotMs(result, 'UTC'), slotMs(input, 'UTC'))
+  }
+  eq(
+    'direct Calendar leaves all-day values alone',
+    { ...formatEventTime({ date: '2026-07-01' }) },
+    { date: '2026-07-01' },
+  )
+}
+
+async function compatibilityHttp(at: string): Promise<void> {
+  const base = `${at}/_run/compat1077`
+  check('compatibility world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const sheet = await post(`${base}/v4/spreadsheets`, 't1', {
+    properties: { title: 'GDP2022 report' },
+  })
+  check('HTTP creates spreadsheet', sheet.status === 200)
+  const id = String(obj(sheet.body).spreadsheetId)
+  const q =
+    "mimeType = 'application/vnd.google-apps.spreadsheet' and (name contains 'GDP2022' or fullText contains 'GDP2022')"
+  const found = await api(`${base}/drive/v3/files?${new URLSearchParams({ q })}`, 't1')
+  check('HTTP Drive accepts grouped query', found.status === 200)
+  eq('HTTP Drive returns matching spreadsheet', field(obj(found.body).files, 'id'), [id])
+  const invalid = await api(
+    `${base}/drive/v3/files?${new URLSearchParams({ q: "name='x' or invalid='y'" })}`,
+    't1',
+  )
+  eq('HTTP Drive validates every branch', invalid.status, 400)
+  for (const q of ["parents in 'root'", "name = 'absent' and (parents in 'root')"]) {
+    const reversed = await api(`${base}/drive/v3/files?${new URLSearchParams({ q })}`, 't1')
+    eq('HTTP Drive rejects reversed membership', reversed.status, 400)
+  }
+  const member = await api(
+    `${base}/drive/v3/files?${new URLSearchParams({ q: "'root' in parents" })}`,
+    't1',
+  )
+  eq('HTTP Drive accepts value-first membership', field(obj(member.body).files, 'id'), [id])
+  const written = await api(`${base}/v4/spreadsheets/${id}/values/Sheet1!A1`, 't1', {
+    method: 'PUT',
+    body: JSON.stringify({ values: [['a long headline for sizing', 'untouched']] }),
+  })
+  eq('HTTP writes cells', written.status, 200)
+  const resized = await post(`${base}/v4/spreadsheets/${id}:batchUpdate`, 't1', {
+    requests: [
+      {
+        autoResizeDimensions: {
+          dimensions: { sheetId: 0, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+        },
+      },
+    ],
+  })
+  eq('HTTP Sheets accepts resize and replies', obj(resized.body).replies ?? null, [{}])
+  const read = await api(`${base}/v4/spreadsheets/${id}?includeGridData=true`, 't1')
+  const data = obj(arr(obj(arr(obj(read.body).sheets)[0]).data)[0])
+  const metadata = arr(data.columnMetadata)
+  check('HTTP Sheets persists resized metadata', Number(obj(metadata[0]).pixelSize) > 100)
+  eq('HTTP Sheets leaves the next column alone', obj(metadata[1]).pixelSize ?? null, 100)
+  const values = await api(`${base}/v4/spreadsheets/${id}/values/Sheet1!A1:B1`, 't1')
+  eq('HTTP Sheets preserves cell contents', obj(values.body).values ?? null, [
+    ['a long headline for sizing', 'untouched'],
+  ])
+  const driveBefore = await api(`${base}/drive/v3/files/${id}`, 't1')
+  const failedBatch = await post(`${base}/v4/spreadsheets/${id}:batchUpdate`, 't1', {
+    requests: [
+      { updateSpreadsheetProperties: { properties: { title: 'must not persist' } } },
+      { addSheet: { properties: { title: 'must not exist' } } },
+      {
+        updateCells: {
+          start: { sheetId: 0 },
+          rows: [{ values: [{ userEnteredValue: { stringValue: 'short' } }] }],
+        },
+      },
+      { autoResizeDimensions: { dimensions: { sheetId: 0, dimension: 'COLUMNS', endIndex: 1 } } },
+      { unsupported: {} },
+    ],
+  })
+  eq('HTTP Sheets rejects a mixed batch', failedBatch.status, 400)
+  eq(
+    'HTTP Sheets does not persist failed batch changes',
+    (await api(`${base}/v4/spreadsheets/${id}?includeGridData=true`, 't1')).body,
+    read.body,
+  )
+  eq(
+    'HTTP Sheets preserves linked Drive metadata on failure',
+    (await api(`${base}/drive/v3/files/${id}`, 't1')).body,
+    driveBefore.body,
+  )
+  const events = `${base}/calendar/v3/calendars/primary/events`
+  const body = {
+    summary: 'Deadline reminder',
+    start: { dateTime: '2026-09-25T20:59:00', timeZone: 'Etc/GMT+12' },
+    end: { dateTime: '2026-09-25T21:59:00', timeZone: 'Etc/GMT+12' },
+  }
+  const created = await post(events, 't1', body)
+  const eventId = String(obj(created.body).id)
+  const expected = { dateTime: '2026-09-25T20:59:00-12:00', timeZone: 'Etc/GMT+12' }
+  eq('HTTP Calendar insert returns an offset', obj(created.body).start ?? null, expected)
+  const fetched = await api(`${events}/${eventId}`, 't1')
+  eq('HTTP Calendar get returns the same offset', obj(fetched.body).start ?? null, expected)
+  const listed = await api(
+    `${events}?timeMin=2026-09-26T08:58:00Z&timeMax=2026-09-26T09:00:00Z`,
+    't1',
+  )
+  eq(
+    'HTTP Calendar list filters and returns the same instant',
+    obj(arr(obj(listed.body).items)[0]).start ?? null,
+    expected,
+  )
+  for (const method of ['PUT', 'PATCH']) {
+    const updated = await api(`${events}/${eventId}`, 't1', { method, body: JSON.stringify(body) })
+    eq(`HTTP Calendar ${method} returns an offset`, obj(updated.body).start ?? null, expected)
+  }
+  for (const method of ['PUT', 'PATCH']) {
+    for (const status of ['tentative', 'cancelled']) {
+      const updated = await api(`${events}/${eventId}`, 't1', {
+        method,
+        body: JSON.stringify(method === 'PUT' ? { ...body, status } : { status }),
+      })
+      eq(`HTTP Calendar ${method} accepts ${status}`, updated.status, 200)
+      eq(
+        `HTTP Calendar ${method} returns supplied status`,
+        obj(updated.body).status ?? null,
+        status,
+      )
+      const fetched = await api(`${events}/${eventId}`, 't1')
+      eq(
+        `HTTP Calendar ${method} persists supplied status`,
+        obj(fetched.body).status ?? null,
+        status,
+      )
+      const visible = await api(events, 't1')
+      eq(
+        'HTTP Calendar list respects cancellation',
+        field(obj(visible.body).items, 'id'),
+        status === 'cancelled' ? [] : [eventId],
+      )
+      const deleted = await api(`${events}?showDeleted=true`, 't1')
+      eq(
+        'HTTP Calendar showDeleted includes current status',
+        field(obj(deleted.body).items, 'status'),
+        [status],
+      )
+      const freeBusy = await post(`${base}/calendar/v3/freeBusy`, 't1', {
+        timeMin: '2026-09-26T00:00:00Z',
+        timeMax: '2026-09-27T00:00:00Z',
+        items: [{ id: 'primary' }],
+      })
+      eq(
+        'HTTP Calendar freeBusy respects cancellation',
+        arr(obj(obj(obj(freeBusy.body).calendars).primary).busy).length,
+        status === 'cancelled' ? 0 : 1,
+      )
+    }
+    const before = (await api(`${events}/${eventId}`, 't1')).body
+    for (const status of ['invalid', 7]) {
+      const invalid = await api(`${events}/${eventId}`, 't1', {
+        method,
+        body: JSON.stringify({ ...body, status }),
+      })
+      eq(`HTTP Calendar ${method} rejects invalid status`, invalid.status, 400)
+      eq(
+        'HTTP Calendar invalid status preserves the event',
+        (await api(`${events}/${eventId}`, 't1')).body,
+        before,
+      )
+    }
+    const omitted = await api(`${events}/${eventId}`, 't1', { method, body: JSON.stringify(body) })
+    eq(
+      `HTTP Calendar ${method} handles omitted status`,
+      obj(omitted.body).status ?? null,
+      method === 'PUT' ? 'confirmed' : 'cancelled',
+    )
+  }
+}
+
 async function main(): Promise<void> {
+  compatibilityDirect()
   const fake = await launch()
   const at = fake.endpoint
   const seed = { tenants: ['t1'], epoch: EPOCH, extras: { forms: FORMS } }
   try {
+    await compatibilityHttp(at)
     // ---- the base world is fixture rows, not constructor state
     check('a bare /reset seeds', (await reset(at, { tenants: ['t1'], epoch: EPOCH })) === 200)
     const labels = await api(`${at}/gmail/v1/users/me/labels`, 't1')
@@ -292,6 +597,246 @@ async function main(): Promise<void> {
       String(obj(obj(colon.body).error).message),
       'Unknown route: POST /v1/documents/a:b:batchUpdate',
     )
+
+    // ---- an event time is validated at the door, never stored as typed
+    const rv = `${at}/_run/rv`
+    check('run rv seeds', (await reset(rv, seed)) === 200)
+    const events = `${rv}/calendar/v3/calendars/primary/events`
+    const timed = (summary: string, start: JsonValue, end: JsonValue): JsonValue => ({
+      summary,
+      start,
+      end,
+    })
+    const zulu = await post(
+      events,
+      't1',
+      timed('zulu', { dateTime: '2026-02-03T10:00:00Z' }, { dateTime: '2026-02-03T11:00:00Z' }),
+    )
+    check('an RFC3339 time with Z is accepted', zulu.status === 200, JSON.stringify(zulu.body))
+    const offset = await post(
+      events,
+      't1',
+      timed(
+        'offset',
+        { dateTime: '2026-02-03T18:30:00+08:00' },
+        { dateTime: '2026-02-03T06:00:00-05:00' },
+      ),
+    )
+    check('numeric offsets are accepted', offset.status === 200, JSON.stringify(offset.body))
+    const zoned = await post(
+      events,
+      't1',
+      timed(
+        'zoned',
+        { dateTime: '2026-02-03T09:00:00', timeZone: 'Europe/Paris' },
+        { dateTime: '2026-02-03T09:30:00', timeZone: 'Europe/Paris' },
+      ),
+    )
+    check(
+      'an offset-free time naming an IANA zone is accepted',
+      zoned.status === 200,
+      JSON.stringify(zoned.body),
+    )
+    const listed = async (): Promise<number> =>
+      arr(obj((await api(events, 't1')).body).items).length
+    const before = await listed()
+    const refused = async (
+      name: string,
+      start: JsonValue,
+      end: JsonValue,
+      message: string,
+    ): Promise<void> => {
+      const r = await post(events, 't1', timed('refused', start, end))
+      const err = obj(obj(r.body).error)
+      check(
+        name,
+        r.status === 400 &&
+          err.status === 'INVALID_ARGUMENT' &&
+          String(err.message).includes(message),
+        `${String(r.status)} ${JSON.stringify(r.body)}`,
+      )
+    }
+    await refused(
+      'a string that is not a date is a 400',
+      { dateTime: 'not-a-date' },
+      { dateTime: 'not-a-date' },
+      'Invalid format: "not-a-date"',
+    )
+    await refused(
+      'a day February does not have is a 400',
+      { dateTime: '2026-02-30T10:00:00Z' },
+      { dateTime: '2026-02-30T11:00:00Z' },
+      'Invalid format',
+    )
+    await refused(
+      'an offset-free time with no zone is a 400',
+      { dateTime: '2026-02-03T10:00:00' },
+      { dateTime: '2026-02-03T11:00:00' },
+      'Invalid format',
+    )
+    await refused(
+      'a zone IANA does not know is a 400',
+      { dateTime: '2026-02-03T10:00:00', timeZone: 'Mars/Olympus' },
+      { dateTime: '2026-02-03T11:00:00', timeZone: 'Mars/Olympus' },
+      'Invalid time zone definition for start time.',
+    )
+    await refused(
+      'an all-day date not spelled yyyy-mm-dd is a 400',
+      { date: '2026-2-3' },
+      { date: '2026-02-04' },
+      'Invalid format',
+    )
+    await refused(
+      'an all-day date the calendar does not have is a 400',
+      { date: '2026-02-30' },
+      { date: '2026-03-01' },
+      'Invalid format',
+    )
+    await refused(
+      'a slot naming both date and dateTime is a 400',
+      { date: '2026-02-03', dateTime: '2026-02-03T10:00:00Z' },
+      { dateTime: '2026-02-03T11:00:00Z' },
+      'Invalid start time.',
+    )
+    eq('a refused create left nothing behind', await listed(), before)
+
+    const id = String(obj(zulu.body).id)
+    const patched = await api(`${events}/${id}`, 't1', {
+      method: 'PATCH',
+      body: JSON.stringify({ start: { dateTime: 'not-a-date' } }),
+    })
+    check('a patch to a malformed time is a 400', patched.status === 400, String(patched.status))
+    const kept = await api(`${events}/${id}`, 't1')
+    eq('and the stored event is unchanged', obj(kept.body).start ?? null, {
+      dateTime: '2026-02-03T10:00:00Z',
+    })
+
+    const window = await api(
+      `${events}?timeMin=2026-02-03T00:00:00Z&timeMax=2026-02-04T00:00:00Z&orderBy=startTime`,
+      't1',
+    )
+    eq(
+      'a bounded, sorted list orders the three by instant',
+      field(obj(window.body).items, 'summary'),
+      ['zoned', 'zulu', 'offset'],
+    )
+    const fb = await post(`${rv}/calendar/v3/freeBusy`, 't1', {
+      timeMin: '2026-02-03T00:00:00Z',
+      timeMax: '2026-02-04T00:00:00Z',
+      items: [{ id: 'primary' }],
+    })
+    eq(
+      'and free/busy reports each as a finite block',
+      arr(obj(obj(obj(fb.body).calendars).primary).busy).map(
+        (b) => `${String(obj(b).start)}/${String(obj(b).end)}`,
+      ),
+      [
+        '2026-02-03T08:00:00.000Z/2026-02-03T08:30:00.000Z',
+        '2026-02-03T10:00:00.000Z/2026-02-03T11:00:00.000Z',
+        '2026-02-03T10:30:00.000Z/2026-02-03T11:00:00.000Z',
+      ],
+    )
+
+    // ---- the cached tenant world, and the four ways it can go stale
+    //
+    // Every check above already rides the cache. What they cannot see is it
+    // going WRONG, which needs the fake IN THIS PROCESS: what these assert is
+    // what the cache HOLDS, and a request answers from the world in its own
+    // hand either way.
+    const rw = `${at}/_run/rw`
+    check('run rw seeds', (await reset(rw, seed)) === 200)
+    await post(`${rw}/v1/documents`, 't1', { title: 'before-reset' })
+    // Door one: /reset replaces the rows with no route involved, which is
+    // what `Fake.afterReset` exists for.
+    check('resetting run rw again', (await reset(rw, seed)) === 200)
+    eq('a scoped reset drops the cached world', await fileNames(rw, 't1'), ['Recall Survey'])
+
+    const home = await start(gwsFake, 0)
+    try {
+      const at2 = home.endpoint
+      check('the in-process fake seeds', (await reset(at2, seed)) === 200)
+      const db = home.runtime.pool.client(DEFAULT_RUN)
+      const T = DEFAULT_TENANT
+
+      // Door two: a write handler that THROWS mutated in place and flushed
+      // nothing. Asserted on the cache rather than a later response: the one
+      // write route that can be made to throw from outside (`multipart/mixed`
+      // with no boundary=) parses before it mints, so nothing observable
+      // changes and a response-level check would pass either way.
+      await api(`${at2}/drive/v3/files`, T)
+      check('a read left a world cached', cachedState(db, T) !== undefined)
+      const headless = Buffer.from(
+        'From: a@example.com\r\nTo: b@example.com\r\nSubject: boom\r\n' +
+          'Content-Type: multipart/mixed\r\n\r\nbody\r\n',
+        'utf8',
+      )
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '')
+      const boom = await post(`${at2}/gmail/v1/users/me/messages/send`, T, { raw: headless })
+      check('a write route that throws is a 500', boom.status === 500, String(boom.status))
+      check('and its half-applied world is evicted', cachedState(db, T) === undefined)
+
+      // Door three: a read that missed can still be inside loadState when a
+      // /reset drops the entry, or when a write that missed alongside it
+      // flushes its own copy; see `Cached` in store/cache.ts.
+      //
+      // Driven by suspending a real load inside `withState`, because the
+      // window needs a ~10ms load to outlive a ~100ms reset or write and a
+      // race fired from a client would pass either way. The write arm goes
+      // through the REAL write route, not the cache primitive under it.
+      const stale = await loadState(db, T)
+      dropState(db, T)
+      const overtaken = await withState(db, T, async () => {
+        await post(`${at2}/v1/documents`, T, { title: 'overtaking-write' })
+        return stale
+      })
+      check('a load a write overtook still answers its own snapshot', overtaken === stale)
+      check('but is not what stays cached', cachedState(db, T) !== stale)
+      const named = await fileNames(at2, T)
+      check(
+        'and the write it was overtaken by survives',
+        named.includes('overtaking-write'),
+        named.join(','),
+      )
+      dropState(db, T)
+      const dropped = await loadState(db, T)
+      const raced = await withState(db, T, async () => {
+        dropState(db, T)
+        return dropped
+      })
+      check('a load a reset overtook answers its own snapshot too', raced === dropped)
+      check('and leaves the cache empty rather than stale', cachedState(db, T) === undefined)
+      // The positive control: every check above would also pass against a
+      // `withState` that simply never installed anything.
+      const fresh = await loadState(db, T)
+      check(
+        'while an uncontested load does install',
+        (await withState(db, T, async () => fresh)) === fresh && cachedState(db, T) === fresh,
+      )
+    } finally {
+      await home.close()
+    }
+
+    // Door four: keyed by the run's CLIENT, not its name, so two servers in
+    // ONE process cannot reach each other's worlds. A map keyed by
+    // `run|tenant` passes every other check here and fails this one.
+    const a = await start(gwsFake, 0)
+    const b = await start(gwsFake, 0)
+    try {
+      check('two in-process fakes seed the same run name', (await reset(a.endpoint, seed)) === 200)
+      check('both of them', (await reset(b.endpoint, seed)) === 200)
+      await post(`${a.endpoint}/v1/documents`, 't1', { title: 'only-in-a' })
+      eq('a world belongs to one runtime', await fileNames(b.endpoint, 't1'), ['Recall Survey'])
+      eq('and the other runtime kept its own', await fileNames(a.endpoint, 't1'), [
+        'Recall Survey',
+        'only-in-a',
+      ])
+    } finally {
+      await a.close()
+      await b.close()
+    }
 
     // ---- a read route must never be the only place a counter moved
     check(

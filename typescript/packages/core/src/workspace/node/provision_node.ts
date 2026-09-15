@@ -25,6 +25,7 @@ import {
   getParts,
   getPipelineCommands,
   getRedirects,
+  takeContinuation,
   getSubshellBody,
   getText,
   getWhileParts,
@@ -363,6 +364,8 @@ export async function provisionNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
+    const continuation = takeContinuation(redirects)
+    let plan: ProvisionResult
     if (command !== null && (command as TSNodeLike & { type: string }).type === NT.LIST) {
       // Mirror the executor: a trailing redirect hoisted over an
       // &&/|| list binds to the last command.
@@ -371,9 +374,28 @@ export async function provisionNode(
         n === right
           ? provisionRedirected(ctx, recurse, recurseUnknown, planScope, right, redirects, s)
           : recurseUnknown(n, s)
-      return handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
+      plan = await handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
+    } else {
+      plan = await provisionRedirected(
+        ctx,
+        recurse,
+        recurseUnknown,
+        planScope,
+        command,
+        redirects,
+        session,
+      )
     }
-    return provisionRedirected(ctx, recurse, recurseUnknown, planScope, command, redirects, session)
+    // Mirror the executor again: the `&&`/`||` steps a heredoc's operator
+    // line carried wrap the whole statement, so each one joins the plan
+    // so far to its right operand.
+    for (const [op, right] of continuation) {
+      const planned = plan
+      const wrapped = (n: unknown, s: Session): Promise<ProvisionResult> =>
+        n === node ? Promise.resolve(planned) : recurseUnknown(n, s)
+      plan = await handleConnectionProvision(wrapped, node, op, right, session)
+    }
+    return plan
   }
 
   if (kind === NodeKind.IF) {

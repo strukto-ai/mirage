@@ -14,8 +14,6 @@
 
 from collections.abc import Mapping, Sequence
 
-import tree_sitter
-
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
@@ -29,6 +27,7 @@ from mirage.shell.parse import (arith_reads, assignment_values,
                                 command_invocations, command_words, env_reads,
                                 identifier_names, implicit_reads, opaque_reads,
                                 parse, referenced_names)
+from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import ManagedRef, VarAttr, with_value
 from mirage.utils.hidden import var_hidden
 from mirage.workspace.lookup.lookup import lookup
@@ -46,8 +45,7 @@ from mirage.workspace.session.state import deref
 _ALIAS_REST = ' "$@"'
 
 
-def _defined_bodies(
-        node: tree_sitter.Node) -> dict[str, list[tree_sitter.Node]]:
+def _defined_bodies(node: TSNodeLike) -> dict[str, list[TSNodeLike]]:
     """Function bodies the line itself defines, every one per name.
 
     A name defined more than once on the line keeps every body: which
@@ -56,9 +54,9 @@ def _defined_bodies(
     be selected.
 
     Args:
-        node (tree_sitter.Node): the parsed line.
+        node (TSNodeLike): the parsed line.
     """
-    out: dict[str, list[tree_sitter.Node]] = {}
+    out: dict[str, list[TSNodeLike]] = {}
     stack = [node]
     while stack:
         current = stack.pop()
@@ -72,8 +70,7 @@ def _defined_bodies(
     return out
 
 
-def line_nodes(node: tree_sitter.Node,
-               session: Session) -> list[tree_sitter.Node]:
+def line_nodes(node: TSNodeLike, session: Session) -> list[TSNodeLike]:
     """The line's tree plus every body its command words can run.
 
     A body runs at invocation, not where it is defined, so the read
@@ -89,16 +86,16 @@ def line_nodes(node: tree_sitter.Node,
     ever over-fetches, under-selection is the bug.
 
     Args:
-        node (tree_sitter.Node): the parsed line.
+        node (TSNodeLike): the parsed line.
         session (Session): the session the line runs in (stored
             functions, aliases, shopts).
     """
     defined = _defined_bodies(node)
     expand = session.shopts.get("expand_aliases",
                                 SHOPT_DEFAULTS["expand_aliases"])
-    nodes: list[tree_sitter.Node] = [node]
+    nodes: list[TSNodeLike] = [node]
     seen: set[str] = set()
-    frontier: list[tree_sitter.Node] = [node]
+    frontier: list[TSNodeLike] = [node]
     while frontier:
         current = frontier.pop()
         for word in command_words(current):
@@ -120,8 +117,7 @@ def line_nodes(node: tree_sitter.Node,
     return nodes
 
 
-def guest_bound(nodes: Sequence[tree_sitter.Node],
-                decision: RouteDecision | None,
+def guest_bound(nodes: Sequence[TSNodeLike], decision: RouteDecision | None,
                 static_bindings: Mapping[str, Runtime | None]) -> bool:
     """Whether any of the line's commands runs on a guest runtime.
 
@@ -135,7 +131,7 @@ def guest_bound(nodes: Sequence[tree_sitter.Node],
     this line's.
 
     Args:
-        nodes (Sequence[tree_sitter.Node]): the line's walked set
+        nodes (Sequence[TSNodeLike]): the line's walked set
             (``line_nodes``).
         decision (RouteDecision | None): the line's placement decision,
             None when only static bindings apply.
@@ -155,7 +151,7 @@ def guest_bound(nodes: Sequence[tree_sitter.Node],
     return False
 
 
-def cli_env_names(nodes: Sequence[tree_sitter.Node], session: Session,
+def cli_env_names(nodes: Sequence[TSNodeLike], session: Session,
                   registry: MountRegistry) -> frozenset[str]:
     """Env names the line's installed CLIs are about to read.
 
@@ -171,7 +167,7 @@ def cli_env_names(nodes: Sequence[tree_sitter.Node], session: Session,
     typed outranks environment, so the parser never reads those.
 
     Args:
-        nodes (Sequence[tree_sitter.Node]): the line's walked set
+        nodes (Sequence[TSNodeLike]): the line's walked set
             (``line_nodes``).
         session (Session): the session the line runs in.
         registry (MountRegistry): the registry holding the installs.
@@ -204,7 +200,7 @@ _MASK_VALUE_BLOCKERS = frozenset(
     {"command_substitution", "process_substitution"})
 
 
-def _replacement_blocked(part: tree_sitter.Node) -> bool:
+def _replacement_blocked(part: TSNodeLike) -> bool:
     """Whether an assignment's subtree defeats the masking premise.
 
     A command or process substitution runs code before the prefix is
@@ -212,7 +208,7 @@ def _replacement_blocked(part: tree_sitter.Node) -> bool:
     spell, so neither may sit inside a masking statement.
 
     Args:
-        part (tree_sitter.Node): one ``variable_assignment`` node.
+        part (TSNodeLike): one ``variable_assignment`` node.
     """
     if opaque_reads(part):
         return True
@@ -225,7 +221,7 @@ def _replacement_blocked(part: tree_sitter.Node) -> bool:
     return False
 
 
-def _assignment_masks(stmt: tree_sitter.Node) -> frozenset[str] | None:
+def _assignment_masks(stmt: TSNodeLike) -> frozenset[str] | None:
     """The names a standalone assignment statement definitely replaces.
 
     None when the statement is not a plain replacement: a ``+=`` reads
@@ -235,7 +231,7 @@ def _assignment_masks(stmt: tree_sitter.Node) -> frozenset[str] | None:
     the statement's effect to the builtin's own rules.
 
     Args:
-        stmt (tree_sitter.Node): a ``variable_assignment``,
+        stmt (TSNodeLike): a ``variable_assignment``,
             ``variable_assignments`` or ``declaration_command``
             statement node.
     """
@@ -268,11 +264,11 @@ _DECLARATION_MASK_HEADS = frozenset(
     {b"declare", b"typeset", b"export", b"readonly"})
 
 
-def _declaration_replaces(stmt: tree_sitter.Node, in_body: bool) -> bool:
+def _declaration_replaces(stmt: TSNodeLike, in_body: bool) -> bool:
     """Whether a declaration statement's assignments land as writes.
 
     Args:
-        stmt (tree_sitter.Node): a ``declaration_command`` statement.
+        stmt (TSNodeLike): a ``declaration_command`` statement.
         in_body (bool): the statement sits in a function body, where
             ``local`` writes; at top level it refuses without writing.
     """
@@ -282,7 +278,7 @@ def _declaration_replaces(stmt: tree_sitter.Node, in_body: bool) -> bool:
     return head in _DECLARATION_MASK_HEADS
 
 
-def _unset_masks(stmt: tree_sitter.Node) -> frozenset[str] | None:
+def _unset_masks(stmt: TSNodeLike) -> frozenset[str] | None:
     """The names a plain ``unset`` statement definitely removes.
 
     None when anything is unprovable: a flag other than ``-v``/``--``
@@ -292,7 +288,7 @@ def _unset_masks(stmt: tree_sitter.Node) -> frozenset[str] | None:
     builtin answers it).
 
     Args:
-        stmt (tree_sitter.Node): an ``unset_command`` statement node.
+        stmt (TSNodeLike): an ``unset_command`` statement node.
     """
     head = stmt.children[0].text if stmt.children else None
     if head != b"unset":
@@ -313,11 +309,11 @@ def _unset_masks(stmt: tree_sitter.Node) -> frozenset[str] | None:
     return frozenset(names)
 
 
-def masked_names(node: tree_sitter.Node,
+def masked_names(node: TSNodeLike,
                  session: Session,
                  writes_gated: bool,
                  in_body: bool = False,
-                 before: tree_sitter.Node | None = None) -> frozenset[str]:
+                 before: TSNodeLike | None = None) -> frozenset[str]:
     """Names one unit definitely replaces before anything can read them.
 
     The unit's leading run of plain statements that only assign,
@@ -342,14 +338,14 @@ def masked_names(node: tree_sitter.Node,
     a policy nothing masks and the fetch keeps today's shape.
 
     Args:
-        node (tree_sitter.Node): the unit's parsed tree -- the line's
+        node (TSNodeLike): the unit's parsed tree -- the line's
             own, one defined body's, or a stored statement's parent
             container (with ``before`` naming the statement).
         session (Session): the session the line runs in.
         writes_gated (bool): a policy hooks ``pre_session``.
         in_body (bool): the unit is a function body, where ``local``
             assigns.
-        before (tree_sitter.Node | None): stop at this child, so a
+        before (TSNodeLike | None): stop at this child, so a
             stored statement is discounted by exactly the prefix that
             runs before it and never by its own writes.
     """
@@ -395,7 +391,7 @@ def masked_names(node: tree_sitter.Node,
 _BODY_CONTAINERS = frozenset({"compound_statement", "subshell"})
 
 
-def _own_masks(node: tree_sitter.Node, session: Session,
+def _own_masks(node: TSNodeLike, session: Session,
                writes_gated: bool) -> frozenset[str]:
     """A walked unit's own leading masks, discounting its own reads.
 
@@ -412,7 +408,7 @@ def _own_masks(node: tree_sitter.Node, session: Session,
     reads exactly as a same-line body's prefix would.
 
     Args:
-        node (tree_sitter.Node): one walked unit past the line itself.
+        node (TSNodeLike): one walked unit past the line itself.
         session (Session): the session the line runs in.
         writes_gated (bool): a policy hooks ``pre_session``.
     """
@@ -432,8 +428,7 @@ def _own_masks(node: tree_sitter.Node, session: Session,
 
 
 def _assigned_reach(
-        nodes: Sequence[tree_sitter.Node]
-) -> dict[str, tuple[set[str], set[str]]]:
+        nodes: Sequence[TSNodeLike]) -> dict[str, tuple[set[str], set[str]]]:
     """What the line's own assignments may leave in each target.
 
     Per target name, the literal values assigned anywhere in the walked
@@ -443,7 +438,7 @@ def _assigned_reach(
     candidate counts, which only over-fetches.
 
     Args:
-        nodes (Sequence[tree_sitter.Node]): the line's walked set.
+        nodes (Sequence[TSNodeLike]): the line's walked set.
     """
     out: dict[str, tuple[set[str], set[str]]] = {}
     for node in nodes:
@@ -508,7 +503,7 @@ def _arith_targets(
     return frozenset(out)
 
 
-def _wanted(session: Session, nodes: Sequence[tree_sitter.Node],
+def _wanted(session: Session, nodes: Sequence[TSNodeLike],
             pending: Mapping[str, ManagedRef], cli_env_names: frozenset[str],
             masked: frozenset[str], writes_gated: bool) -> frozenset[str]:
     """The pending names the line's walked set is about to read.
@@ -535,7 +530,7 @@ def _wanted(session: Session, nodes: Sequence[tree_sitter.Node],
 
     Args:
         session (Session): the session the line runs in.
-        nodes (Sequence[tree_sitter.Node]): the line's walked set.
+        nodes (Sequence[TSNodeLike]): the line's walked set.
         pending (Mapping[str, ManagedRef]): unfetched managed vars.
         cli_env_names (frozenset[str]): env names the line's installed
             CLIs read (``cli_env_names``).
@@ -600,7 +595,7 @@ def _pending(session: Session) -> dict[str, ManagedRef]:
 
 
 def fill_names(session: Session,
-               nodes: Sequence[tree_sitter.Node],
+               nodes: Sequence[TSNodeLike],
                *,
                whole: bool,
                cli_env_names: frozenset[str],
@@ -617,7 +612,7 @@ def fill_names(session: Session,
 
     Args:
         session (Session): the session the line runs in.
-        nodes (Sequence[tree_sitter.Node]): the line's walked set
+        nodes (Sequence[TSNodeLike]): the line's walked set
             (``line_nodes``).
         whole (bool): the line runs as one opaque program (a whole-line
             runtime), so every managed name may be read.

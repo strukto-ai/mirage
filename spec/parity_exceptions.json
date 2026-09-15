@@ -1,8 +1,5 @@
 {
   "command_io": {
-    "hf": {
-      "slots": "find is a slot in python and a bespoke command in typescript (see notion) — the same query, expressed at a different layer."
-    },
     "notion": {
       "slots": "find is a slot in python and a bespoke command in typescript (notion/find.ts). Both pass stat=None, so the -mtime behavior matches; only the layer differs."
     }

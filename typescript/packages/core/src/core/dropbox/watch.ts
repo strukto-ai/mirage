@@ -13,15 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import type { PathSpec, WalkEntry } from '../../types.ts'
+import {
+  Delta,
+  FileChangeKind,
+  FileEvent,
+  FileMetadata,
+  type PathSpec,
+  type WalkEntry,
+} from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { ListingDeltaHook } from '../../watch/delta.ts'
+import { DIR_FINGERPRINT } from '../../watch/constants.ts'
+import { ListingDeltaHook, specFor } from '../../watch/delta.ts'
 import { statFingerprint } from '../../watch/fingerprint.ts'
 import { DropboxApiError } from './client.ts'
-import { listFolder } from './api.ts'
+import {
+  continueFolder,
+  listFolder,
+  listFolderState,
+  type DropboxEntry,
+  type ListFolderState,
+} from './api.ts'
 import { dropboxPathOf } from './paths.ts'
+
+const NATIVE = 1
 
 /**
  * One recursive `list_folder` feeding the generic listing differ.
@@ -37,8 +54,8 @@ import { dropboxPathOf } from './paths.ts'
  * `list_folder/continue` replays only what changed since. That is a faster
  * pull, not a more correct one, and it cannot replace this walk, because the
  * server may invalidate a cursor at any time and the only answer to that is a
- * full listing. When the fast path is added it belongs behind `pull`, with this
- * walk as its reset path.
+ * full listing. `DropboxDeltaHook` uses the cursor behind `pull` and this walk
+ * as its reset path.
  */
 export class DropboxWalk {
   private readonly accessor: DropboxAccessor
@@ -49,7 +66,6 @@ export class DropboxWalk {
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
     const accessor = this.accessor
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
     const apiRoot = dropboxPathOf(accessor, root)
     let found
     try {
@@ -60,43 +76,248 @@ export class DropboxWalk {
       if (error instanceof DropboxApiError && error.status === 409) return
       throw error
     }
-    // Dropbox paths are case-insensitive: `path_display` carries the
-    // server's casing while `rootPath` carries the user's, so a configured
-    // `/team` whose displayed path is `/Team` matched nothing and every
-    // event landed outside the watch scope. The comparison folds case; the
-    // slice keeps the server's casing for everything below the root, and is
-    // safe because `path_lower` is `path_display` lowercased, same length.
-    const base = accessor.rootPath
-    const folded = base.toLowerCase()
     for (const entry of found) {
-      const display = entry.path_display ?? entry.path_lower
-      if (display === undefined || display === '') continue
-      const trimmed =
-        base !== '' && display.toLowerCase().startsWith(folded)
-          ? display.slice(base.length)
-          : display
-      const relative = stripSlash(trimmed)
-      if (relative === '') continue
-      const virtual = prefix !== '' ? `${prefix}/${relative}` : `/${relative}`
-      if (entry['.tag'] === 'folder') {
-        yield { virtual, isDir: true, fingerprint: null }
-        continue
-      }
-      const modified = entry.server_modified ?? entry.client_modified ?? null
-      const size = typeof entry.size === 'number' ? entry.size : null
-      const version = entry.content_hash ?? entry.rev ?? null
-      yield {
-        virtual,
-        isDir: false,
-        fingerprint: statFingerprint(version, modified, size),
-        size,
-        modified,
-      }
+      const framed = frame(accessor, root, entry)
+      if (framed === null || entry['.tag'] === 'deleted') continue
+      yield framed.walk
     }
   }
 }
 
+function isReset(error: DropboxApiError): boolean {
+  return error.status === 409 && error.summary.startsWith('reset')
+}
+
+function frame(
+  accessor: DropboxAccessor,
+  root: PathSpec,
+  entry: DropboxEntry,
+): { virtual: string; walk: WalkEntry } | null {
+  // Dropbox paths are case-insensitive: `path_display` carries the
+  // server's casing while `rootPath` carries the user's, so a configured
+  // `/team` whose displayed path is `/Team` matched nothing and every
+  // event landed outside the watch scope. The comparison folds case; the
+  // slice keeps the server's casing for everything below the root, and is
+  // safe because `path_lower` is `path_display` lowercased, same length.
+  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+  const display = entry.path_display ?? entry.path_lower
+  if (display === undefined || display === '') return null
+  const base = accessor.rootPath
+  const folded = base.toLowerCase()
+  const trimmed =
+    base !== '' && display.toLowerCase().startsWith(folded) ? display.slice(base.length) : display
+  const relative = stripSlash(trimmed)
+  if (relative === '') return null
+  const virtual = prefix !== '' ? `${prefix}/${relative}` : `/${relative}`
+  if (entry['.tag'] === 'folder') {
+    return { virtual, walk: { virtual, isDir: true, fingerprint: null } }
+  }
+  if (entry['.tag'] === 'deleted') {
+    return { virtual, walk: { virtual, isDir: false, fingerprint: null } }
+  }
+  const modified = entry.server_modified ?? entry.client_modified ?? null
+  const size = typeof entry.size === 'number' ? entry.size : null
+  const version = entry.content_hash ?? entry.rev ?? null
+  return {
+    virtual,
+    walk: {
+      virtual,
+      isDir: false,
+      fingerprint: statFingerprint(version, modified, size),
+      size,
+      modified,
+    },
+  }
+}
+
+function encode(cursor: string, snapshot: Record<string, string>): string {
+  const ordered: Record<string, string> = {}
+  for (const key of Object.keys(snapshot).sort(compareCodePoints)) {
+    const value = snapshot[key]
+    if (value !== undefined) ordered[key] = value
+  }
+  return JSON.stringify({ _dbx: NATIVE, c: cursor, s: ordered })
+}
+
+function decode(checkpoint: string | null): {
+  cursor: string | null
+  snapshot: Record<string, string> | null
+  native: boolean
+} {
+  if (checkpoint === null) return { cursor: null, snapshot: null, native: false }
+  const parsed: unknown = JSON.parse(checkpoint)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { cursor: null, snapshot: null, native: false }
+  }
+  const data = parsed as Record<string, unknown>
+  if (
+    data._dbx === NATIVE &&
+    typeof data.c === 'string' &&
+    typeof data.s === 'object' &&
+    data.s !== null
+  ) {
+    return { cursor: data.c, snapshot: data.s as Record<string, string>, native: true }
+  }
+  return { cursor: null, snapshot: data as Record<string, string>, native: false }
+}
+
+function eventOf(
+  root: PathSpec,
+  virtual: string,
+  kind: FileChangeKind,
+  entry: WalkEntry | undefined,
+  observed: Date,
+): FileEvent {
+  const metadata =
+    entry !== undefined && !entry.isDir && kind !== FileChangeKind.DELETE
+      ? new FileMetadata({
+          fingerprint: entry.fingerprint,
+          size: entry.size ?? null,
+          modified: entry.modified ?? null,
+        })
+      : null
+  return new FileEvent({ kind, path: specFor(root, virtual), timestamp: observed, metadata })
+}
+
+function diffSnapshots(
+  root: PathSpec,
+  previous: Record<string, string>,
+  current: Record<string, string>,
+  entries: Map<string, WalkEntry>,
+  observed: Date,
+): FileEvent[] {
+  const keys = [...new Set([...Object.keys(current), ...Object.keys(previous)])].sort(
+    compareCodePoints,
+  )
+  const changes: FileEvent[] = []
+  for (const virtual of keys) {
+    const old = previous[virtual]
+    const next = current[virtual]
+    if (old === next) continue
+    const kind =
+      old === undefined && next !== undefined
+        ? FileChangeKind.CREATE
+        : next === undefined
+          ? FileChangeKind.DELETE
+          : FileChangeKind.UPDATE
+    changes.push(eventOf(root, virtual, kind, entries.get(virtual), observed))
+  }
+  return changes
+}
+
+function dropPrefix(snapshot: Record<string, string>, virtual: string): Record<string, string> {
+  const prefix = `${virtual.replace(/\/$/, '')}/`
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (key !== virtual && !key.startsWith(prefix)) next[key] = value
+  }
+  return next
+}
+
+/**
+ * Native Dropbox cursor pull, with the listing walk as reset.
+ */
+export class DropboxDeltaHook implements DeltaHook {
+  private readonly accessor: DropboxAccessor
+  private readonly listing: ListingDeltaHook
+
+  constructor(accessor: DropboxAccessor) {
+    this.accessor = accessor
+    const walk = new DropboxWalk(accessor)
+    this.listing = new ListingDeltaHook(walk.walk.bind(walk))
+  }
+
+  private async snapshot(root: PathSpec): Promise<{
+    snapshot: Record<string, string>
+    entries: Map<string, WalkEntry>
+    cursor: string
+  }> {
+    const accessor = this.accessor
+    const apiRoot = dropboxPathOf(accessor, root)
+    let found: DropboxEntry[]
+    let cursor: string
+    try {
+      const state = await listFolderState(accessor.tokenManager, apiRoot, { recursive: true })
+      found = state.entries
+      cursor = state.cursor
+    } catch (error) {
+      if (error instanceof DropboxApiError && error.status === 409) {
+        return { snapshot: {}, entries: new Map(), cursor: '' }
+      }
+      throw error
+    }
+    const snapshot: Record<string, string> = {}
+    const entries = new Map<string, WalkEntry>()
+    for (const raw of found) {
+      const framed = frame(accessor, root, raw)
+      if (framed === null || raw['.tag'] === 'deleted') continue
+      entries.set(framed.virtual, framed.walk)
+      snapshot[framed.virtual] = framed.walk.isDir
+        ? DIR_FINGERPRINT
+        : (framed.walk.fingerprint ?? '')
+    }
+    return { snapshot, entries, cursor }
+  }
+
+  /**
+   * List `root` afresh and answer with a new native cursor.
+   *
+   * A root Dropbox refuses leaves `snapshot` with no cursor at all, and an
+   * empty one must never be encoded: the cursor `list_folder/continue` takes
+   * is at least one character, so a native checkpoint carrying '' makes every
+   * later pull fail on the refusal and the listing is never reached again,
+   * even once the root is back. The walk answers that case instead, and the
+   * listing checkpoint it hands out is upgraded by the next pull that finds a
+   * cursor.
+   */
+  private async relist(
+    root: PathSpec,
+    previous: Record<string, string> | null,
+    observed: Date,
+  ): Promise<Delta> {
+    const next = await this.snapshot(root)
+    if (next.cursor === '') {
+      return this.listing.pull(root, previous === null ? null : JSON.stringify(previous))
+    }
+    const changes =
+      previous === null ? [] : diffSnapshots(root, previous, next.snapshot, next.entries, observed)
+    return new Delta({ changes, checkpoint: encode(next.cursor, next.snapshot) })
+  }
+
+  async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
+    const decoded = decode(checkpoint)
+    const observed = new Date()
+    if (!decoded.native) return this.relist(root, decoded.snapshot, observed)
+    let state: ListFolderState
+    try {
+      state = await continueFolder(this.accessor.tokenManager, decoded.cursor ?? '')
+    } catch (error) {
+      if (error instanceof DropboxApiError && isReset(error)) {
+        return this.relist(root, decoded.snapshot, observed)
+      }
+      throw error
+    }
+    let snapshot = { ...(decoded.snapshot ?? {}) }
+    const entries = new Map<string, WalkEntry>()
+    for (const raw of state.entries) {
+      const framed = frame(this.accessor, root, raw)
+      if (framed === null) continue
+      entries.set(framed.virtual, framed.walk)
+      if (raw['.tag'] === 'deleted') {
+        snapshot = dropPrefix(snapshot, framed.virtual)
+        continue
+      }
+      snapshot[framed.virtual] = framed.walk.isDir
+        ? DIR_FINGERPRINT
+        : (framed.walk.fingerprint ?? '')
+    }
+    return new Delta({
+      changes: diffSnapshots(root, decoded.snapshot ?? {}, snapshot, entries, observed),
+      checkpoint: encode(state.cursor, snapshot),
+    })
+  }
+}
+
 export function buildDeltaHook(accessor: DropboxAccessor): DeltaHook {
-  const walk = new DropboxWalk(accessor)
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  return new DropboxDeltaHook(accessor)
 }

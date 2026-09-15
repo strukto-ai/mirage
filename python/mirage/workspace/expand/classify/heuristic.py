@@ -21,7 +21,6 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
 
-_FILENAME_CHAR = re.compile(r"[a-zA-Z0-9_./]")
 _NON_PATH_CHAR = re.compile(r"[(){}=;|&<> ]")
 _RELATIVE_PATH = re.compile(
     r"(?:\.?[a-zA-Z0-9_\-]*/)*[a-zA-Z0-9_\-]+\.[a-zA-Z0-9]+")
@@ -87,12 +86,13 @@ def classify_word(word: str, registry: MountRegistry,
             resolved=True,
         )
 
-    # Relative glob: only classify if the word looks like a
-    # filename pattern (has alphanumeric, dot, or slash alongside
-    # glob chars). Bare globs like *, ?, [a-z] are command
-    # arguments (e.g. expr 4 * 3), not path patterns.
+    # Relative glob: a pattern under cwd, a bare `*`, `?` or `[a-z]`
+    # included, because bash expands every unquoted glob word (`echo *`
+    # lists the directory, and `expr 4 * 3` is the classic mistake). A
+    # quoted glob arrives with no marks and stays text. A word carrying
+    # shell syntax beside the glob (`x=*`) is an argument, not a path.
     if word_has_glob and ("/" in word or not shape.startswith(".")):
-        if not _FILENAME_CHAR.search(shape) or _NON_PATH_CHAR.search(shape):
+        if _NON_PATH_CHAR.search(shape):
             return word
         return relative_spec(word, registry, cwd)
 

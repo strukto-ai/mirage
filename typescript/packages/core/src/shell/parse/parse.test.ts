@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { getParts, getRedirects, getText } from '../helpers.ts'
 import { createShellParser, type ShellParser, stripLineContinuation } from './index.ts'
-import type { TSNodeLike } from '../types.ts'
+import { NodeType as NT, type TSNodeLike } from '../types.ts'
 
 const require = createRequire(import.meta.url)
 const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
@@ -227,5 +227,120 @@ describe('stripLineContinuation', () => {
     ['echo a\\ b', 'echo a\\ b'],
   ])('%j -> %j', (command, expected) => {
     expect(stripLineContinuation(command)).toBe(expected)
+  })
+})
+
+describe('heredoc source reader', () => {
+  it.each([
+    ["cat <<'EOF'\n\\first\nsecond\nEOF", '\\first\nsecond\n'],
+    ["cat <<'EOF'\n\\first\n\\second\nthird\nEOF", '\\first\n\\second\nthird\n'],
+    ["cat <<'EOF'\n  first\nsecond\nEOF", '  first\nsecond\n'],
+    ["cat <<'EOF'\n\\begin{table}\n  \\begin{center}\nEOF", '\\begin{table}\n  \\begin{center}\n'],
+    ["cat <<'EOF'\n\\item Don't\nsecond\nEOF", "\\item Don't\nsecond\n"],
+    ['cat <<"E\\$F"\n\\first\nE$F', '\\first\n'],
+  ])('preserves body and source: %s', (command, body) => {
+    const root = parser.parse(command)
+    expect(root.hasError).toBe(false)
+    expect(root.sourceText).toBe(command)
+    expect(root.namedChildren[0]?.namedChildren.at(-1)?.heredoc?.body).toBe(body)
+  })
+
+  it('exposes expansions as ordinary string children', () => {
+    const root = parser.parse('cat <<EOF\n\\a $v `echo body`\nEOF')
+    const word = root.namedChildren[0]?.namedChildren.at(-1)?.namedChildren.at(-1)
+    expect(word?.namedChildren.map((child) => child.type)).toContain(NT.SIMPLE_EXPANSION)
+    expect(word?.namedChildren.map((child) => child.type)).toContain(NT.COMMAND_SUBSTITUTION)
+  })
+
+  it('keeps escaped dollars literal', () => {
+    const root = parser.parse('cat <<EOF\n\\$v\nEOF')
+    const word = root.namedChildren[0]?.namedChildren.at(-1)?.namedChildren.at(-1)
+    expect(word?.namedChildren.map((child) => child.type)).not.toContain(NT.SIMPLE_EXPANSION)
+  })
+
+  it('keeps the pipeline outside the body', () => {
+    const root = parser.parse("cat <<'EOF' | tr a-z A-Z\n\\first\nEOF")
+    expect(root.namedChildren[0]?.type).toBe(NT.PIPELINE)
+    expect(root.namedChildren[0]?.namedChildren.at(-1)?.text).toBe('tr a-z A-Z')
+  })
+})
+
+describe('heredoc source reader: operator-line regressions', () => {
+  function bodiesByDelimiter(command: string): Record<string, string> {
+    const root = parser.parse(command)
+    expect(root.hasError).toBe(false)
+    const found: Record<string, string> = {}
+    const stack: TSNodeLike[] = [root]
+    for (;;) {
+      const node = stack.pop()
+      if (node === undefined) break
+      stack.push(...node.children)
+      if (node.heredoc !== undefined) found[node.heredoc.delimiter] = node.heredoc.body
+    }
+    return found
+  }
+
+  it.each([
+    'cat <<EOF; echo x\nhi\nEOF\n',
+    'cat <<EOF;echo x\nhi\nEOF\n',
+    'cat <<EOF>out\nhi\nEOF\n',
+    'cat <<EOF|wc -l\nhi\nEOF\n',
+    'cat <<EOF&&echo x\nhi\nEOF\n',
+    "cat <<'EOF'; echo x\nhi\nEOF\n",
+    'cat <<EOF;\nhi\nEOF;\nEOF\n',
+    '(cat <<EOF)\nhi\nEOF)\nEOF\n',
+    'cat <<A && cat <<B\na\nA\nb\nB\n',
+    'cat <<A; cat <<B\na\nA\nb\nB\n',
+    '(cat <<EOF)\nhi\nEOF\n',
+    'case x in x) cat <<EOF;; esac\nhi\nEOF\n',
+    '{ cat <<EOF; }\nhi\nEOF\n',
+  ])('preserves operator-line source: %j', (command) => {
+    const root = parser.parse(command)
+    expect(root.hasError).toBe(false)
+    expect(root.sourceText).toBe(command)
+  })
+
+  it('keeps each of two heredocs on one line its own body', () => {
+    expect(bodiesByDelimiter('cat <<A && cat <<B\na\nA\nb\nB\n')).toEqual({ A: 'a\n', B: 'b\n' })
+    expect(bodiesByDelimiter('cat <<A | cat <<B; cat <<C\na\nA\nb\nB\nc\nC\n')).toEqual({
+      A: 'a\n',
+      B: 'b\n',
+      C: 'c\n',
+    })
+  })
+
+  it("keeps the body's indentation under a semicolon tail", () => {
+    expect(bodiesByDelimiter('cat <<EOF; echo x\n  hi\nEOF\n')).toEqual({ EOF: '  hi\n' })
+  })
+
+  it('reads a metacharacter inside a quoted delimiter as the delimiter', () => {
+    expect(bodiesByDelimiter("cat <<'EOF;'\nhi\nEOF;\n")).toEqual({ 'EOF;': 'hi\n' })
+  })
+
+  it('checks the delimiter word on a clean tree', () => {
+    // `EOF;` is tree-sitter's token and a body line at once, so the typed
+    // source parses clean with a body one line short; bash's word is EOF.
+    expect(bodiesByDelimiter('cat <<EOF; echo x\nhi\nEOF;\nEOF\n')).toEqual({ EOF: 'hi\nEOF;\n' })
+    expect(bodiesByDelimiter('cat <<EOF|tr a-z A-Z\nhi\nEOF|tr a-z A-Z\nEOF\n')).toEqual({
+      EOF: 'hi\nEOF|tr a-z A-Z\n',
+    })
+  })
+
+  it('keeps a body line that only opens with the delimiter', () => {
+    // tree-sitter-bash's scanner compares a line's first characters with
+    // the delimiter and stops there; bash wants the whole line.
+    expect(bodiesByDelimiter('cat <<EOF\nEOFX\nEOF;\n EOF\nEOF\n')).toEqual({
+      EOF: 'EOFX\nEOF;\n EOF\n',
+    })
+    expect(bodiesByDelimiter('cat <<-EOF\n\thi\n\tEOFX\n  EOF\n\tEOF\n')).toEqual({
+      EOF: 'hi\nEOFX\n  EOF\n',
+    })
+  })
+
+  it('leaves an unterminated body as typed', () => {
+    const root = parser.parse('cat <<EOF; echo x\nhi\n')
+    expect(root.hasError).toBe(false)
+    expect(root.sourceText).toBe('cat <<EOF; echo x\nhi\n')
+    expect(root.warnings).not.toBe('')
   })
 })

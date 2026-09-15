@@ -14,13 +14,9 @@
 
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { Workspace } from '../../typescript/packages/node/src/workspace.ts'
-import { SSHResource } from '../../typescript/packages/node/src/resource/ssh/ssh.ts'
-import { Limit, MountMode } from '../../typescript/packages/core/src/types.ts'
-import { E2BRuntime } from '../../typescript/packages/node/src/runtime/sandbox/e2b/runtime.ts'
-import { SSHRuntime } from '../../typescript/packages/node/src/runtime/sandbox/ssh/runtime.ts'
-
-import { RAMResource } from '../../typescript/packages/core/src/resource/ram/ram.ts'
+import { Workspace, SSHResource, SSHRuntime } from '@struktoai/mirage-node'
+import { Limit, MountMode, RAMResource } from '@struktoai/mirage-core'
+import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import { exerciseCancellation } from '../fixtures/runtime/e2b_cancel.ts'
 
 const dec = new TextDecoder()
@@ -47,7 +43,7 @@ async function exercise(runtime: E2BRuntime | SSHRuntime, label: string) {
     )
     assert.equal(result.exitCode, 7)
     assert.equal(dec.decode(result.stdout), 'out')
-    assert.equal(dec.decode(result.stderr), 'err')
+    assert.equal(dec.decode(result.stderr ?? undefined), 'err')
   }
   const results = await Promise.all(
     Array.from({ length: 6 }, (_, i) =>

@@ -15,8 +15,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
-import { Session } from '../session/session.ts'
-import { assignmentStatus, finishStatement } from './statement.ts'
+import { Session, newStatusWriter } from '../session/session.ts'
+import { assignmentStatus, finishStatement, restoreStatus, snapshotStatus } from './statement.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
 
@@ -68,5 +68,45 @@ describe('assignmentStatus', () => {
     session.cmdsubStatus = 5
     expect(assignmentStatus(session, seq)).toBe(5)
     expect(assignmentStatus(session, session.cmdsubSeq)).toBe(0)
+  })
+})
+
+describe('snapshotStatus / restoreStatus', () => {
+  it('puts back the captured shell status', () => {
+    const session = new Session({ sessionId: 't' })
+    session.lastExitCode = 3
+    session.pipeStatus = [0, 3]
+    const before = snapshotStatus(session)
+    session.lastExitCode = 0
+    session.pipeStatus = [0]
+    session.pipeStatusPending = [1]
+    restoreStatus(session, before, null)
+    expect(session.lastExitCode).toBe(3)
+    expect(session.pipeStatus).toEqual([0, 3])
+    expect(session.pipeStatusPending).toBeNull()
+  })
+
+  // Two `execute()` calls can share a session, and a snapshot taken
+  // before a concurrent line finished is older than that line's result.
+  // Putting it back would resurrect a value the shell moved past.
+  it('declines to restore over a status another line stamped', () => {
+    const session = new Session({ sessionId: 't' })
+    const mine = newStatusWriter()
+    const theirs = newStatusWriter()
+    session.lastExitCode = 1
+    const before = snapshotStatus(session)
+
+    // The other line finishes and stamps 0.
+    session.lastExitCode = 0
+    session.pipeStatus = [0]
+    session.statusWriter = theirs
+
+    restoreStatus(session, before, mine)
+    expect(session.lastExitCode).toBe(0)
+    expect(session.pipeStatus).toEqual([0])
+
+    // The line that did stamp last still puts its own back.
+    restoreStatus(session, before, theirs)
+    expect(session.lastExitCode).toBe(1)
   })
 })

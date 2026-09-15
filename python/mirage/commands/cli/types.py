@@ -24,7 +24,7 @@ from mirage.commands.spec.types import (CommandSpec, FlagValue,
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.runtime.types import DispatchFn, ScriptSource
-from mirage.types import Limit, PathSpec, ResourceName
+from mirage.types import Limit, PathSpec
 
 # The group-level flag bag the walk accumulates, keyed by canonical
 # dashed spelling like ParsedArgs.flags.
@@ -116,6 +116,12 @@ class CLIInvocation(Generic[ConfigT]):
         doors (CLIDoors | None): one door per state plane, None outside
             a workspace and for every CLI that reaches a service
             instead of a filesystem.
+        spec (CLISpec | None): the leaf the line resolved to, the
+            grammar its argv was parsed against. A verb reads it to
+            answer in its original's terms (git names the first switch
+            letter parse-options would not know), so a refusal never
+            restates the options declared one level up. None where no
+            executor built the record.
     """
     config: ConfigT
     argv: tuple[str, ...] = ()
@@ -125,6 +131,7 @@ class CLIInvocation(Generic[ConfigT]):
     stdin: ByteSource | None = None
     env: Mapping[str, str] = field(default_factory=dict)
     doors: CLIDoors | None = None
+    spec: "CLISpec | None" = None
 
 
 @dataclass(frozen=True)
@@ -170,15 +177,6 @@ class CLISpec(CommandSpec):
         config_model (type[BaseModel] | None): root only. Pydantic model
             validating an installation's config from YAML ``clis:`` or
             ``register_cli``; also the redaction schema for snapshots.
-        serves (tuple[ResourceName, ...]): root only. The resources this
-            CLI's service also backs as mounts. A write verb mutates that
-            service by id, which no vfs path can be derived from, so
-            those mounts drop their cached listings and bodies
-            afterwards: the agent's next ``ls`` shows what it just made
-            and its next ``cat`` shows an edit rather than the pre-write
-            content. Empty for a CLI with no mounted counterpart
-            (``git`` reaches mounts through the op dispatcher, which
-            invalidates per path already).
         script (ScriptSource | None): root only, and the root stands
             alone (no fn, no subcommands: the program re-parses argv
             natively). The program that serves the whole install,
@@ -210,7 +208,6 @@ class CLISpec(CommandSpec):
     # (a collision is legal, a TypeError is not).
     limit: Limit | None = field(default=None, hash=False)
     config_model: type[BaseModel] | None = None
-    serves: tuple[ResourceName, ...] = ()
     script: ScriptSource | None = None
     runtime: str | None = None
 

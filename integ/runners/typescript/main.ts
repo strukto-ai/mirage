@@ -15,11 +15,13 @@
 import { writeFileSync } from 'node:fs'
 import { ConsistencyPolicy } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
-import type { Case, Target } from './harness.ts'
+import type { Case, EmitRow, ServiceEnv, Target, TargetRunner } from './harness.ts'
 import {
   Report,
   compare,
+  planRun,
   integRoot,
   loadCases,
   loadServices,
@@ -36,13 +38,20 @@ import {
 
 const TS_HOSTS = ['typescript-node', 'typescript-browser']
 
-interface EmitRow {
-  target: string
-  id: string
-  exit: number
-  stdout: string
-  stderr: string
-  check: string | null
+/**
+ * How many targets may be in flight, refusing what `int()` would refuse.
+ *
+ * `Number()` is wider than python's `int()` -- it takes `0x10`, `1e2` and
+ * `4.0` and would have run 16, 100 and 4 workers where argparse exits 2 --
+ * so the digits are checked before the value is read.
+ */
+function parseJobs(raw: string): number {
+  const n = Number(raw)
+  if (!/^\d+$/.test(raw.trim()) || !Number.isInteger(n) || n < 1) {
+    process.stderr.write('--target-jobs takes an integer >= 1\n')
+    process.exit(2)
+  }
+  return n
 }
 
 function parseArgs(): {
@@ -51,12 +60,17 @@ function parseArgs(): {
   facet: string | undefined
   strict: boolean
   allowSkip: string
+  targetJobs: number
 } {
   const targets: string[] = []
   let emit: string | undefined
   let facet: string | undefined
   let strict = false
   let allowSkip = ''
+  // How many targets may be in flight. One is the plain loop, which stays the
+  // default so a local run is sequential and debuggable and so landing the
+  // scheduler changes nothing until a workflow line asks for it.
+  let targetJobs = 1
   const argv = process.argv.slice(2)
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
@@ -64,11 +78,113 @@ function parseArgs(): {
     else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--allow-skip' && i + 1 < argv.length) allowSkip = argv[++i]
+    else if (argv[i] === '--target-jobs' || argv[i].startsWith('--target-jobs=')) {
+      // Both spellings, and a missing value refused rather than ignored,
+      // because argparse takes `--target-jobs=4` and refuses the empty form
+      // on the python host. A word this chain does not match is dropped in
+      // silence, so either would have left the default of one worker and
+      // exited 0 -- the concurrency a workflow asked for, silently gone.
+      // The same hole is open on every other flag here and is left alone:
+      // it predates this change.
+      const eq = argv[i].indexOf('=')
+      targetJobs = parseJobs(
+        eq === -1 ? (i + 1 < argv.length ? argv[++i] : '') : argv[i].slice(eq + 1),
+      )
+    }
   }
-  return { targets, emit, facet, strict, allowSkip }
+  return { targets, emit, facet, strict, allowSkip, targetJobs }
 }
 
-async function runTarget(
+/**
+ * Run every eligible target with at most `width` in flight.
+ *
+ * Targets own separate workspaces and mint a fresh run id per open, so they
+ * overlap safely; `planRun` names the two kinds that cannot. Output order does not
+ * depend on completion order: every target, exclusive ones included, fills its
+ * own report and emit slot, and the slots are absorbed in selection order. So
+ * a concurrent run prints exactly what the serial run printed on STDOUT --
+ * stderr is written straight through from inside `runTarget` and interleaves.
+ *
+ * Returns how many targets threw. Reported by the caller after the summary,
+ * rather than exiting here, so a pooled run that lost one target still prints
+ * the counts for every other one.
+ */
+export async function runPool(
+  eligible: Target[],
+  cases: Case[],
+  root: string,
+  report: Report | null,
+  emit: EmitRow[] | null,
+  services: Map<string, ServiceEnv>,
+  width: number,
+  runner: TargetRunner = runTarget,
+): Promise<number> {
+  const { alone, pool } = planRun(eligible, services)
+  // On stderr, so the stdout equivalence holds, and unconditional so a change
+  // that quietly routed every run down the serial loop would show as this line
+  // going missing rather than as the battery merely being slower. Mutation
+  // testing found that exact regression invisible.
+  process.stderr.write(
+    `pool: ${String(pool.length)} target(s) at width ${String(width)}, ${String(alone.length)} alone\n`,
+  )
+  const slots = eligible.map(() => ({
+    report: report === null ? null : new Report(false),
+    emit: emit === null ? null : ([] as EmitRow[]),
+  }))
+  const errors: [string, unknown][] = []
+  for (const at of alone) {
+    try {
+      await runner(eligible[at], cases, root, slots[at].report, slots[at].emit)
+    } catch (err: unknown) {
+      errors.push([eligible[at].id, err])
+    }
+  }
+  const limiter = new ConcurrencyLimiter(width)
+  // A lane is a promise chain rather than a lock: node has no mutex, and
+  // chaining gives the same "never two at once" without a queue of our own.
+  const lanes = new Map<string, Promise<void>>()
+  const running: (Promise<void> | null)[] = eligible.map(() => null)
+  for (const { at, lane } of pool) {
+    const target = eligible[at]
+    const slot = slots[at]
+    const prev = lanes.get(lane) ?? Promise.resolve()
+    // The lane is taken before the worker so a target waiting on a busy lane
+    // is not holding one of the four slots while it waits.
+    const next = prev.then(async () => {
+      const release = await limiter.acquire()
+      try {
+        await runner(target, cases, root, slot.report, slot.emit)
+      } catch (err: unknown) {
+        // Recorded, not thrown: a sibling still has a workspace open and a
+        // backend to tear down, and rejecting here would strand both.
+        errors.push([target.id, err])
+      } finally {
+        release()
+      }
+    })
+    lanes.set(lane, next)
+    running[at] = next
+  }
+  // Awaited in selection order, and each slot flushed the moment every slot
+  // before it has. Waiting for the whole pool before printing anything would
+  // give CI one silent step and then a wall of text, which is the failure
+  // mode a buffered script already has here.
+  for (let at = 0; at < running.length; at++) {
+    const task = running[at]
+    if (task !== null) await task
+    const slot = slots[at]
+    if (report !== null && slot.report !== null) report.absorb(slot.report)
+    if (emit !== null && slot.emit !== null) emit.push(...slot.emit)
+  }
+  for (const [id, err] of errors) {
+    process.stderr.write(
+      `ERROR [${id}] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+    )
+  }
+  return errors.length
+}
+
+export async function runTarget(
   target: Target,
   cases: Case[],
   root: string,
@@ -203,7 +319,7 @@ async function main(): Promise<void> {
   const services = loadServices(root)
   const cases = loadCases(root)
 
-  const { targets, emit: emitPath, facet, strict, allowSkip } = parseArgs()
+  const { targets, emit: emitPath, facet, strict, allowSkip, targetJobs } = parseArgs()
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
@@ -225,6 +341,7 @@ async function main(): Promise<void> {
   // broken job, which is the whole point of --strict.
   const allowed = parseAllowSkip(services, allowSkip)
   const envSkipped: string[] = []
+  const eligible: Target[] = []
   for (const id of ids) {
     const target = manifest.get(id)
     if (!target) throw new Error(`unknown target: ${id}`)
@@ -244,8 +361,18 @@ async function main(): Promise<void> {
       }
       continue
     }
-    await runTarget(target, cases, root, report, emit)
+    eligible.push(target)
     ran += 1
+  }
+
+  // One worker means the old loop, unchanged. The pool cannot stand in for
+  // it: a target waiting on a busy lane lets a later one take the worker
+  // first, so the default run would quietly reorder itself.
+  let threw = 0
+  if (targetJobs === 1) {
+    for (const target of eligible) await runTarget(target, cases, root, report, emit)
+  } else {
+    threw = await runPool(eligible, cases, root, report, emit, services, targetJobs)
   }
 
   // A skip is one line on stderr and exit 0, so a facet whose service
@@ -269,11 +396,22 @@ async function main(): Promise<void> {
     process.exit(2)
   }
   if (emitPath) {
+    // No file, deliberately, where the report path prints partial counts:
+    // parity.py diffs two emits by (target, id), so a short one reads as a
+    // pile of ONLY-PY/ONLY-TS rows rather than as the run that broke.
+    if (threw) {
+      process.stderr.write(`${String(threw)} target(s) failed to run\n`)
+      process.exit(1)
+    }
     writeFileSync(emitPath, JSON.stringify(emit))
     return
   }
   if (report === null) return
   process.stdout.write(`\n${report.summary()}\n`)
+  if (threw) {
+    process.stderr.write(`${String(threw)} target(s) failed to run\n`)
+    process.exit(1)
+  }
   if (report.failed) process.exit(1)
 }
 

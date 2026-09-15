@@ -39,22 +39,151 @@ function splitFields(line: string, fs: string | null): string[] {
   return line.split(re)
 }
 
+const CMP_RE = new RegExp(CMP_OP_PATTERN.source, 'g')
+const STRING_QUOTE = '"'
+const REGEX_DELIM = '/'
+const REGEX_ERROR = 'awk: syntax error in regular expression {pattern} at source line 1'
+
+// Index just past the literal opening at `start`. Covers the two literals a
+// pattern can hold, a `"string"` and a `/regex/`; a backslash escapes the
+// next character in both, which is how `/a\/b/` keeps its slash. null when
+// the literal never closes.
+function literalEnd(text: string, start: number): number | null {
+  const delim = text.charAt(start)
+  let i = start + 1
+  while (i < text.length) {
+    const ch = text.charAt(i)
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === delim) return i + 1
+    i += 1
+  }
+  return null
+}
+
+function isLiteral(tok: string): boolean {
+  const head = tok.charAt(0)
+  return (head === STRING_QUOTE || head === REGEX_DELIM) && literalEnd(tok, 0) === tok.length
+}
+
+function isRegexLiteral(tok: string): boolean {
+  return tok.startsWith(REGEX_DELIM) && isLiteral(tok)
+}
+
+// Where a `/` opens a regex rather than dividing: at the start of a
+// condition and after an operator that wants an operand.
+const REGEX_OPENERS = new Set(['~', '!', '&', '|', '(', ','])
+
+function opensRegex(text: string, at: number): boolean {
+  const before = text.slice(0, at).trimEnd()
+  return before === '' || REGEX_OPENERS.has(before.charAt(before.length - 1))
+}
+
+// Split a condition at `op` outside its literals. A `"string"` or a
+// `/regex/` can hold the operator's characters (`$0 ~ /A&&B/`,
+// `$1 == "a||b"`), so the split walks the text and steps over each literal
+// whole; a `/` opens a regex only where awk expects an operand, so the
+// slash of a bare word is not one. Validator and evaluator both split
+// through here, so they cannot disagree about where a term ends. A literal
+// that never closes ends the scan, and the validator refuses what is left.
+function splitBool(condition: string, op: string): string[] {
+  const parts: string[] = []
+  let start = 0
+  let i = 0
+  while (i < condition.length) {
+    const ch = condition.charAt(i)
+    if (ch === STRING_QUOTE || (ch === REGEX_DELIM && opensRegex(condition, i))) {
+      const end = literalEnd(condition, i)
+      if (end === null) break
+      i = end
+    } else if (condition.startsWith(op, i)) {
+      parts.push(condition.slice(start, i))
+      i += op.length
+      start = i
+    } else {
+      i += 1
+    }
+  }
+  parts.push(condition.slice(start))
+  return parts
+}
+
+// Index of the `{` that opens the action, or -1 without one. Literals are
+// skipped whole, so the brace in a pattern's `/a{2}/` is not mistaken for
+// the action's.
+function actionStart(program: string): number {
+  let i = 0
+  while (i < program.length) {
+    const ch = program.charAt(i)
+    if (ch === STRING_QUOTE || ch === REGEX_DELIM) {
+      const end = literalEnd(program, i)
+      if (end === null) return -1
+      i = end
+      continue
+    }
+    if (ch === '{') return i
+    i += 1
+  }
+  return -1
+}
+
 function parseProgram(program: string): [string, string] {
   const trimmed = program.trim()
-  if (trimmed.startsWith('{')) {
-    return ['', trimmed.slice(1).trimEnd().replace(/\}$/, '').trim()]
+  const idx = actionStart(trimmed)
+  if (idx === -1) return [trimmed, '']
+  const condition = trimmed.slice(0, idx).trim()
+  const action = trimmed
+    .slice(idx + 1)
+    .trimEnd()
+    .replace(/\}$/, '')
+    .trim()
+  return [condition, action]
+}
+
+// Split `lhs OP rhs` at the first operator outside a leading literal. A
+// leading `/regex/` or `"string"` is skipped whole, so the `<` inside
+// `/a<b/` is not read as a comparison; after that the leftmost operator
+// wins, which is how `$0 ~ /a==b/` keeps `==` in its regex. null when the
+// expression is not a comparison.
+function splitComparison(expr: string): [string, AwkCmpOp, string] | null {
+  let scanFrom = 0
+  const head = expr.charAt(0)
+  if (head === STRING_QUOTE || head === REGEX_DELIM) {
+    const end = literalEnd(expr, 0)
+    if (end === null) return null
+    scanFrom = end
   }
-  if (trimmed.includes('{')) {
-    const idx = trimmed.indexOf('{')
-    const condition = trimmed.slice(0, idx).trim()
-    const action = trimmed
-      .slice(idx + 1)
-      .trimEnd()
-      .replace(/\}$/, '')
-      .trim()
-    return [condition, action]
+  CMP_RE.lastIndex = scanFrom
+  const m = CMP_RE.exec(expr)
+  if (m === null || m.index === 0) return null
+  const lhs = expr.slice(0, m.index).trim()
+  const rhs = expr.slice(m.index + m[0].length).trim()
+  if (lhs === '' || rhs === '') return null
+  return [lhs, m[0] as AwkCmpOp, rhs]
+}
+
+// Peel one leading `!` off a probe (`!/re/`, `!x`). `!=` and `!~` are
+// operators, not negations, so they stay put.
+function stripNegation(expr: string): [boolean, string] {
+  if (
+    expr.startsWith('!') &&
+    !expr.startsWith(AwkCmpOp.NE) &&
+    !expr.startsWith(AwkCmpOp.NOT_MATCH)
+  ) {
+    return [true, expr.slice(1).trim()]
   }
-  return [trimmed, '']
+  return [false, expr]
+}
+
+// Compile an awk regex, refusing a bad one with awk's exit 2.
+function compileRegex(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern)
+  } catch {
+    throw new UsageError(REGEX_ERROR.replace('{pattern}', pattern))
+  }
 }
 
 const IDENT_RE = /^[A-Za-z_]\w*$/
@@ -161,15 +290,28 @@ function validateAction(action: string): void {
 
 function validateSimple(rawExpr: string): void {
   const expr = rawExpr.trim()
-  const cmp = new RegExp(`(.+?)\\s*(${CMP_OP_PATTERN.source})\\s*(.+)`).exec(expr)
-  if (cmp === null) {
-    if (expr.length >= 2 && expr.startsWith('/') && expr.endsWith('/')) return
-    if (!isSimpleOperand(expr)) reject(expr)
+  const [negated, probe] = stripNegation(expr)
+  const split = splitComparison(probe)
+  if (split === null) {
+    if (isRegexLiteral(probe)) {
+      compileRegex(probe.slice(1, -1))
+      return
+    }
+    if (!isSimpleOperand(probe)) reject(expr)
     return
   }
-  const lhs = (cmp[1] ?? '').trim()
-  const rhs = (cmp[3] ?? '').trim()
+  // `!$1 == 2` negates the operand, not the comparison, and nothing here
+  // evaluates that shape.
+  if (negated) reject(expr)
+  const [lhs, op, rhs] = split
   if (!isSimpleOperand(lhs)) reject(expr)
+  if (op === AwkCmpOp.MATCH || op === AwkCmpOp.NOT_MATCH) {
+    // A literal regex is checked now; a variable or field is a dynamic
+    // regex, compiled against each record.
+    if (isLiteral(rhs)) compileRegex(rhs.slice(1, -1))
+    else if (!isSimpleOperand(rhs)) reject(expr)
+    return
+  }
   if (rhs.startsWith('"') || rhs.startsWith(FIELD_PREFIX)) {
     if (!isSimpleOperand(rhs)) reject(expr)
     return
@@ -188,13 +330,12 @@ function validateSimple(rawExpr: string): void {
 function validateCondition(condition: string): void {
   const cond = condition.trim()
   if (cond === '' || cond === AwkBlock.BEGIN || cond === AwkBlock.END) return
-  if (cond.includes(AwkBoolOp.OR)) {
-    for (const part of cond.split(AwkBoolOp.OR)) validateCondition(part)
-    return
-  }
-  if (cond.includes(AwkBoolOp.AND)) {
-    for (const part of cond.split(AwkBoolOp.AND)) validateCondition(part)
-    return
+  for (const op of [AwkBoolOp.OR, AwkBoolOp.AND]) {
+    const parts = splitBool(cond, op)
+    if (parts.length > 1) {
+      for (const part of parts) validateCondition(part)
+      return
+    }
   }
   validateSimple(cond)
 }
@@ -224,24 +365,30 @@ function resolveToken(tok: string, fieldMap: Record<string, string>): string {
   return IDENT_RE.test(tok) ? '' : tok
 }
 
+function truthy(val: string): boolean {
+  const n = Number.parseFloat(val)
+  if (!Number.isNaN(n)) return n !== 0
+  return val !== ''
+}
+
 function evalSimple(rawExpr: string, fieldMap: Record<string, string>): boolean {
   const expr = rawExpr.trim()
-  const cmp = new RegExp(`(.+?)\\s*(${CMP_OP_PATTERN.source})\\s*(.+)`).exec(expr)
-  if (cmp === null) {
-    if (expr.startsWith('/') && expr.endsWith('/')) {
-      const regex = expr.slice(1, -1)
-      return new RegExp(regex).test(fieldMap[AwkBuiltin.REC] ?? '')
-    }
-    const val = resolveToken(expr, fieldMap)
-    const n = Number.parseFloat(val)
-    if (!Number.isNaN(n)) return n !== 0
-    return val !== ''
+  const [negated, probe] = stripNegation(expr)
+  const split = splitComparison(probe)
+  if (split === null) {
+    const hit = isRegexLiteral(probe)
+      ? compileRegex(probe.slice(1, -1)).test(fieldMap[AwkBuiltin.REC] ?? '')
+      : truthy(resolveToken(probe, fieldMap))
+    return hit !== negated
   }
-  const lhsRaw = (cmp[1] ?? '').trim()
-  const op = (cmp[2] ?? '') as AwkCmpOp
-  let rhsRaw = (cmp[3] ?? '').trim()
-  rhsRaw = rhsRaw.replace(/^"|"$/g, '')
+  const [lhsRaw, op, rhsRawIn] = split
   const lhs = resolveToken(lhsRaw, fieldMap)
+  if (op === AwkCmpOp.MATCH || op === AwkCmpOp.NOT_MATCH) {
+    const pattern = isLiteral(rhsRawIn) ? rhsRawIn.slice(1, -1) : resolveToken(rhsRawIn, fieldMap)
+    const hit = compileRegex(pattern).test(lhs)
+    return op === AwkCmpOp.MATCH ? hit : !hit
+  }
+  const rhsRaw = rhsRawIn.replace(/^"|"$/g, '')
   const rhs =
     rhsRaw.startsWith(FIELD_PREFIX) || rhsRaw in fieldMap ? resolveToken(rhsRaw, fieldMap) : rhsRaw
   const lhsN = Number.parseFloat(lhs)
@@ -262,12 +409,10 @@ function evalSimple(rawExpr: string, fieldMap: Record<string, string>): boolean 
 function evalCondition(condition: string, fieldMap: Record<string, string>): boolean {
   const cond = condition.trim()
   if (cond === AwkBlock.BEGIN || cond === AwkBlock.END) return false
-  if (cond.includes(AwkBoolOp.OR)) {
-    return cond.split(AwkBoolOp.OR).some((p) => evalCondition(p, fieldMap))
-  }
-  if (cond.includes(AwkBoolOp.AND)) {
-    return cond.split(AwkBoolOp.AND).every((p) => evalCondition(p, fieldMap))
-  }
+  const ors = splitBool(cond, AwkBoolOp.OR)
+  if (ors.length > 1) return ors.some((p) => evalCondition(p, fieldMap))
+  const ands = splitBool(cond, AwkBoolOp.AND)
+  if (ands.length > 1) return ands.every((p) => evalCondition(p, fieldMap))
   return evalSimple(cond, fieldMap)
 }
 

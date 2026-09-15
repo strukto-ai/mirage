@@ -18,9 +18,10 @@ from datetime import date
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.context import reset_current_session, set_current_session
 from mirage.shell.escapes import unescape_unquoted
-from mirage.types import HiddenPaths, PathSpec
+from mirage.types import FileStat, FileType, HiddenPaths, PathSpec
 from mirage.utils import glob_walk
 from mirage.utils.glob_walk import (DEFAULT_MAX_GLOB_MATCHES, expand_pattern,
                                     glob_pattern, glob_prefix, glob_span,
@@ -45,6 +46,7 @@ TREE = {
     ],
     "/": ["/alpha", "/beta.txt"],
     "/alpha": ["/alpha/b.txt"],
+    "/box": ["/box/sub/", "/box/f.txt"],
 }
 
 CALLS: list[str] = []
@@ -205,6 +207,16 @@ async def test_directory_shaped_spec():
     )
     matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
     assert [m.virtual for m in matched] == ["/notion/pages/Demo_page__uuid1"]
+
+
+@pytest.mark.asyncio
+async def test_cold_listing_directory_marker_is_not_part_of_the_name():
+    # box, gdrive and dropbox mark a folder with a trailing slash on a cold
+    # listing; the marker is not part of the name a match spells.
+    spec = glob_spec("/box/*", "/box")
+    matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
+    assert [m.virtual for m in matched] == ["/box/f.txt", "/box/sub"]
+    assert [m.resource_path for m in matched] == ["f.txt", "sub"]
 
 
 @pytest.mark.asyncio
@@ -480,3 +492,95 @@ def test_glob_prefix_restores_a_quoted_metacharacter():
 )
 def test_glob_stem_prefix_drops_only_a_reached_suffix(pattern, expected):
     assert glob_walk.glob_stem_prefix(pattern, [".md", ".png"]) == expected
+
+
+async def fake_stat(accessor, path, index=None):
+    key = path.virtual.rstrip("/") or "/"
+    if key in TREE:
+        return FileStat(name=key.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
+    parent = key.rsplit("/", 1)[0] or "/"
+    if key in TREE.get(parent, []):
+        return FileStat(name=key.rsplit("/", 1)[-1], type=FileType.FILE)
+    raise FileNotFoundError(key)
+
+
+def typed_spec(virtual: str, raw: str) -> PathSpec:
+    return dataclasses.replace(glob_spec(virtual, ""), raw_path=raw)
+
+
+# The command tier's own resolver honours a trailing slash the way the
+# shell tier does (#1065): directories only, and one slash kept.
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_keeps_directories_only_and_the_slash():
+    out = await resolve_glob_with(fake_readdir,
+                                  None, [typed_spec("/*", "*/")],
+                                  NULL_INDEX,
+                                  stat=fake_stat)
+    assert [(m.virtual, m.raw_path) for m in out] == [("/alpha", "alpha/")]
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_spells_an_absolute_word():
+    out = await resolve_glob_with(fake_readdir,
+                                  None,
+                                  [typed_spec("/notion/p*", "/notion/p*/")],
+                                  NULL_INDEX,
+                                  stat=fake_stat)
+    assert [m.raw_path for m in out] == ["/notion/pages/"]
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_without_a_stat_door_keeps_every_match():
+    out = await resolve_glob_with(fake_readdir, None, [typed_spec("/*", "*/")],
+                                  NULL_INDEX)
+    assert [m.raw_path for m in out] == ["alpha/", "beta.txt/"]
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_zero_match_keeps_the_typed_word():
+    out = await resolve_glob_with(fake_readdir,
+                                  None, [typed_spec("/zz*", "zz*/")],
+                                  NULL_INDEX,
+                                  stat=fake_stat)
+    assert [(m.raw_path, m.pattern) for m in out] == [("zz*/", None)]
+
+
+async def fake_target_stat(virtual: str) -> FileStat | None:
+    # The namespace's own answer for the names it owes: a link to a
+    # directory, a nested mount root, a link to a file, a link to nothing.
+    name = virtual.rsplit("/", 1)[-1]
+    if virtual in ("/lnk", "/inner"):
+        return FileStat(name=name, type=FileType.DIRECTORY)
+    if virtual == "/flink":
+        return FileStat(name=name, type=FileType.FILE)
+    return None
+
+
+def owed(parent: str) -> list[str]:
+    return ["broken", "flink", "inner", "lnk"] if parent == "/" else []
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_asks_the_namespace_about_an_owed_name():
+    # bash follows a link for `*/` and keeps it only when the target is
+    # a directory; a dangling one is dropped like any file.
+    out = await resolve_glob_with(fake_readdir,
+                                  None, [typed_spec("/*", "*/")],
+                                  NULL_INDEX,
+                                  children=owed,
+                                  stat=fake_stat,
+                                  target_stat=fake_target_stat)
+    assert [m.raw_path for m in out] == ["alpha/", "inner/", "lnk/"]
+
+
+@pytest.mark.asyncio
+async def test_trailing_slash_keeps_an_owed_name_it_cannot_ask_about():
+    out = await resolve_glob_with(fake_readdir,
+                                  None, [typed_spec("/*", "*/")],
+                                  NULL_INDEX,
+                                  children=owed,
+                                  stat=fake_stat)
+    assert [m.raw_path
+            for m in out] == ["alpha/", "broken/", "flink/", "inner/", "lnk/"]

@@ -65,10 +65,10 @@ gh api repos/acme/tools/contents/README.md -X PUT \
 
 A write through `gh` lands on the same repository the mount reads, but it
 lands **by repository name rather than by any vfs path**, so the mount has
-nothing to aim a per-path invalidation at. The spec declares which
-resource it serves, and the executor expires that mount's index after the
-line, so the next `cat` or `ls` refetches instead of serving the pre-write
-bytes. Nothing is required of the caller.
+nothing to aim a per-path invalidation at. The executor expires every
+mount's caches after a write verb of an account CLI, so the next `cat` or
+`ls` refetches instead of serving the pre-write bytes. Nothing is required
+of the caller, and nothing on the spec names the mount.
 
 ## Verbs
 

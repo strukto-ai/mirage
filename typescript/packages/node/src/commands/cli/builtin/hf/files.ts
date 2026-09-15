@@ -42,5 +42,5 @@ export async function deleteCmd(inv: CLIInvocation): Promise<CommandFnResult> {
     description: fl.asStr('commit_description') ?? '',
     createPr: fl.asBool('create_pr'),
   })
-  return textOut(patterns.map((p) => `Deleted ${p} from ${target}\n`).join(''), true)
+  return textOut(patterns.map((p) => `Deleted ${p} from ${target}\n`).join(''))
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections import defaultdict, deque
 from collections.abc import Mapping
 
 from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
@@ -44,6 +45,34 @@ def synthesize_path_spec(value: str) -> PathSpec:
                     directory=value[:value.rfind("/") + 1] or "/",
                     resource_path="",
                     resolved=True)
+
+
+def take_spelling(spellings: dict[str, deque[PathSpec]],
+                  scope_map: Mapping[str, PathSpec], value: str) -> PathSpec:
+    """The next classified word spelling ``value``, in argv order.
+
+    Two words can resolve to one path (`ls -d dir/ link/` with link ->
+    dir, `tar -C dir .`), each with its own spelling, so every consumer
+    takes the next word for its path off a queue rather than reading a
+    lookup keyed by the path alone, which handed them all the last
+    spelling; the parser hands positionals back in argv order, the
+    guarantee argparse gives too. A path no word spells (one the parser
+    normalized, a followed link whose target climbs through `..`) falls
+    back to the map, which still serves a word the classifier left as
+    text, and is synthesized after that, since a keyed backend cannot
+    read `b/../a`.
+
+    Args:
+        spellings (dict[str, deque[PathSpec]]): the classified words by
+            resolved path, in argv order; the word taken is removed.
+        scope_map (Mapping[str, PathSpec]): the classified words by path,
+            last spelling wins.
+        value (str): the resolved path the parser reported.
+    """
+    queue = spellings.get(value.rstrip("/") or "/")
+    if queue:
+        return queue.popleft()
+    return scope_map.get(value) or synthesize_path_spec(value)
 
 
 def parse_flags(
@@ -94,6 +123,10 @@ def parse_flags(
             stripped = item.virtual.rstrip("/")
             if stripped and stripped != item.virtual:
                 scope_map[stripped] = item
+    spellings: dict[str, deque[PathSpec]] = defaultdict(deque)
+    for item in parts:
+        if isinstance(item, PathSpec):
+            spellings[item.virtual.rstrip("/") or "/"].append(item)
 
     if spec is not None:
         parsed = parse_command(spec, argv, cwd=cwd, env=env)
@@ -124,6 +157,12 @@ def parse_flags(
             for opt in spec.options if opt.type == "path" and not opt.multiple
             for name in (opt.short, opt.long) if name
         }
+        # An option's value is read before the operands, which is POSIX
+        # order and the order -C requires (its value moves the operands
+        # after it), so `tar -cf out.tar -C dir .` hands `dir` to -C and
+        # `.` to the operand. A permuted line spelling one path twice,
+        # once as an option's value typed after the operand, swaps the
+        # two spellings and nothing else.
         if not str_flag_paths:
             for key, value in flag_kwargs.items():
                 # Only the parser's own list[str] values reach here; a
@@ -133,31 +172,33 @@ def parse_flags(
                 ] if isinstance(value, list) else [])
                 if key in pair_path_keys and isinstance(value, list):
                     # A pair is (name, value): only the odd slots are paths.
-                    flag_kwargs[key] = [
-                        scope_map.get(part, synthesize_path_spec(part))
-                        if index % 2 else part
-                        for index, part in enumerate(texts_in)
-                    ]
+                    pairs: list[str | PathSpec] = list(texts_in)
+                    for index in range(1, len(pairs), 2):
+                        pairs[index] = take_spelling(spellings, scope_map,
+                                                     texts_in[index])
+                    flag_kwargs[key] = pairs
                 elif key in repeat_path_keys and isinstance(value, list):
                     flag_kwargs[key] = [
-                        scope_map.get(part, synthesize_path_spec(part))
+                        take_spelling(spellings, scope_map, part)
                         for part in texts_in
                     ]
                 elif key in single_path_keys and isinstance(value, str):
-                    flag_kwargs[key] = scope_map.get(
-                        value, synthesize_path_spec(value))
+                    flag_kwargs[key] = take_spelling(spellings, scope_map,
+                                                     value)
                 elif isinstance(value, str) and value in scope_map:
                     flag_kwargs[key] = scope_map[value]
+        else:
+            # The string view still takes an option's word off the queue,
+            # so the operands get the same words on both dispatch paths.
+            for value in parsed.path_flag_values:
+                take_spelling(spellings, scope_map, value)
 
-        # Classify positional args
+        # Classify positional args: each operand takes its own word.
         paths: list[PathSpec] = []
         texts: list[str] = []
         for value, kind in parsed.args:
             if kind == "path":
-                scope = scope_map.get(value)
-                if scope is None:
-                    scope = synthesize_path_spec(value)
-                paths.append(scope)
+                paths.append(take_spelling(spellings, scope_map, value))
             else:
                 texts.append(value)
         return ParsedCommand(

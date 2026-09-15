@@ -250,6 +250,18 @@ export class MirageService extends Service {
   }
 
   /**
+   * The live workspace, or null while it is still building.
+   *
+   * The non-throwing twin of {@link workspace}, for a synchronous seam
+   * method whose honest answer before `ready` is "this world cannot tell
+   * you" rather than an exception. Reads `built` directly, as
+   * {@link vfsOnly} does.
+   */
+  get workspaceIfReady(): Workspace | null {
+    return this.built
+  }
+
+  /**
    * The decision ledger: every ask this world has raised and every
    * answer given, questions still waiting included.
    *

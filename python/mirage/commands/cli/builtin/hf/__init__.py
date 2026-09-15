@@ -21,7 +21,6 @@ from mirage.commands.cli.builtin.hf.upload import upload_cmd
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.spec.types import Operand, Option
 from mirage.core.hf_hub.config import HfConfig
-from mirage.types import ResourceName
 
 # Upstream `hf` is argparse, not clap, so the default UsageStyle already
 # words its refusals ("hf: error: argument ...: invalid choice: 'x'",
@@ -177,8 +176,6 @@ HF = CLISpec(
     name="hf",
     description="hf command helpers",
     config_model=HfConfig,
-    serves=(ResourceName.HF_MODELS, ResourceName.HF_DATASETS,
-            ResourceName.HF_SPACES),
     subcommands=(
         _auth(),
         _repo(),

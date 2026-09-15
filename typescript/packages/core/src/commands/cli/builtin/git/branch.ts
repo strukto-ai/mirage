@@ -24,17 +24,27 @@ import {
   BranchNameRequiredError,
   CheckedOutBranchError,
   GitError,
+  InvalidBranchNameError,
   NoBranchError,
   NoWorkspaceError,
+  RefLockError,
   UnknownSwitchError,
   UnmergedBranchError,
 } from './errors.ts'
 import { short } from './format.ts'
-import { deleteRef, loadRefs, readHead, writeRef, SYMREF_PREFIX } from './refs.ts'
+import {
+  blockingRef,
+  deleteRef,
+  loadRefs,
+  readHead,
+  validRefName,
+  writeRef,
+  SYMREF_PREFIX,
+} from './refs.ts'
 import { opened, repoArgs, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import type { Dispatch, HeadRef } from './types.ts'
-import { checkOperands, fatal } from './util.ts'
+import { checkOperands, escaped, fatal, switches } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -66,9 +76,17 @@ async function create(
   name: string,
   start: string | undefined,
 ): Promise<void> {
+  // Before the start point resolves, which is git's order here and the
+  // opposite of switch's. A ref is a path below .git, so an unchecked name
+  // reaches writeRef as one.
+  if (!validRefName(name)) throw new InvalidBranchNameError(name)
   const ref = `${HEADS_PREFIX}${name}`
   if (refs.has(ref)) throw new BranchExistsError(name)
   const oid = await resolveCommit(repo, start ?? HEAD)
+  // Last, as it is for git: a ref whose path another ref already holds fails
+  // when the lock is taken, so a bad start point is reported first.
+  const held = blockingRef(new Set(refs.keys()), ref)
+  if (held !== null) throw new RefLockError(ref, held)
   await writeRef(dispatch, repo.location.commondir, ref, oid)
 }
 
@@ -78,7 +96,7 @@ async function create(
  * HEAD carries an object id only when detached; attached it names a ref, which
  * is unset until the first commit.
  */
-function headCommit(refs: ReadonlyMap<string, string>, head: HeadRef): string | null {
+export function headCommit(refs: ReadonlyMap<string, string>, head: HeadRef): string | null {
   if (head.commit !== null) return head.commit
   if (head.ref === null) return null
   return refs.get(head.ref) ?? null
@@ -142,7 +160,7 @@ export async function branch(inv: CLIInvocation): Promise<CommandFnResult> {
   try {
     const dispatch = doors.dispatch
     if (dispatch === undefined) throw new NoWorkspaceError()
-    checkOperands(texts, UnknownSwitchError)
+    checkOperands(texts, UnknownSwitchError, escaped(inv.argv), switches(inv))
     const repo = await opened(fl, doors)
     refs = await loadRefs(dispatch, repo.location.gitdir, repo.location.commondir)
     head = await readHead(dispatch, repo.location.gitdir)

@@ -34,7 +34,7 @@ import { commitFacts, opened, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
 import { diffstat, statTable } from './summary.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
-import { checkOperands, fatal, revisionArg } from './util.ts'
+import { checkOperands, escaped, fatal, revisionArg } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -135,7 +135,7 @@ export async function show(inv: CLIInvocation): Promise<CommandFnResult> {
   const texts = [...inv.texts]
   const fl = new FlagView(inv.flags)
   try {
-    checkOperands(texts)
+    checkOperands(texts, undefined, escaped(inv.argv))
     const parsed = parseShowFlags(fl)
     const repo = await opened(fl, doors)
     const oid = await resolveCommit(repo, revisionArg(texts))

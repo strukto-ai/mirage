@@ -21,6 +21,7 @@ from mirage.context import reset_current_session, set_current_session
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
+from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, MountMode,
                           PathSpec)
@@ -282,6 +283,58 @@ async def test_rename_moves_a_namespace_link():
                           dst=PathSpec.from_str_path("/ram/moved"))
         assert not ws._namespace.is_link("/ram/link")
         assert ws._namespace.readlink("/ram/moved") == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_carries_the_nodes_below_a_directory():
+    # A rename re-anchors a whole subtree, and the part of it no backend
+    # can see has to move with it: the link below the source used to
+    # stay at a name the rename had emptied, so the moved directory was
+    # missing it and the old name still answered readlink.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/ram/d"),
+                          dst=PathSpec.from_str_path("/ram/e"))
+        assert not ws._namespace.is_link("/ram/d/link")
+        assert ws._namespace.readlink("/ram/e/link") == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_refuses_a_destination_holding_a_link():
+    # A link is a directory entry no backend can see, so a destination
+    # the backend reads as empty is not: POSIX rename(2) answers
+    # ENOTEMPTY for it (probed on debian:stable-slim, where a directory
+    # holding one broken symlink refuses the rename). Letting the
+    # backend decide replaced the directory and deleted the link with
+    # it, which loses namespace state where the kernel refuses.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
+        await ws.execute("ln -s gone /ram/e/stale")
+        with pytest.raises(OSError) as caught:
+            await ws.dispatch("rename",
+                              PathSpec.from_str_path("/ram/d"),
+                              dst=PathSpec.from_str_path("/ram/e"))
+        assert caught.value.errno == errno.ENOTEMPTY
+        # Nothing moved: both ends are as they were.
+        assert ws._namespace.readlink("/ram/e/stale") == "gone"
+        assert ws._namespace.readlink("/ram/d/link") == "a.txt"
+
+
+@pytest.mark.asyncio
+async def test_rename_replaces_an_empty_destination():
+    # The other half of rename(2): a destination with nothing in it is
+    # replaced, and the subtree re-anchors onto the new name.
+    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
+        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.execute("ln -s a.txt /ram/d/link")
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/ram/d"),
+                          dst=PathSpec.from_str_path("/ram/e"))
+        assert ws._namespace.readlink("/ram/e/link") == "a.txt"
+        assert not ws._namespace.is_link("/ram/d/link")
 
 
 @pytest.mark.asyncio
@@ -596,3 +649,57 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
     kept = await ws.execute("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_rename_drops_the_listing_cached_below_it(tmp_path):
+    # The old name kept answering from its cached children after the
+    # move, so a later rename onto that name saw a directory that was no
+    # longer there and landed the source inside it.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "readme.md").write_text("notes\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        listed = await ws.execute("ls /disk/docs")
+        assert listed.stdout == b"readme.md\n"
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/docs"),
+                          dst=PathSpec.from_str_path("/disk/moved"))
+        gone = await ws.execute("test -d /disk/docs && echo stale || echo gone"
+                                )
+        assert gone.stdout == b"gone\n"
+        assert (await ws.execute("ls /disk/docs")).exit_code != 0
+        assert (await ws.execute("ls /disk/moved")).stdout == b"readme.md\n"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_carries_the_node_at_the_source(tmp_path):
+    # The subtree below the source was re-anchored and the source's own
+    # node was not, so the mode a chmod recorded stayed at the emptied
+    # name: the landing read as the unclamped file and whatever was
+    # created at the old name next inherited the overlay.
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        assert (await ws.execute("chmod 400 /disk/a.txt")).exit_code == 0
+        assert ws.namespace.meta_for("/disk/a.txt").mode == 0o400
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/a.txt"),
+                          dst=PathSpec.from_str_path("/disk/b.txt"))
+        assert ws.namespace.meta_for("/disk/a.txt") is None
+        assert ws.namespace.meta_for("/disk/b.txt").mode == 0o400
+
+
+@pytest.mark.asyncio
+async def test_a_rename_replaces_the_node_at_the_landing(tmp_path):
+    # rename(2) replaces the destination, so the overlay it carried goes
+    # with it rather than staying to shadow what just landed.
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("two\n", encoding="utf-8")
+    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+                   mode=MountMode.WRITE) as ws:
+        assert (await ws.execute("chmod 400 /disk/b.txt")).exit_code == 0
+        await ws.dispatch("rename",
+                          PathSpec.from_str_path("/disk/a.txt"),
+                          dst=PathSpec.from_str_path("/disk/b.txt"))
+        assert ws.namespace.meta_for("/disk/b.txt") is None

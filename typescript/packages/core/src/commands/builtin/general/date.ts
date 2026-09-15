@@ -19,25 +19,27 @@ import { parseDateExpr } from '../../../utils/dates.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
-import { DAY_NAMES, MONTH_NAMES, formatTZOffset, pad2, pad4, strftime } from '../utils/strftime.ts'
+import { DAY_NAMES, MONTH_NAMES, pad2, pad4, strftime } from '../utils/strftime.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, FlagView } from '../../spec/types.ts'
+import { LOCAL_ZONE, UTC_ZONE, type Zone, zoneFromEnv } from '../../../utils/timezone.ts'
 
 const ENC = new TextEncoder()
 
 // RFC 5322 (email) date format — e.g. "Mon, 21 Apr 2026 06:34:55 +0000"
-function formatRFC5322(dt: Date, utc: boolean): string {
-  const dow = utc ? dt.getUTCDay() : dt.getDay()
-  const day = utc ? dt.getUTCDate() : dt.getDate()
-  const mon = utc ? dt.getUTCMonth() : dt.getMonth()
-  const year = utc ? dt.getUTCFullYear() : dt.getFullYear()
-  const hour = utc ? dt.getUTCHours() : dt.getHours()
-  const minute = utc ? dt.getUTCMinutes() : dt.getMinutes()
-  const second = utc ? dt.getUTCSeconds() : dt.getSeconds()
-  const tz = utc ? '+0000' : formatTZOffset(dt)
-  return `${DAY_NAMES[dow] ?? ''}, ${pad2(day)} ${MONTH_NAMES[mon] ?? ''} ${pad4(year)} ${pad2(hour)}:${pad2(minute)}:${pad2(second)} ${tz}`
+function formatRFC5322(dt: Date, zone: Zone): string {
+  const p = zone.parts(dt)
+  return `${DAY_NAMES[p.weekday] ?? ''}, ${pad2(p.day)} ${MONTH_NAMES[p.month] ?? ''} ${pad4(p.year)} ${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)} ${strftime(dt, '%z', zone)}`
 }
 
+// GNU `date`: the current moment, or the one `-d` names, rendered in the
+// zone the command runs in. The zone is `-u`'s UTC, else the TZ of the
+// command's own environment (`TZ=Asia/Hong_Kong date` and an exported TZ
+// alike, as GNU reads it), else the host's local zone. It is read from
+// `opts.env`, never from process state, so concurrent workspaces cannot
+// move each other's clock. `%Z` is tzdata's abbreviation (`HKT`), as GNU
+// prints it, read from a table generated off zoneinfo since Intl has
+// none; the Python twin reads zoneinfo itself.
 function dateCommand(
   _accessor: Accessor,
   paths: PathSpec[],
@@ -52,9 +54,11 @@ function dateCommand(
   // (`AMBIGUOUS_NAMES`); a plain `I` key is one the parser never emits.
   const argsI = fl.asBool('args_I')
   const R = fl.asBool('R')
+  const named = u ? UTC_ZONE : zoneFromEnv(opts.env)
+  const zone = named ?? LOCAL_ZONE
   let dt: Date
   if (d !== null) {
-    const parsed = parseDateExpr(d, u)
+    const parsed = parseDateExpr(d, zone)
     if (parsed === null) {
       // GNU's refusal, exit 1: a NaN render with exit 0 poisons whatever
       // consumed it (the 0NaN-NaN-NaN corpus failure).
@@ -76,15 +80,13 @@ function dateCommand(
   }
   let result: string
   if (argsI) {
-    result = strftime(dt, '%Y-%m-%d', u)
+    result = strftime(dt, '%Y-%m-%d', zone)
   } else if (R) {
-    result = formatRFC5322(dt, u)
+    result = formatRFC5322(dt, zone)
   } else if (fmt !== null) {
-    result = strftime(dt, fmt, u)
-  } else if (u) {
-    result = strftime(dt, '%a %b %d %H:%M:%S %Z %Y', u)
+    result = strftime(dt, fmt, zone)
   } else {
-    result = strftime(dt, '%a %b %d %H:%M:%S %Y', u)
+    result = strftime(dt, '%a %b %d %H:%M:%S %Z %Y', zone)
   }
   return [ENC.encode(result + '\n'), new IOResult()]
 }

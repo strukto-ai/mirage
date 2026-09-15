@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { varsFromEnv } from '../../../workspace/session/session.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { CLISpec, type CLIInvocation, type CLIVerbFn } from '../../../commands/cli/types.ts'
 import { Operand, Option } from '../../../commands/spec/types.ts'
@@ -24,7 +24,7 @@ import { ScriptSource } from '../../../runtime/routing/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
 import { Session } from '../../session/session.ts'
-import { handleCli } from './cli.ts'
+import { dropsMountCaches, handleCli } from './cli.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
@@ -176,6 +176,85 @@ describe('handleCli', () => {
     await expect(
       handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' })),
     ).rejects.toThrow(/prog run: timed out/)
+  })
+
+  it('drops the caches when a write times out, and again when it settles', async () => {
+    // Racing a promise does not stop its work: the leaf keeps running past
+    // exit 124, and its request may land either side of the deadline.
+    let dropped = 0
+    const dropCaches = (): Promise<void> => {
+      dropped += 1
+      return Promise.resolve()
+    }
+    let settled = false
+    const slow: CLIVerbFn = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      settled = true
+      return [null, new IOResult()]
+    }
+    const spec = new CLISpec({
+      name: 'prog',
+      configModel: (input) => input,
+      subcommands: [
+        new CLISpec({
+          name: 'run',
+          fn: slow,
+          write: true,
+          limit: new Limit({ timeoutSeconds: 0.05 }),
+        }),
+      ],
+    })
+    const install: CLIInstall = { name: 'prog', spec, config: {} }
+    await expect(
+      handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' }), null, {}, dropCaches),
+    ).rejects.toThrow(/timed out/)
+    expect(dropped).toBe(1)
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(settled).toBe(true)
+    expect(dropped).toBe(2)
+  })
+
+  it('reports a drop that fails after the timeout instead of rejecting into nowhere', async () => {
+    let calls = 0
+    const dropCaches = (): Promise<void> => {
+      calls += 1
+      return calls === 1 ? Promise.resolve() : Promise.reject(new Error('torn down'))
+    }
+    const slow: CLIVerbFn = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return [null, new IOResult()]
+    }
+    const spec = new CLISpec({
+      name: 'prog',
+      configModel: (input) => input,
+      subcommands: [
+        new CLISpec({
+          name: 'run',
+          fn: slow,
+          write: true,
+          limit: new Limit({ timeoutSeconds: 0.05 }),
+        }),
+      ],
+    })
+    const install: CLIInstall = { name: 'prog', spec, config: {} }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      await expect(
+        handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' }), null, {}, dropCaches),
+      ).rejects.toThrow(/timed out/)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      expect(calls).toBe(2)
+      expect(unhandled).toEqual([])
+      expect(warn).toHaveBeenCalledWith('prog run: cache drop after timeout failed: torn down')
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+      warn.mockRestore()
+    }
   })
 
   it('carries stdin on the invocation record, never as a flag', async () => {
@@ -620,5 +699,18 @@ describe('cache drop on a thrown leaf', () => {
     )
     expect(io.exitCode).toBe(1)
     expect(dropped).toEqual([])
+  })
+})
+
+describe('dropsMountCaches', () => {
+  it('is true for a root that reaches a service, false for the git tier', () => {
+    // A script root's config is opaque, so it never carries a config model,
+    // yet its program may reach a service exactly as an account CLI does;
+    // only a root with neither writes through the dispatcher.
+    expect(dropsMountCaches(makeInstall().spec)).toBe(true)
+    expect(
+      dropsMountCaches(new CLISpec({ name: 'pager', script: new ScriptSource("print('hi')") })),
+    ).toBe(true)
+    expect(dropsMountCaches(new CLISpec({ name: 'tool', fn: send }))).toBe(false)
   })
 })

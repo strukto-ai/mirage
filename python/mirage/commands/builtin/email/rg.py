@@ -18,7 +18,8 @@ from mirage.commands.builtin.email.io import resolve_glob
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
-from mirage.commands.builtin.grep_pushdown import pushdown_operand
+from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
+                                                   search_query)
 from mirage.commands.builtin.grep_scan import grep_lines
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
@@ -61,13 +62,16 @@ async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
     # It used to return exit 1 instead, reporting "nothing matched" for a
     # search it had not run.
     operand = pushdown_operand(paths, opts.flags, pattern_str, SEARCH_HONORED)
+    # The server is asked for the literal every match must contain, never
+    # the regex's own spelling: IMAP TEXT is a substring search.
+    query = search_query(pattern_str, F)
     match = detect_scope(operand) if operand is not None else None
-    if (operand is not None and match is not None
+    if (operand is not None and query is not None and match is not None
             and match.kind in NATIVE_KINDS):
         folder = match.slots["folder"]
         uids = await search_messages(accessor,
                                      folder,
-                                     text=pattern_str,
+                                     text=query,
                                      max_results=accessor.config.max_messages)
         if not uids:
             return b"", IOResult(exit_code=1)

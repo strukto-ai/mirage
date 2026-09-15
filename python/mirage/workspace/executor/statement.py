@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import tree_sitter
+from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.types import TSNodeLike
 from mirage.utils.errors import format_fs_error
+from mirage.workspace.abort import StatusWriter, line_status_writer
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -48,6 +50,9 @@ def record_status(session: Session,
         transparent (bool): whether the statement is not a pipeline of
             its own.
     """
+    # Whose status this is, so a cancelled line puts back only what it
+    # overwrote and never a concurrent line's finished result.
+    session.status_writer = line_status_writer()
     session.last_exit_code = code
     pending = session._pipe_status_pending
     session._pipe_status_pending = None
@@ -55,6 +60,72 @@ def record_status(session: Session,
         session.pipe_status = pending
     elif not transparent:
         session.pipe_status = (code, )
+
+
+@dataclass(frozen=True, slots=True)
+class StatusSnapshot:
+    """The status a line found, taken before its first statement runs
+    and put back if the caller cancels the line.
+
+    A cancelled invocation is the caller's outcome, not the shell's, so
+    it must leave ``$?`` where it was. But the cancellation lands on one
+    await inside the line, and every statement before that await has
+    already stamped through ``record_status``; only a copy taken before
+    the line can undo them.
+
+    The three fields travel together because they are one shell fact:
+    ``$?``, ``${PIPESTATUS[@]}``, and the per-segment statuses a
+    pipeline parked for its boundary to claim. Restoring one without
+    the others would leave a state no bash line produces.
+
+    Attributes:
+        last_exit_code (int): ``$?``.
+        pipe_status (tuple[int, ...]): ``${PIPESTATUS[@]}``.
+        pipe_status_pending (tuple[int, ...] | None): statuses a
+            pipeline parked for the enclosing boundary.
+    """
+    last_exit_code: int
+    pipe_status: tuple[int, ...]
+    pipe_status_pending: tuple[int, ...] | None
+
+
+def snapshot_status(session: Session) -> StatusSnapshot:
+    """Capture ``$?`` and ``${PIPESTATUS[@]}`` before a line runs.
+
+    Args:
+        session (Session): shell session whose status is captured.
+    """
+    return StatusSnapshot(session.last_exit_code, session.pipe_status,
+                          session._pipe_status_pending)
+
+
+def restore_status(session: Session, snapshot: StatusSnapshot,
+                   writer: StatusWriter | None) -> None:
+    """Put back the status a line found, for a line the caller aborted.
+
+    Statements inside the line may already have stamped their own
+    status before the abort landed, and an aborted invocation is the
+    caller's outcome, not the shell's.
+
+    Only what this line overwrote, though. Two ``execute()`` calls can
+    share a session, and a snapshot taken before a concurrent line
+    finished is older than that line's result: putting it back would
+    resurrect a value the shell had already moved past. So the restore
+    happens only while the last stamp is still this line's. When nobody
+    has stamped since the snapshot the status already equals it and
+    declining is the same thing; when someone else did, declining is
+    the point.
+
+    Args:
+        session (Session): shell session receiving the status.
+        snapshot (StatusSnapshot): what ``snapshot_status`` captured.
+        writer (StatusWriter | None): the restoring line's identity.
+    """
+    if session.status_writer is not writer:
+        return
+    session.last_exit_code = snapshot.last_exit_code
+    session.pipe_status = snapshot.pipe_status
+    session._pipe_status_pending = snapshot.pipe_status_pending
 
 
 def carry_status(session: Session) -> None:
@@ -77,7 +148,7 @@ async def finish_statement(
     stdout: ByteSource | None,
     io: IOResult,
     session: Session,
-    node: tree_sitter.Node | None = None,
+    node: TSNodeLike | None = None,
     exec_node: ExecutionNode | None = None,
 ) -> ByteSource | None:
     """Finalize a completed statement and seed $? for the next one.
@@ -100,7 +171,7 @@ async def finish_statement(
         io (IOResult): the statement's result; exit_code may still be
             provisional until the barrier runs.
         session (Session): shell session receiving the status.
-        node (tree_sitter.Node | None): the statement that finished,
+        node (TSNodeLike | None): the statement that finished,
             which decides whether it stamps ``PIPESTATUS`` itself; None
             (a caller without the node) stamps.
         exec_node (ExecutionNode | None): the statement's record, whose

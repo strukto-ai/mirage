@@ -16,14 +16,13 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-import tree_sitter
-
 from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS
 from mirage.shell.escapes import unescape_unquoted
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
 from mirage.utils.path import expand_tilde
@@ -40,12 +39,12 @@ from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
 
 
-def _string_has_array_at(node: tree_sitter.Node) -> bool:
+def _string_has_array_at(node: TSNodeLike) -> bool:
     return any(is_multiword_at(c) for c in node.children)
 
 
 async def _expand_string_with_array(
-    node: tree_sitter.Node,
+    node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
@@ -107,7 +106,7 @@ async def _expand_string_with_array(
 
 
 async def _expand_brace_word(
-    node: tree_sitter.Node,
+    node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
@@ -129,7 +128,7 @@ async def _expand_brace_word(
     `{$p,x}` keeps the value live.
 
     Args:
-        node (tree_sitter.Node): concatenation or brace_expression.
+        node (TSNodeLike): concatenation or brace_expression.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.

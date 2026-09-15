@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
@@ -33,9 +34,9 @@ class EchoRuntime(PythonRuntime):
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 
 
-def test_attach_defaults_to_noop():
+def test_language_inherits_workspace_binding():
     rt = EchoRuntime()
-    rt.attach(lambda *a: None, PrefixResolver(lambda: []))
+    rt.bind(WorkspaceBinding(lambda *a: None, PrefixResolver(lambda: [])))
     result = asyncio.run(rt.run(RunArgs(code="hi")))
     assert result.stdout == b"hi"
     assert result.exit_code == 0

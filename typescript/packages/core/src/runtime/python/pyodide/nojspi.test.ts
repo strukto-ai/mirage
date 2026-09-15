@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
@@ -43,7 +44,7 @@ describe('PyodideRuntime without JSPI', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
     const result = await rt.run({
       code: `with open('/ram/out.txt', 'wb') as f: f.write(b'landed')`,
       args: [],
@@ -90,7 +91,7 @@ describe('PyodideRuntime without JSPI', () => {
     }
     const mounts: string[] = []
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, new PrefixResolver(() => mounts))
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => mounts)))
     await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
     mounts.push('/late/')
     const result = await rt.run({
@@ -115,7 +116,7 @@ describe('PyodideRuntime without JSPI', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
     const result = await rt.run({
       code: [
         'import os',
@@ -184,7 +185,7 @@ describe('PyodideRuntime without JSPI', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.attach(dispatch, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => ['/ram/'])))
     await rt.run({ code: 'pass', args: [], env: {}, stdin: new Uint8Array() })
     files.set('/ram/log.txt', new TextEncoder().encode('a'))
     const result = await rt.run({

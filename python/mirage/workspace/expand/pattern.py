@@ -15,13 +15,12 @@
 from collections.abc import Callable
 from typing import Any
 
-import tree_sitter
-
 from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import escape_glob
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.node import expand_node
@@ -48,7 +47,7 @@ def _unquoted_pattern(text: str) -> str:
 
 
 async def _quoted_string_pattern(
-    ts_node: tree_sitter.Node,
+    ts_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
@@ -62,7 +61,7 @@ async def _quoted_string_pattern(
     themselves.
 
     Args:
-        ts_node (tree_sitter.Node): the string node.
+        ts_node (TSNodeLike): the string node.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
@@ -85,7 +84,7 @@ async def _quoted_string_pattern(
 
 
 async def expand_pattern(
-    ts_node: tree_sitter.Node,
+    ts_node: TSNodeLike,
     session: Session,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
@@ -102,7 +101,7 @@ async def expand_pattern(
     matches the word ``a b``.
 
     Args:
-        ts_node (tree_sitter.Node): one pattern node.
+        ts_node (TSNodeLike): one pattern node.
         session (Session): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.

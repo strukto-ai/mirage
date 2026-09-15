@@ -21,7 +21,9 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.factory import (
-    make_generic_commands, with_read_cache)
+    _run_with_namespace_globs, make_generic_commands, with_read_cache)
+from mirage.commands.config import CommandOpts
+from mirage.ops.types import LinkView, NamespaceView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -140,3 +142,62 @@ async def test_no_manager_falls_through_to_backend():
     out = await _drain(ops.read_stream(None, _spec()))
     assert out == b"payload"
     assert backend.stream_calls == 1
+
+
+async def _no_target(virtual: str):
+    return None
+
+
+async def _nothing_there(virtual: str) -> bool:
+    return False
+
+
+def _no_links(directory: str) -> list:
+    return []
+
+
+def _same(path: str) -> str:
+    return path
+
+
+def _owes_nothing(parent: str) -> list[str]:
+    return []
+
+
+@pytest.mark.asyncio
+async def test_namespace_globs_stamp_the_link_target_stat():
+    # The command tier's `*/` asks the namespace what a link points at,
+    # so the invocation's target_stat rides the adapter beside the child
+    # names, stamped per invocation exactly like glob_children.
+    seen: list[CommandIO] = []
+
+    async def capture(ops, accessor, paths, texts, opts):
+        seen.append(ops)
+
+    links = LinkView(stat_at=_no_links,
+                     children=_no_links,
+                     subtree=_no_links,
+                     resolve=_same,
+                     exists=_nothing_there,
+                     target_stat=_no_target)
+    opts = CommandOpts(
+        ns=NamespaceView(links=links, child_mounts=_owes_nothing))
+    await _run_with_namespace_globs(_ops(_CountingBackend(b"")),
+                                    lambda ops: ops, capture, None, [], [],
+                                    opts)
+    assert seen[0].glob_children is _owes_nothing
+    assert seen[0].glob_target_stat is _no_target
+
+
+@pytest.mark.asyncio
+async def test_namespace_globs_stamp_nothing_without_links():
+    seen: list[CommandIO] = []
+
+    async def capture(ops, accessor, paths, texts, opts):
+        seen.append(ops)
+
+    opts = CommandOpts(ns=NamespaceView(child_mounts=_owes_nothing))
+    await _run_with_namespace_globs(_ops(_CountingBackend(b"")),
+                                    lambda ops: ops, capture, None, [], [],
+                                    opts)
+    assert seen[0].glob_target_stat is None

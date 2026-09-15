@@ -18,6 +18,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
+from mirage.workspace.abort import MirageAbortError, cancellable_sleep
+from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
 
 
 def _make_ws():
@@ -210,19 +212,34 @@ async def test_cancel_between_list_stages():
 
 
 @pytest.mark.asyncio
-async def test_cancel_inside_command_substitution():
+async def test_cancel_inside_command_substitution(monkeypatch):
     ws = _make_ws()
     cancel = asyncio.Event()
+    entered = asyncio.Event()
+    exited = asyncio.Event()
 
-    async def trigger() -> None:
-        await asyncio.sleep(0.1)
+    async def tracked_sleep(seconds, event):
+        entered.set()
+        try:
+            await cancellable_sleep(seconds, event)
+        finally:
+            exited.set()
+
+    monkeypatch.setitem(handle_sleep.__globals__, "cancellable_sleep",
+                        tracked_sleep)
+    task = asyncio.create_task(
+        ws.execute('echo "$(sleep 3600)"', cancel=cancel))
+    try:
+        # Synchronize on the inner command, not parsing/runner wall time.
+        await asyncio.wait_for(entered.wait(), timeout=10)
         cancel.set()
-
-    asyncio.create_task(trigger())
-    t0 = asyncio.get_event_loop().time()
-    with pytest.raises(Exception):
-        await ws.execute('echo "$(sleep 5)"', cancel=cancel)
-    assert asyncio.get_event_loop().time() - t0 < 1.0
+        with pytest.raises(MirageAbortError):
+            await asyncio.wait_for(task, timeout=10)
+        assert exited.is_set()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -293,3 +310,27 @@ async def test_agent_pattern_one_aborts_while_siblings_complete():
     assert "abort" in str(settled[0]).lower()
     assert not isinstance(settled[1], Exception)
     assert settled[1].stdout.decode().strip() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_an_aborted_line_does_not_erase_a_concurrent_lines_status():
+    # Two `execute()` calls share the default session. A snapshots `$?`
+    # and blocks, B finishes and stamps its own, then A is cancelled.
+    # A's snapshot is older than B's result, so putting it back would
+    # resurrect a status the shell had already moved past.
+    ws = _make_ws()
+    await ws.execute("true")
+
+    cancel = asyncio.Event()
+    blocked = asyncio.create_task(ws.execute("sleep 5", cancel=cancel))
+    # Let the blocked line reach its snapshot before the other one runs.
+    await asyncio.sleep(0.05)
+
+    await ws.execute("false")
+
+    cancel.set()
+    with pytest.raises(Exception):
+        await blocked
+
+    r = await ws.execute("echo $?")
+    assert r.stdout.decode().strip() == "1"

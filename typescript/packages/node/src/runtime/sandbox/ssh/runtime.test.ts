@@ -153,6 +153,6 @@ describe('SSHRuntime', () => {
   it("registers under the config name 'ssh'", () => {
     const runtime = buildRuntime('ssh', { config: { host: 'box' } })
     expect(runtime).toBeInstanceOf(SSHRuntime)
-    expect(runtime.captures).toEqual(['*'])
+    expect(runtime.captures).toEqual(['@external'])
   })
 })

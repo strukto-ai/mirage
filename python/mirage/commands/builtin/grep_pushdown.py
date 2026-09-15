@@ -19,6 +19,7 @@ from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec
+from mirage.utils.bre import bre_to_python
 
 
 def classify_pattern(
@@ -47,6 +48,32 @@ _REGEX_BREAKERS = frozenset(".^$*+?()|{}")
 _MIN_SEARCH_LITERAL = 3
 
 
+def _quantifier_min(pattern: str, i: int) -> int | None:
+    """Fewest repeats the quantifier starting at ``pattern[i]`` allows.
+
+    Args:
+        pattern (str): a regular expression.
+        i (int): index just past the atom the quantifier would apply to.
+
+    Returns:
+        int | None: 0 for ``?``, ``*`` and an interval whose lower bound
+            is 0 or missing, 1 for ``+``, the lower bound of any other
+            interval, or None when no quantifier starts there.
+    """
+    if i >= len(pattern):
+        return None
+    ch = pattern[i]
+    if ch in "?*":
+        return 0
+    if ch == "+":
+        return 1
+    if ch == "{":
+        end = pattern.find("}", i)
+        low = (pattern[i + 1:end] if end != -1 else "").split(",", 1)[0]
+        return int(low) if low.isdigit() else 0
+    return None
+
+
 def extract_required_literal(pattern: str) -> str | None:
     """Longest substring every match of a regex must contain.
 
@@ -54,11 +81,14 @@ def extract_required_literal(pattern: str) -> str | None:
     contain, suitable for narrowing via a literal search API before the real
     regex is scanned locally. Conservative: returns None whenever a required
     literal cannot be proven (top-level alternation, character classes,
-    escapes, runs shorter than ``_MIN_SEARCH_LITERAL``), so the caller falls
-    back to a full scan rather than risk a false negative.
+    escapes, a ``(?`` group, runs shorter than ``_MIN_SEARCH_LITERAL``), so
+    the caller falls back to a full scan rather than risk a false negative.
+    A run inside a group that ``?``, ``*`` or a zero-floored interval makes
+    optional is not required either: ``(foo)?bar`` matches ``bar`` alone,
+    so only ``bar`` may be searched for.
 
     Args:
-        pattern (str): a regular expression.
+        pattern (str): a regular expression in extended syntax.
 
     Returns:
         str | None: the longest required literal, or None.
@@ -67,6 +97,7 @@ def extract_required_literal(pattern: str) -> str | None:
         return None
     runs: list[str] = []
     current: list[str] = []
+    groups: list[int] = []
     i = 0
     n = len(pattern)
     while i < n:
@@ -82,6 +113,23 @@ def extract_required_literal(pattern: str) -> str | None:
             i += 1
             while i < n and pattern[i] != "]":
                 i += 2 if pattern[i] == "\\" else 1
+            i += 1
+            continue
+        if ch == "(":
+            if pattern.startswith("(?", i):
+                return None
+            runs.append("".join(current))
+            current = []
+            groups.append(len(runs))
+            i += 1
+            continue
+        if ch == ")":
+            runs.append("".join(current))
+            current = []
+            if groups:
+                opened = groups.pop()
+                if _quantifier_min(pattern, i + 1) == 0:
+                    del runs[opened:]
             i += 1
             continue
         if ch in _REGEX_BREAKERS:
@@ -124,20 +172,38 @@ def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
                                        and "." not in pattern)
 
 
-def search_query(pattern: str, fixed_string: bool) -> str | None:
-    """Literal to push down to a code-search API for a grep/rg pattern.
+def search_query(pattern: str,
+                 fixed_string: bool,
+                 basic: bool = False) -> str | None:
+    """Literal to push down to a substring or code-search API for a pattern.
+
+    A SIMPLE pattern holding a dot is a regex here, not a literal:
+    ``worker.3`` matches ``worker-3``, which a substring search for
+    ``worker.3`` never returns, so only the run before the dot is required.
+    ``is_literal_pattern`` already draws that line for the whole-word case.
+    A basic expression is translated before a literal is extracted, since
+    its operators are the escaped spellings: ``\\(bar\\)\\?`` is an
+    optional group there and ``(bar)?`` three literal characters plus a
+    literal question mark.
 
     Args:
         pattern (str): the search pattern.
         fixed_string (bool): True if -F is set.
+        basic (bool): True when the pattern is a basic regular expression,
+            which grep reads unless -E says otherwise.
 
     Returns:
-        str | None: the pattern itself when it is literal, a required literal
-            extracted from a regex, or None when no literal can be searched.
+        str | None: the pattern itself when it is literal, the longest
+            literal every match of a regex must contain, or None when no
+            literal can be searched: a newline-joined pattern list is a set
+            of alternatives no one literal is required by.
     """
-    if classify_pattern(pattern, fixed_string) != PatternType.REGEX:
+    if "\n" in pattern:
+        return None
+    if is_literal_pattern(pattern, fixed_string):
         return pattern
-    return extract_required_literal(pattern)
+    return extract_required_literal(
+        bre_to_python(pattern) if basic else pattern)
 
 
 _PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h",

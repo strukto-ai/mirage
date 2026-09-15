@@ -26,8 +26,9 @@
     "wsB:  bob  (expected: bob)",
     "(each workspace has its own Pyodide → own os.environ → no mixing)",
     "",
-    "=== os.environ merges runtime env + session.env ===",
-    "HOME in os.environ: True  (expected: True — process.env is merged in under the session env)",
+    "=== host environment is not inherited ===",
+    "host-only value: missing  (expected: missing)",
+    "explicit command value: guest-marker  (expected: guest-marker)",
     ""
   ]
 }

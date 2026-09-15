@@ -131,7 +131,7 @@ export async function applyReset<C extends MinimalClient>(
   }
   if (scoped && fresh) {
     const template = await pool.seededTemplate(templateKey(req), seedInto)
-    pool.clientFromSeeded(req.run, template)
+    const made = pool.clientFromSeeded(req.run, template)
     const st = state(req.run)
     // Marked right after the copy, because the copy IS the seed here. Reached
     // only once seededTemplate has resolved, so a template build that threw
@@ -140,6 +140,10 @@ export async function applyReset<C extends MinimalClient>(
       st.reset(tenant, req.epoch)
       st.markSeeded(tenant)
     }
+    // `fresh` means no client existed, so a cache keyed by the client has
+    // nothing here to forget. Fired anyway, for a fake that keys its own some
+    // other way.
+    fake.afterReset?.(made, req.tenants)
     return {
       ok: true,
       run: req.run,
@@ -150,21 +154,35 @@ export async function applyReset<C extends MinimalClient>(
     }
   }
   const db = scoped ? pool.client(req.run) : await pool.recreate(req.run)
-  if (scoped) await clearTenants(db, fake.dmmf, req.tenants)
-  const st = state(req.run)
-  for (const tenant of req.tenants) st.reset(tenant, req.epoch)
-  // Marked per tenant as each one finishes, not after the loop: a later tenant
-  // throwing must not unmark the ones already seeded.
-  const seeded = await seedInto(db, (tenant) => {
-    st.markSeeded(tenant)
-  })
-  return {
-    ok: true,
-    run: req.run,
-    epoch: req.epoch ?? null,
-    scoped,
-    tenants: req.tenants,
-    seeded,
+  try {
+    if (scoped) await clearTenants(db, fake.dmmf, req.tenants)
+    const st = state(req.run)
+    for (const tenant of req.tenants) st.reset(tenant, req.epoch)
+    // Marked per tenant as each one finishes, not after the loop: a later
+    // tenant throwing must not unmark the ones already seeded.
+    const seeded = await seedInto(db, (tenant) => {
+      st.markSeeded(tenant)
+    })
+    return {
+      ok: true,
+      run: req.run,
+      epoch: req.epoch ?? null,
+      scoped,
+      tenants: req.tenants,
+      seeded,
+    }
+  } finally {
+    // In a `finally`, because a reseed that throws has ALREADY cleared the
+    // rows, and after the seed rather than beside the clear, because a read
+    // does not join this queue and could cache the half-cleared world.
+    // Reported rather than propagated: a throw here would replace the seed's
+    // own exception on its way to the 500 envelope.
+    try {
+      fake.afterReset?.(db, req.tenants)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`${fake.config.service} fake: afterReset: ${message}\n`)
+    }
   }
 }
 

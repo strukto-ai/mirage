@@ -16,6 +16,8 @@ from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import compile_spec
+from mirage.shell.constants import BUILTIN_GROUP
+from mirage.shell.types import BuiltinGroup
 from mirage.types import PathSpec
 from mirage.workspace.names import (JOB_BUILTINS, NAMESPACE_COMMANDS,
                                     NO_FOLLOW_COMMANDS, SHELL_NAMES,
@@ -31,6 +33,11 @@ __all__ = [
     "SHELL_ONLY_BUILTINS",
     "UNSUPPORTED_BUILTINS",
 ]
+
+# Interpreter names select runtime adapters; session builtins stay in Mirage.
+INTERPRETER_NAMES = frozenset(
+    str(name) for name, group in BUILTIN_GROUP.items()
+    if group is BuiltinGroup.INTERPRETERS)
 
 # Per-command flags that turn a no-follow command back into a following
 # one, GNU's -L / --dereference.

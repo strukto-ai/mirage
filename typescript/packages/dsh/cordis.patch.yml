@@ -68,6 +68,17 @@
 #     comes from the calling session's cwd) names nothing in this world,
 #     so it is ignored in favour of the workspace default rather than
 #     run in a directory the agent cannot reach.
+#
+# One boundary this patch does NOT move: `ctx.subprocess`. dsh-base
+# registers `dsh-subprocess-local`, which spawns real host processes,
+# and mirage provides no subprocess seam — a mirage world is a shell
+# interpreter over mounts, not a process table. In dsh-base that row is
+# inert, because the only three plugins that consume it (`bash-sandbox`,
+# `pwsh-sandbox`, `tool-fs-search`) are all disabled above. A profile
+# that adds a subprocess consumer of its own — `terminal-bash` and
+# `lsp-stdio` are the ones that exist — puts that plugin on the HOST
+# while the file and shell tools stay in the workspace, so the world is
+# no longer one. Disable those rows, or leave them off the profile.
 
 # The host filesystem and bash providers step aside; mirage provides the
 # same ctx.fs and ctx.shell seams over the workspace.
@@ -89,6 +100,26 @@
 - id: tool-fs-search
   disabled: true
 
+# Oversized tool results spill to the workspace, not to the host.
+#
+# The spill policy keeps a result over `maxInlineBytes` out of the
+# model's context by saving the full text and replacing the result with
+# a preview plus the locator, telling the model to read or grep it for
+# the rest. dsh-base stores that through `spill-local`, which writes
+# under the host's temporary directory — a path that names nothing in
+# this world, so the recovery the notice invites fails on a file the
+# model cannot open, and an oversized result becomes truncation with a
+# dead pointer. The mirage store writes through the same op door every
+# other effect here passes, so the locator is an ordinary workspace path
+# and the tool that produced the output is the one that can go read it.
+#
+# `dir` moves the artifacts; the default rides the `/tmp` ram mount
+# below. A deployment that wants them out of the agent's reach puts
+# `dir` on a mount the session holds no grant for — mirage has no
+# permission bits to offer, so the mount table is the boundary.
+- id: spill-local
+  disabled: true
+
 - insert:
     - id: mirage
       name: '@struktoai/mirage-dsh/service'
@@ -101,3 +132,6 @@
 
     - id: mirage-shell
       name: '@struktoai/mirage-dsh/shell'
+
+    - id: mirage-spill
+      name: '@struktoai/mirage-dsh/spill-store'

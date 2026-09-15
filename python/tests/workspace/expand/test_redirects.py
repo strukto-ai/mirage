@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+from pathlib import Path
+
 import pytest
 
 from mirage import MountMode, RAMResource, Workspace
@@ -289,3 +292,253 @@ async def test_assignment_second_unbraced_var_stays_assignment():
     ws = await _workspace_at("/data")
     assert await _stdout(
         ws, "c=aa; id=1; p=/api/$c/$id.json; echo $p") == "/api/aa/1.json\n"
+
+
+# tree-sitter-bash used to lex a heredoc body line opening with a backslash
+# as more words of the operator line, and to skip the first line's leading
+# whitespace; parse() shields such bodies so the workspace reads them as
+# bash does (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_a_leading_backslash_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<'END'\n\\first\nsecond\nEND")
+    assert out == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_leading_backslash_line_round_trips_through_a_file():
+    ws = await _workspace_at("/data")
+    await ws.execute("cat > /data/HB <<'END'\n\\first\nsecond\nEND")
+    assert await _stdout(ws, "cat /data/HB") == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_indentation_after_a_backslash_line():
+    ws = await _workspace_at("/data")
+    body = ("\\begin{table}[!ht]\n  \\begin{center}\n"
+            "  \\end{center}\n\\end{table}\n")
+    assert await _stdout(ws, f"cat <<'END'\n{body}END") == body
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_leading_indentation():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<'END'\n  first\nsecond\nEND")
+    assert out == "  first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_unquoted_backslash_line_expands_and_escapes():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<END\n\\a $hb\n\\$hb\nsecond\nEND")
+    assert out == "\\a val\n$hb\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_backslash_line_does_not_reach_the_pipeline():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<'END' | tr a-z A-Z\n\\first\nsecond\nEND")
+    assert out == "\\FIRST\nSECOND\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_apostrophe_on_a_backslash_line_is_body_text():
+    ws = await _workspace_at("/data")
+    io = await ws.execute(
+        "cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
+    assert io.exit_code == 0
+    assert (io.stdout or b"").decode() == (
+        "\\item Don't stop; echo not-a-command\nsecond\n")
+
+
+@pytest.mark.asyncio
+async def test_heredoc_dash_keeps_a_tab_indented_backslash_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
+    assert out == "\\first\nsecond\n"
+
+
+# bash keeps the empty lines a body opens with and reads a quoted
+# delimiter with the shell's own escape rules; both reach the workspace
+# through the heredoc package (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_a_leading_empty_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<'END'\n\nfirst\nEND") == "\nfirst\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_a_body_that_is_one_empty_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<'END'\n\nEND") == "\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_keeps_an_empty_line_before_a_backslash_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<'END'\n\n\\first\nEND")
+    assert out == "\n\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_expands_after_leading_empty_lines():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<END\n\n\n$hb\nEND")
+    assert out == "\n\nval\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_dash_keeps_a_leading_empty_line():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "cat <<-'END'\n\n\tfirst\n\tEND")
+    assert out == "\nfirst\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_reads_an_escaped_dollar_in_a_quoted_delimiter():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, 'cat <<"E\\$F"\n\\first\nE$F')
+    assert out == "\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_reads_an_escaped_quote_in_a_quoted_delimiter():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, 'cat <<"E\\"F"\n\\first\nE"F')
+    assert out == "\\first\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_leading_empty_line_round_trips_through_a_file():
+    ws = await _workspace_at("/data")
+    await ws.execute("cat > /data/HB7 <<'END'\n\nfirst\nEND")
+    assert await _stdout(ws, "cat /data/HB7") == "\nfirst\n"
+
+
+# A backslash before a newline in the delimiter is the reader's line
+# continuation rather than quoting, so the body it opens expands, and the
+# terminator line tree-sitter leaves in that body is not body text
+# (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_expands_its_body():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<EO\\\nF\n$hb\nEOF\n")
+    assert out == "val\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_drops_its_terminator_line():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "cat <<EO\\\nF\nbody\nEOF\n") == "body\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_continued_delimiter_with_an_escape_is_quoted():
+    ws = await _workspace_at("/data")
+    out = await _stdout(ws, "hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n")
+    assert out == "$hb\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_expanding_to_the_delimiter_is_kept():
+    ws = await _workspace_at("/data")
+    assert await _stdout(ws, "hb=END; cat <<END\n$hb\nEND") == "END\n"
+
+
+# The operator line runs past a `)` that closes a case pattern and past
+# the quotes a substitution inside double quotes holds, so the body it
+# opens is the one bash reads (issue #1050).
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_case_pattern_paren():
+    ws = await _workspace_at("/data")
+    line = ("cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n"
+            "\\first\nsecond\nEOF\n")
+    assert await _stdout(ws, line) == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_case_pattern_keeps_indentation():
+    ws = await _workspace_at("/data")
+    line = ("cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n"
+            "  spaced\nsecond\nEOF\n")
+    assert await _stdout(ws, line) == "  spaced\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_quote_inside_a_substitution():
+    ws = await _workspace_at("/data")
+    line = ('cat <<EOF >"$( : "a\n  b"; echo /data/HB8)"\n'
+            "\\first\nsecond\nEOF\n")
+    await ws.execute(line)
+    assert await _stdout(ws, "cat /data/HB8") == "\\first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_heredoc_body_after_a_quote_inside_a_backtick():
+    ws = await _workspace_at("/data")
+    line = ('cat <<EOF >"`  : "a\n  b"; echo /data/HB9 `"\n'
+            "\\first\nsecond\nEOF\n")
+    await ws.execute(line)
+    assert await _stdout(ws, "cat /data/HB9") == "\\first\nsecond\n"
+
+
+HEREDOC_CASES = json.loads(
+    (Path(__file__).resolve().parents[4] /
+     "integ/bash/heredoc/reader.json").read_text())["cases"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", HEREDOC_CASES, ids=lambda case: case["id"])
+async def test_heredoc_reader_integration(case):
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(case["command"])
+        assert {
+            "exit": io.exit_code,
+            "stdout": await io.stdout_str(),
+            "stderr": (await io.materialize_stderr()).decode()
+        } == case["expect"]
+    finally:
+        await ws.close()
+
+
+NESTED_HEREDOC_CASES = json.loads(
+    (Path(__file__).resolve().parents[4] /
+     "integ/crossmount/nested/heredoc.json").read_text())["cases"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case",
+                         NESTED_HEREDOC_CASES,
+                         ids=lambda case: case["id"])
+async def test_heredoc_nested_mount_integration(case):
+    parent, child, ghost = RAMResource(), RAMResource(), RAMResource()
+    ws = Workspace(
+        {
+            "/data": parent,
+            "/data/inner": child,
+            "/ghost/deep": ghost
+        },
+        mode=MountMode.WRITE)
+    try:
+        io = await ws.execute(case["command"])
+        assert {
+            "exit": io.exit_code,
+            "stdout": await io.stdout_str(),
+            "stderr": (await io.materialize_stderr()).decode()
+        } == case["expect"]
+        # A longest-prefix routing bug can read back its own misplaced write;
+        # inspect ownership too, so a false round trip cannot pass.
+        assert not any(
+            key.startswith("/inner/") for key in parent._store.files)
+        assert child._store.files or ghost._store.files
+    finally:
+        await ws.close()

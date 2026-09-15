@@ -18,9 +18,14 @@ from mirage.commands.cli.builtin.git.checkout import checkout
 from mirage.commands.cli.builtin.git.commit import commit
 from mirage.commands.cli.builtin.git.diff import diff
 from mirage.commands.cli.builtin.git.log import log
+from mirage.commands.cli.builtin.git.mv import mv
 from mirage.commands.cli.builtin.git.reset import reset
+from mirage.commands.cli.builtin.git.restore import restore
+from mirage.commands.cli.builtin.git.rm import rm
 from mirage.commands.cli.builtin.git.show import show
 from mirage.commands.cli.builtin.git.status import status
+from mirage.commands.cli.builtin.git.switch import switch
+from mirage.commands.cli.builtin.git.tag import tag
 from mirage.commands.cli.types import CLISpec, UsageStyle
 from mirage.commands.spec.types import Operand, Option
 
@@ -127,6 +132,71 @@ COMMIT_OPTIONS = (
 CHECKOUT_OPTIONS = (Option(short="-b",
                            description="Create the branch and switch to it"), )
 
+SWITCH_OPTIONS = (
+    Option(short="-c",
+           long="--create",
+           type="str",
+           description="Create the branch and switch to it"),
+    Option(short="-d",
+           long="--detach",
+           description="Detach HEAD at the named commit"),
+)
+
+RESTORE_OPTIONS = (
+    Option(short="-S", long="--staged", description="Restore the index"),
+    Option(short="-W",
+           long="--worktree",
+           description="Restore the working tree (default)"),
+    Option(short="-s",
+           long="--source",
+           type="str",
+           description="Which tree-ish to restore from"),
+)
+
+RM_OPTIONS = (
+    Option(short="-r", description="Allow recursive removal"),
+    Option(long="--cached",
+           description="Only remove from the index, keeping the file"),
+    Option(short="-f",
+           long="--force",
+           description="Override the up-to-date check"),
+    Option(short="-q", long="--quiet",
+           description="Do not list removed files"),
+    Option(long="--ignore-unmatch",
+           description="Exit with a zero status even if nothing matched"),
+)
+
+MV_OPTIONS = (
+    Option(short="-f",
+           long="--force",
+           description="Force move/rename even if target exists"),
+    Option(short="-k", description="Skip move/rename errors"),
+    Option(short="-n", long="--dry-run", description="Dry run"),
+    Option(short="-v", long="--verbose", description="Be verbose"),
+)
+
+TAG_OPTIONS = (
+    Option(short="-l", long="--list", description="List tag names"),
+    # git spells the count attached (`-n2`) or not at all, never as a
+    # separate token, which is what value_optional says: a bare -n means
+    # one line and the next word is left alone to be a pattern.
+    Option(short="-n",
+           type="int",
+           value_optional=True,
+           description="Print <n> lines of each tag message"),
+    Option(short="-d", long="--delete", description="Delete tags"),
+    Option(short="-a",
+           long="--annotate",
+           description="Annotated tag, needs a message"),
+    Option(short="-m",
+           long="--message",
+           type="str",
+           multiple=True,
+           description="Tag message (repeatable, one paragraph each)"),
+    Option(short="-f", long="--force",
+           description="Replace the tag if exists"),
+)
+
 STATUS_OPTIONS = (
     Option(long="--porcelain",
            description="Machine-readable output, stable across versions"),
@@ -218,6 +288,46 @@ GIT = CLISpec(
             fn=checkout,
             options=CHECKOUT_OPTIONS,
             rest=REVISION,
+            write=True,
+        ),
+        CLISpec(
+            name="switch",
+            description="Switch branches",
+            fn=switch,
+            options=SWITCH_OPTIONS,
+            rest=REVISION,
+            write=True,
+        ),
+        CLISpec(
+            name="restore",
+            description="Restore working tree files",
+            fn=restore,
+            options=RESTORE_OPTIONS,
+            rest=PATHSPEC,
+            write=True,
+        ),
+        CLISpec(
+            name="rm",
+            description="Remove files from the working tree and the index",
+            fn=rm,
+            options=RM_OPTIONS,
+            rest=PATHSPEC,
+            write=True,
+        ),
+        CLISpec(
+            name="mv",
+            description="Move or rename a file, a directory, or a symlink",
+            fn=mv,
+            options=MV_OPTIONS,
+            rest=PATHSPEC,
+            write=True,
+        ),
+        CLISpec(
+            name="tag",
+            description="Create, list or delete a tag",
+            fn=tag,
+            options=TAG_OPTIONS,
+            rest=Operand(type="str"),
             write=True,
         ),
     ),

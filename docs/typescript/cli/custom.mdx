@@ -103,11 +103,13 @@ workspace file tree. A missing model is not an untyped-config mode: the install
 must have no config and `inv.config` is `null`.
 
 Mark every mutating leaf `write: true`. This is policy metadata; it does not
-perform the mutation, grant access, or invalidate a service cache by itself.
-The handler still owns the service call and its consistency behavior. When a
-leaf's mutation depends on argv, `new IOResult({ mutated: ... })` may refine
-cache invalidation for that run; it does not change the leaf's static policy
-class.
+perform the mutation or grant access. The handler still owns the service call.
+It is also the one cache signal: after a write verb of a CLI with a
+`configModel`, the executor expires every mount's cached listings and bodies,
+because an account CLI writes by id and no mount can see that write. A script
+root counts too, since its config is opaque and its program may reach anything.
+A CLI with neither gets no such drop, since its writes go through the op
+dispatcher, which invalidates per path.
 
 ## Install it
 
@@ -200,13 +202,11 @@ as an attachment. That is different from treating a mount as the CLI's service
 client. Such a leaf opts into workspace access through `inv.doors`; do not
 assume those doors exist outside a workspace.
 
-If a CLI and a Mirage resource back the same service, root `serves` identifies
-the resource kinds whose cached reads must be invalidated after a mutating leaf
-runs. A write that throws may already have reached the service, so Mirage also
-invalidates on that path. Use only registered `ResourceName` values. A fully
-third-party resource name is not yet an open shared-spec extension point; do
-not widen `CLISpec`, `Option`, or `Operand` just to route around that
-constraint.
+If a CLI and a Mirage resource back the same service, neither names the other.
+A write verb on a CLI with a config model expires every mount's cached reads
+after it runs, and a write that throws may already have reached the service, so
+Mirage also expires on that path. Do not widen `CLISpec`, `Option`, or
+`Operand` to point a CLI at a resource.
 
 ## Snapshots and credentials
 
@@ -292,7 +292,6 @@ The tables below explain how an author should use that surface.
 | `subcommands` | Child nodes for a group. |
 | `write` | Marks a mutating leaf for policy classification. |
 | `configModel` | Root Zod schema or normalizer for per-install validation. |
-| `serves` | Root resource kinds invalidated after a write may mutate the service. |
 | `script` | Embedded whole-program source; mutually exclusive with a typed tree. |
 | `runtime` | Runtime entry name for `script`; absent means first language match. |
 | `usageStyle` | One renderer/error dialect for the whole program. Keep the default for an invented CLI. |

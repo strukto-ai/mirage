@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceBinding } from '../../binding.ts'
 import { describe, expect, it } from 'vitest'
 import { PrefixResolver } from '../../resolver.ts'
 import { PyodideRuntime } from './runtime.ts'
@@ -27,7 +28,7 @@ function decode(bytes: Uint8Array | null | undefined): string {
 describe('PyodideRuntime sysPath', () => {
   it('reports a glob that matched nothing on the run stderr', async () => {
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/*.whl'] } })
-    rt.attach(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
     const result = await rt.run({ code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() })
     expect(decode(result.stderr)).toContain('/ram/*.whl')
     expect(decode(result.stderr)).toContain('matched nothing')
@@ -39,7 +40,7 @@ describe('PyodideRuntime sysPath', () => {
 
   it('reports each missing glob once, not on every run', async () => {
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/*.whl'] } })
-    rt.attach(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
     const args = { code: 'print(1)', args: [], env: {}, stdin: new Uint8Array() }
     await rt.run(args)
     const second = await rt.run(args)
@@ -51,7 +52,7 @@ describe('PyodideRuntime sysPath', () => {
     // Only a glob can silently expand to nothing; a literal entry is on
     // sys.path exactly as configured, which is what CPython does too.
     const rt = new PyodideRuntime({ config: { sysPath: ['/ram/vendor'] } })
-    rt.attach(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/']))
+    rt.bind(new WorkspaceBinding(EMPTY_MOUNT, new PrefixResolver(() => ['/ram/'])))
     const result = await rt.run({
       code: `import sys; print('/ram/vendor' in sys.path)`,
       args: [],

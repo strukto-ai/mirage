@@ -297,8 +297,8 @@ describe('awk unsupported constructs fail loud', () => {
     )
   })
 
-  it('rejects a tilde match condition', async () => {
-    await expect(run([], ['$1 ~ /x/ {print}'], opts({}, ENC.encode('x\n')))).rejects.toThrow(
+  it('rejects an unsupported match operand', async () => {
+    await expect(run([], ['length($1) ~ /1/'], opts({}, ENC.encode('a\n')))).rejects.toThrow(
       'unsupported construct',
     )
   })
@@ -307,6 +307,102 @@ describe('awk unsupported constructs fail loud', () => {
     await expect(run([], ['NR % 2 == 0 {print}'], opts({}, ENC.encode('a\nb\n')))).rejects.toThrow(
       'unsupported construct',
     )
+  })
+})
+
+const FIELDS = 'alice 30 engineer\nbob 25 designer\ncarol 40 manager\n'
+
+async function runStdin(
+  program: string,
+  stdin: string,
+  flags: Record<string, string | boolean | number | string[]> = {},
+): Promise<string> {
+  const [out] = await run([], [program], opts(flags, ENC.encode(stdin)))
+  return out
+}
+
+describe('awk regex match', () => {
+  it('matches a field against a regex (issue #1065)', async () => {
+    const out = await runStdin(
+      '$4 ~ /[Aa]pplication/ {print}',
+      'a|b|c|Application\nx|y|z|Other\n',
+      {
+        F: '|',
+      },
+    )
+    expect(out).toBe('a|b|c|Application\n')
+  })
+
+  it('reads a boolean operator inside a regex as regex text', async () => {
+    // awk 20200816 and mawk 1.3.4 both print the line: the `&&` belongs to
+    // the regex, it is not a conjunction.
+    expect(await runStdin('$0 ~ /A&&B/ {print}', 'xA&&By\nAB\n')).toBe('xA&&By\n')
+  })
+
+  it('reads a boolean operator inside a string as string text', async () => {
+    expect(await runStdin('$1 == "a||b" {print $2}', 'a||b q\nz 1\n')).toBe('q\n')
+  })
+
+  it('matches a bare regex pattern holding an operator', async () => {
+    expect(await runStdin('/A&&B/', 'xA&&By\nAB\n')).toBe('xA&&By\n')
+  })
+
+  it('negates the match with !~', async () => {
+    expect(await runStdin('$3 !~ /^d/ {print $1}', FIELDS)).toBe('alice\ncarol\n')
+  })
+
+  it('reads a string right-hand side as a dynamic regex', async () => {
+    expect(await runStdin('$2 ~ "0" && $1 ~ /^c/', FIELDS)).toBe('carol 40 manager\n')
+  })
+
+  it('reads a variable right-hand side as a dynamic regex', async () => {
+    expect(await runStdin('$1 ~ pat {print $2}', FIELDS, { v: 'pat=ar' })).toBe('40\n')
+  })
+
+  it('matches a numeric right-hand side as text', async () => {
+    expect(await runStdin('$1 ~ 1', '12\n3\n')).toBe('12\n')
+  })
+
+  it('accepts $NF and a builtin on the left', async () => {
+    expect(await runStdin('$NF ~ /^App/', 'x y Application\nx y Other\n')).toBe('x y Application\n')
+    expect(await runStdin('NR ~ /[13]/', 'a\nb\nc\n')).toBe('a\nc\n')
+  })
+
+  it('keeps a comparison operator inside the regex', async () => {
+    expect(await runStdin('$0 ~ /a<b/', 'a<b\nab\n')).toBe('a<b\n')
+    expect(await runStdin('$0 ~ /a==b/', 'a==b\nab\n')).toBe('a==b\n')
+  })
+
+  it('keeps a comparison operator inside a bare regex', async () => {
+    expect(await runStdin('/a<b/', 'a<b\nab\n')).toBe('a<b\n')
+  })
+
+  it('keeps an escaped slash inside the regex', async () => {
+    expect(await runStdin('$1 ~ /a\\/b/', 'a/b\nab\n')).toBe('a/b\n')
+  })
+
+  it('does not read an interval brace as the action brace', async () => {
+    expect(await runStdin('$1 ~ /a{2}/ {print $2}', 'aa 1\na 2\n')).toBe('1\n')
+  })
+
+  it('needs no spaces around the operator', async () => {
+    expect(await runStdin('$1~/a/', 'a b\nc d\n')).toBe('a b\n')
+  })
+
+  it('negates a bare regex', async () => {
+    expect(await runStdin('!/bob/ {print $1}', FIELDS)).toBe('alice\ncarol\n')
+  })
+
+  it('negates an operand by its truthiness', async () => {
+    expect(await runStdin('!$1', '0\n1\nfoo\n\n')).toBe('0\n\n')
+    expect(await runStdin('!x', 'a\nb\n', { v: 'x=0' })).toBe('a\nb\n')
+  })
+
+  it('refuses an invalid regex with awk wording', async () => {
+    await expect(runStdin('$1 ~ /(a/ {print}', 'a\n')).rejects.toThrow(
+      'awk: syntax error in regular expression (a at source line 1',
+    )
+    await expect(runStdin('/(a/', 'a\n')).rejects.toThrow('syntax error in regular expression')
   })
 })
 

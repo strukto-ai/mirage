@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../../types.ts'
 import { mvGeneric, parseFlags } from '../../generic/mv.ts'
 import type { Builder } from '../adapter.ts'
-import { refuseReveal } from '../adapter.ts'
+import { refuseReveal, resolveGlobOf } from '../adapter.ts'
 import { overlayableStat } from './cp.ts'
 import { FlagView } from '../../../spec/types.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -24,7 +24,7 @@ export const MV_BUILDER: Builder = {
   name: 'mv',
   write: true,
   requirements: ['rename'],
-  fn: (ops, accessor, paths, _texts, opts) => {
+  fn: async (ops, accessor, paths, _texts, opts) => {
     const { rename } = ops
     if (rename === undefined) {
       throw new Error('mv: backend provides no rename op')
@@ -32,7 +32,7 @@ export const MV_BUILDER: Builder = {
     const idx = opts.index ?? undefined
     const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
     return mvGeneric(
-      paths,
+      await resolveGlobOf(ops)(accessor, paths, idx),
       overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
       { rename: (src: PathSpec, target: PathSpec) => rename(accessor, src, target) },
       parsed,

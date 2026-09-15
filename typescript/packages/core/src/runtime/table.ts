@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EXTERNAL_COMMANDS } from './constants.ts'
 import { Runtime } from './base.ts'
-import { isLineExecutor, type LineExecutor } from './mixin.ts'
+import { isProcessExecutor, isLineExecutor, type LineExecutor } from './mixin.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
@@ -107,11 +108,8 @@ const PYTHON_ONLY_HINTS: Record<string, string> = {
     "'pyodide' (WASM CPython, default), 'monty' (sandboxed), and " +
     "'quickjs' (sandboxed JavaScript)",
   sandlock:
-    "runtime 'sandlock' (the host python3 confined by Landlock and seccomp) " +
-    "is Python-only and Linux-only; TypeScript supports 'smolvm' for a " +
-    "hardware-isolated microVM, 'docker' for a container, 'pyodide' (WASM " +
-    "CPython, default), 'monty' (sandboxed), and 'quickjs' (sandboxed " +
-    'JavaScript)',
+    "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
+    'to register it. Sandlock requires Linux and the sandlock CLI on PATH.',
 }
 
 // Every runtime is constructed the same way; config keys are checked
@@ -225,6 +223,13 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
   const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
   const seen = new Set<string>()
   for (const entry of entries) {
+    if (
+      entry.captures.includes(EXTERNAL_COMMANDS) &&
+      !isLineExecutor(entry) &&
+      !isProcessExecutor(entry)
+    ) {
+      throw new Error('@external requires process or shell execution')
+    }
     if (seen.has(entry.name)) {
       throw new Error(`duplicate runtime entry: '${entry.name}'`)
     }
@@ -239,20 +244,14 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 /**
  * The runtime that runs this entire line, if any.
  *
- * A runtime carrying LineExecutor takes the raw line when it captures
- * one of the line's commands; a "*" capture claims any line. A
- * specific capture beats "*". The vfs runtime never matches here
+ * Only an explicit "*" capture claims a whole line. Named captures
+ * and EXTERNAL_COMMANDS execute individual commands. The vfs runtime never matches here
  * because it carries no capability: the workspace executor IS the
  * path a vfs-resolved line takes anyway, so there is no delegate.
  */
 export function wholeLineRuntime(
   bindings: Record<string, Runtime | null>,
-  commands: readonly string[],
 ): (Runtime & LineExecutor) | null {
-  for (const command of commands) {
-    const runtime = Object.hasOwn(bindings, command) ? bindings[command] : null
-    if (runtime != null && isLineExecutor(runtime)) return runtime
-  }
   const star = Object.hasOwn(bindings, '*') ? bindings['*'] : null
   if (star != null && isLineExecutor(star)) return star
   return null

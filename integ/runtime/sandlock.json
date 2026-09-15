@@ -1,22 +1,28 @@
 {
   "suite": "sandlock",
   "optional": true,
-  "optional_reason": "sandlock needs its CLI installed and Landlock ABI v6 (Linux 6.12+); GitHub-hosted runners ship neither, and it has no apt package to add cheaply. Run locally on a Linux host with MIRAGE_INTEG_SANDLOCK set; drop this flag once the gate installs it.",
+  "optional_reason": "Requires the Sandlock CLI and Linux Landlock ABI v6. Set MIRAGE_INTEG_SANDLOCK to run the same cases through both SDKs on a supported host.",
   "requires": {
     "python": [
       "env:MIRAGE_INTEG_SANDLOCK"
     ],
-    "typescript": []
+    "typescript": [
+      "env:MIRAGE_INTEG_SANDLOCK"
+    ]
   },
   "cases": [
     {
       "id": "sys_argv",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
-          "sandlock"
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
         ]
       },
       "steps": [
@@ -31,12 +37,16 @@
     },
     {
       "id": "real_cpython_not_a_subset",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
-          "sandlock"
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
         ]
       },
       "steps": [
@@ -51,9 +61,6 @@
     },
     {
       "id": "granted_path_is_writable",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           {
@@ -62,7 +69,12 @@
               "fs_writable": [
                 "/tmp"
               ]
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -78,9 +90,6 @@
     },
     {
       "id": "ungranted_write_is_refused",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           {
@@ -89,7 +98,12 @@
               "fs_writable": [
                 "/tmp"
               ]
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -105,9 +119,6 @@
     },
     {
       "id": "mirage_environment_is_not_inherited",
-      "hosts": [
-        "python"
-      ],
       "world": {
         "runtimes": [
           {
@@ -116,7 +127,12 @@
               "env": {
                 "BOX_MARKER": "from-config"
               }
-            }
+            },
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
           }
         ]
       },
@@ -126,6 +142,54 @@
           "expect": {
             "exit": 0,
             "stdout": "from-config None\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "node_argv",
+      "world": {
+        "runtimes": [
+          {
+            "name": "sandlock",
+            "captures": [
+              "python3",
+              "node",
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e 'console.log(JSON.stringify(process.argv.slice(1)))' 'a b' '$(echo literal)' '' ",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"a b\",\"$(echo literal)\",\"\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "external_fallback_preserves_vfs_pipeline",
+      "world": {
+        "runtimes": [
+          "sandlock"
+        ]
+      },
+      "steps": [
+        {
+          "command": "getconf LONG_BIT | grep 64 > /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /ram/wordsize.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "64\n"
           }
         }
       ]

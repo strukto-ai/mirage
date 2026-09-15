@@ -17,7 +17,7 @@ import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { makeAbortError } from '../abort.ts'
+import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { assignmentStatus, finishStatement, recordStatus } from '../executor/statement.ts'
@@ -33,6 +33,7 @@ import {
   getNegatedCommand,
   getPipelineCommands,
   getRedirects,
+  takeContinuation,
   getText,
   getParts,
   getUnsetArgs,
@@ -250,6 +251,136 @@ async function recurseReassociated(
   return [stdout, io, execNode]
 }
 
+type RunLeft = (
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+) => Promise<Result>
+
+/**
+ * Run a redirected statement: the command under its redirects, then the
+ * pipeline a heredoc's operator line fed it into.
+ */
+async function runRedirected(
+  recurse: Recurse,
+  dispatch: DispatchFn,
+  executeFn: ExecuteFn,
+  registry: MountRegistry,
+  command: TSNodeLike | null,
+  redirects: Redirect[],
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Result> {
+  if (command !== null && command.type === NT.LIST) {
+    // tree-sitter hoists a trailing redirect over the whole &&/||
+    // list; bash binds it to the last command:
+    //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
+    // Re-associate and defer target expansion until R runs, so
+    // `cd /x && echo hi > f` writes under /x. Compound and subshell
+    // bodies keep the whole-body redirect (bash group semantics).
+    const [left, op, right] = getListParts(command)
+    const wrapped = recurseReassociated.bind(
+      null,
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      redirects,
+      right,
+    )
+    return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+  }
+  if (command !== null && command.type === NT.PIPELINE) {
+    const [commands, stderrFlags] = getPipelineCommands(command)
+    const right = commands[commands.length - 1]
+    if (right === undefined) throw new Error('redirected pipeline: missing command')
+    const wrapped = recurseReassociated.bind(
+      null,
+      recurse,
+      dispatch,
+      executeFn,
+      registry,
+      redirects,
+      right,
+    )
+    return handlePipe(wrapped, commands, stderrFlags, session, stdin, callStack)
+  }
+  const [expandedRedirects, pipeNode] = await expandRedirects(
+    redirects,
+    session,
+    executeFn,
+    registry,
+    callStack,
+    sessionView(session, registry.policies),
+  )
+  // `exec > file` with no command installs the redirects on the shell
+  // for every later statement, rather than applying them to one
+  // command. `exec cmd > file` still has a command and falls through
+  // to the ordinary path, which refuses the command form.
+  if (isBareExec(command)) {
+    return await installExecRedirects(dispatch, session, expandedRedirects)
+  }
+  let [stdout, io, execNode] = await handleRedirect(
+    recurse,
+    dispatch,
+    command,
+    expandedRedirects,
+    session,
+    stdin,
+    callStack,
+  )
+  if (pipeNode !== null && stdout !== null) {
+    const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
+    stdout = stdout2
+    io = await io.merge(io2)
+    execNode = execNode2
+  }
+  return [stdout, io, execNode]
+}
+
+/**
+ * Fold the `&&`/`||` steps a heredoc's operator line carried around the
+ * statement, left to right.
+ *
+ * The last step's operator joins everything before it to its right
+ * operand, so the fold is `handleConnection` with the statement's node
+ * standing for that left side; `recurseContinuation` runs the remaining
+ * steps when asked for it and recurses normally for the right operand.
+ * The list semantics (short-circuit, `$?`, `PIPESTATUS`, `set -e`
+ * immunity) are therefore the `list` node's own, not a second copy.
+ */
+async function runContinuation(
+  recurse: Recurse,
+  runLeft: RunLeft,
+  left: TSNodeLike,
+  steps: readonly (readonly [string, TSNodeLike])[],
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Result> {
+  const last = steps[steps.length - 1]
+  if (last === undefined) return runLeft(session, stdin, callStack)
+  const [op, right] = last
+  const wrapped = recurseContinuation.bind(null, recurse, runLeft, left, steps.slice(0, -1))
+  return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+}
+
+async function recurseContinuation(
+  recurse: Recurse,
+  runLeft: RunLeft,
+  left: TSNodeLike,
+  steps: readonly (readonly [string, TSNodeLike])[],
+  node: TSNodeLike,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+): Promise<Result> {
+  if (node === left)
+    return runContinuation(recurse, runLeft, left, steps, session, stdin, callStack)
+  return recurse(node, session, stdin, callStack)
+}
+
 async function recursePipeStderr(
   recurse: Recurse,
   dispatch: DispatchFn,
@@ -352,6 +483,13 @@ export async function executeNode(
   session.diagnostics = []
   try {
     const [stdout, io, execNode] = await executeNodeBody(deps, node, session, stdin, callStack)
+    // A statement that settles after the caller aborted is an orphan: its
+    // status must not reach the shell the caller was already released from.
+    if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
+      throw makeAbortError(
+        deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+      )
+    }
     if (session.diagnostics.length > 0) {
       const err = diagnosticStderr(node, session)
       const existing = await io.materializeStderr()
@@ -437,7 +575,9 @@ async function executeNodeBody(
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
   if (deps.signal?.aborted === true || session.abortSignal?.aborted === true) {
-    throw makeAbortError()
+    throw makeAbortError(
+      deps.signal?.aborted === true ? deps.signal : (session.abortSignal ?? undefined),
+    )
   }
   session.errexitImmune = false
 
@@ -543,71 +683,22 @@ async function executeNodeBody(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    if (command !== null && command.type === NT.LIST) {
-      // tree-sitter hoists a trailing redirect over the whole &&/||
-      // list; bash binds it to the last command:
-      //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
-      // Re-associate and defer target expansion until R runs, so
-      // `cd /x && echo hi > f` writes under /x. Compound and subshell
-      // bodies keep the whole-body redirect (bash group semantics).
-      const [left, op, right] = getListParts(command)
-      const wrapped = recurseReassociated.bind(
-        null,
-        recurse,
-        dispatch,
-        executeFn,
-        registry,
-        redirects,
-        right,
-      )
-      return handleConnection(wrapped, left, op, right, session, stdin, callStack)
-    }
-    if (command !== null && command.type === NT.PIPELINE) {
-      const [commands, stderrFlags] = getPipelineCommands(command)
-      const right = commands[commands.length - 1]
-      if (right === undefined) throw new Error('redirected pipeline: missing command')
-      const wrapped = recurseReassociated.bind(
-        null,
-        recurse,
-        dispatch,
-        executeFn,
-        registry,
-        redirects,
-        right,
-      )
-      return handlePipe(wrapped, commands, stderrFlags, session, stdin, callStack)
-    }
-    const [expandedRedirects, pipeNode] = await expandRedirects(
-      redirects,
-      session,
-      executeFn,
-      registry,
-      callStack,
-      sessionView(session, registry.policies),
-    )
-    // `exec > file` with no command installs the redirects on the shell
-    // for every later statement, rather than applying them to one
-    // command. `exec cmd > file` still has a command and falls through
-    // to the ordinary path, which refuses the command form.
-    if (isBareExec(command)) {
-      return await installExecRedirects(dispatch, session, expandedRedirects)
-    }
-    let [stdout, io, execNode] = await handleRedirect(
+    // The `&&`/`||` steps a heredoc's operator line carried
+    // (`false <<EOF || echo x`) wrap the whole statement, hoisted list
+    // and all, exactly as a `list` node would have wrapped it had the
+    // parser read the line the way bash does.
+    const continuation = takeContinuation(redirects)
+    const runLeft = runRedirected.bind(
+      null,
       recurse,
       dispatch,
+      executeFn,
+      registry,
       command,
-      expandedRedirects,
-      session,
-      stdin,
-      callStack,
+      redirects,
     )
-    if (pipeNode !== null && stdout !== null) {
-      const [stdout2, io2, execNode2] = await recurse(pipeNode, session, stdout, callStack)
-      stdout = stdout2
-      io = await io.merge(io2)
-      execNode = execNode2
-    }
-    return [stdout, io, execNode]
+    if (continuation.length === 0) return runLeft(session, stdin, callStack)
+    return runContinuation(recurse, runLeft, node, continuation, session, stdin, callStack)
   }
 
   if (kind === NodeKind.SUBSHELL) {
@@ -843,6 +934,7 @@ async function executeNodeBody(
         agentId,
         deps.handed ?? null,
         registry.decisions,
+        mergeSignals(deps.signal, session.abortSignal),
       )
     }
     return handleFor(

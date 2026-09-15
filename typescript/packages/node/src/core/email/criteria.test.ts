@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { listMessageUids, lockMailbox, parseSearchCriteria } from './client.ts'
+import { listMessageUids, lockMailbox, parseSearchCriteria, quoteString } from './client.ts'
 
 // The IMAP criteria string is the cross-language contract: python hands
 // it straight to imaplib, node has to rebuild imapflow's search object
@@ -150,5 +150,30 @@ describe('mailbox and search failures', () => {
     await expect(listMessageUids(accessor as never, 'INBOX', 'SEEN')).rejects.toThrow(
       'IMAP rejected the search',
     )
+  })
+})
+
+describe('quoteString', () => {
+  it('escapes the two quoted-specials and nothing else', () => {
+    expect(quoteString('say "hi"')).toBe('"say \\"hi\\""')
+    expect(quoteString('back\\slash')).toBe('"back\\\\slash"')
+    expect(quoteString('plain words')).toBe('"plain words"')
+    expect(quoteString('会議の記録')).toBe('"会議の記録"')
+  })
+
+  it('round-trips through the criteria tokenizer', () => {
+    // The encoder and the decoder are the two halves of one contract:
+    // whatever the search builder spells, the client has to read back
+    // as the same value, quotes and backslashes included (#1067).
+    for (const value of ['say "hi"', 'a\\b', '', 'x "y" \\ z', 'tail\\']) {
+      expect(parseSearchCriteria(`TEXT ${quoteString(value)}`)).toEqual({ text: value })
+    }
+  })
+
+  it('refuses a line break, which a quoted string cannot carry', () => {
+    // RFC 3501 has no escape for CR or LF inside a quoted string; on the
+    // wire one would end the command line early.
+    expect(() => quoteString('two\nlines')).toThrow('line break')
+    expect(() => quoteString('two\rlines')).toThrow('line break')
   })
 })

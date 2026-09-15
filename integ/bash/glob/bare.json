@@ -1,0 +1,208 @@
+{
+  "cases": [
+    {
+      "id": "glob_bare_prep",
+      "seq": 940070,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shopt -u failglob nullglob dotglob && mkdir -p /data/gbs/2026-09-10 /data/gbs/2026-09-11 && printf 'x\\n' | tee /data/gbs/2026-09-10/.keep > /dev/null && printf 'x\\n' | tee /data/gbs/2026-09-11/.keep > /dev/null && printf 'plain\\n' | tee /data/gbs/plain.txt > /dev/null && printf 'x\\n' | tee /data/gbs/.hidden > /dev/null && cd /data/gbs",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_bare_star_lists_the_directory",
+      "seq": 940071,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '<%s>\\n' *",
+      "expect": {
+        "exit": 0,
+        "stdout": "<2026-09-10>\n<2026-09-11>\n<plain.txt>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_bare_star_drives_a_loop",
+      "seq": 940072,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for f in *; do printf '[%s]' \"$f\"; done; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "[2026-09-10][2026-09-11][plain.txt]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_bare_pattern_without_a_name_character",
+      "seq": 940073,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '<%s>\\n' *-* ?lain.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "<2026-09-10>\n<2026-09-11>\n<plain.txt>\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_quoted_star_stays_literal",
+      "seq": 940074,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '<%s>\\n' '*' \"*\" \\*; expr 4 '*' 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "<*>\n<*>\n<*>\n12\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "glob_bare_star_inside_an_assignment_is_literal",
+      "seq": 940075,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=*; printf '<%s>\\n' \"$x\"; case abc in *) echo matched;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "<*>\nmatched\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

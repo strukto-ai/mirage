@@ -17,12 +17,10 @@ from dataclasses import replace
 from typing import ClassVar
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.errors import UnsupportedExecutionError
-from mirage.runtime.resolver import MountResolver
-from mirage.runtime.types import (CodeExecution, DispatchFn, ExecutionRequest,
-                                  Language, RunArgs, RunResult,
-                                  RuntimeCapabilities, RuntimeContext)
+from mirage.runtime.types import (CodeExecution, ExecutionRequest, Language,
+                                  RunArgs, RunResult, RuntimeCapabilities,
+                                  RuntimeContext)
 
 
 class LanguageRuntime(Runtime):
@@ -41,14 +39,9 @@ class LanguageRuntime(Runtime):
     inherit it from their language tier (PythonRuntime, JsRuntime)
     rather than declaring it per class.
 
-    How an implementation sees workspace files is its own concern: a
-    sandboxed interpreter bridges file I/O through the workspace
-    dispatch attached here, while a host subprocess only sees the host
-    filesystem and keeps the default no-op attach.
-
     A host adapter receives data, namespace and gated session views through
-    WorkspaceBinding and its per-execution RuntimeContext. Existing engines
-    use attach for their filesystem bridge. Guests receive only RunArgs.env,
+    WorkspaceBinding and its per-execution RuntimeContext. Guests receive
+    only RunArgs.env,
     a copy whose writes do not mutate the Mirage session; the adapter must
     explicitly use the gated SessionView for any intended session write.
     """
@@ -58,10 +51,6 @@ class LanguageRuntime(Runtime):
     @property
     def capabilities(self) -> RuntimeCapabilities:
         return replace(super().capabilities, languages=(self.language, ))
-
-    def bind(self, binding: WorkspaceBinding) -> None:
-        super().bind(binding)
-        self.attach(binding.dispatch, binding.resolver)
 
     async def _execute(self, request: ExecutionRequest,
                        context: RuntimeContext | None) -> RunResult:
@@ -87,21 +76,6 @@ class LanguageRuntime(Runtime):
             stdout=b"",
             stderr=f"{self.name}: version information unavailable\n".encode(),
             exit_code=1)
-
-    def attach(self, dispatch: DispatchFn, resolver: MountResolver) -> None:
-        """Late-wire workspace I/O into a user-constructed instance.
-
-        Config-built and user-passed runtimes exist before the
-        workspace they serve, so the workspace attaches its dispatch
-        at construction. Runtimes that never touch workspace files (a
-        host subprocess) keep the default no-op.
-
-        Args:
-            dispatch (DispatchFn): workspace op dispatch the sandboxed
-                runtime bridges file I/O through.
-            resolver (MountResolver): the workspace mount routing
-                table, read per run.
-        """
 
     @abstractmethod
     async def run(self, args: RunArgs) -> RunResult:

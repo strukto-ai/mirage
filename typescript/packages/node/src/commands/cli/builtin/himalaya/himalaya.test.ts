@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type * as ClientModule from '../../../../core/email/client.ts'
+import {
+  fetchHeaders,
+  listMessageUids,
+  type FetchedMessage,
+} from '../../../../core/email/client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type { CLIDoors } from '@struktoai/mirage-core/commands/cli/types'
@@ -20,6 +26,7 @@ import type { IOResult } from '@struktoai/mirage-core/io/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { EmailAccessor } from '../../../../accessor/email.ts'
+import { EmailResource } from '../../../../resource/email/email.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { Workspace } from '../../../../workspace.ts'
@@ -47,7 +54,10 @@ const appendMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./smtp.ts', () => ({ sendRaw: sendRawMock }))
 
-vi.mock('../../../../core/email/client.ts', () => ({
+// The real `quoteString` rides along: the query compiler spells its
+// patterns through it, and a stub would have to re-implement RFC 3501.
+vi.mock('../../../../core/email/client.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof ClientModule>()),
   listFolderEntries: listFolderEntriesMock,
   fetchRawMessage: vi.fn(() => Promise.resolve(new TextEncoder().encode('From: a@x\r\n\r\nbody'))),
   fetchMessage: vi.fn(() => Promise.resolve(ORIGINAL)),
@@ -749,8 +759,13 @@ describe('himalaya verbs', () => {
     const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
     // INTERNALDATE only picks the date directory; it is not an envelope
-    // field, and every envelope renders through the mount's renderer.
+    // field.
     expect(rows.every((r) => !('internalDate' in r))).toBe(true)
+    // Nor is the body: a listing is header-only, and `message read` and the
+    // mounted .email.json are where the body lives (#1067).
+    expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
+    expect(rows.every((r) => !('snippet' in r))).toBe(true)
+    expect(rows.map((r) => r.subject)).toEqual(['alpha', 'beta'])
     expect(closeSpy).toHaveBeenCalledTimes(1)
     closeSpy.mockRestore()
   })
@@ -766,8 +781,9 @@ describe('himalaya verbs', () => {
       stdin: null,
       env: {},
     })) as [Uint8Array, IOResult]
-    const rows = JSON.parse(decode(await materialize(out))) as { uid: string }[]
+    const rows = JSON.parse(decode(await materialize(out))) as Record<string, unknown>[]
     expect(rows.map((r) => r.uid)).toEqual(['2', '1'])
+    expect(rows.every((r) => !('body_text' in r) && !('body_html' in r))).toBe(true)
     closeSpy.mockRestore()
   })
 })
@@ -821,5 +837,117 @@ describe('himalaya dispatch', () => {
       "himalaya: 'move' is not a himalaya message command. See 'himalaya message --help'.\n",
     )
     await ws.close()
+  })
+})
+
+describe('himalaya writes and a mounted account', () => {
+  // The CLI and a mount are two doors to one account, so a message the CLI
+  // files has to show in the mount's listing without waiting out the index
+  // TTL. The mailbox here is test state; the resource, the CLI, the workspace
+  // and its caches are the real ones.
+  const store = new Map<string, string[]>()
+  const added = new Map<string, unknown>()
+  let nextUid = 100
+
+  function file(folder: string, raw: Uint8Array): void {
+    const subject = /^Subject: (.*?)\r?$/m.exec(new TextDecoder().decode(raw))?.[1] ?? ''
+    const uid = String(++nextUid)
+    added.set(uid, {
+      ...ORIGINAL,
+      uid,
+      subject,
+      date: 'Mon, 14 Sep 2026 10:00:00 +0000',
+      internalDate: '2026-09-14T10:00:00.000Z',
+    })
+    const uids = store.get(folder) ?? []
+    uids.push(uid)
+    store.set(folder, uids)
+  }
+
+  function workspace(): Workspace {
+    const ws = new Workspace({
+      '/mail': new EmailResource(CONFIG),
+      '/alias': new EmailResource(CONFIG),
+    })
+    ws.registerCli('himalaya', HIMALAYA, CONFIG)
+    return ws
+  }
+
+  async function out(ws: Workspace, line: string): Promise<string> {
+    const io = await ws.execute(line)
+    expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
+    return new TextDecoder().decode(io.stdout)
+  }
+
+  beforeEach(() => {
+    store.clear()
+    added.clear()
+    nextUid = 100
+    file('INBOX', new TextEncoder().encode('Subject: Older\r\n\r\n'))
+    vi.mocked(listMessageUids).mockImplementation((_accessor, folder) =>
+      Promise.resolve([...(store.get(folder) ?? [])]),
+    )
+    vi.mocked(fetchHeaders).mockImplementation((_accessor, _folder, uids) =>
+      Promise.resolve(uids.map((uid) => added.get(uid) ?? HEADERS[uid]) as FetchedMessage[]),
+    )
+    appendMock.mockImplementation((folder: string, raw: Uint8Array) => {
+      file(folder, raw)
+      return Promise.resolve({ destination: folder })
+    })
+    // The mount lists folders through the client's own LIST, which the
+    // module mock above cannot intercept from inside the module.
+    vi.spyOn(EmailAccessor.prototype, 'getImap').mockResolvedValue({
+      append: appendMock,
+      list: () =>
+        Promise.resolve([
+          { pathAsListed: 'INBOX', specialUse: null },
+          { pathAsListed: 'Sent', specialUse: '\\Sent' },
+        ]),
+    } as unknown as Awaited<ReturnType<EmailAccessor['getImap']>>)
+    sendRawMock.mockResolvedValue({
+      to: [{ name: '', email: 'r@example.invalid' }],
+      subject: 'Copy',
+    })
+  })
+
+  afterEach(() => {
+    vi.mocked(listMessageUids).mockImplementation(() => Promise.resolve(['1', '2']))
+    vi.mocked(fetchHeaders).mockImplementation((_accessor, _folder, uids) =>
+      Promise.resolve(uids.map((uid) => HEADERS[uid]) as FetchedMessage[]),
+    )
+  })
+
+  it('a saved message reaches every listed mount of the account', async () => {
+    const ws = workspace()
+    try {
+      expect(await out(ws, 'ls /mail/Sent')).toBe('')
+      expect(await out(ws, 'ls /alias/Sent')).toBe('')
+      await out(
+        ws,
+        'himalaya message compose --to r@example.invalid --subject Example --body Hello --save Sent',
+      )
+      expect(await out(ws, 'ls /mail/Sent')).toBe('2026-09-14\n')
+      expect(await out(ws, 'find /alias -type f')).toContain(
+        '/alias/Sent/2026-09-14/Example__102.email.json\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a sent copy lands in a listed folder that already had mail', async () => {
+    const ws = workspace()
+    try {
+      expect(await out(ws, 'ls /mail/INBOX/2026-09-14')).toBe('Older__101.email.json\n')
+      await out(
+        ws,
+        'himalaya message compose --to r@example.invalid --subject Copy --body Hello --send --save INBOX',
+      )
+      expect(await out(ws, 'ls /mail/INBOX/2026-09-14')).toBe(
+        'Copy__102.email.json\nOlder__101.email.json\n',
+      )
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -29,11 +29,15 @@ HEADERS = {
         "uid": "1",
         "subject": "beta",
         "date": "Mon, 02 Feb 2026 10:00:00 +0000",
+        "body_text": "beta body",
+        "body_html": "<p>beta body</p>",
     },
     "2": {
         "uid": "2",
         "subject": "alpha",
         "date": "Tue, 03 Feb 2026 10:00:00 +0000",
+        "body_text": "alpha body",
+        "body_html": "<p>alpha body</p>",
     },
 }
 
@@ -123,3 +127,12 @@ async def test_an_explicit_sort_widens_the_fetch_to_the_account_window(
     await search_envelopes(
         CLIInvocation(CONFIG, texts=("order", "by", "subject")))
     assert patched["budget"] == CONFIG.max_messages
+
+
+@pytest.mark.asyncio
+async def test_search_results_are_header_only_like_list(patched):
+    out, _ = await search_envelopes(
+        CLIInvocation(CONFIG, texts=("subject", "alpha")))
+    data = json.loads(await materialize(out))
+    assert [d["subject"] for d in data] == ["alpha", "beta"]
+    assert all("body_text" not in d and "body_html" not in d for d in data)

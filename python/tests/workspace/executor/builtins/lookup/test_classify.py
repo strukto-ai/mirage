@@ -14,6 +14,8 @@ class FakeRegistry:
 
     def __init__(self, commands: set[str], with_cli: bool = False):
         self._commands = commands
+        self.runtime_bindings = {}
+        self.runtime_unavailable = {}
         self.clis = CLIRegistry()
         if with_cli:
             self.clis.install("linear", TREE)

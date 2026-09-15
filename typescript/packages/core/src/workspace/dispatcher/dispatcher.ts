@@ -26,6 +26,7 @@ import {
   eexist,
   einval,
   enoent,
+  enotempty,
   isMissError,
   isMissingOp,
   type FsError,
@@ -242,6 +243,19 @@ export class Dispatcher {
           throw eacces(path.virtual)
         }
       }
+    }
+    if (
+      opName === 'rename' &&
+      dstArg instanceof PathSpec &&
+      this.namespace.linkStatsBelow(dstArg.virtual).length > 0
+    ) {
+      // rename(2) replaces a destination directory only when it is empty, and
+      // the node table is half of what empty means here: a link is invisible to
+      // every backend, so a destination the backend reads as empty can still
+      // hold one. Left to the backend the rename succeeded and the purge below
+      // then deleted the link with it, losing namespace state silently where
+      // POSIX promises ENOTEMPTY.
+      throw enotempty(dstArg.virtual)
     }
     if (this.tableAnswers(opName, path.virtual, kwargs)) {
       return [
@@ -471,13 +485,27 @@ export class Dispatcher {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
       await this.invalidateAfterWriteByPath(p.virtual, observed)
       if (renameDst !== null) {
-        await this.invalidateAfterWriteByPath(renameDst.virtual)
+        await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
         // rename(2) replaces the destination, so a node the table holds
         // at that name does not survive the move. A link left there
         // shadowed the file that had just landed: the listing showed the
         // new file, every read followed the old link, and the moved
         // content was reachable under no name at all.
         await this.namespace.unlink(renameDst.virtual)
+        // The subtree moves with it, and only the node table can move the
+        // part of it no backend holds: a link or an attr overlay below the
+        // source is addressed by absolute path, so it would otherwise stay
+        // behind at a name the rename has emptied. The destination's own
+        // subtree is replaced first, as rename(2) replaces what it lands on.
+        await this.namespace.purgeUnder(renameDst.virtual)
+        // The node at the source itself is not part of the subtree below it,
+        // so re-anchoring that subtree leaves it behind: the mode or ownership
+        // a chmod recorded stayed at the emptied name, never reached the
+        // landing, and was inherited by whatever was created at the old name
+        // next. Shell mv compensates for this in its own prepare step; a verb
+        // reaching the dispatcher directly, as git mv does, had nothing to.
+        await this.namespace.rename(p.virtual, renameDst.virtual)
+        await this.namespace.renameUnder(p.virtual, renameDst.virtual)
       }
     }
     if (opName === 'stat' && result instanceof FileStat) {
@@ -1017,6 +1045,26 @@ export class Dispatcher {
     await this.cache.clear()
   }
 
+  /**
+   * The cache manager that owns a mount's listings and bodies.
+   *
+   * One manager for both halves, as Python's invalidate_after_write does: it
+   * is what knows the file cache is keyed mount-absolute while the index may
+   * not be, and evicting the index inline here spelled the key the other way
+   * and missed.
+   */
+  private managerFor(mount: MountEntry): CacheManager {
+    return (
+      mount.cacheManager ??
+      new CacheManager(
+        this.cache,
+        mount.resource.index ?? null,
+        mount.prefix,
+        cachesReads(mount.resource),
+      )
+    )
+  }
+
   async invalidateAfterWriteByPath(rawPath: string, observed: number | null = null): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
@@ -1026,20 +1074,29 @@ export class Dispatcher {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
     await this.namespace.clearTimes(path, observed)
-    // One manager for both halves, as Python's invalidate_after_write
-    // does: it is what knows the file cache is keyed mount-absolute while
-    // the index may not be, and evicting the index inline here spelled
-    // the key the other way and missed.
-    const manager =
-      mount.cacheManager ??
-      new CacheManager(
-        this.cache,
-        mount.resource.index ?? null,
-        mount.prefix,
-        cachesReads(mount.resource),
-      )
+    const manager = this.managerFor(mount)
     await manager.invalidateAfterWrite(path)
     await manager.invalidateAncestors(path)
+  }
+
+  /**
+   * Drop everything cached below both ends of a rename.
+   *
+   * A rename re-anchors the whole subtree under its source, so the listings
+   * and bodies cached one level down under either name are stale, not just the
+   * two paths and their parents. Evicting only those left a moved directory's
+   * old name answering `stat` and `ls` from its cached children, so the next
+   * rename onto that name saw a directory that was no longer there.
+   */
+  async invalidateAfterRenameByPath(source: string, dst: string): Promise<void> {
+    const from = rstripSlash(source) || '/'
+    const to = rstripSlash(dst) || '/'
+    const mount = this.namespace.tryMountFor(from)
+    if (mount === null) return
+    const manager = this.managerFor(mount)
+    await manager.invalidateSubtree(from)
+    await manager.invalidateSubtree(to)
+    await manager.invalidateAncestors(to)
   }
 
   // The file cache only holds paths for read-caching mounts, mirroring

@@ -168,3 +168,36 @@ async def test_rg_invert_flag_defers_to_generic():
                  CommandOpts(index=RAMIndexCacheStore(), flags={"v": True}))
     search.assert_not_awaited()
     generic.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rg_alternation_defers_to_generic():
+    # No literal is required by every match of `parser|percent`, and IMAP
+    # TEXT is a substring search, so the push-down cannot narrow it: the
+    # generic scan runs instead of answering exit 1 (#1067).
+    accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
+    with patch("mirage.commands.builtin.email.rg.search_messages",
+               new=AsyncMock(return_value=[])) as search, \
+            patch("mirage.commands.builtin.email.rg.resolve_glob",
+                  new=AsyncMock(return_value=[])), \
+            patch("mirage.commands.builtin.email.rg.generic_rg",
+                  new=AsyncMock(return_value=(b"", IOResult()))) as generic:
+        await rg(accessor, [_path()], ["parser|percent"],
+                 CommandOpts(index=RAMIndexCacheStore(), flags={}))
+    search.assert_not_awaited()
+    generic.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_rg_regex_hands_the_server_its_required_literal():
+    # `worker.3` matches `worker-3`; the server is asked for `worker`.
+    accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
+    search = AsyncMock(return_value=[])
+    with patch("mirage.commands.builtin.email.rg.search_messages",
+               new=search), \
+            patch("mirage.commands.builtin.email.rg.resolve_glob",
+                  new=AsyncMock(side_effect=AssertionError("glob ran"))):
+        _, io = await rg(accessor, [_path()], ["worker.3"],
+                         CommandOpts(index=RAMIndexCacheStore()))
+    assert io.exit_code == 1
+    assert search.await_args.kwargs["text"] == "worker"

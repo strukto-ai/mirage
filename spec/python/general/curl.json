@@ -18,36 +18,43 @@
   "options": [
     {
       "description": "Add a custom header to the request.",
+      "long": "--header",
       "short": "-H",
       "type": "str"
     },
     {
       "description": "Set the User-Agent header.",
+      "long": "--user-agent",
       "short": "-A",
       "type": "str"
     },
     {
       "description": "Specify the HTTP request method.",
+      "long": "--request",
       "short": "-X",
       "type": "str"
     },
     {
       "description": "Send the given data as the request body.",
+      "long": "--data",
       "short": "-d",
       "type": "str"
     },
     {
       "description": "Submit a multipart/form-data field.",
+      "long": "--form",
       "short": "-F",
       "type": "str"
     },
     {
       "description": "Write response body to the given file.",
+      "long": "--output",
       "short": "-o",
       "type": "path"
     },
     {
       "description": "Follow HTTP redirects.",
+      "long": "--location",
       "short": "-L",
       "type": "bool"
     },
@@ -59,16 +66,44 @@
     },
     {
       "description": "Run silently with no progress or messages.",
+      "long": "--silent",
       "short": "-s",
       "type": "bool"
     },
     {
       "description": "Show errors even when silent.",
+      "long": "--show-error",
       "short": "-S",
       "type": "bool"
+    },
+    {
+      "description": "Dump the request and response headers on stderr.",
+      "long": "--verbose",
+      "short": "-v",
+      "type": "bool"
+    },
+    {
+      "description": "Include the response headers in the output.",
+      "long": "--include",
+      "short": "-i",
+      "type": "bool"
+    },
+    {
+      "description": "Fetch the headers only.",
+      "long": "--head",
+      "short": "-I",
+      "type": "bool"
+    },
+    {
+      "description": "Give up after this many seconds.",
+      "long": "--max-time",
+      "short": "-m",
+      "type": "float"
     }
   ],
-  "rest": {
-    "type": "str"
-  }
+  "positional": [
+    {
+      "type": "str"
+    }
+  ]
 }

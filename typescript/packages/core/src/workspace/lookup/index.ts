@@ -23,5 +23,13 @@ export {
   readsSubtrees,
   walksMounts,
 } from './constants.ts'
-export { commandVisible, isTool, listed, lookup, lookupAll, verbVisible } from './lookup.ts'
+export {
+  commandVisible,
+  isTool,
+  listed,
+  lookup,
+  lookupAll,
+  runtimeRefused,
+  verbVisible,
+} from './lookup.ts'
 export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

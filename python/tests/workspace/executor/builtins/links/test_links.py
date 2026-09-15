@@ -6,7 +6,8 @@ from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.links import (accepts_line,
                                                       follow_parent,
-                                                      follow_paths, link_flags)
+                                                      follow_paths, link_flags,
+                                                      prepare_mv)
 
 
 def _ws() -> Workspace:
@@ -259,3 +260,57 @@ async def test_one_read_only_mount_speaks_once():
         assert r.stderr == b"rm: read-only mount at /data/\n", line
     assert ws.namespace.is_link("/data/l1")
     assert ws.namespace.is_link("/data/l2")
+
+
+@pytest.mark.asyncio
+async def test_prepare_mv_hands_back_the_pair_whatever_the_table_holds():
+    # Gated on the source carrying overlay attrs, the pair was withheld
+    # for a directory whose own node is empty, and every link below it
+    # stayed at the emptied name: readable nowhere, since the backend
+    # holds no entry for a link at all.
+    ws = _ws()
+    await ws.execute("mkdir -p /data/d; printf 't\\n' > /data/t")
+    await ws.execute("ln -s /data/t /data/d/link")
+    _items, unlinked, renamed, early = await prepare_mv(
+        ws.namespace, ws.dispatch, [
+            PathSpec.from_str_path("/data/d"),
+            PathSpec.from_str_path("/data/moved")
+        ], ("/data/d", "/data/moved"), "/")
+    assert early is None
+    assert unlinked == "/data/moved"
+    assert renamed == ("/data/d", "/data/moved")
+
+
+@pytest.mark.asyncio
+async def test_prepare_mv_reads_the_destination_off_the_parsed_line():
+    # -T names the destination outright, so the basename is not appended
+    # to it, and -t makes every positional a source, which is the shape
+    # a two-operand pair cannot describe at all.
+    ws = _ws()
+    await ws.execute("mkdir -p /data/dst; printf 'a\\n' > /data/a")
+    pair = [
+        PathSpec.from_str_path("/data/a"),
+        PathSpec.from_str_path("/data/dst")
+    ]
+    _items, _unlinked, renamed, _early = await prepare_mv(
+        ws.namespace, ws.dispatch, pair, ("/data/a", "/data/dst"), "/")
+    assert renamed == ("/data/a", "/data/dst/a")
+    _items, _unlinked, no_target, _early = await prepare_mv(
+        ws.namespace, ws.dispatch, pair, ("-T", "/data/a", "/data/dst"), "/")
+    assert no_target == ("/data/a", "/data/dst")
+    _items, _unlinked, target_dir, _early = await prepare_mv(
+        ws.namespace, ws.dispatch, pair, ("-t", "/data/dst", "/data/a"), "/")
+    assert target_dir is None
+
+
+@pytest.mark.asyncio
+async def test_a_link_below_a_renamed_directory_moves_with_it():
+    ws = _ws()
+    await ws.execute("mkdir -p /data/d; printf 't\\n' > /data/t")
+    await ws.execute("ln -s /data/t /data/d/link")
+    assert (await ws.execute("mv /data/d /data/moved")).exit_code == 0
+    read = await ws.execute("readlink /data/moved/link")
+    assert read.exit_code == 0
+    assert read.stdout == b"/data/t\n"
+    assert (await ws.execute("cat /data/moved/link")).stdout == b"t\n"
+    assert (await ws.execute("readlink /data/d/link")).exit_code != 0

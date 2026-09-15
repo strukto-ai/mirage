@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../../types.ts'
 import { GhConfigSchema } from '../../../../core/github/config.ts'
 import { CLISpec } from '../../types.ts'
 import { Operand, Option } from '../../../spec/types.ts'
@@ -474,7 +473,6 @@ export const GH = new CLISpec({
   name: 'gh',
   description: 'GitHub CLI',
   configModel: GhConfigSchema,
-  serves: [ResourceName.GITHUB],
   subcommands: [
     new CLISpec({
       name: 'api',

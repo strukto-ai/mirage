@@ -90,6 +90,6 @@ export const ARITH_OPERATORS: ReadonlySet<string> = new Set([
   '--',
 ])
 
-// Arithmetic delimiter tokens that mark the start/end of $((...)) and
+// Arithmetic delimiter tokens that mark the start/end of $((...)), $[...], and
 // the (( ... )) arithmetic command.
-export const ARITH_DELIMITERS: ReadonlySet<string> = new Set(['$((', '((', '))'])
+export const ARITH_DELIMITERS: ReadonlySet<string> = new Set(['$((', '((', '))', '$[', ']'])

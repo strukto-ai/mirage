@@ -13,11 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Runtime } from './base.ts'
-import type { WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import type { MountResolver } from './resolver.ts'
 import type {
-  BridgeDispatchFn,
   ExecutionRequest,
   RunArgs,
   RunResult,
@@ -42,14 +39,9 @@ import type {
  * their language tier (PythonRuntime, JsRuntime) rather than declaring
  * it per class.
  *
- * How an implementation sees workspace files is its own concern: a
- * sandboxed interpreter bridges file I/O through the workspace
- * dispatch attached here, while a host subprocess only sees the host
- * filesystem and keeps the default no-op attach.
- *
  * A host adapter receives data, namespace and gated session views through
- * WorkspaceBinding and its per-execution RuntimeContext. Existing engines
- * use attach for their filesystem bridge. Guests receive only RunArgs.env,
+ * WorkspaceBinding and its per-execution RuntimeContext. Guests receive
+ * only RunArgs.env,
  * a copy whose writes do not mutate the Mirage session; the adapter must
  * explicitly use the gated SessionView for any intended session write.
  */
@@ -58,11 +50,6 @@ export abstract class LanguageRuntime extends Runtime {
 
   override get capabilities(): RuntimeCapabilities {
     return { ...super.capabilities, languages: [this.language] }
-  }
-
-  override bind(binding: WorkspaceBinding): void {
-    super.bind(binding)
-    this.attach(binding.dispatch, binding.resolver)
   }
 
   protected override async executeRequest(
@@ -94,15 +81,6 @@ export abstract class LanguageRuntime extends Runtime {
       stderr: new TextEncoder().encode(`${this.name}: version information unavailable\n`),
       exitCode: 1,
     })
-  }
-
-  /**
-   * Late-wire workspace I/O into a user-constructed instance. The
-   * workspace attaches its dispatch at construction; runtimes that
-   * never touch workspace files keep the default no-op.
-   */
-  attach(_dispatch: BridgeDispatchFn, _resolver: MountResolver): void {
-    // runtimes that never touch workspace files keep the no-op
   }
 
   /** Execute one program and return its captured outcome. */

@@ -681,7 +681,7 @@ class LineBox extends Runtime implements LineExecutor {
 }
 
 describe('whole-line runtimes', () => {
-  it('a captured command sends the raw line wholesale', async () => {
+  it('a named capture keeps the pipeline and redirect in Mirage', async () => {
     const parser = await getTestParser()
     const box = new LineBox()
     const ws = new Workspace(
@@ -689,9 +689,12 @@ describe('whole-line runtimes', () => {
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
     )
     try {
-      const result = await ws.execute('nvidia-smi -L | grep GPU > /out.txt')
-      expect(DEC.decode(result.stdout)).toBe('box:nvidia-smi -L | grep GPU > /out.txt')
-      expect(box.lines[0]?.[0]).toBe('nvidia-smi -L | grep GPU > /out.txt')
+      const result = await ws.execute('nvidia-smi -L | grep box > /out.txt')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('')
+      expect(box.lines[0]?.[0]).toBe('nvidia-smi -L')
+      const saved = await ws.execute('cat /out.txt')
+      expect(DEC.decode(saved.stdout)).toBe('box:nvidia-smi -L\n')
     } finally {
       await ws.close()
     }

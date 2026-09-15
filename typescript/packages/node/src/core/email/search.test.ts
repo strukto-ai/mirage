@@ -14,8 +14,9 @@
 
 import { NAME_MAX_BYTES, byteLength } from '@struktoai/mirage-core/utils/sanitize'
 import { describe, expect, it } from 'vitest'
+import { parseSearchCriteria } from './client.ts'
 import { msgFilename } from './readdir.ts'
-import { buildVfsPath } from './search.ts'
+import { buildSearchCriteria, buildVfsPath } from './search.ts'
 
 const CJK_SUBJECT = '会議の記録'.repeat(40)
 const MSG = { subject: CJK_SUBJECT, uid: '7', date: 'Mon, 5 Jan 2026 10:00:00 +0000' }
@@ -37,5 +38,34 @@ describe('email search paths', () => {
         .pop() ?? ''
     expect(byteLength(name)).toBeLessThanOrEqual(NAME_MAX_BYTES)
     expect(name).not.toContain('\uFFFD')
+  })
+})
+
+describe('buildSearchCriteria', () => {
+  it('escapes quotes and backslashes in every text-valued key', () => {
+    // A grep pattern holding a quote used to end the quoted string early,
+    // so the rest of the pattern was read as IMAP search keys (#1067).
+    expect(buildSearchCriteria({ text: 'say "hi"' })).toBe('TEXT "say \\"hi\\""')
+    expect(buildSearchCriteria({ subject: 'a\\b' })).toBe('SUBJECT "a\\\\b"')
+    expect(buildSearchCriteria({ fromAddr: '"Al" <a@x>' })).toBe('FROM "\\"Al\\" <a@x>"')
+    expect(buildSearchCriteria({ toAddr: 'x"y' })).toBe('TO "x\\"y"')
+  })
+
+  it('keeps spaces and unicode', () => {
+    expect(buildSearchCriteria({ text: 'quarterly review' })).toBe('TEXT "quarterly review"')
+    expect(buildSearchCriteria({ subject: '会議の記録' })).toBe('SUBJECT "会議の記録"')
+  })
+
+  it('joins keys and leaves dates bare', () => {
+    expect(buildSearchCriteria({})).toBe('ALL')
+    expect(buildSearchCriteria({ unseen: true, since: '05-Jan-2026', before: '07-Jan-2026' })).toBe(
+      'UNSEEN SINCE 05-Jan-2026 BEFORE 07-Jan-2026',
+    )
+  })
+
+  it('spells a value the client reads back unchanged', () => {
+    expect(parseSearchCriteria(buildSearchCriteria({ text: 'say "hi" \\ done' }))).toEqual({
+      text: 'say "hi" \\ done',
+    })
   })
 })

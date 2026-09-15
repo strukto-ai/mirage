@@ -22,10 +22,20 @@ export const REGULAR = 0o100644
 export const EXECUTABLE = 0o100755
 export const SYMLINK = 0o120000
 export const OWNER_EXECUTE = 0o100
+// The part of a tree entry's mode that is a permission: what a restored
+// entry's own bits are set from, the object type above it being the mount's
+// business rather than the tree's.
+export const PERMISSION_BITS = 0o777
 // The same mode as `SYMLINK`, in the spelling a tree entry carries. The index
 // records a number and a tree records git's octal string, so both spellings
 // are real here and neither is a stand-in for the other.
 export const SYMLINK_MODE = '120000'
+/**
+ * A gitlink: the commit another repository is checked out at. It is not an
+ * object this repository holds, so nothing about it is written into the working
+ * tree; git only makes sure a directory stands at the name.
+ */
+export const GITLINK_MODE = '160000'
 
 // The symbolic ref every verb resolves first.
 export const HEAD = 'HEAD'

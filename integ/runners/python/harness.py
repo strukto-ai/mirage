@@ -17,6 +17,7 @@ import os
 import subprocess
 import tempfile
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -30,6 +31,19 @@ from mirage.types import FileStat, PathSpec
 CASE_DIRS = ("unix", "bash", "crossmount", "resources", "cli", "session",
              "console", "secrets")
 
+# A service entry names the env vars each host needs, and may declare
+# ``shared``: the fake behind it holds ONE world rather than a namespace per
+# run, so two targets on it can never be in flight together. Everything else
+# mints a fresh run id per ``open_target`` and is free to overlap.
+SERVICE_KEYS = frozenset({"python", "typescript", "shared"})
+
+# What runs one target. The pool takes it as an argument so a gate can pass
+# a recorder and watch what actually overlaps, which no end-to-end run can
+# show: every service-free target finishes in one event-loop tick.
+TargetRunner = Callable[
+    [dict, list[dict], Path, "Report | None", "list[dict] | None"],
+    Awaitable[None]]
+
 
 def integ_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -37,7 +51,35 @@ def integ_root() -> Path:
 
 def load_targets(root: Path) -> dict:
     data = json.loads((root / "targets.json").read_text())
+    validate_targets(data)
     return {t["id"]: t for t in data["targets"]}
+
+
+def validate_targets(data: dict) -> list[dict]:
+    """Reject a target whose ``exclusive`` is not a boolean.
+
+    The twin of the ``shared`` check in :func:`validate_services`, and for
+    the same reason: one file is read by two hosts, and a hand-edited
+    ``"exclusive": 1`` would run the target alone on one of them and pool
+    it on the other. That is the failure this key exists to prevent --
+    a secrets target's fetch function replaced under a sibling asserting
+    call counts against it, or opfs swapping ``globalThis.navigator``
+    while another target reads it -- arriving as a typescript-only flake
+    rather than as a manifest error.
+
+    Args:
+        data (dict): the parsed targets.json.
+
+    Returns:
+        list[dict]: the validated target list.
+    """
+    for target in data["targets"]:
+        flag = target.get("exclusive")
+        if flag is not None and not isinstance(flag, bool):
+            raise KeyError(f"targets.json: target {target['id']!r} declares "
+                           f"'exclusive' as {type(flag).__name__}, must be a "
+                           f"boolean")
+    return data["targets"]
 
 
 def load_services(root: Path) -> dict:
@@ -77,9 +119,22 @@ def validate_services(data: dict) -> dict:
         raise KeyError(f"targets.json: services entry names no target: "
                        f"{', '.join(unused)}")
     for name, hosts in services.items():
-        if set(hosts) != {"python", "typescript"}:
+        if not {"python", "typescript"} <= set(hosts):
             raise KeyError(f"targets.json: service {name!r} must declare "
                            f"both 'python' and 'typescript'")
+        unknown = sorted(set(hosts) - SERVICE_KEYS)
+        if unknown:
+            raise KeyError(f"targets.json: service {name!r} declares unknown "
+                           f"key(s): {', '.join(unknown)}")
+        # The value, not only the key. One file is read by two hosts, and
+        # python reads `shared` for truth where typescript reads it for
+        # `=== true`, so a hand-edited `"shared": 1` would serialize the
+        # lane here and pool it there -- two targets on a one-world fake
+        # in flight together, as a typescript-only flake.
+        if "shared" in hosts and not isinstance(hosts["shared"], bool):
+            raise KeyError(f"targets.json: service {name!r} declares "
+                           f"'shared' as {type(hosts['shared']).__name__}, "
+                           f"must be a boolean")
     return services
 
 
@@ -577,16 +632,98 @@ class Report:
     passed: int = 0
     failed: int = 0
     failures: list[str] = field(default_factory=list)
+    # A concurrent run gives every target its own report and absorbs them in
+    # the order the targets were selected, so the printed lines are the serial
+    # run's lines whatever order the targets actually finished in. Streaming is
+    # the default because a serial run should still report as it goes.
+    stream: bool = True
+    lines: list[str] = field(default_factory=list)
 
     def record(self, target: str, case_id: str, diffs: list[str]) -> None:
         if diffs:
             self.failed += 1
             joined = "; ".join(diffs)
             self.failures.append(f"[{target}] {case_id}: {joined}")
-            print(f"FAIL [{target}] {case_id}: {joined}")
+            line = f"FAIL [{target}] {case_id}: {joined}"
         else:
             self.passed += 1
-            print(f"ok   [{target}] {case_id}")
+            line = f"ok   [{target}] {case_id}"
+        if self.stream:
+            print(line)
+        else:
+            self.lines.append(line)
+
+    def absorb(self, other: "Report") -> None:
+        """Fold one target's buffered report into the run's, printing it.
+
+        Args:
+            other (Report): the per-target report to merge and flush.
+        """
+        self.passed += other.passed
+        self.failed += other.failed
+        self.failures.extend(other.failures)
+        for line in other.lines:
+            print(line)
 
     def summary(self) -> str:
         return f"{self.passed} passed, {self.failed} failed"
+
+
+def target_lane(target: dict, services: dict) -> str:
+    """The lane a target holds for its whole run.
+
+    Two targets in one lane are never in flight together. A lane is the
+    SERVICE only when that service is declared ``shared``, because those
+    fakes hold one world: github serves every mount the same repository
+    under one token, and trello, discord and linear re-seed themselves
+    from the fixture on connect. Every other service mints a namespace
+    per ``open_target`` -- gws a ``/_run/<id>`` path, s3 a key prefix,
+    gridfs a database, dropbox an account -- so its targets cannot see
+    each other and get a lane of their own. That distinction is the
+    whole speed of this: gws carries five core targets and s3 three, and
+    they are the slow ones.
+
+    Args:
+        target (dict): the target manifest entry.
+        services (dict): the table from load_services.
+
+    Returns:
+        str: the lane name.
+    """
+    service = target.get("service")
+    if service is not None and services[service].get("shared"):
+        return service
+    return f"solo:{target['id']}"
+
+
+def plan_run(targets: list[dict],
+             services: dict) -> tuple[list[int], list[tuple[int, str]]]:
+    """Split eligible targets into the ones that run alone and the pool.
+
+    A lane bounds a target against its own service's other targets; an
+    ``exclusive`` target is bounded against EVERY other target, because
+    what it touches is process-global rather than server-side. Two
+    kinds carry it today. opfs replaces ``globalThis.navigator`` for the
+    length of the run and restores the previous descriptor afterwards,
+    which no second target may be reading across. The four ``secrets-*``
+    targets publish a fetch function into the process-global source
+    registry under a fixed name, and the healthy one's closes over a
+    per-open counter the cases assert call counts against, so a second
+    target on the same kind would silently replace it. Those run first,
+    one at a time, before the pool opens; all five are small.
+
+    Positions rather than entries, because the caller holds one output
+    slot per position: two ``--target ram`` on one line are two runs, and
+    anything keyed by the entry would merge one slot twice.
+
+    Args:
+        targets (list[dict]): eligible targets, in selection order.
+        services (dict): the table from load_services.
+
+    Returns:
+        tuple: positions that run alone, and (position, lane) for the pool.
+    """
+    alone = [i for i, t in enumerate(targets) if t.get("exclusive") is True]
+    pool = [(i, target_lane(t, services)) for i, t in enumerate(targets)
+            if t.get("exclusive") is not True]
+    return alone, pool

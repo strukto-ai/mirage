@@ -18,7 +18,8 @@ from mirage.ops.config import NamespaceLinks
 from mirage.ops.namespace_view import child_mount_names, namespace_names
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import ExitSignal
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import WALK_ERRORS
 from mirage.utils.glob_walk import (glob_name_matches, glob_pattern, has_glob,
                                     literal_word, spell_match, unmark_globs)
 from mirage.utils.key_prefix import mount_key
@@ -452,6 +453,37 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
     return dataclasses.replace(match, raw_path=spelled)
 
 
+async def _is_directory(registry: MountRegistry, mount: MountEntry,
+                        links: NamespaceLinks | None, virtual: str) -> bool:
+    """Whether a match is a directory, the way a trailing slash asks.
+
+    bash keeps a directory or a symlink to one and drops a regular file
+    or a broken link (bash 5.2, ``*/``). A nested mount root is a
+    directory by construction; anything else is asked of the mount that
+    owns the link-resolved path, one stat per match.
+
+    Args:
+        registry (MountRegistry): registry holding the mount table.
+        mount (MountEntry): the mount owning the typed word.
+        links (NamespaceLinks | None): the namespace symlink table.
+        virtual (str): one match's absolute virtual path.
+    """
+    real = virtual
+    if links is not None:
+        try:
+            real = links.follow(virtual)
+        except CycleError:
+            return False
+    owner = _mount_of(registry, real, mount)
+    if real.rstrip("/") == owner.prefix.rstrip("/"):
+        return True
+    try:
+        row = await owner.execute_op("stat", real)
+    except WALK_ERRORS:
+        return False
+    return isinstance(row, FileStat) and row.type == FileType.DIRECTORY
+
+
 def _has_globstar_segment(item: PathSpec) -> bool:
     """Whether a word holds a segment that is exactly `**`.
 
@@ -501,6 +533,19 @@ async def resolve_globs(
             if mount is None:
                 result.append(item)
                 continue
+            # A trailing slash asks for directories only, and every match
+            # keeps one (`*/` -> `sub/`, and so does `*//`). The slash is
+            # not part of the spelling to rebuild, so it comes off the
+            # word here and goes back on each match; the literal answer
+            # to a zero-match glob is still the word as typed. normpath
+            # already dropped it from `virtual`, which is what tells a
+            # typed word from a directory-shaped spec (#1065).
+            typed = item
+            dirs_only = (item.raw_path.endswith("/")
+                         and item.raw_path != item.virtual)
+            if dirs_only:
+                item = dataclasses.replace(item,
+                                           raw_path=item.raw_path.rstrip("/"))
             prefix = mount.prefix.rstrip("/")
             # Stamp the backend key so readdir addresses the correct
             # resource-relative path.
@@ -540,24 +585,35 @@ async def resolve_globs(
                         _namespace_children(registry, links, directory,
                                             pattern), directory, prefix,
                         registry, mount)
+                if dirs_only:
+                    kept: list[PathSpec] = []
+                    for p in resolved:
+                        if await _is_directory(registry, mount, links,
+                                               _as_spec(p, prefix).virtual):
+                            kept.append(p)
+                    resolved = kept
                 if not resolved:
                     # bash's three answers to a zero-match glob: the
                     # literal word (default), nothing at all under
                     # nullglob, and a fatal expansion error under
                     # failglob, which ends the line like a bad subscript.
                     if opts.failglob:
-                        word = unmark_globs(item.raw_path)
+                        word = unmark_globs(typed.raw_path)
                         raise ExitSignal(
                             1,
                             stderr=f"bash: no match: {word}\n".encode(),
                             contained_code=1)
                     if not opts.nullglob:
-                        result.append(item)
+                        result.append(typed)
                     continue
                 for p in resolved:
-                    result.append(_match_raw(item, _as_spec(p, prefix)))
+                    spelled = _match_raw(item, _as_spec(p, prefix))
+                    if dirs_only:
+                        spelled = dataclasses.replace(
+                            spelled, raw_path=spelled.raw_path + "/")
+                    result.append(spelled)
             except (ValueError, AttributeError, TypeError):
-                result.append(item)
+                result.append(typed)
         elif isinstance(item, PathSpec):
             result.append(item)
         else:

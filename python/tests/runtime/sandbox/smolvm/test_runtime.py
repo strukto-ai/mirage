@@ -17,6 +17,8 @@ import json
 import pytest
 
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
+from mirage.runtime.types import ProcessExecution, ShellExecution
+from mirage.types import PathSpec
 
 
 class FakeSmolvmRuntime(SmolvmRuntime):
@@ -124,3 +126,43 @@ async def test_exec_line_ends_flags_so_a_dashed_line_is_not_parsed():
     args, _ = runtime.calls[-1]
     assert args[-3:] == ["sh", "-c", "--version"]
     assert args[-4] == "--"
+
+
+@pytest.mark.asyncio
+async def test_process_preserves_argv_and_shares_the_shell_connection():
+    runtime = FakeSmolvmRuntime(config={
+        "machine": "vm",
+        "env": {
+            "E": "config"
+        }
+    })
+    argv = ("node", "a b", "$(echo literal)", "", "--flag")
+    result = await runtime.execute(
+        ProcessExecution(argv=argv,
+                         cwd=PathSpec.from_str_path("/work"),
+                         env={"E": "request"},
+                         stdin=b"input"))
+    assert result.stdout == b"out:--flag"
+    assert result.stderr == b"warn"
+    assert runtime.calls[-1] == ([
+        "machine", "exec", "--name", "vm", "-i", "-w", "/work", "-e",
+        "E=request", "--", *argv
+    ], b"input")
+    await runtime.execute(
+        ShellExecution(line="pwd", cwd=PathSpec.from_str_path("/work")))
+    assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
+    assert runtime.capabilities.process and runtime.capabilities.shell
+    assert runtime.capabilities.filesystem == ()
+
+
+@pytest.mark.asyncio
+async def test_process_refuses_a_stopped_vm_and_empty_argv():
+    runtime = FakeSmolvmRuntime(state="stopped", config={"machine": "vm"})
+    with pytest.raises(ValueError, match="argv must not be empty"):
+        await runtime.execute(
+            ProcessExecution(argv=(), cwd=PathSpec.from_str_path("/")))
+    assert not runtime.calls
+    with pytest.raises(RuntimeError, match="not running"):
+        await runtime.execute(
+            ProcessExecution(argv=("node", ), cwd=PathSpec.from_str_path("/")))
+    assert len(runtime.calls) == 1

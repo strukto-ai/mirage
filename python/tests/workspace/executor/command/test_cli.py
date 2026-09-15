@@ -25,14 +25,17 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
+from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunArgs, RunResult, ScriptSource
 from mirage.shell.variable import VarAttr
-from mirage.types import Limit, PathSpec
+from mirage.types import Limit, MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.cli.types import CLIInstall
-from mirage.workspace.executor.command.cli import CLIContext, handle_cli
+from mirage.workspace.executor.command.cli import (CLIContext,
+                                                   drops_mount_caches,
+                                                   handle_cli)
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.session import Session
 from mirage.workspace.session.state import seed_var, set_attr
@@ -204,6 +207,29 @@ async def test_leaf_limit_bounds_the_handler():
     install = CLIInstall(name="prog", spec=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="prog run"):
         await handle_cli(install, ["prog", "run"], Session("t"))
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_write_still_drops_the_caches():
+    # asyncio cancels the leaf, but a request it already sent may have
+    # been accepted, and the service will not roll it back.
+    dropped = []
+
+    async def drop():
+        dropped.append(True)
+
+    spec = CLISpec(name="prog",
+                   config_model=TokenConfig,
+                   subcommands=(CLISpec(name="run",
+                                        fn=slow_send,
+                                        write=True,
+                                        limit=Limit(timeout_seconds=0.05)), ))
+    install = CLIInstall(name="prog", spec=spec, config=TokenConfig(token="t"))
+    with pytest.raises(CommandTimeoutError):
+        await handle_cli(install, ["prog", "run"],
+                         Session("t"),
+                         drop_caches=drop)
+    assert dropped == [True]
 
 
 @pytest.mark.asyncio
@@ -685,3 +711,96 @@ async def test_a_leafs_session_write_clears_the_same_gate_the_shell_does():
         assert (await ws.execute("echo $AWS_PROFILE")).stdout == b"\n"
         allowed = await ws.execute("stash OTHER fine")
         assert allowed.exit_code == 0
+
+
+def _out_of_band_writer(root):
+    """A leaf that reaches its service past every mount, as an account
+    CLI does: the file lands on disk, and no vfs path was touched."""
+
+    async def leaf(inv: CLIInvocation):
+        (root / "made.txt").write_bytes(b"made\n")
+        return b"ok\n", IOResult()
+
+    return leaf
+
+
+def _disk_workspace(root):
+    root.mkdir(exist_ok=True)
+    (root / "a.txt").write_bytes(b"v1\n")
+    disk = DiskResource(root=str(root))
+    disk.caches_reads = True
+    return Workspace({"/data/": disk}, mode=MountMode.WRITE)
+
+
+async def _warm_then_run(ws: Workspace, root, line: str) -> tuple[str, str]:
+    await ws.execute("cat /data/a.txt")
+    await ws.execute("ls /data")
+    (root / "a.txt").write_bytes(b"v2\n")
+    result = await ws.execute(line)
+    assert result.exit_code == 0, result.stderr
+    body = (await ws.execute("cat /data/a.txt")).stdout.decode()
+    listing = (await ws.execute("ls /data")).stdout.decode()
+    return body, listing
+
+
+@pytest.mark.asyncio
+async def test_an_account_cli_write_refreshes_every_mount(tmp_path):
+    # Nothing on the CLI names the mount and nothing on the mount names
+    # the CLI: a write verb on a CLI with a config model is the whole
+    # signal, and the next read of any mount refetches.
+    root = tmp_path / "svc"
+    with _disk_workspace(root) as ws:
+        ws.register_cli(
+            "acme",
+            CLISpec(name="acme",
+                    config_model=TokenConfig,
+                    subcommands=(CLISpec(name="close",
+                                         write=True,
+                                         fn=_out_of_band_writer(root)), )),
+            {"token": "t"})
+        body, listing = await _warm_then_run(ws, root, "acme close")
+        assert body == "v2\n"
+        assert "made.txt" in listing
+
+
+@pytest.mark.asyncio
+async def test_an_account_cli_read_keeps_every_mount_warm(tmp_path):
+    root = tmp_path / "svc"
+    with _disk_workspace(root) as ws:
+        ws.register_cli(
+            "acme",
+            CLISpec(name="acme",
+                    config_model=TokenConfig,
+                    subcommands=(CLISpec(name="peek",
+                                         fn=_out_of_band_writer(root)), )),
+            {"token": "t"})
+        body, listing = await _warm_then_run(ws, root, "acme peek")
+        assert body == "v1\n"
+        assert "made.txt" not in listing
+
+
+@pytest.mark.asyncio
+async def test_a_mount_tier_cli_write_drops_nothing(tmp_path):
+    # A CLI without a config model (git) writes through the dispatcher,
+    # which invalidates the paths it touched as it went; a blanket drop
+    # would only cost every other mount a reload.
+    root = tmp_path / "svc"
+    with _disk_workspace(root) as ws:
+        ws.register_cli(
+            "tool",
+            CLISpec(name="tool",
+                    subcommands=(CLISpec(name="poke",
+                                         write=True,
+                                         fn=_out_of_band_writer(root)), )))
+        body, listing = await _warm_then_run(ws, root, "tool poke")
+        assert body == "v1\n"
+        assert "made.txt" not in listing
+
+
+def test_a_service_reaching_root_drops_mount_caches():
+    # A script root's config is opaque, so it never carries a config
+    # model, yet its program may reach a service exactly as an account
+    # CLI does; only a root with neither writes through the dispatcher.
+    assert drops_mount_caches(make_install().spec)
+    assert drops_mount_caches(script_install().spec)
+    assert not drops_mount_caches(STASH)

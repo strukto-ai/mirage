@@ -98,15 +98,32 @@ git -C /repo branch topic
 git -C /repo branch -d topic
 git -C /repo branch -D topic
 git -C /repo checkout topic
+git -C /repo switch topic
+git -C /repo switch -c feature HEAD~1
+git -C /repo switch --detach HEAD~1
+git -C /repo restore src/main.py
+git -C /repo restore --staged src/main.py
+git -C /repo restore --source HEAD~1 -SW src/main.py
+git -C /repo rm old.py
+git -C /repo rm -r --cached build
+git -C /repo mv src/old.py src/new.py
+git -C /repo tag v1.0
+git -C /repo tag -a v1.1 -m "release"
+git -C /repo tag -d v1.0
 ```
 
-| Verb       | Notes                                                            |
-| ---------- | ---------------------------------------------------------------- |
-| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path |
-| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths        |
-| `commit`   | `-m` required, `--author "Name <email>"` optional                 |
-| `branch`   | `-d` deletes a merged branch, `-D` any branch                     |
-| `checkout` | refuses rather than overwrite work you have not committed         |
+| Verb       | Notes                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `add`      | `-A` everything, `-u` tracked only, `-f` to stage an ignored path                                                                       |
+| `reset`    | mixed only, from HEAD; a pathspec limits it to those paths                                                                              |
+| `restore`  | worktree by default, `--staged` the index, `-SW` both; `--source` takes any tree-ish, spelled as a peel (`HEAD^{tree}`), a subtree (`HEAD:sub`) or a raw id, and is required before the first commit since the implicit HEAD source has nothing to read; a path it lacks is removed from the target, a path still in conflict is named rather than half-restored, a file replaces a directory standing in its place, as it replaces a symlink standing on one of its parents, and a gitlink keeps whatever working tree it has |
+| `rm`       | refuses a path with uncommitted work unless `-f`, a path a symlinked ancestor now hides included; `--cached` keeps the file; `-r` for a directory; `-q`, `--ignore-unmatch`; the index is written only once the working tree is done with, so a deletion the mount refuses leaves the entry staged as it stood |
+| `mv`       | files and directories, `-f` over an existing file and over the conflict stages it was holding, `-k` skips what cannot move, `-n` dry run, `-v`; two sources cannot land on one name, a directory and something inside it cannot both move, an unmerged path moves nowhere as a source, and a move that would cross a mount boundary at either end is refused rather than half-moved |
+| `commit`   | `-m` required, `--author "Name <email>"` optional                                                                                       |
+| `branch`   | `-d` deletes a merged branch, `-D` any branch; a name whose ref path another branch already holds is refused                             |
+| `checkout` | refuses rather than overwrite work you have not committed, an untracked file the target needs the room for included and an index still holding conflict stages too, the branch HEAD already names included, since moving nothing is not the same as having nothing to check |
+| `switch`   | the same move for a branch only; `-c` creates and checks the name against git's ref rules and works before the first commit, `--detach` is the only way onto a bare commit and takes HEAD when nothing is named; a staged addition, deletion or edit both branches agree about is carried across and reported with its status letter |
+| `tag`      | lists sorted, `-l <pattern>`, `-n[<num>]`, where `-n-1` says nothing at all and any count below it is refused; a name is a lightweight tag, `-a`/`-m` an annotated one; any object is a legal target, `HEAD^{tree}`, `HEAD:a.txt`, `v1^{tag}` and `v1^{object}` included, and the type recorded is the one the target really is; a name whose ref path another tag already holds is refused; `-d` deletes atomically, `-f`; a creation option needs a name, and `-n` needs a listing |
 
 `commit` records `mirage <mirage@localhost>` unless `--author` says
 otherwise: git reads `user.name` from config files that a mount does not
@@ -115,8 +132,229 @@ serve, and inventing a name would put an unreviewed one into history.
 ## Deliberate limits
 
 - **No network verbs.** `clone`, `fetch`, `pull` and `push` are absent.
+- **A pathspec that begins with a dash needs `--`.** `git rm -draft` is a
+  refused switch and `git rm -- -draft` removes the file, which is what
+  every synopsis ending `[--] [<pathspec>...]` promises. The marker
+  itself is consumed by the parser, so a verb reading a *revision* still
+  resolves an escaped word as one rather than narrowing by it.
 - **No `reset --hard`.** It destroys uncommitted work with no reflog here
-  to recover it from.
+  to recover it from. `rm` and `restore` are the way to discard a file's
+  changes on purpose, and `rm` refuses unless `-f` says so.
+- **No `switch -`.** The previous branch lives in the reflog, which this
+  build writes but does not read back.
+- **An unmerged index stops a branch move.** Every collision check reads
+  stage 0, so a path held only as conflict stages would be carried past
+  all of them and then cleared. `switch` and `checkout` name each such
+  path and refuse first. Creating a branch where HEAD already is
+  (`switch -c topic`, no start point) moves nothing and is allowed, which
+  is git's own reading of the line.
+- **A branch with no commit is a name and nothing else.** `switch -c topic`
+  before the first commit repoints HEAD and writes neither a ref nor a
+  reflog line, which is how git leaves an unborn branch too. Naming a
+  start point there is a different line and stays unresolvable.
+- **A revision is read left to right.** `~n`, `^n` and `^{<type>}` are
+  operators applied in the order they are written, so `HEAD^{commit}~1`
+  is HEAD's parent, `HEAD~1^{tree}` is that parent's tree, and the two
+  chain further (`HEAD^{commit}~1^{tree}`). A peel was read as a
+  trailing thing until this round, so every chain that went on after one
+  was refused although git takes it. A step off something with no
+  parents is still refused, which is what `HEAD^{tree}~1` is.
+- **`^{tag}` stops above the commit.** Every other peel type sits at or
+  below it, so an annotated tag is unwrapped on the way; `v1^{tag}` is
+  the one spelling that names the tag object itself, and a lightweight
+  tag has none to stop at.
+- **`^{object}` peels nothing.** It is an existence check rather than a
+  type, so it hands back whatever the name resolved to and an annotated
+  tag stays a tag where `^{}` would unwrap it. Every object reports a
+  concrete type, so reading `object` as one refused every expression
+  that spelled it.
+- **A bare object id names that exact object.** Every other spelling of a
+  revision is a commit-ish reading that unwraps an annotated tag, so
+  `restore --source=v1` reads a tree; an id does not, which is how
+  `git tag nested <tag-id>` records the nested tag git itself warns
+  about rather than quietly flattening it.
+- **A path is only a way through while every parent is a directory.**
+  Anything else standing on one is not, whatever kind it is: a symlink,
+  a regular file, tracked or not. The two directions differ and both are
+  git's. Writing an entry *replaces* what stands above it with the
+  directory the entry needs, so `restore` and `switch` both land the
+  blob where the branch says and leave a link's target tree, a path no
+  branch named, untouched. Removing an entry does nothing at all,
+  because the path never led there. The checks are one helper, so a
+  third caller inherits both halves rather than re-deriving one.
+- **A switch replaces an ignored parent and refuses an uncommitted
+  one.** The untracked case git refuses by name, and that is unchanged.
+  An *ignored* file or link is in neither tree and on no collision list,
+  so it reaches the write and is replaced in silence, which is git's own
+  split. The deliberate divergence is the third: where an index entry
+  stands in the way of a directory the target records, git allows the
+  switch and discards the staged addition with nothing left pointing at
+  the blob, and this build refuses and names the path instead. Same
+  trade as the staged-change refusal above: no reflog here means a
+  silent discard cannot be undone, and a refusal can be acted on.
+- **The divergence runs both ways round the same collision.** A staged
+  path *inside* a directory the target replaces with a file is refused
+  and named too. git succeeds there as well, removing the directory and
+  dropping the staged entry, which would otherwise leave an index
+  holding both `slot` and `slot/child`: a shape git's own index has no
+  room for. The two halves are one decision, so neither is quietly
+  more permissive than the other.
+- **A directory is replaced without following a link out of it.** A
+  listing dereferences, so a link to a directory lists that directory's
+  contents; walking them would delete a tree no branch named. The name
+  plane is asked for each child, and a link is unlinked where a
+  directory is descended into, which is what `rm -r` does too.
+- **Two refs cannot hold one path.** A ref is a file below `.git`, so
+  `foo` and `foo/bar` cannot both exist, in `refs/tags/` or in
+  `refs/heads/`. Creating either over the other is refused with git's
+  own lock wording and exit 128, before the working tree moves, and
+  `-f` does not help because the obstacle is the path rather than the
+  value. Left to the mount, a disk backend raised its host's error and
+  a prefix store took both keys and left a ref the loose-ref walk could
+  not find.
+- **`mv` refuses a directory and something inside it**, whatever order
+  the line puts them in and whether or not `-k` is given. The check
+  reads the whole line once every source has passed its own, so a
+  source with a fault of its own and a same-target collision are both
+  reported first, and a source `-k` already skipped is out of the
+  comparison. `-k` cannot apply here: moving the directory is what
+  makes the other source disappear, so skipping the second move would
+  leave the first one applied and unstaged.
+- **The same split applies to a directory standing on the name itself**,
+  not only above it. A directory holding untracked files is refused and
+  named (`Updating the following directories would lose untracked files
+  in them`); one holding nothing but ignored files is removed whole and
+  the target's file written in its place, since `--overwrite-ignore` is
+  git's default and the refusal is about untracked content rather than
+  about the directory.
+- **A tree entry's executable bit is restored with its content.** git
+  records exactly one permission bit and puts it back in both
+  directions, so `chmod -x` on a `100755` path and `chmod +x` on a
+  `100644` one are both modifications that `restore` and `switch` undo.
+  The mode is written unconditionally rather than probed first: deciding
+  costs the same op as setting, and the backends a repository is served
+  from apply it natively.
+- **An unborn branch is not a branch you can be on.** A fresh
+  repository's HEAD names one that has never been written, and
+  `switch <that name>` is `fatal: invalid reference: <name>` rather than
+  `Already on`, because there is no commit to be on; `switch -c <new>`
+  stays the one line an unborn HEAD accepts. `checkout` answers the same
+  line differently, as git does, through its pathspec fallback.
+- **A move never crosses a mount boundary**, at either end. The rename op
+  binds to the backend serving the source, so a destination another mount
+  serves would be written into the source's backend at a path it does not
+  own: the file lands hidden behind that mount while the index names the
+  new path. A source that is a mount root, or holds one, is refused for
+  the same reason one level up.
+- **A rename moves what the node table holds at the path, not just below
+  it.** A symlink and an attr overlay live above every backend, addressed
+  by absolute path, so a move has to re-anchor the source's own entry and
+  its whole subtree or the link is destroyed and the mode is inherited by
+  whatever is written at the old name next. `git mv` renames through the
+  dispatcher, which does this for every caller that reaches it; a
+  single-mount shell `mv` renames through the backend op directly and so
+  repeats it, for a two-operand line only.
+- **A rename onto a directory the namespace has filled is `ENOTEMPTY`.**
+  A symlink is namespace state no backend can see, so a destination the
+  backend reads as empty can still hold one, and replacing it would
+  delete the link with it. The merged view decides, which is what POSIX
+  promises.
+- **`tag -a` needs `-m`**, for the reason `commit` does: there is no
+  editor to open. `mv` prints only its two usage lines for a missing
+  operand, and `tag` prints only the synopsis lines for the options this
+  build has, neither of them git's full option table.
+- **`tag -n` asks for a listing, so `-d` cannot also be on the line.**
+  With nothing else there `-n` *makes* the line a listing, which is why
+  `tag -n1 nosuch` is a pattern matching nothing at exit 0; once `-d`
+  has chosen the mode there is nothing left to imply, and the line dies
+  with every tag still standing.
+- **`tag -d` deletes every name or none of them.** One ref transaction
+  carries the whole line, and a name given twice is two updates for one
+  ref, which the transaction refuses before applying any of them. A name
+  no ref answers is reported and skipped instead, since it never reaches
+  the transaction at all. The one divergence is the wording of the
+  `-l`/`-d` refusal: git names the two options in the order they were
+  typed and in the spelling used, where this build has one fixed order.
+- **`tag -n-1` is not a `-n` at all.** git's option parser starts the
+  count at -1 to mean "never given", so the sentinel reaches the verb
+  looking like an absent flag: `tag -d -n-1 v` deletes and
+  `tag -n-1 -a v -m m` creates, where either line with a real `-n`
+  refuses. Anything below -1 is a count, and a count has to be positive:
+  the refusal names the format field git was building
+  (`positive value expected contents:lines=-2`) rather than the option,
+  because that is where git discovers it, which is also why it fires in
+  a repository holding no tags and why `-d -n-2` still dies on the
+  list-mode refusal first.
+- **A symlinked ancestor hides a tracked file from the walk, not from
+  `rm`.** git's own diff refuses to follow a link in a leading path and
+  reports the file deleted, which is why `status` shows `D` for it; `rm`
+  lstats instead, and that lstat resolves the link and finds whatever
+  lies at the other end. So a tracked `slot/child` behind
+  `slot -> /elsewhere` is a local modification and is refused without
+  `-f`, even when the file at the other end is byte for byte the same
+  one: two files agreeing is still two files. A link pointing past the
+  name entirely leaves nothing to lose, and the removal goes through.
+- **A nested mount stops a working-tree removal.** Replacing a directory
+  with a file takes the whole directory, and `readdir` merges a mount
+  nested inside it into the listing, so the walk would empty a backend
+  no branch ever recorded and then remove its root. The mount table is
+  asked first and the verb refuses, naming the mount when the session
+  may be told about it and saying only that one is there when it may
+  not. **Every destination is asked before the first one is written**,
+  which is what the other collision checks already do and what keeps
+  the refusal from landing halfway: a `switch` that had written an
+  earlier path would leave the working tree on the target's content
+  with HEAD and the index still on the branch being left, and
+  `restore -SW` stages before it writes, so a refusal in the second
+  pass would move the index and nothing else. The same boundary stops
+  the tidying pass that drops a directory emptied by `rm`: it halts at
+  the mount root rather than removing it, since nothing the caller
+  asked for has failed. This is the rule `MountRootPolicy` already
+  applies to `rm` and `mv` at the command tier, which a git verb
+  reaching the dispatcher directly has to ask for itself.
+- **`mv -f` onto an unmerged path takes its stages with it.** `-f` is
+  the only way to reach a destination that already exists, and git's
+  answer there is one stage-0 entry holding the source: `ls-files -u` is
+  empty afterwards. Leaving the stages behind is the worse divergence
+  rather than the smaller one, since the index writer lays them back
+  over the entry and the blob that just moved is the copy that
+  disappears. An unmerged *source* still moves nowhere, and a plain `mv`
+  onto an occupied destination is still the ordinary refusal.
+- **An ancestry suffix is only `~` and `^`.** Every other character
+  used to count as another first-parent hop, so `HEAD^x` resolved to
+  `HEAD^^` and `git tag release HEAD^x` wrote the tag at a commit
+  nobody named. The whole expression is refused now, which is git's own
+  answer, and `main~٣` goes with it: the count scans ASCII digits, so
+  what a unicode digit leaves behind is not a step either. The wording
+  follows the verb, since git's does: `tag` says
+  `Failed to resolve '<rev>' as a valid ref.` and `log` and `show` say
+  `ambiguous argument '<rev>'`. `HEAD^0`, `HEAD^~` and `HEAD~2^2~1` are
+  steps git takes and still parse.
+- **A gitlink is a directory placeholder, not a blob.** A `160000`
+  entry names a commit in another repository, which this one does not
+  hold, so reading it as content is either a miss or, when the id does
+  happen to resolve here, an empty string written over the whole
+  directory. git checks out no submodule content at all without
+  `--recurse-submodules`; all the entry asks of the working tree is
+  that a directory stand at the name, so an existing one is left
+  exactly as it is with its untracked work, a regular file or a link is
+  replaced by an empty directory, and a missing one is created. What is
+  under the name is never touched either: a tracked child the restored
+  source drops loses its index entry and keeps its working-tree copy,
+  and a directory full of untracked files is what the entry asked for
+  rather than a collision, where an untracked *file* at the name still
+  refuses. Taking the entry away is an `rmdir` rather than an unlink,
+  and it warns rather than failing: an empty directory goes, one that
+  still holds anything stays with
+  `warning: unable to rmdir '<name>': Directory not empty`, a file or a
+  link at the name is the `Not a directory` wording of the same line,
+  and the switch or restore succeeds either way. A gitlink is also
+  invisible to the unstaged comparison, because the submodule's own HEAD
+  is what git compares and this build cannot read it: reporting the
+  directory as a deleted file is worse than saying nothing, and it
+  refused every branch switch away from a submodule. What is left of the
+  divergence is the untracked side: files inside a submodule's directory
+  are still listed as untracked, where git says nothing about them.
 - **`reset` takes no revision.** Real git resets the index to any commit
   named as an operand; this build resets it from HEAD only and refuses a
   revision by name rather than doing nothing quietly.

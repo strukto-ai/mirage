@@ -185,4 +185,4 @@ async def upload_cmd(
                      create_pr=bool(fl.as_bool("create_pr")))
         home = repo_url(inv.config.endpoint, accessor.repo_type, repo_id)
         url = f"{home}/tree/{accessor.revision}/{base}".rstrip("/")
-        return text_out(f"{url}\n", mutated=True)
+        return text_out(f"{url}\n")

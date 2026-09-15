@@ -58,6 +58,8 @@ export interface SheetTab {
   // rows with nothing in it.
   rows: number
   cols: number
+  rowPixels?: Record<string, number>
+  columnPixels?: Record<string, number>
 }
 
 export interface Spreadsheet {

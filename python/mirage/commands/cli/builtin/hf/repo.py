@@ -50,8 +50,7 @@ async def create_cmd(
         resource_group_id=fl.as_str("resource_group_id"))
     url = result.get("url")
     return text_out(f"{url}\n" if isinstance(url, str) else
-                    f"{repo_url(inv.config.endpoint, repo_type, repo_id)}\n",
-                    mutated=True)
+                    f"{repo_url(inv.config.endpoint, repo_type, repo_id)}\n")
 
 
 async def tag_create_cmd(
@@ -67,7 +66,7 @@ async def tag_create_cmd(
                      repo_type_of(fl),
                      revision=fl.as_str("revision") or DEFAULT_REVISION,
                      message=fl.as_str("message"))
-    return text_out(f"Tag {tag} created on {repo_id}\n", mutated=True)
+    return text_out(f"Tag {tag} created on {repo_id}\n")
 
 
 async def tag_list_cmd(
@@ -120,4 +119,4 @@ async def tag_delete_cmd(
             f"deleting tag {tag} needs -y, or y on stdin: there is no "
             "terminal to confirm on")
     await delete_tag_api(inv.config, repo_id, tag, repo_type_of(fl))
-    return text_out(f"Tag {tag} deleted on {repo_id}\n", mutated=True)
+    return text_out(f"Tag {tag} deleted on {repo_id}\n")

@@ -83,6 +83,7 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   cmp: 2,
   awk: 2,
   jq: 2,
+  curl: 2,
   tar: 64,
   python: 2,
   python3: 2,

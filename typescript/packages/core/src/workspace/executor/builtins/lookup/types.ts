@@ -15,12 +15,8 @@
 /**
  * What a command name resolves to, spelled as `type -t` prints it.
  *
- * bash's `-t` vocabulary is alias/keyword/function/builtin/file. mirage
- * has no aliases and no external binaries, so `file` never applies and
- * every mirage-native runnable name that is not a function would
- * collapse into `builtin`. `cli` is a sixth word rather than a reuse of
- * `file`: reusing it would promise `type -p` a path to print, and there
- * is none.
+ * "cli" and "external" identify configured routes. Neither promises
+ * a local executable path for `type -p`.
  *
  * Members are ordered as `type -a` prints them, which is also the order
  * the layers resolve in.
@@ -29,6 +25,7 @@ export const NameKind = Object.freeze({
   ALIAS: 'alias',
   KEYWORD: 'keyword',
   FUNCTION: 'function',
+  EXTERNAL: 'external',
   CLI: 'cli',
   BUILTIN: 'builtin',
 } as const)

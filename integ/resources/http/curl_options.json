@@ -1,0 +1,264 @@
+{
+  "cases": [
+    {
+      "id": "curl_max_time_keeps_the_url",
+      "seq": 330040,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --max-time 5 {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_verbose_keeps_the_url",
+      "seq": 330041,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sv {http}/hello 2>/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_unknown_option_exit_2",
+      "seq": 330042,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --bogus {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "curl: option --bogus: is unknown\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_unknown_letter_exit_2",
+      "seq": 330043,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sW {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "curl: option -W: is unknown\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_max_time_needs_a_number",
+      "seq": 330044,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --max-time abc {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "curl: option --max-time: expected a proper numerical parameter\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_head_status_line",
+      "seq": 330045,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sI {http}/hello | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "HTTP/1.1 200 OK\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_include_body_last",
+      "seq": 330046,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -si {http}/hello | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_long_spellings",
+      "seq": 330047,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s --request PUT --header 'X-Mirage-Test: yes' {http}/echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "method=PUT\nheader=yes\nbody=\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_max_time_zero_disables_the_deadline",
+      "seq": 330048,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -m 0 {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_head_with_explicit_get_drops_the_body",
+      "seq": 330049,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sI -X GET {http}/echo | grep -c '^method='",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_data_sends_the_form_content_type",
+      "seq": 330050,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -d 'a=1' {http}/type",
+      "expect": {
+        "exit": 0,
+        "stdout": "type=application/x-www-form-urlencoded\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_header_content_type_replaces_the_default",
+      "seq": 330051,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -H 'Content-Type: application/json' -d '{}' {http}/type",
+      "expect": {
+        "exit": 0,
+        "stdout": "type=application/json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_verbose_shows_the_body_headers_curl_sends",
+      "seq": 330052,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sv -d 'a=1' {http}/type 2>&1 | grep '^> Content-'",
+      "expect": {
+        "exit": 0,
+        "stdout": "> Content-Length: 3\r\n> Content-Type: application/x-www-form-urlencoded\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_verbose_shows_a_custom_content_type_in_its_slot",
+      "seq": 330053,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sv -H 'Content-Type: application/json' -d '{}' {http}/type 2>&1 | grep '^> Content-'",
+      "expect": {
+        "exit": 0,
+        "stdout": "> Content-Type: application/json\r\n> Content-Length: 2\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_negative_max_time_is_refused_with_s",
+      "seq": 330054,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -s -m -1 {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "curl: option --max-time: expected a positive numerical parameter\ncurl: try 'curl --help' or 'curl --manual' for more information\n"
+      }
+    },
+    {
+      "id": "curl_head_with_data_is_refused",
+      "seq": 330055,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -I -d x {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "Warning: You can only select one HTTP request method! You asked for both POST \nWarning: (-d, --data) and HEAD (-I, --head).\n"
+      }
+    },
+    {
+      "id": "curl_silent_mutes_the_head_with_data_warning",
+      "seq": 330056,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sS -I -d x {http}/hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_include_with_location_shows_every_hop",
+      "seq": 330057,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -siL {http}/redirect | grep 'HTTP/\\|Found\\|hello'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HTTP/1.1 302 Found\r\nlocation: /hello\r\nHTTP/1.1 200 OK\r\nhello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_head_with_location_shows_every_hop",
+      "seq": 330058,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -sIL {http}/redirect | grep 'HTTP/\\|Found\\|hello'",
+      "expect": {
+        "exit": 0,
+        "stdout": "HTTP/1.1 302 Found\r\nlocation: /hello\r\nHTTP/1.1 200 OK\r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_verbose_with_location_traces_each_request",
+      "seq": 330059,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "curl -svL {http}/redirect 2>&1 | grep '^> GET\\|^< HTTP/'",
+      "expect": {
+        "exit": 0,
+        "stdout": "> GET /redirect HTTP/1.1\r\n< HTTP/1.1 302 Found\r\n> GET /hello HTTP/1.1\r\n< HTTP/1.1 200 OK\r\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

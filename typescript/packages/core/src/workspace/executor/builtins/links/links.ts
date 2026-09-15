@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SPECS, parseCommand } from '../../../../commands/spec/index.ts'
+import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
+import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { blamedPath, fsStrerror, isEacces, isEnoent, isErofs } from '../../../../utils/errors.ts'
@@ -251,18 +252,39 @@ export interface PreparedMv {
 // the link entry itself. A destination that is (a link to) a directory
 // receives the move inside it (rename(2) preceded by mv's dst stat); any
 // other destination is replaced, so its node entry, link or overlay attrs
-// alike, drops once the backend move succeeds. A plain source that carries
-// overlay attributes has its meta travel with the file once the backend
-// move succeeds.
+// alike, drops once the backend move succeeds. A plain source hands back the
+// pair to re-anchor once the backend move succeeds, so whatever the node table
+// holds at it and below it travels with the bytes.
+//
+// The pair is where this can be done at all: a single-mount `mv` renames
+// through the backend op bound to the accessor rather than through the
+// dispatcher, so the re-anchoring the dispatcher does for every other caller
+// has to be repeated here. Only a two-operand line qualifies, because a
+// path-shaped word is classified into a PathSpec whether it filled an operand
+// slot or a flag's value, and nothing here can tell `mv a b dst` from
+// `mv -t dst a b`.
 export async function prepareMv(
   namespace: Namespace,
   dispatch: DispatchFn,
   items: (string | PathSpec)[],
+  args: readonly string[],
+  cwd: string,
 ): Promise<PreparedMv> {
   const paths = items.filter((p): p is PathSpec => p instanceof PathSpec)
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
+    return { items, postUnlink: null, postRename: null, early: null }
+  }
+  // `-t` makes every positional a source and the flag's value the destination,
+  // which is the many-source shape above; `-T` names the destination outright,
+  // so no basename is appended to it. Both are read off the parsed line rather
+  // than guessed from the parts, since a path-shaped flag value is classified
+  // into a PathSpec there exactly as an operand is.
+  const spec = SPECS.mv
+  if (spec === undefined) return { items, postUnlink: null, postRename: null, early: null }
+  const fl = new FlagView(parseToKwargs(parseCommand(spec, [...args], cwd)), spec)
+  if (fl.raw('target_directory') !== undefined) {
     return { items, postUnlink: null, postRename: null, early: null }
   }
 
@@ -271,7 +293,8 @@ export async function prepareMv(
   // the destination itself, replaced like rename(2).
   const followed = namespace.follow(dst.virtual)
   const stat = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
-  const intoDir = stat !== null && stat.type === FileType.DIRECTORY
+  const intoDir =
+    !fl.asBool('no_target_directory') && stat !== null && stat.type === FileType.DIRECTORY
   let targetDst = dst.virtual
   if (intoDir) {
     const name = src.virtual.slice(src.virtual.lastIndexOf('/') + 1)
@@ -311,10 +334,11 @@ export async function prepareMv(
     return { items, postUnlink: null, postRename: null, early }
   }
 
-  let postRename: [string, string] | null = null
-  if (namespace.metaFor(src.virtual) !== null) {
-    postRename = [src.virtual, targetDst]
-  }
+  // Unconditional: a directory source carries a whole subtree of node entries
+  // that no exact-path lookup at the source can see, and a symlink below it is
+  // destroyed rather than merely forgotten when they are left behind. Both
+  // halves are no-ops when the table holds nothing there.
+  const postRename: [string, string] = [src.virtual, targetDst]
 
   const rewritten = intoDir && namespace.isLink(dst.virtual) ? followPaths(namespace, items) : items
   return { items: rewritten, postUnlink: targetDst, postRename, early: null }

@@ -65,7 +65,7 @@ describe('RemoteSandbox', () => {
   it.each(['python3 --version', 'python -V', 'node --version', 'node -v', 'tsc --version'])(
     'passes %s and its output through the remote environment',
     async (line) => {
-      const box = new RecordingSandbox()
+      const box = new RecordingSandbox({ captures: line.split(' ', 1) })
       const ws = await sandboxWorkspace(box)
       try {
         const io = await ws.execute(line)

@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: Run captured lines whole inside a sandbox (Docker, smolvm, Daytona, e2b, or any machine over SSH) you provision yourself.
+description: Run captured programs inside a sandbox (Docker, smolvm, Daytona, e2b, or any machine over SSH) you provision yourself.
 icon: server
 ---
 
@@ -28,29 +28,41 @@ own, and an ssh machine is whatever machine you point it at.
 
 <Note>
   Looking for Sandlock? Mirage's
-  [Sandlock adapter](/python/runtime/sandbox/sandlock) is Python-only today.
-  It confines the host `python3` interpreter rather than arbitrary captured
-  lines, and the matching TypeScript adapter has not landed yet.
+  [Sandlock adapter](/python/runtime/sandbox/sandlock) is available in `@struktoai/mirage-node` on Linux.
+  It runs native programs, including Python and Node.js.
 </Note>
 
 ## Routing: what goes to the sandbox
 
-A sandbox runtime does not claim every line. Each runtime **captures** a set
-of commands; a captured line runs in the sandbox, everything else stays on
-the local vfs. You list the runtimes in order, and `vfs` is the catch-all:
+Sandbox runtimes default to `captures: ["@external"]`: only program names
+Mirage does not resolve are delegated. Existing Mirage commands, pipes and
+redirects stay in the workspace.
 
 ```yaml
 runtimes:
-  - name: daytona
-    captures: ["python3", "pip"] # these run in the sandbox
-  - vfs                          # ls, grep, cat, ... stay local
+  - name: sandlock
+    captures: ["@external"] # optional: this is the sandbox default
 ```
 
-So `grep`, `cat`, and `ls` run locally as always, while `python3 train.py`
-runs on the cloud box. Mirage never creates, provisions, or deletes
-sandboxes: **you bring your own** (a running container or microVM, or a live
-Daytona or E2B sandbox), the first captured line connects to it, and every
-captured line execs inside it verbatim.
+Named captures explicitly select a runtime for a program. For example,
+`captures: ["python3", "node", "@external"]` selects native interpreters and
+keeps the external fallback. Without those named captures, Mirage's
+interpreter commands keep their normal runtime bindings.
+Shell builtins such as `cd`, `export`, and `echo` stay in Mirage even when
+named in `captures`.
+
+`python3 job.py | grep error > /logs/errors` delegates only `python3`;
+Mirage executes `grep` and writes the VFS output. An explicit `captures: ["*"]`
+opts into delegating the entire shell line.
+
+The SDK exports the same marker:
+
+```typescript
+import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core';
+import { SandlockRuntime } from '@struktoai/mirage-node';
+
+const runtime = new SandlockRuntime({ captures: [EXTERNAL_COMMANDS] });
+```
 
 ## The workspace inside the sandbox
 
@@ -175,7 +187,7 @@ configure sandbox creation and cleanup in your application.
 
 ## Evaluating route-policy scripts
 
-A sandbox runs whole lines; it does not evaluate expressions, so it cannot
+A sandbox runs programs; it does not evaluate expressions, so it cannot
 run [route-policy scripts](/home/route-policy). To make one eligible, subclass it
 and implement `eval` with your own transport. The
 [docker eval examples](https://github.com/strukto-ai/mirage/tree/main/examples)

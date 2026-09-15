@@ -185,5 +185,5 @@ export async function uploadCmd(inv: CLIInvocation): Promise<CommandFnResult> {
   })
   const home = repoUrl((inv.config as HfConfig).endpoint, accessor.repoType, repoId)
   const url = `${home}/tree/${accessor.revision}/${base}`.replace(/\/+$/, '')
-  return textOut(`${url}\n`, true)
+  return textOut(`${url}\n`)
 }

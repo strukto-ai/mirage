@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Runtime } from '../base.ts'
+import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { evalWithCtx } from '../script.ts'
 import { bindCommands, catchAll, runtimeBindingsFor } from '../table.ts'
@@ -134,9 +135,16 @@ async function evalSource(
  * captured stage on the line (including the catch-all vfs) keeps the
  * line's first stage.
  */
-function ctxForRuntime(ctx: RouteContext, runtime: Runtime): RouteContext {
+function ctxForRuntime(
+  ctx: RouteContext,
+  runtime: Runtime,
+  externalCommands: readonly string[],
+): RouteContext {
   for (const parsed of ctx.commands) {
-    if (runtime.captures.includes(parsed.command)) {
+    if (
+      runtime.captures.includes(parsed.command) ||
+      (runtime.captures.includes(EXTERNAL_COMMANDS) && externalCommands.includes(parsed.command))
+    ) {
       return { ...ctx, command: parsed.command, builtin: parsed.builtin }
     }
   }
@@ -155,8 +163,9 @@ async function evaluateScript(
   ctx: RouteContext,
   runtime: Runtime,
   entries: readonly Runtime[],
+  externalCommands: readonly string[],
 ): Promise<boolean> {
-  const view = ctxForRuntime(ctx, runtime)
+  const view = ctxForRuntime(ctx, runtime, externalCommands)
   const verdict: unknown =
     script instanceof ScriptSource
       ? await evalSource(
@@ -255,6 +264,7 @@ export async function decideLine(
   policy: RoutePolicy | null,
   ctx: RouteContext,
   staticBindings: Record<string, Runtime>,
+  externalCommands: readonly string[] = [],
 ): Promise<RouteDecision> {
   if (policy !== null) {
     const name = await evaluatePolicy(policy, ctx, entries)
@@ -280,7 +290,9 @@ export async function decideLine(
   const willing: Runtime[] = []
   for (const entry of entries) {
     const wants =
-      entry.script === undefined ? true : await evaluateScript(entry.script, ctx, entry, entries)
+      entry.script === undefined
+        ? true
+        : await evaluateScript(entry.script, ctx, entry, entries, externalCommands)
     if (wants) willing.push(entry)
   }
   // Every captured command resolves: to its first willing capturer, or
